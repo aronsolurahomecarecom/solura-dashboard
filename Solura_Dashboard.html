@@ -256,28 +256,39 @@ const EXCL = ['lost','won','on hold'];
 
 let msal=null, clientId=localStorage.getItem('solura_cid')||'';
 
-window.addEventListener('load',()=>{ if(clientId) boot(); show('btn-setup'); });
+window.addEventListener('load',()=>{
+  show('btn-setup');
+  if(clientId) boot();
+});
 
 function boot(){
+  // If MSAL script already loaded, just reinit
+  if(window.msal){
+    initMsalApp(); return;
+  }
   const s=document.createElement('script'); s.src=MSAL_SRC;
-  s.onload=()=>{
-    msal=new window.msal.PublicClientApplication({
-      auth:{clientId,redirectUri:window.location.href,authority:'https://login.microsoftonline.com/common'},
-      cache:{cacheLocation:'localStorage'}
-    });
-    msal.handleRedirectPromise().then(r=>{
-      if(r) onAuth(r.account);
-      else{ const a=msal.getAllAccounts(); if(a.length) onAuth(a[0]); }
-    }).catch(console.error);
-  };
+  s.onload=()=>{ initMsalApp(); };
   document.head.appendChild(s);
-  show('btn-setup');
+}
+
+function initMsalApp(){
+  msal=new window.msal.PublicClientApplication({
+    auth:{clientId,redirectUri:window.location.href,authority:'https://login.microsoftonline.com/common'},
+    cache:{cacheLocation:'localStorage'}
+  });
+  msal.handleRedirectPromise().then(r=>{
+    if(r) onAuth(r.account);
+    else{ const a=msal.getAllAccounts(); if(a.length) onAuth(a[0]); }
+  }).catch(console.error);
 }
 
 function saveClientId(){
   const v=document.getElementById('cid-input').value.trim();
-  if(!/^[0-9a-f\-]{36}$/i.test(v)){alert('Invalid Client ID format');return;}
-  clientId=v; localStorage.setItem('solura_cid',v); closeSetup(); boot();
+  if(!/^[0-9a-f\-]{36}$/i.test(v)){alert('Invalid Client ID format — should look like xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx');return;}
+  clientId=v; localStorage.setItem('solura_cid',v); closeSetup();
+  boot();
+  // Brief delay then auto-trigger sign in so user doesn't have to click again
+  setTimeout(()=>{ if(msal) signIn(); else { const i=setInterval(()=>{ if(msal){clearInterval(i);signIn();} },150); } },400);
 }
 
 function openSetup(){ document.getElementById('cid-input').value=clientId; document.getElementById('mbg').classList.add('open'); }
