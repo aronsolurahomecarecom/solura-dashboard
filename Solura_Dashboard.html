@@ -307,7 +307,11 @@ function pDate(v) {
 function mn(d) { const n = new Date(d); n.setHours(0,0,0,0); return n; }
 
 function buildUI(rows) {
-  const today = mn(new Date()), tMs = today.getTime(), wMs = tMs + 7*86400000;
+  // Use local date strings to avoid timezone shift issues
+  const now = new Date();
+  const todayStr = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+  const todayD = new Date(todayStr);
+  const weekD  = new Date(todayD.getTime() + 7*86400000);
   const od=[], td=[], wk=[], al=[];
 
   for (let i = 3; i < rows.length; i++) {
@@ -316,16 +320,21 @@ function buildUI(rows) {
     const st = String(r[C.STATUS] || '').trim();
     if (EXCL.some(x => st.toLowerCase().includes(x))) continue;
     al.push(name);
-    const fu = r[C.NEXT_FU] ? mn(pDate(r[C.NEXT_FU])) : null;
+    const fuRaw = r[C.NEXT_FU];
+    if (!fuRaw) continue;
+    const fu = pDate(fuRaw);
     if (!fu || isNaN(fu)) continue;
-    const fMs = fu.getTime();
+    // Normalize to local midnight using string to avoid timezone offset
+    const fuStr = fu.getFullYear()+'-'+String(fu.getMonth()+1).padStart(2,'0')+'-'+String(fu.getDate()).padStart(2,'0');
+    const fuD = new Date(fuStr);
     const lead = { no:r[C.NO], name, phone:r[C.PHONE]||'', email:r[C.EMAIL]||'',
-                   status:st, fu, method:r[C.METHOD]||'', dm:r[C.DM]||'', notes:r[C.NOTES]||'' };
-    if (fMs < tMs) od.push(lead);
-    else if (fMs === tMs) td.push(lead);
-    else if (fMs > tMs && fMs <= wMs) wk.push(lead);
+                   status:st, fu:fuD, method:r[C.METHOD]||'', dm:r[C.DM]||'', notes:r[C.NOTES]||'' };
+    if      (fuStr <  todayStr)                        od.push(lead);
+    else if (fuStr === todayStr)                       td.push(lead);
+    else if (fuD > todayD && fuD <= weekD)             wk.push(lead);
   }
   od.sort((a,b) => a.fu-b.fu); wk.sort((a,b) => a.fu-b.fu);
+  const tMs = todayD.getTime();
 
   ['kv0','kv1','kv2','kv3'].forEach((id,i) => document.getElementById(id).textContent = [od,td,wk,al][i].length);
   ['c0','c1','c2'].forEach((id,i) => { const n=[od,td,wk][i].length; document.getElementById(id).textContent = n+' lead'+(n!==1?'s':''); });
