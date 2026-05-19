@@ -337,15 +337,52 @@ async function loadData(){
   }catch(e){showErr(e.message);}finally{unSpin();}
 }
 
-// ── Write cells back ──────────────────────────────────────────────────────────
-async function writeRow(rowIndex,updates){
-  const cols='ABCDEFGHIJKLMNOPQRSTU';
-  const excelRow=rowIndex+1;
-  for(const[colIdx,val]of Object.entries(updates)){
-    const addr=`${cols[parseInt(colIdx)]}${excelRow}`;
-    const res=await gFetch(`${GRAPH}/me/drive/items/${fileId}/workbook/worksheets/Lead%20Tracker/range(address='${addr}')`,
-      'PATCH',{values:[[val]]});
-    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error('Save failed: '+(e.error?.message||res.status));}
+// ── Write cells back via Excel workbook session ───────────────────────────────
+async function writeRow(rowIndex, updates) {
+  const cols = 'ABCDEFGHIJKLMNOPQRSTU';
+  const excelRow = rowIndex + 1;
+  const baseUrl = `${GRAPH}/me/drive/items/${fileId}/workbook`;
+
+  // Create a persistent session for reliable SP writes
+  let sessionId = null;
+  try {
+    const sessRes = await gFetch(`${baseUrl}/createSession`, 'POST', { persistChanges: true });
+    if (sessRes.ok) {
+      const sessJson = await sessRes.json();
+      sessionId = sessJson.id;
+    }
+  } catch(e) { /* proceed without session */ }
+
+  const extraHeaders = sessionId ? { 'workbook-session-id': sessionId } : {};
+
+  try {
+    for (const [colIdx, val] of Object.entries(updates)) {
+      const addr = `${cols[parseInt(colIdx)]}${excelRow}`;
+      const res = await fetch(
+        `${baseUrl}/worksheets/Lead%20Tracker/range(address='${addr}')`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer ' + accessToken,
+            'Content-Type': 'application/json',
+            ...extraHeaders
+          },
+          body: JSON.stringify({ values: [[val]] })
+        }
+      );
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error('Save failed: ' + (e.error?.message || res.status));
+      }
+    }
+  } finally {
+    // Close session
+    if (sessionId) {
+      await fetch(`${baseUrl}/closeSession`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json', 'workbook-session-id': sessionId }
+      }).catch(() => {});
+    }
   }
 }
 
@@ -365,12 +402,16 @@ async function savePanel(rowIndex,pid){
     if(method) updates[C.METHOD]=method;
     updates[C.NOTES]=notes;
     if(method||nextFU) updates[C.LAST_CONTACT]=today;
+    if(Object.keys(updates).length===0){closePanel(pid);setSaving(pid,false);return;}
     await writeRow(rowIndex,updates);
-    Object.entries(updates).forEach(([col,val])=>{allRows[rowIndex][col]=val;});
+    Object.entries(updates).forEach(([col,val])=>{allRows[rowIndex][parseInt(col)]=val;});
     closePanel(pid);
     toast('✓ Saved to your Excel sheet');
-    setTimeout(loadData,700);
-  }catch(e){showErr(e.message);setSaving(pid,false);}
+    setTimeout(loadData,1200);
+  }catch(e){
+    showErr(e.message);
+    setSaving(pid,false);
+  }
 }
 function setSaving(pid,on){
   const p=document.getElementById(pid);if(!p)return;
