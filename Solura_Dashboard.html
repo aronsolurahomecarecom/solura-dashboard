@@ -109,6 +109,29 @@ tbody td{padding:11px 13px;font-size:13px;vertical-align:middle}
 .p-r{background:var(--red-pale);color:var(--red)} .p-a{background:var(--amb-pale);color:var(--amb)} .p-g{background:var(--grn-pale);color:var(--grn)}
 .empty{padding:28px;text-align:center;color:var(--soft);font-size:13px;font-style:italic}
 
+/* Action cards */
+.action-cards{display:flex;flex-direction:column;gap:10px}
+.action-card{background:var(--white);border:1px solid var(--border);border-radius:12px;padding:16px 20px;display:flex;align-items:center;gap:16px;transition:box-shadow .15s;cursor:default}
+.action-card:hover{box-shadow:0 2px 12px rgba(0,0,0,.08)}
+.action-card.urgency-now{border-left:4px solid var(--red)}
+.action-card.urgency-today{border-left:4px solid var(--amb)}
+.action-card.urgency-waiting{border-left:4px solid var(--border);opacity:.6}
+.action-card.urgency-done{border-left:4px solid var(--grn);opacity:.5}
+.ac-icon{font-size:22px;flex-shrink:0;width:36px;text-align:center}
+.ac-body{flex:1;min-width:0}
+.ac-name{font-weight:600;font-size:14px;margin-bottom:2px}
+.ac-action{font-size:13px;color:var(--mid)}
+.ac-phase{font-size:11px;color:var(--soft);margin-top:3px}
+.ac-contact{display:flex;flex-direction:column;gap:2px;flex-shrink:0}
+.ac-contact a{font-size:12px;text-decoration:none;white-space:nowrap}
+.ac-contact a.ph{color:var(--sky)} .ac-contact a.em{color:var(--grn)}
+.ac-btn-group{display:flex;gap:6px;flex-shrink:0}
+.ac-btn{padding:6px 12px;border-radius:7px;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:600;cursor:pointer;border:none;white-space:nowrap;transition:opacity .15s}
+.ac-btn:hover{opacity:.8}
+.ac-done{background:var(--grn-pale);color:var(--grn)}
+.ac-responded{background:var(--gold-pale);color:#8B6914}
+.ac-skip{background:#F0F0F5;color:var(--soft)}
+
 /* Update button */
 .act-btn{padding:5px 12px;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--white);color:var(--mid);transition:all .15s;white-space:nowrap}
 .act-btn:hover,.act-btn.active{background:var(--gold);color:var(--dark);border-color:var(--gold)}
@@ -258,9 +281,54 @@ const SCOPES='Files.ReadWrite.All Sites.ReadWrite.All User.Read offline_access';
 const SP_FILE_PATH='/personal/aron_solurahomecare_com/Documents/Solura_Lead_Tracker.xlsx';
 
 // Column map (0-based)
-const C={NO:0,NAME:2,PHONE:3,EMAIL:4,AREA:5,SOURCE:6,SERVICES:7,HRS:8,EST_START:9,
-         STATUS:10,LAST_CONTACT:11,METHOD:12,NEXT_FU:13,DM:14,PAY:15,VALUE:16,AGREEMENT:17,NOTES:18};
+const C={NO:0,DATE_ADDED:1,NAME:2,PHONE:3,EMAIL:4,AREA:5,SOURCE:6,SERVICES:7,HRS:8,EST_START:9,
+         STATUS:10,LAST_CONTACT:11,METHOD:12,NEXT_FU:13,DM:14,PAY:15,VALUE:16,AGREEMENT:17,NOTES:18,
+         SEQ_PHASE:19,SEQ_LAST:20,SEQ_DATE:21};
 const EXCL=['lost','won','on hold'];
+
+// ── Sequence engine ───────────────────────────────────────────────────────────
+function getSeqPhase(daysOld) {
+  if (daysOld <= 1)  return {phase:1, label:'Phase 1 — Day 1 Contact'};
+  if (daysOld <= 10) return {phase:2, label:`Phase 2 — Daily Follow-Up (Day ${daysOld})`};
+  if (daysOld <= 42) return {phase:3, label:`Phase 3 — Weekly Nurture (Wk ${Math.floor((daysOld-10)/7)+2})`};
+  if (daysOld <= 49) return {phase:4, label:'Phase 4 — 6-Week Re-engagement'};
+  return {phase:5, label:'Phase 5 — Long-Term Nurture'};
+}
+
+function getNextAction(lead, daysOld) {
+  const lastAction = lead.seqLast || '';
+  const p = lead.seqPhase;
+
+  if (p === 1) {
+    if (!lastAction)                               return {icon:'💬', action:'Send intro text + notify "calling in 5 min"', type:'sms',   urgency:'now'};
+    if (lastAction === 'Intro text sent')          return {icon:'📞', action:'Make first call (5 min after text)',          type:'call',  urgency:'now'};
+    if (lastAction === 'First call made')          return {icon:'📞', action:'Second call attempt (same day)',               type:'call',  urgency:'today'};
+    if (lastAction === 'Second call made')         return {icon:'💬', action:'Send "missed you" text',                      type:'sms',   urgency:'today'};
+    return {icon:'✓', action:'Day 1 complete — moves to Phase 2 tomorrow', type:'done', urgency:'done'};
+  }
+  if (p === 2) {
+    const amDone = lastAction.includes('AM call');
+    const pmDone = lastAction.includes('PM call');
+    if (!amDone)  return {icon:'📞', action:`Call #1 of the day (AM) — Day ${daysOld}`,  type:'call', urgency:'today'};
+    if (!pmDone)  return {icon:'📞', action:`Call #2 of the day (PM) — Day ${daysOld}`,  type:'call', urgency:'today'};
+    return {icon:'✓', action:"Both calls done today — check back tomorrow", type:'done', urgency:'done'};
+  }
+  if (p === 3) {
+    const weekNum = Math.floor((daysOld-10)/7)+2;
+    const dayInWeek = (daysOld-10) % 7;
+    if (dayInWeek === 0) return {icon:'💬', action:`Week ${weekNum} outreach — send text or email`, type:'sms', urgency:'today'};
+    return {icon:'⏳', action:`Week ${weekNum} outreach sent — next contact in ${7-dayInWeek} day${7-dayInWeek!==1?'s':''}`, type:'wait', urgency:'waiting'};
+  }
+  if (p === 4) {
+    if (!lastAction.includes('Re-engagement call')) return {icon:'📞', action:'6-week re-engagement call',           type:'call', urgency:'today'};
+    if (!lastAction.includes('Voicemail'))          return {icon:'📞', action:'Leave voicemail + send follow-up text', type:'sms',  urgency:'today'};
+    return {icon:'↩', action:'Move to long-term weekly nurture',            type:'done', urgency:'done'};
+  }
+  // Phase 5
+  const dayInWeek = daysOld % 7;
+  if (dayInWeek === 0) return {icon:'💬', action:'Weekly nurture — send text or email', type:'sms', urgency:'today'};
+  return {icon:'⏳', action:`Next weekly touch in ${7-dayInWeek} day${7-dayInWeek!==1?'s':''}`, type:'wait', urgency:'waiting'};
+}
 
 let accessToken=sessionStorage.getItem('solura_token')||null;
 let clientId=localStorage.getItem('solura_cid')||'1cb530f8-6c5f-4605-9590-068dd55e0b81';
@@ -573,30 +641,105 @@ function dateStr(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2
 function buildUI(rows){
   const now=new Date(),todayStr=dateStr(now);
   const todayD=new Date(todayStr),weekD=new Date(todayD.getTime()+7*86400000);
-  const od=[],td=[],wk=[],al=[];
+  const od=[],td=[],wk=[],al=[],actionLeads=[];
+
   for(let i=3;i<rows.length;i++){
     const r=rows[i],name=r[C.NAME];if(!name)continue;
     const st=String(r[C.STATUS]||'').trim();
     if(EXCL.some(x=>st.toLowerCase().includes(x)))continue;
     al.push(name);
-    const fuRaw=r[C.NEXT_FU];if(!fuRaw)continue;
-    const fu=pDate(fuRaw);if(!fu||isNaN(fu))continue;
-    const fuStr=dateStr(fu),fuD=new Date(fuStr);
+
+    // Sequence calc
+    const dateAdded=pDate(r[C.DATE_ADDED]);
+    const daysOld=dateAdded?Math.max(0,Math.round((todayD-new Date(dateStr(dateAdded)))/86400000)):0;
+    const seqInfo=getSeqPhase(daysOld);
+    const seqLast=r[C.SEQ_LAST]||'';
+    const nextAct=getNextAction({seqPhase:seqInfo.phase,seqLast},daysOld);
+
     const lead={rowIndex:i,no:r[C.NO],name,phone:r[C.PHONE]||'',email:r[C.EMAIL]||'',
-                status:st,fu:fuD,fuStr,method:r[C.METHOD]||'',dm:r[C.DM]||'',notes:r[C.NOTES]||''};
-    if(fuStr<todayStr) od.push(lead);
-    else if(fuStr===todayStr) td.push(lead);
-    else if(fuD>todayD&&fuD<=weekD) wk.push(lead);
+                status:st,method:r[C.METHOD]||'',dm:r[C.DM]||'',notes:r[C.NOTES]||'',
+                daysOld,seqPhase:seqInfo.phase,seqLabel:seqInfo.label,seqLast,nextAct,fu:null,fuStr:''};
+
+    if(nextAct.urgency==='now'||nextAct.urgency==='today') actionLeads.push(lead);
+
+    const fuRaw=r[C.NEXT_FU];
+    if(fuRaw){
+      const fu=pDate(fuRaw);
+      if(fu&&!isNaN(fu)){
+        const fuStr=dateStr(fu),fuD=new Date(fuStr);
+        lead.fu=fuD;lead.fuStr=fuStr;
+        if(fuStr<todayStr) od.push({...lead});
+        else if(fuStr===todayStr) td.push({...lead});
+        else if(fuD>todayD&&fuD<=weekD) wk.push({...lead});
+      }
+    }
   }
+
   od.sort((a,b)=>a.fu-b.fu);wk.sort((a,b)=>a.fu-b.fu);
+  actionLeads.sort((a,b)=>{
+    const u={now:0,today:1};
+    return (u[a.nextAct.urgency]||2)-(u[b.nextAct.urgency]||2)||a.seqPhase-b.seqPhase;
+  });
+
   ['kv0','kv1','kv2','kv3'].forEach((id,i)=>document.getElementById(id).textContent=[od,td,wk,al][i].length);
   ['c0','c1','c2'].forEach((id,i)=>{const n=[od,td,wk][i].length;document.getElementById(id).textContent=n+' lead'+(n!==1?'s':'');});
   const tMs=todayD.getTime();
   document.getElementById('t0').innerHTML=tbl(od,'od',tMs);
   document.getElementById('t1').innerHTML=tbl(td,'td',tMs);
   document.getElementById('t2').innerHTML=tbl(wk,'wk',tMs);
+  buildActions(actionLeads);
   document.getElementById('kpi-bar').style.display='grid';
   document.getElementById('main').classList.add('visible');
+}
+
+function buildActions(leads){
+  const sec=document.getElementById('actions-section');
+  const list=document.getElementById('actions-list');
+  const sub=document.getElementById('actions-sub');
+  if(!leads.length){sec.style.display='none';return;}
+  sec.style.display='block';
+  const nowCount=leads.filter(l=>l.nextAct.urgency==='now').length;
+  sub.textContent=leads.length+' action'+(leads.length!==1?'s':'')+' needed'+(nowCount?' · '+nowCount+' urgent':'');
+  list.innerHTML='<div class="action-cards">'+leads.map(l=>{
+    const a=l.nextAct;
+    const ph=l.phone?`<a class="ph" href="#" onclick="event.preventDefault();window.open('https://voice.google.com/calls?a=nc,+1'+'${l.phone}'.replace(/\D/g,''),'gv','width=500,height=600');return false;">📞 ${l.phone}</a>`:'';
+    const em=l.email?`<a class="em" href="mailto:${l.email}">✉ ${l.email}</a>`:'';
+    return `<div class="action-card urgency-${a.urgency}" id="ac-${l.rowIndex}">
+      <div class="ac-icon">${a.icon}</div>
+      <div class="ac-body">
+        <div class="ac-name">${l.name}</div>
+        <div class="ac-action">${a.action}</div>
+        <div class="ac-phase">${l.seqLabel} · Day ${l.daysOld}</div>
+      </div>
+      <div class="ac-contact">${ph}${em}</div>
+      <div class="ac-btn-group">
+        <button class="ac-btn ac-done" onclick="logSeqAction(${l.rowIndex},'${a.action.replace(/'/g,"\\'").replace(/"/g,'\\"')}')">✓ Done</button>
+        <button class="ac-btn ac-responded" onclick="markResponded(${l.rowIndex})">🤝 Responded</button>
+      </div>
+    </div>`;
+  }).join('')+'</div>';
+}
+
+async function logSeqAction(rowIndex,actionText){
+  const today=fmtDate(new Date());
+  const card=document.getElementById('ac-'+rowIndex);
+  if(card){card.style.opacity='.4';card.style.pointerEvents='none';}
+  try{
+    await writeRow(rowIndex,{[C.SEQ_LAST]:actionText,[C.SEQ_DATE]:today,[C.LAST_CONTACT]:today});
+    toast('✓ Logged: '+actionText);
+    setTimeout(loadData,800);
+  }catch(e){showErr(e.message);if(card){card.style.opacity='1';card.style.pointerEvents='';}}
+}
+
+async function markResponded(rowIndex){
+  const today=fmtDate(new Date());
+  const card=document.getElementById('ac-'+rowIndex);
+  if(card){card.style.opacity='.4';card.style.pointerEvents='none';}
+  try{
+    await writeRow(rowIndex,{[C.STATUS]:'Contacted',[C.SEQ_LAST]:'Lead responded',[C.SEQ_DATE]:today,[C.LAST_CONTACT]:today});
+    toast('🤝 Lead marked as responded!');
+    setTimeout(loadData,800);
+  }catch(e){showErr(e.message);if(card){card.style.opacity='1';card.style.pointerEvents='';}}
 }
 
 function sbadge(s){
