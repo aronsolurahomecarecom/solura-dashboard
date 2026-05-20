@@ -1,7 +1,11 @@
 <!DOCTYPE html>
+<!-- v3.0 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Solura Home Care — Follow-Up Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -9,19 +13,19 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --gold:#C9A84C;--gold-pale:#FDF8EC;
+  --gold:#C8973A;--gold-pale:#FDF6E8;
   --dark:#1C1C1E;--mid:#4A4A4C;--soft:#8E8E93;
-  --bg:#F7F6F2;--white:#FFFFFF;--border:#E5E3DC;
-  --sky:#4A9CC9;--sky-pale:#EBF5FB;
+  --bg:#FAFAF8;--white:#FFFFFF;--border:#E5E3DC;
+  --sky:#5BADE0;--sky-pale:#EAF4FB;
   --red:#C0392B;--red-pale:#FFF5F4;--red-mid:#FADBD8;
   --amb:#E67E22;--amb-pale:#FFFBF5;--amb-mid:#FDEBD0;
   --grn:#1E7A4A;--grn-pale:#F4FBF7;--grn-mid:#D5F5E3;
   --drawer-w:360px;
 }
-body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--dark);min-height:100vh;overflow-x:hidden}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--dark);min-height:100vh;overflow-x:hidden;background-image:radial-gradient(circle,#C8973A22 1px,transparent 1px);background-size:24px 24px;}
 
 /* ── Header ── */
-.header{background:var(--dark);padding:16px 36px;display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid var(--gold);position:sticky;top:0;z-index:200}
+.header{background:#1A1A2E;padding:16px 36px;display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid var(--gold);position:sticky;top:0;z-index:200}
 .hdr-left{display:flex;align-items:center;gap:14px}
 .logo{width:40px;height:40px;background:var(--gold);border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:'DM Serif Display',serif;font-size:18px;color:var(--dark);font-weight:bold;flex-shrink:0}
 .brand{font-family:'DM Serif Display',serif;font-size:19px;color:var(--white)}
@@ -198,7 +202,7 @@ tbody td{padding:11px 13px;font-size:13px;vertical-align:middle}
 
 <div class="header">
   <div class="hdr-left">
-    <div class="logo">S</div>
+    <div class="logo" style="background:linear-gradient(135deg,#C8973A,#E8B84B);border-radius:50%;border:2px solid #C8973A">S</div>
     <div class="brand">Solura <span>Home Care</span></div>
   </div>
   <div class="hdr-right">
@@ -385,7 +389,7 @@ window.addEventListener('load',async()=>{
     }catch(e){}
   }
 
-  if(accessToken) onSignedIn();
+  if(accessToken) setTimeout(onSignedIn, 0);
 });
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -417,11 +421,11 @@ async function signIn(){
     +`&code_challenge_method=S256`;
 }
 function onSignedIn(){
-  document.getElementById('login-screen').style.display='none';
-  document.getElementById('btn-refresh').style.display='flex';
-  document.getElementById('btn-out').style.display='flex';
-  document.getElementById('sdot').className='sync-dot live';
-  document.getElementById('slabel').textContent='Connected to OneDrive';
+  const ls=document.getElementById('login-screen');if(ls)ls.style.display='none';
+  const br=document.getElementById('btn-refresh');if(br)br.style.display='flex';
+  const bo=document.getElementById('btn-out');if(bo)bo.style.display='flex';
+  const sd=document.getElementById('sdot');if(sd)sd.className='sync-dot live';
+  const sl=document.getElementById('slabel');if(sl)sl.textContent='Connected to OneDrive';
   loadData();
 }
 function signOut(){sessionStorage.clear();location.reload();}
@@ -694,6 +698,7 @@ function buildActions(leads){
   const sec=document.getElementById('actions-section');
   const list=document.getElementById('actions-list');
   const sub=document.getElementById('actions-sub');
+  if(!sec||!list||!sub)return;
   if(!leads.length){sec.style.display='none';return;}
   sec.style.display='block';
   const nowCount=leads.filter(l=>l.nextAct.urgency==='now').length;
@@ -818,10 +823,15 @@ async function gFetch(url,method='GET',body=null){
   return fetch(url,opts);
 }
 setInterval(()=>{if(accessToken)loadData();},60*60*1000);
-function spin(m){document.getElementById('spin-msg').textContent=m;document.getElementById('spin').classList.add('on');document.getElementById('main').classList.remove('visible');document.getElementById('kpi-bar').style.display='none';}
-function unSpin(){document.getElementById('spin').classList.remove('on');}
-function showErr(m){const e=document.getElementById('err');e.textContent='⚠ '+m;e.classList.add('on');}
-function clearErr(){document.getElementById('err').classList.remove('on');}
+function spin(m){
+  const s=document.getElementById('spin-msg');if(s)s.textContent=m;
+  const sp=document.getElementById('spin');if(sp)sp.classList.add('on');
+  const mn=document.getElementById('main');if(mn)mn.classList.remove('visible');
+  const kb=document.getElementById('kpi-bar');if(kb)kb.style.display='none';
+}
+function unSpin(){const sp=document.getElementById('spin');if(sp)sp.classList.remove('on');}
+function showErr(m){const e=document.getElementById('err');if(e){e.textContent='⚠ '+m;e.classList.add('on');}}
+function clearErr(){const e=document.getElementById('err');if(e)e.classList.remove('on');}
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3200);}
 </script>
 </body>
