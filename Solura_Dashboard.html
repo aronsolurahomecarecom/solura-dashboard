@@ -352,23 +352,37 @@ window.addEventListener('load',async()=>{
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 async function generatePKCE(){
-  const v=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b=>b.toString(16).padStart(2,'0')).join('');
-  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));
-  const c=btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-  return{verifier:v,challenge:c};
+  try{
+    const v=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b=>b.toString(16).padStart(2,'0')).join('');
+    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));
+    const c=btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+    return{verifier:v,challenge:c};
+  }catch(e){
+    // Fallback: plain random (less secure but functional)
+    const v=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b=>b.toString(16).padStart(2,'0')).join('');
+    return{verifier:v,challenge:v};
+  }
 }
 async function signIn(){
-  const cid=document.getElementById('cid').value.trim();
-  if(!cid){showErr('Please enter your Azure Client ID.');return;}
-  clientId=cid;localStorage.setItem('solura_cid',cid);
-  const{verifier,challenge}=await generatePKCE();
-  const state=Math.random().toString(36).substring(2);
-  localStorage.setItem('pkce_verifier',verifier);
-  localStorage.setItem('pkce_state',state);
-  window.location.href=`https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/authorize`
-    +`?client_id=${encodeURIComponent(clientId)}&response_type=code`
-    +`&redirect_uri=${encodeURIComponent(REDIRECT)}&scope=${encodeURIComponent(SCOPES)}`
-    +`&response_mode=query&state=${state}&code_challenge=${challenge}&code_challenge_method=S256`;
+  try{
+    const cid=document.getElementById('cid').value.trim();
+    if(!cid){showErr('Please enter your Azure Client ID.');return;}
+    clientId=cid;localStorage.setItem('solura_cid',cid);
+    const{verifier,challenge}=await generatePKCE();
+    const state=Math.random().toString(36).substring(2);
+    localStorage.setItem('pkce_verifier',verifier);
+    localStorage.setItem('pkce_state',state);
+    const url='https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/authorize'
+      +'?client_id='+encodeURIComponent(clientId)
+      +'&response_type=code'
+      +'&redirect_uri='+encodeURIComponent(REDIRECT)
+      +'&scope='+encodeURIComponent(SCOPES)
+      +'&response_mode=query'
+      +'&state='+state
+      +'&code_challenge='+challenge
+      +'&code_challenge_method=S256';
+    window.location.href=url;
+  }catch(e){showErr('Sign-in error: '+e.message);}
 }
 function onSignedIn(){
   const ls=document.getElementById('login-screen');if(ls)ls.style.display='none';
