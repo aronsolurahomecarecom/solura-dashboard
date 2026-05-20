@@ -643,7 +643,7 @@ function dateStr(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2
 function buildUI(rows){
   const now=new Date(),todayStr=dateStr(now);
   const todayD=new Date(todayStr),weekD=new Date(todayD.getTime()+7*86400000);
-  const od=[],td=[],wk=[],al=[],actionLeads=[];
+  const od=[],td=[],wk=[],al=[];
 
   for(let i=3;i<rows.length;i++){
     const r=rows[i],name=r[C.NAME];if(!name)continue;
@@ -662,7 +662,6 @@ function buildUI(rows){
                 status:st,method:r[C.METHOD]||'',dm:r[C.DM]||'',notes:r[C.NOTES]||'',
                 daysOld,seqPhase:seqInfo.phase,seqLabel:seqInfo.label,seqLast,nextAct,fu:null,fuStr:''};
 
-    if(nextAct.urgency==='now'||nextAct.urgency==='today') actionLeads.push(lead);
 
     const fuRaw=r[C.NEXT_FU];
     if(fuRaw){
@@ -678,10 +677,6 @@ function buildUI(rows){
   }
 
   od.sort((a,b)=>a.fu-b.fu);wk.sort((a,b)=>a.fu-b.fu);
-  actionLeads.sort((a,b)=>{
-    const u={now:0,today:1};
-    return (u[a.nextAct.urgency]||2)-(u[b.nextAct.urgency]||2)||a.seqPhase-b.seqPhase;
-  });
 
   ['kv0','kv1','kv2','kv3'].forEach((id,i)=>document.getElementById(id).textContent=[od,td,wk,al][i].length);
   ['c0','c1','c2'].forEach((id,i)=>{const n=[od,td,wk][i].length;document.getElementById(id).textContent=n+' lead'+(n!==1?'s':'');});
@@ -689,7 +684,6 @@ function buildUI(rows){
   document.getElementById('t0').innerHTML=tbl(od,'od',tMs);
   document.getElementById('t1').innerHTML=tbl(td,'td',tMs);
   document.getElementById('t2').innerHTML=tbl(wk,'wk',tMs);
-  buildActions(actionLeads);
   document.getElementById('kpi-bar').style.display='grid';
   document.getElementById('main').classList.add('visible');
 }
@@ -775,7 +769,14 @@ function tbl(leads,type,tMs){
 
     return`
     <tr class="data-row${currentDrawerRow===l.rowIndex?' selected':''}" onclick="openDrawer(${l.rowIndex});highlightRow(this)">
-      <td><div class="td-name">${l.name}</div><div class="td-sub">${l.dm||''}</div></td>
+      <td>
+      <div class="td-name">${l.name}</div>
+      <div class="td-sub">${l.dm||''}</div>
+      <div style="font-size:11px;margin-top:4px;display:flex;align-items:center;gap:4px">
+        <span style="background:var(--gold-pale);color:#8B6914;padding:2px 7px;border-radius:10px;font-weight:600;font-size:10px;white-space:nowrap">${l.seqLabel||''}</span>
+      </div>
+      <div style="font-size:11px;color:var(--mid);margin-top:3px">${l.nextAct?'→ '+l.nextAct.icon+' '+l.nextAct.action:''}</div>
+    </td>
       <td>${contact}</td>
       <td>${sbadge(l.status)}</td>
       <td>${pill}<br><span style="font-size:11px;color:var(--soft)">${fuDisp}</span></td>
