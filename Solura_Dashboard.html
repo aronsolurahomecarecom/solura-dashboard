@@ -480,56 +480,43 @@ function fd2(d){return(d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear();}
 
 function buildUI(){
   var now=new Date(),ts=ds(now),td=new Date(ts),wd=new Date(td.getTime()+7*86400000);
-  var od=[],td2=[],wk=[],al=[];
+  var od=[],td2=[],wk=[],al=[],allL=[],svSet=new Set();
   for(var i=3;i<rows.length;i++){
     var r=rows[i],name=r[C.NM];if(!name)continue;
     var st=String(r[C.ST]||'').trim();
     if(EXCL.some(function(x){return st.toLowerCase().indexOf(x)>-1;}))continue;
     al.push(name);
-    var da=pd(r[C.DA]),daysOld=da?Math.max(0,Math.round((td-new Date(ds(da)))/86400000)):0;
-    var si=seqP(daysOld),sl=r[C.SL]||'',na=nextAct(si.p,sl,daysOld);
-    var active=isActive(st);
+    var da=pd(r[C.DA]),daysOld=da?Math.max(0,Math.round((td-new Date(da.getFullYear(),da.getMonth(),da.getDate()))/86400000)):0;
+    var si=seqP(daysOld),sl=r[C.SL]||'',active=isActive(st);
+    var na=active?null:nextAct(si.p,sl,daysOld);
+    var sv=r[C.SV];if(sv&&String(sv).trim())svSet.add(String(sv).trim());
+    var fuRaw=r[C.NF],fu=fuRaw?pd(fuRaw):null;
+    var afud=fu&&!isNaN(fu)?new Date(fu.getFullYear(),fu.getMonth(),fu.getDate()):null;
+    var fuStr=afud?ds(afud):'';
     var lead={ri:i,no:r[C.NO],name:name,phone:r[C.PH]||'',email:r[C.EM]||'',status:st,
       method:r[C.MT]||'',dm:r[C.DM]||'',notes:r[C.NT]||'',daysOld:daysOld,
-      seqP:si.p,seqLbl:si.lbl,seqLast:sl,na:na,active:active,fu:null,fuStr:''};
-    var fuRaw=r[C.NF];
-    if(fuRaw){var fu=pd(fuRaw);if(fu&&!isNaN(fu)){
-      var fus=ds(fu),fud=new Date(fus);
-      lead.fu=new Date(fud.getTime());lead.fuStr=fus;
+      seqP:si.p,seqLbl:si.lbl,seqLast:sl,na:na,active:active,fu:afud,fuStr:fuStr};
+    allL.push(lead);
+    if(afud){
       var actionDue=(na!==null);
-      if(fus<ts)od.push(copyLead(lead));
-      else if(fus===ts&&(active||actionDue))td2.push(copyLead(lead));
-      else if(fud>td&&fud<=wd&&(active||actionDue))wk.push(copyLead(lead));
-    }}
+      if(fuStr<ts)od.push(copyLead(lead));
+      else if(fuStr===ts&&(active||actionDue))td2.push(copyLead(lead));
+      else if(afud>td&&afud<=wd&&(active||actionDue))wk.push(copyLead(lead));
+    }
   }
+  window._services=Array.from(svSet).sort();
   od.sort(function(a,b){return a.fu-b.fu;});wk.sort(function(a,b){return a.fu-b.fu;});
+  allL.sort(function(a,b){if(!a.fu&&!b.fu)return 0;if(!a.fu)return 1;if(!b.fu)return -1;return a.fu-b.fu;});
   ['kv0','kv1','kv2','kv3'].forEach(function(id,i){var e=el(id);if(e)e.textContent=[od,td2,wk,al][i].length;});
   ['c0','c1','c2'].forEach(function(id,i){var n=[od,td2,wk][i].length;var e=el(id);if(e)e.textContent=n+' lead'+(n!==1?'s':'');});
   var tMs=td.getTime();
   var t0=el('t0');if(t0)t0.innerHTML=buildTbl(od,'od',tMs);
   var t1=el('t1');if(t1)t1.innerHTML=buildTbl(td2,'td',tMs);
   var t2=el('t2');if(t2)t2.innerHTML=buildTbl(wk,'wk',tMs);
-  // All leads
-  var allL=[];
-  for(var ai=3;ai<rows.length;ai++){
-    var ar=rows[ai],an=ar[C.NM];if(!an)continue;
-    var ast=String(ar[C.ST]||"").trim();
-    if(EXCL.some(function(x){return ast.toLowerCase().indexOf(x)>-1;}))continue;
-    var ada=pd(ar[C.DA]),adO=ada?Math.max(0,Math.round((td-new Date(ada.getFullYear(),ada.getMonth(),ada.getDate()))/86400000)):0;
-    var asi=seqP(adO),asl=ar[C.SL]||"",aact=isActive(ast),ana=aact?null:nextAct(asi.p,asl,adO);
-    var afu=pd(ar[C.NF]),afud=afu?new Date(afu.getFullYear(),afu.getMonth(),afu.getDate()):null;
-    allL.push({ri:ai,no:ar[C.NO],name:an,phone:ar[C.PH]||"",email:ar[C.EM]||"",status:ast,method:ar[C.MT]||"",dm:ar[C.DM]||"",notes:ar[C.NT]||"",daysOld:adO,seqP:asi.p,seqLbl:asi.lbl,seqLast:asl,na:ana,active:aact,fu:afud,fuStr:afud?ds(afud):""});
-  }
-  // Collect unique services for dropdown
-  window._services=[];
-  var svSet=new Set();
-  for(var si2=3;si2<rows.length;si2++){var sv2=rows[si2][C.SV];if(sv2&&String(sv2).trim())svSet.add(String(sv2).trim());}
-  window._services=Array.from(svSet).sort();
-  allL.sort(function(a,b){if(!a.fu&&!b.fu)return 0;if(!a.fu)return 1;if(!b.fu)return -1;return a.fu-b.fu;});
-  var c3=el("c3");if(c3)c3.textContent=allL.length+" lead"+(allL.length!==1?"s":"");
-  var t3=el("t3");if(t3)t3.innerHTML=buildTbl(allL,"all",tMs);
-  var kb=el("kbar");if(kb)kb.style.display="grid";
-  var mn=el("main");if(mn)mn.classList.add("vis");
+  var c3=el('c3');if(c3)c3.textContent=allL.length+' lead'+(allL.length!==1?'s':'');
+  var t3=el('t3');if(t3)t3.innerHTML=buildTbl(allL,'all',tMs);
+  var kb=el('kbar');if(kb)kb.style.display='grid';
+  var mn=el('main');if(mn)mn.classList.add('vis');
 }
 function copyLead(l){return Object.assign({},l,{fu:l.fu?new Date(l.fu.getTime()):null});}
 
@@ -541,6 +528,7 @@ function sbadge(s){
 var MOPS=['','Phone call','SMS','Email','In person','Left voicemail','No answer'];
 
 function buildTbl(leads,type,tMs){
+  var def3=new Date();def3.setDate(def3.getDate()+3);
   if(!leads.length){
     var msgs={od:'No overdue follow-ups — great work!',td:'Nothing due today.',wk:'No follow-ups scheduled this week.'};
     return'<div class="empty">'+msgs[type]+'</div>';
@@ -627,7 +615,6 @@ function buildTbl(leads,type,tMs){
     var soptsSel=stOpts.map(function(s){return'<option value="'+s+'"'+(s===l.status?' selected':'')+'>'+s+'</option>';}).join('');
     var curNSM=rows[l.ri]?String(rows[l.ri][C.NSM]||'').trim():'';
     var moptsSel=MOPS.map(function(s){return'<option value="'+s+'"'+(s&&s===curNSM?' selected':'')+'>'+(s||'— select —')+'</option>';}).join('');
-    var def3=new Date();def3.setDate(def3.getDate()+3);
     // Update panel
     var panelUpdate='<div class="ebanner eb-gold">✏ Update Follow-Up</div>'
       +'<div class="egrid g4">'
@@ -828,144 +815,6 @@ function openDrawer(ri){
 function closeDrawer(){el('drawer').classList.remove('open');el('pw').classList.remove('do');document.querySelectorAll('.dr.sel').forEach(function(r){r.classList.remove('sel');});drawerRi=null;}
 function hlRow(r){document.querySelectorAll('.dr.sel').forEach(function(x){x.classList.remove('sel');});r.classList.add('sel');}
 
-
-// ── GHL + Templates + Modals ──────────────────────────────────────────────────
-var GHL_LOC='kWlzzI2WZaes2GnQf7DV';
-var GHL_KEY='pit-5df912ec-7542-4dc8-af5b-272472ba84e9';
-var GHL_BASE='https://services.leadconnectorhq.com';
-var TMPLS={
-  p1_intro:["Hi {name}, this is Meir with Solura Home Care. We received your info from A Place for Mom and understand you're looking for care for {client}. We provide compassionate, reliable care. One of our team members will be calling you in about 5 minutes.","Hello {name}, Meir here from Solura Home Care. A Place for Mom shared your info — we'd love to help with care for {client}. Expect a call in 5 minutes!","Hi {name}, this is Meir with Solura Home Care. Got your referral from A Place for Mom regarding {client}. Calling you shortly!"],
-  p1_missed:["Hi {name}, Meir with Solura Home Care. We tried reaching you today. We'd love to connect about care for {client}. Call 216-483-8981 or we'll follow up soon.","Hello {name}, Meir from Solura Home Care. Sorry we missed you — please call 216-483-8981 about care for {client}.","Hi {name}, Meir with Solura Home Care. Missed you today. Call 216-483-8981 anytime."],
-  p2_sms:["Hi {name}, Meir with Solura Home Care checking in. We'd love to connect about care for {client} — 216-483-8981.","Hello {name}, Meir from Solura Home Care following up. Reach us at 216-483-8981.","Hi {name}, Meir from Solura Home Care. Still here for you and {client} — 216-483-8981"],
-  p3_weekly:["Hi {name}, Meir with Solura Home Care. Checking in on care options for {client}. Here when ready — 216-483-8981.","Hello {name}, Meir from Solura Home Care. Thinking of you and {client}. Just a call away: 216-483-8981.","Hi {name}, Meir with Solura Home Care. Hope {client} is doing well. Still here if you need care support — 216-483-8981."],
-  p4_re:["Hi {name}, Meir with Solura Home Care. Still exploring care for {client}? Happy to help — 216-483-8981.","Hello {name}, Meir from Solura Home Care checking in on {client}. We'd love to help — 216-483-8981","Hi {name}, Meir from Solura Home Care. Here for {client} whenever you're ready — 216-483-8981"],
-  email_subj:["Checking in — Care Support for {name}","Still here for you and {name}","A quick note from Solura Home Care"],
-  email_body:["Hi {name},\n\nChecking in to see how things are going. We know finding the right care takes time and we're here whenever you're ready.\n\nAt Solura Home Care we specialize in compassionate non-medical support tailored to each client's needs.\n\nFeel free to schedule a free in-home assessment — no commitment required.\n\nWarm regards,\nMeir Schwimer\nSolura Home Care\n216-483-8981 | www.solurahomecare.com","Hi {name},\n\nJust a quick note — we're still thinking of you. No rush, no pressure.\n\nA free in-home assessment is always available.\n\nAlways here,\nMeir Schwimer\nSolura Home Care | 216-483-8981","Hi {name},\n\nHope you're doing well. Solura Home Care is still available whenever the time is right.\n\nOur caregivers are trained, background-checked, and matched based on skills and personality.\n\nBest,\nMeir | 216-483-8981"]
-};
-function tmpl(arr,ri){return arr[ri%arr.length];}
-function fill(s,n,c){return s.replace(/{name}/g,n||'there').replace(/{client}/g,c||'your loved one');}
-function getSMSTmpl(lead){
-  var ri=lead.ri,n=lead.name,l=lead.seqLast||'';
-  if(lead.seqP===1){if(!l||l.indexOf('Intro text')===-1)return fill(tmpl(TMPLS.p1_intro,ri),n,n);return fill(tmpl(TMPLS.p1_missed,ri),n,n);}
-  if(lead.seqP===2)return fill(tmpl(TMPLS.p2_sms,ri),n,n);
-  if(lead.seqP===4)return fill(tmpl(TMPLS.p4_re,ri),n,n);
-  return fill(tmpl(TMPLS.p3_weekly,ri),n,n);
-}
-function getEmailTmpl(lead){
-  var idx=lead.ri%TMPLS.email_subj.length;
-  return{subject:fill(TMPLS.email_subj[idx],lead.name,lead.name),body:fill(TMPLS.email_body[idx],lead.name,lead.name)};
-}
-function getScript(lead){
-  var n=lead.name||"them",isAPFM=(lead.source||"").toLowerCase().indexOf("place for mom")>-1;
-  if(isAPFM){return{title:"A Place for Mom — Call Script",sections:[
-    {h:"1. Opening",t:"Hi, is this "+n+"? Great — this is Meir with Solura Home Care. I'm calling because we received your information from A Place for Mom. How are you doing today?"},
-    {h:"2. Frame the Call",t:"I'd love to learn more about what's going on so we can recommend the right type of care. I'll ask a few questions, and then we'll schedule your in-home assessment."},
-    {h:"3. Emotional Discovery",t:"Before we go into details, how are you holding up? What made today the day you reached out through A Place for Mom?"},
-    {h:"4. Care Needs Discovery",t:"Tell me about "+n+" — what's been happening recently? Prompts: Bathing/dressing, Fall risk, Mobility, Dementia, Toileting, Meal prep, Medication reminders, Overnight, Companionship"},
-    {h:"5. Safety + Urgency",t:"Have there been any recent falls? Is "+n+" safe when left alone? How soon are you hoping to have care start?"},
-    {h:"6. Assumptive Scheduling",t:"The next step is simple — we'll schedule your in-home assessment. 'We're doing assessments this week — today at 4 PM or tomorrow at 10 AM. Which works best?'"},
-    {h:"7. Hesitation Responses",t:"'Need family input' — Assessment is the easiest way to get everyone aligned. 'Comparing agencies' — Meeting our care manager gives a much clearer picture. 'Not ready' — The assessment commits you to nothing."},
-    {h:"8. Closing",t:"Perfect — I have you down for [day & time]. We'll send a confirmation shortly. We look forward to supporting your family."}
-  ]};}
-  return{title:"General Follow-Up Script",sections:[
-    {h:"Opening",t:"Hi, is this "+n+"? This is Meir with Solura Home Care. How are you today?"},
-    {h:"Purpose",t:"I'm calling to follow up and see if you're still exploring care options, and to answer any questions."},
-    {h:"Discovery",t:"Tell me about what's going on — what kind of support are you looking for?"},
-    {h:"Close",t:"The easiest next step is a free in-home assessment — no commitment. Can we find a time this week?"}
-  ]};
-}
-function buildLeadObj(ri){
-  var r=rows[ri];if(!r)return null;
-  var da=pd(r[C.DA]),dO=da?Math.max(0,Math.round((new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate())-new Date(da.getFullYear(),da.getMonth(),da.getDate()))/86400000)):0;
-  return{ri:ri,name:r[C.NM]||'',email:r[C.EM]||'',phone:r[C.PH]||'',status:r[C.ST]||'',source:r[C.SO]||'',seqP:seqP(dO).p,seqLast:r[C.SL]||''};
-}
-var currentEmailRi=null;
-function closeModal(id){var m=el(id);if(m)m.style.display='none';}
-function openModal(id){var m=el(id);if(m)m.style.display='flex';}
-function openScript(ri){
-  var lead=buildLeadObj(ri);if(!lead)return;
-  var sc=getScript(lead);
-  el('script-title').textContent=sc.title;
-  el('script-body').innerHTML=sc.sections.map(function(s){
-    return'<div style="margin-bottom:16px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--gold);margin-bottom:5px">'+s.h+'</div>'
-      +'<div style="font-size:13px;color:var(--mid);line-height:1.65;background:var(--cream);padding:11px 14px;border-radius:9px;white-space:pre-wrap">'+s.t+'</div></div>';
-  }).join('');
-  openModal('script-modal');
-}
-async function openSMS(ri){
-  var lead=buildLeadObj(ri);if(!lead)return;
-  if(!lead.phone){toast('No phone for this lead');return;}
-  var msg=getSMSTmpl(lead);
-  el('sms-preview').value=msg;
-  var clean=lead.phone.replace(/\D/g,'');if(clean.length===10)clean='1'+clean;
-  el('sms-hcg-link').href='https://app.homecaregrow.io/v2/location/'+GHL_LOC+'/contacts';
-  window._smsRi=ri;window._smsPhone=clean;
-  openModal('sms-modal');
-}
-async function sendSMSNow(){
-  var ri=window._smsRi,phone=window._smsPhone,msg=el('sms-preview').value;
-  if(!phone||!msg)return;
-  var btn=el('sms-send-btn');if(btn)btn.disabled=true;
-  var spin=el('sms-sending');if(spin)spin.style.display='flex';
-  try{
-    var contactId=null;
-    var sr=await fetch(GHL_BASE+'/contacts/search/duplicate?locationId='+GHL_LOC+'&number='+encodeURIComponent('+'+phone),
-      {headers:{'Authorization':'Bearer '+GHL_KEY,'Version':'2021-07-28'}});
-    if(sr.ok){var sj=await sr.json();if(sj.contact)contactId=sj.contact.id;}
-    if(!contactId){
-      var r2=await fetch(GHL_BASE+'/contacts/?locationId='+GHL_LOC+'&query='+encodeURIComponent('+'+phone),
-        {headers:{'Authorization':'Bearer '+GHL_KEY,'Version':'2021-07-28'}});
-      if(r2.ok){var j2=await r2.json();if(j2.contacts&&j2.contacts.length>0)contactId=j2.contacts[0].id;}
-    }
-    if(!contactId&&rows[ri]){
-      var r3=rows[ri],nm=(r3[C.NM]||'').split(' ');
-      var cr=await fetch(GHL_BASE+'/contacts/',{method:'POST',
-        headers:{'Authorization':'Bearer '+GHL_KEY,'Version':'2021-07-28','Content-Type':'application/json'},
-        body:JSON.stringify({locationId:GHL_LOC,firstName:nm[0]||'',lastName:nm.slice(1).join(' ')||'',phone:'+'+phone,email:r3[C.EM]||''})});
-      if(cr.ok){var cj=await cr.json();contactId=cj.contact?cj.contact.id:null;}
-    }
-    if(!contactId)throw new Error('Could not find or create contact in HomeCareGrow.');
-    var sres=await fetch(GHL_BASE+'/conversations/messages',{method:'POST',
-      headers:{'Authorization':'Bearer '+GHL_KEY,'Version':'2021-07-28','Content-Type':'application/json'},
-      body:JSON.stringify({type:'SMS',contactId:contactId,locationId:GHL_LOC,message:msg})});
-    if(!sres.ok){var se=await sres.json().catch(function(){return{};});throw new Error('SMS failed: '+(se.message||sres.status));}
-    closeModal('sms-modal');toast('✓ SMS sent via HomeCareGrow');
-    var today=fd2(new Date());
-    await writeRow(ri,{[C.MT]:'SMS',[C.LC]:today,[C.SL]:'SMS sent'});
-    setTimeout(loadData,600);
-  }catch(e){showErr('SMS error: '+e.message);}
-  finally{if(btn)btn.disabled=false;if(spin)spin.style.display='none';}
-}
-function openEmail(ri){
-  var lead=buildLeadObj(ri);if(!lead)return;
-  if(!lead.email){toast('No email for this lead');return;}
-  currentEmailRi=ri;
-  var t=getEmailTmpl(lead);
-  el('email-to').textContent=lead.name+' <'+lead.email+'>';
-  el('email-subject').value=t.subject;
-  el('email-body').value=t.body;
-  openModal('email-modal');
-}
-async function sendEmailNow(){
-  var ri=currentEmailRi;if(ri===null)return;
-  var match=el('email-to').textContent.match(/<([^>]+)>/);
-  var toAddr=match?match[1]:'';if(!toAddr){toast('No email');return;}
-  var subject=el('email-subject').value,body=el('email-body').value;
-  var btn=el('email-send-btn');if(btn)btn.disabled=true;
-  var spin=el('email-sending');if(spin)spin.style.display='flex';
-  try{
-    var res=await fetch('https://graph.microsoft.com/v1.0/me/sendMail',{method:'POST',
-      headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
-      body:JSON.stringify({message:{subject:subject,body:{contentType:'Text',content:body},toRecipients:[{emailAddress:{address:toAddr}}]},saveToSentItems:true})});
-    if(res.ok||res.status===202){
-      closeModal('email-modal');toast('✓ Email sent to '+toAddr);
-      var today=fd2(new Date());
-      await writeRow(ri,{[C.MT]:'Email',[C.LC]:today,[C.SL]:'Email sent'});
-      setTimeout(loadData,600);
-    }else{var e=await res.json().catch(function(){return{};});throw new Error(e.error?e.error.message:'Send failed: '+res.status);}
-  }catch(e){showErr('Email error: '+e.message);}
-  finally{if(btn)btn.disabled=false;if(spin)spin.style.display='none';}
-}
 
 // Helpers
 function dialHCG(phone){
