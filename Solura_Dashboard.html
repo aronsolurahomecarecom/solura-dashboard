@@ -447,8 +447,8 @@ function buildUI(){
     if(EXCL.some(function(x){return st.toLowerCase().indexOf(x)>-1;}))continue;
     al.push(name);
     var da=pd(r[C.DA]),daysOld=da?Math.max(0,Math.round((td-new Date(ds(da)))/86400000)):0;
-    var si=seqP(daysOld),sl=r[C.SL]||'',na=nextAct(si.p,sl,daysOld);
-    var active=isActive(st);
+    var si=seqP(daysOld),sl=r[C.SL]||'',active=isActive(st),na=active?null:nextAct(si.p,sl,daysOld);
+    // active already set above
     var lead={ri:i,no:r[C.NO],name:name,phone:r[C.PH]||'',email:r[C.EM]||'',status:st,
       method:r[C.MT]||'',dm:r[C.DM]||'',notes:r[C.NT]||'',daysOld:daysOld,
       seqP:si.p,seqLbl:si.lbl,seqLast:sl,na:na,active:active,fu:null,fuStr:''};
@@ -497,7 +497,7 @@ function buildTbl(leads,type,tMs){
     var fuD=l.fu.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
     var ph=l.phone?'<a class="ph" href="#" onclick="event.stopPropagation();event.preventDefault();window.open(\'https://voice.google.com/calls?a=nc,+1\'+\''+l.phone+'\'.replace(/\\D/g,\'\'),\'gv\',\'width=520,height=640,noopener\')">📞 '+l.phone+'</a>':'';
     var em=l.email?'<a class="em" href="mailto:'+l.email+'" onclick="event.stopPropagation()">✉ '+l.email+'</a>':'';
-    var naHtml=l.na?'<div class="snxt">'+l.na.icon+' '+l.na.text+'</div>':'<div class="snxt" style="color:var(--soft)">✓ Complete for today</div>';
+    var naHtml=l.active?'<div class="snxt" style="color:var(--grn)">✓ Active — follow-up scheduled</div>':l.na?'<div class="snxt">'+l.na.icon+' '+l.na.text+'</div>':'<div class="snxt" style="color:var(--soft)">✓ Complete for today</div>';
     var pid='ep-'+l.ri;
     // Determine buttons based on active status
     // Active lead (has responded before): show Update only
