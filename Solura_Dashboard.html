@@ -547,7 +547,8 @@ function buildTbl(leads,type,tMs){
             :type==='td'?'<span class="pill pa">Due today</span>'
             :'<span class="pill pg">in '+Math.round((fMs-tMs)/86400000)+'d</span>';
     var fuD=l.fu.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-    var ph=l.phone?'<a class="ph" href="#" onclick="event.stopPropagation();event.preventDefault();window.open(\'https://voice.google.com/calls?a=nc,+1\'+\''+l.phone+'\'.replace(/\\D/g,\'\'),\'gv\',\'width=520,height=640,noopener\')">📞 '+l.phone+'</a>':'';
+    var cleanPh=l.phone?l.phone.replace(/\D/g,''):'';
+    var ph=l.phone?'<a class="ph" href="#" onclick="event.stopPropagation();event.preventDefault();window.open(\'https://app.homecaregrow.io/v2/location/kWlzzI2WZaes2GnQf7DV/contacts?search=\'+encodeURIComponent(\'+1'+cleanPh+'\')+\'\',\'hcg\',\'width=1100,height=750,noopener\')">📞 '+l.phone+'</a>':'';
     var em=l.email?'<a class="em" href="mailto:'+l.email+'" onclick="event.stopPropagation()">✉ '+l.email+'</a>':'';
     var naHtml=l.na?'<div class="snxt">'+l.na.icon+' '+l.na.text+'</div>':'<div class="snxt" style="color:var(--soft)">✓ Complete for today</div>';
     var pid='ep-'+l.ri;
@@ -565,7 +566,7 @@ function buildTbl(leads,type,tMs){
           +'<button class="rb-small" style="flex:1;background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)" onclick="event.stopPropagation();openSMS('+l.ri+')">💬</button>'
           +'</div></div>';
     }else{
-      var naLabel=l.na?(l.na.icon+' '+l.na.text.split('—')[0].trim()):'✓ Done';
+      var naLabel=l.na?('✓ Done: '+l.na.text.split('—')[0].trim()):'✓ Done';
       btns='<div style="display:flex;flex-direction:column;gap:4px;min-width:130px">'
           +'<button class="rb-primary rb-done" data-pid="'+pid+'" data-mode="done" onclick="btnClick(this,event)" style="background:var(--grn);color:#fff;border:none">'+naLabel+'</button>'
           +'<div style="display:flex;gap:4px">'
@@ -597,16 +598,31 @@ function buildTbl(leads,type,tMs){
         +'<div class="ef"><label>Action Completed</label><input type="text" class="ep-act-done" value="'+(l.na?l.na.text.replace(/"/g,'&quot;'):'')+'" readonly></div>'
       +'</div>';
     // Responded panel — full info
-    var panelResp='<div class="ebanner eb-sky">🤝 Lead Responded — Log Response</div>'
+    var panelResp='<div class="ebanner eb-sky">🤝 First Contact — Log Conversation</div>'
       +'<div class="egrid g4">'
         +'<div class="ef"><label>Response Method</label><select class="ep-resp-method">'+moptsSel+'</select></div>'
-        +'<div class="ef"><label>Response Date &amp; Time</label><input type="text" disabled value="'+new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'"></div>'
+        +'<div class="ef"><label>Date &amp; Time</label><input type="text" disabled value="'+new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'"></div>'
+        +'<div class="ef"><label>Decision Maker Name</label><input type="text" class="ep-resp-dm" placeholder="Who did you speak with?"></div>'
+        +'<div class="ef"><label>Relationship to Client</label><input type="text" class="ep-resp-rel" placeholder="Son, daughter, spouse…"></div>'
+      +'</div>'
+      +'<div class="egrid g4">'
+        +'<div class="ef"><label>Monthly Budget</label><input type="text" class="ep-resp-budget" placeholder="$1,500/mo, flexible…"></div>'
+        +'<div class="ef"><label>Hours / Week Needed</label><input type="text" class="ep-resp-hrs" placeholder="20 hrs, full-time…"></div>'
+        +'<div class="ef"><label>Est. Start Date</label><input type="date" class="ep-resp-start"></div>'
+        +'<div class="ef"><label>Urgency Level</label><select class="ep-resp-urgency"><option value="">— select —</option><option>ASAP — within days</option><option>Within 2 weeks</option><option>Within a month</option><option>Just exploring</option></select></div>'
+      +'</div>'
+      +'<div class="egrid g3">'
+        +'<div class="ef"><label>Care Needs Identified</label><input type="text" class="ep-resp-needs" placeholder="Bathing, companionship, meals…"></div>'
+        +'<div class="ef"><label>Safety Concerns</label><input type="text" class="ep-resp-safety" placeholder="Fall risk, alone at home…"></div>'
+        +'<div class="ef"><label>Pay Type</label><select class="ep-resp-pay"><option value="">— select —</option><option>Private Pay</option><option>Medicaid / PASSPORT</option><option>Long-Term Care Insurance</option><option>VA Benefits</option><option>Unknown</option></select></div>'
+      +'</div>'
+      +'<div class="egrid g2">'
         +'<div class="ef"><label>Next Follow-Up Date</label><input type="date" class="ep-resp-fu" value="'+ds(def3)+'"></div>'
         +'<div class="ef"><label>Next Follow-Up Method</label><select class="ep-resp-next-method"><option value="">— select —</option>'+MOPS.slice(1).map(function(s){return'<option>'+s+'</option>';}).join('')+'</select></div>'
       +'</div>'
-      +'<div class="ef" style="margin-bottom:14px"><label>Notes from Conversation</label><textarea class="ep-resp-notes" placeholder="What did they say? Key details, concerns, next steps…"></textarea></div>';
+      +'<div class="ef" style="margin-bottom:14px"><label>Conversation Notes</label><textarea class="ep-resp-notes" placeholder="Key details, concerns, what they said, next steps…"></textarea></div>';
     rowHtml='<tr class="dr'+(drawerRi===l.ri?' sel':'')+'" onclick="openDrawer('+l.ri+');hlRow(this)">'
-      +'<td><div class="tn">'+l.name.split(' ')[0]+'</div><div class="ts">'+(l.dm?l.dm.split(' ')[0]:'')+'</div></td>'
+      +'<td><div class="tn">'+l.name+'</div><div class="ts">'+(l.dm||'')+'</div></td>'
       +'<td><div class="tc2">'+(ph||'')+( em||'')+(!ph&&!em?'<span style="color:var(--soft);font-size:12px">—</span>':'')+'</div></td>'
       +'<td>'+sbadge(l.status)+'</td>'
       +'<td>'+pill+'<br><span style="font-size:11px;color:var(--soft)">'+fuD+'</span></td>'
@@ -687,16 +703,26 @@ async function saveEp(ri,pid){
       u[C.SD]=today;u[C.LC]=today;
       if(mt2&&mt2.value){}// method already set
     } else if(mode==='responded'){
-      var rm=ep.querySelector('.ep-resp-method');if(rm&&rm.value)u[C.MT]=rm.value;
-      var rfu=ep.querySelector('.ep-resp-fu');if(rfu&&rfu.value)u[C.NF]=rfu.value;
-      var rnm=ep.querySelector('.ep-resp-next-method');if(rnm&&rnm.value)u[C.SL]='Lead responded via '+(rm?rm.value:'');
-      var rnt=ep.querySelector('.ep-resp-notes');if(rnt)u[C.NT]=rnt.value;
-      u[C.ST]='Active Conversation';u[C.LC]=today;u[C.SD]=today;
-    }
-    if(Object.keys(u).length===0){closeEp(pid);setSaving(pid,false);return;}
-    await writeRow(ri,u);
-    closeEp(pid);toast('✓ Saved to your sheet');
-    setTimeout(loadData,700);
+    var rm=ep.querySelector('.ep-resp-method');if(rm&&rm.value)u[C.MT]=rm.value;
+    var rfu=ep.querySelector('.ep-resp-fu');if(rfu&&rfu.value)u[C.NF]=rfu.value;
+    var rdm=ep.querySelector('.ep-resp-dm');if(rdm&&rdm.value)u[C.DM]=rdm.value;
+    var rhrs=ep.querySelector('.ep-resp-hrs');if(rhrs&&rhrs.value)u[C.HR]=rhrs.value;
+    var rstart=ep.querySelector('.ep-resp-start');if(rstart&&rstart.value)u[C.ES]=rstart.value;
+    var rpay=ep.querySelector('.ep-resp-pay');if(rpay&&rpay.value)u[C.PT]=rpay.value;
+    var rnt=ep.querySelector('.ep-resp-notes');
+    var rbudget=ep.querySelector('.ep-resp-budget');
+    var rurgency=ep.querySelector('.ep-resp-urgency');
+    var rneeds=ep.querySelector('.ep-resp-needs');
+    var rsafety=ep.querySelector('.ep-resp-safety');
+    var np=[];
+    if(rnt&&rnt.value)np.push(rnt.value);
+    if(rbudget&&rbudget.value)np.push('Budget: '+rbudget.value);
+    if(rurgency&&rurgency.value)np.push('Urgency: '+rurgency.value);
+    if(rneeds&&rneeds.value)np.push('Care needs: '+rneeds.value);
+    if(rsafety&&rsafety.value)np.push('Safety: '+rsafety.value);
+    if(np.length)u[C.NT]=np.join(' | ');
+    u[C.SL]='First contact logged';u[C.ST]='Active Conversation';u[C.LC]=today;u[C.SD]=today;
+  }
   }catch(e){showErr(e.message);setSaving(pid,false);}
 }
 
@@ -709,7 +735,7 @@ function openDrawer(ri){
   el('dstatus').innerHTML=sbadge(v(C.ST)||'');
   function drow(lbl,val,type){
     if(!val)return'';
-    var disp=type==='ph'?'<a href="#" onclick="event.preventDefault();window.open(\'https://voice.google.com/calls?a=nc,+1\'+\''+val+'\'.replace(/\\D/g,\'\'),\'gv\',\'width=520,height=640,noopener\')">'+val+'</a>'
+    var disp=type==='ph'?'<a href="#" onclick="event.preventDefault();window.open(\'https://app.homecaregrow.io/v2/location/kWlzzI2WZaes2GnQf7DV/contacts\',\'hcg\',\'width=1100,height=750,noopener\')">'+val+'</a>'
             :type==='em'?'<a class="em" href="mailto:'+val+'">'+val+'</a>':val;
     return'<div class="drow"><span class="dlbl">'+lbl+'</span><span class="dval">'+disp+'</span></div>';
   }
@@ -905,7 +931,7 @@ var TMPL={
   }
 };
 
-function ft(s,n,c){return s.replace(/{n}/g,n||"there").replace(/{c}/g,c||"your loved one");}
+function ft(s,n,c){var fn=(n||'there').split(' ')[0];var fc=(c||'your loved one').split(' ')[0];return s.replace(/{n}/g,fn).replace(/{c}/g,fc);}
 function getTmpl(arr,ri){return arr[ri%arr.length];}
 
 function getSMSTmpl(lead){
@@ -922,7 +948,7 @@ function getEmailTmpl(lead){
 }
 
 function getScript(lead){
-  var n=lead.name||"them";
+  var n=(lead.name||"them").split(" ")[0];
   var isAPFM=(lead.source||"").toLowerCase().indexOf("place for mom")>-1;
   if(isAPFM){return{title:"A Place for Mom Call Script",sections:[
     {h:"1. Opening",t:"Hi, is this "+n+"? Great, this is Meir with Solura Home Care. I am calling because we received your information from A Place for Mom. How are you doing today?"},
