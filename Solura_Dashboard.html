@@ -318,7 +318,7 @@ var GR='https://graph.microsoft.com/v1.0',
     RD='https://aronsolurahomecarecom.github.io/solura-dashboard/Solura_Dashboard.html',
     SC='Files.ReadWrite.All Sites.ReadWrite.All User.Read offline_access',
     SP='/personal/aron_solurahomecare_com/Documents/Solura_Lead_Tracker.xlsx';
-var C={NO:0,DA:1,NM:2,PH:3,EM:4,AR:5,SO:6,SV:7,HR:8,ES:9,ST:10,LC:11,MT:12,NF:13,DM:14,PT:15,MV:16,AG:17,NT:18,SQ:19,SL:20,SD:21};
+var C={NO:0,DA:1,NM:2,PH:3,EM:4,AR:5,SO:6,SV:7,HR:8,ES:9,ST:10,LC:11,MT:12,NF:13,DM:14,PT:15,MV:16,AG:17,NT:18,SQ:19,SL:20,SD:21,SAFETY:22,REL:23,NSM:24};
 var EXCL=['lost','won','on hold'];
 // A lead is "active" (has responded before) if status contains contacted/active/assessment/proposal/negotiat/won
 var ACTIVE_ST=['contacted','active conversation','assessment','proposal','negotiat','won'];
@@ -413,22 +413,16 @@ async function loadData(){
 }
 
 async function writeRow(ri,updates){
-  var cols='ABCDEFGHIJKLMNOPQRSTUV',exRow=ri+1,base=GR+'/me/drive/items/'+fid+'/workbook';
-  var sid=null;
-  try{var sr=await gf(base+'/createSession','POST',{persistChanges:true});if(sr.ok){var sj=await sr.json();sid=sj.id;}}catch(e){}
-  var xh=sid?{'workbook-session-id':sid}:{};
-  try{
-    var ents=Object.entries(updates);
-    for(var i=0;i<ents.length;i++){
-      var ci=ents[i][0],val=ents[i][1],addr=cols[parseInt(ci)]+exRow;
-      var res=await fetch(base+'/worksheets/Lead%20Tracker/range(address=\''+addr+'\')',{
-        method:'PATCH',headers:Object.assign({Authorization:'Bearer '+tok,'Content-Type':'application/json'},xh),
-        body:JSON.stringify({values:[[val]]})
-      });
-      if(!res.ok){var e=await res.json().catch(function(){return{};});throw new Error('Save failed: '+(e.error?e.error.message:res.status));}
-    }
-  }finally{
-    if(sid)fetch(base+'/closeSession',{method:'POST',headers:Object.assign({Authorization:'Bearer '+tok,'Content-Type':'application/json'},xh)}).catch(function(){});
+  var cols='ABCDEFGHIJKLMNOPQRSTUVWXY',exRow=ri+1,base=GR+'/me/drive/items/'+fid+'/workbook';
+  var ents=Object.entries(updates);
+  for(var ei=0;ei<ents.length;ei++){
+    var ci=ents[ei][0],val=ents[ei][1],addr=cols[parseInt(ci)]+exRow;
+    var url2=base+"/worksheets/Lead%20Tracker/range(address='" + addr + "')";
+    var res=await fetch(url2,{
+      method:'PATCH',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
+      body:JSON.stringify({values:[[val]]})
+    });
+    if(!res.ok){var er=await res.json().catch(function(){return{};});throw new Error('Save failed: '+(er.error?er.error.message:res.status));}
   }
 }
 
@@ -520,6 +514,11 @@ function buildUI(){
     var afu=pd(ar[C.NF]),afud=afu?new Date(afu.getFullYear(),afu.getMonth(),afu.getDate()):null;
     allL.push({ri:ai,no:ar[C.NO],name:an,phone:ar[C.PH]||"",email:ar[C.EM]||"",status:ast,method:ar[C.MT]||"",dm:ar[C.DM]||"",notes:ar[C.NT]||"",daysOld:adO,seqP:asi.p,seqLbl:asi.lbl,seqLast:asl,na:ana,active:aact,fu:afud,fuStr:afud?ds(afud):""});
   }
+  // Collect unique services for dropdown
+  window._services=[];
+  var svSet=new Set();
+  for(var si2=3;si2<rows.length;si2++){var sv2=rows[si2][C.SV];if(sv2&&String(sv2).trim())svSet.add(String(sv2).trim());}
+  window._services=Array.from(svSet).sort();
   allL.sort(function(a,b){if(!a.fu&&!b.fu)return 0;if(!a.fu)return 1;if(!b.fu)return -1;return a.fu-b.fu;});
   var c3=el("c3");if(c3)c3.textContent=allL.length+" lead"+(allL.length!==1?"s":"");
   var t3=el("t3");if(t3)t3.innerHTML=buildTbl(allL,"all",tMs);
@@ -557,26 +556,66 @@ function buildTbl(leads,type,tMs){
     // No-answer lead: show Done + Responded
     var btns='';
     if(l.active){
-      var naIcon=l.na?l.na.icon:'✏';
-      btns='<div style="display:flex;flex-direction:column;gap:4px;min-width:120px">'
-          +'<button class="rb-primary rb-upd" data-pid="'+pid+'" data-mode="update" onclick="btnClick(this,event)" style="background:var(--gold);color:#fff;border:none">✏ Update</button>'
+      // Next suggested method for active leads (col NSM)
+      var nsm=rows[l.ri]?String(rows[l.ri][C.NSM]||'').trim():'';
+      var nsmIsCall=(nsm.toLowerCase().indexOf('phone')>-1||nsm.toLowerCase().indexOf('call')>-1);
+      var nsmIsSMS=(nsm.toLowerCase().indexOf('sms')>-1||nsm.toLowerCase().indexOf('text')>-1);
+      var nsmIsEmail=(nsm.toLowerCase().indexOf('email')>-1);
+      var activeMainBtn='';
+      if(nsmIsCall){
+        activeMainBtn='<button class="rb-primary" style="background:var(--sky-deep);color:#fff;border:none" onclick="event.stopPropagation();dialHCG(\''+l.phone+'\')">📞 Call Now</button>';
+      } else if(nsmIsSMS){
+        activeMainBtn='<button class="rb-primary" style="background:var(--grn);color:#fff;border:none" onclick="event.stopPropagation();openSMS('+l.ri+')">💬 Send Text</button>';
+      } else if(nsmIsEmail){
+        activeMainBtn='<button class="rb-primary" style="background:var(--gold);color:#fff;border:none" onclick="event.stopPropagation();openEmail('+l.ri+')">✉ Send Email</button>';
+      } else {
+        activeMainBtn='<button class="rb-primary" style="background:var(--sky-deep);color:#fff;border:none" onclick="event.stopPropagation();dialHCG(\''+l.phone+'\')">📞 Call Now</button>';
+      }
+      var activeAltBtns='';
+      if(!nsmIsCall||!nsm)activeAltBtns+='<button class="rb-small" style="background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)" onclick="event.stopPropagation();dialHCG(\''+l.phone+'\')">📞</button>';
+      if(!nsmIsSMS)activeAltBtns+='<button class="rb-small" style="background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)" onclick="event.stopPropagation();openSMS('+l.ri+')">💬</button>';
+      if(!nsmIsEmail)activeAltBtns+='<button class="rb-small" style="background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)" onclick="event.stopPropagation();openEmail('+l.ri+')">✉</button>';
+      btns='<div style="display:flex;flex-direction:column;gap:5px;min-width:140px">'
           +'<div style="display:flex;gap:4px">'
-          +'<button class="rb-small" style="flex:1;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)" onclick="event.stopPropagation();openScript('+l.ri+')">📋</button>'
-          +'<button class="rb-small" style="flex:1;background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)" onclick="event.stopPropagation();openEmail('+l.ri+')">✉</button>'
-          +'<button class="rb-small" style="flex:1;background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)" onclick="event.stopPropagation();openSMS('+l.ri+')">💬</button>'
-          +'</div></div>';
-    }else{
-      var naLabel=l.na?('✓ Done: '+l.na.text.split('—')[0].trim()):'✓ Done';
-      btns='<div style="display:flex;flex-direction:column;gap:4px;min-width:130px">'
-          +'<button class="rb-primary rb-done" data-pid="'+pid+'" data-mode="done" onclick="btnClick(this,event)" style="background:var(--grn);color:#fff;border:none">'+naLabel+'</button>'
-          +'<div style="display:flex;gap:4px">'
-          +'<button class="rb-small rb-resp" data-pid="'+pid+'" data-mode="responded" onclick="btnClick(this,event)" style="background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)">🤝 Responded</button>'
+          +activeMainBtn
+          +'<button class="rb-primary rb-upd" data-pid="'+pid+'" data-mode="update" onclick="btnClick(this,event)" style="background:var(--gold);color:#fff;border:none;flex:0 0 auto;padding:9px 12px">✏</button>'
           +'</div>'
+          +'<div style="display:flex;gap:4px;align-items:center">'
+          +activeAltBtns
+          +'<button class="rb-small" style="background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid);margin-left:auto" onclick="event.stopPropagation();openScript('+l.ri+')">📋</button>'
+          +'</div>'
+          +'</div>';
+    }else{
+      // Determine primary action type from sequence
+      var naType=l.na?l.na.icon:'📞';
+      var naIsCall=(naType==='📞');
+      var naIsSMS=(naType==='💬');
+      var naIsEmail=(naType==='✉');
+      // Primary action button
+      var primaryBtn='';
+      if(naIsCall){
+        primaryBtn='<button class="rb-primary" style="background:var(--sky-deep);color:#fff;border:none" onclick="event.stopPropagation();dialHCG(\''+l.phone+'\')">📞 Call Now</button>';
+      } else if(naIsSMS){
+        primaryBtn='<button class="rb-primary" style="background:var(--grn);color:#fff;border:none" onclick="event.stopPropagation();openSMS('+l.ri+')">💬 Send Text</button>';
+      } else {
+        primaryBtn='<button class="rb-primary" style="background:var(--gold);color:#fff;border:none" onclick="event.stopPropagation();openEmail('+l.ri+')">✉ Send Email</button>';
+      }
+      // Other two methods (not the primary)
+      var altBtns='';
+      if(!naIsCall)altBtns+='<button class="rb-small" style="background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)" onclick="event.stopPropagation();dialHCG(\''+l.phone+'\')">📞 Call</button>';
+      if(!naIsSMS)altBtns+='<button class="rb-small" style="background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)" onclick="event.stopPropagation();openSMS('+l.ri+')">💬 Text</button>';
+      if(!naIsEmail)altBtns+='<button class="rb-small" style="background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)" onclick="event.stopPropagation();openEmail('+l.ri+')">✉ Email</button>';
+      btns='<div style="display:flex;flex-direction:column;gap:5px;min-width:140px">'
+          +primaryBtn
           +'<div style="display:flex;gap:4px">'
-          +'<button class="rb-small" style="flex:1;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)" onclick="event.stopPropagation();openScript('+l.ri+')">📋</button>'
-          +'<button class="rb-small" style="flex:1;background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)" onclick="event.stopPropagation();openEmail('+l.ri+')">✉</button>'
-          +'<button class="rb-small" style="flex:1;background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)" onclick="event.stopPropagation();openSMS('+l.ri+')">💬</button>'
-          +'</div></div>';
+          +'<button class="rb-small rb-done" data-pid="'+pid+'" data-mode="done" onclick="btnClick(this,event)" style="flex:1;background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)">✓ Done</button>'
+          +'<button class="rb-small rb-resp" data-pid="'+pid+'" data-mode="responded" onclick="btnClick(this,event)" style="flex:1;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)">🤝 Responded</button>'
+          +'</div>'
+          +'<div style="display:flex;gap:4px;align-items:center">'
+          +altBtns
+          +'<button class="rb-small" style="background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid);margin-left:auto" onclick="event.stopPropagation();openScript('+l.ri+')">📋</button>'
+          +'</div>'
+          +'</div>';
     }
     // Build panel based on mode (rendered for all, shown/hidden by JS)
     var soptsSel=stOpts.map(function(s){return'<option value="'+s+'"'+(s===l.status?' selected':'')+'>'+s+'</option>';}).join('');
@@ -587,8 +626,8 @@ function buildTbl(leads,type,tMs){
       +'<div class="egrid g4">'
         +'<div class="ef"><label>Status</label><select class="ep-status">'+soptsSel+'</select></div>'
         +'<div class="ef"><label>Next Follow-Up Date</label><input type="date" class="ep-fu" value="'+ds(def3)+'"></div>'
-        +'<div class="ef"><label>Contact Method Used</label><select class="ep-method">'+moptsSel+'</select></div>'
-        +'<div class="ef"><label>Last Contact Date</label><input type="text" disabled value="Auto — today"></div>'
+        +'<div class="ef"><label>Method Used This Time</label><select class="ep-method">'+moptsSel+'</select></div>'
+        +'<div class="ef"><label>Next Suggested Method</label><select class="ep-nsm"><option value="">— select —</option>'+MOPS.slice(1).map(function(s){return'<option>'+s+'</option>';}).join('')+'</select></div>'
       +'</div>'
       +'<div class="ef" style="margin-bottom:14px"><label>Notes</label><textarea class="ep-notes">'+( l.notes||'')+'</textarea></div>';
     // Done panel — just asks for method
@@ -598,7 +637,8 @@ function buildTbl(leads,type,tMs){
         +'<div class="ef"><label>Action Completed</label><input type="text" class="ep-act-done" value="'+(l.na?l.na.text.replace(/"/g,'&quot;'):'')+'" readonly></div>'
       +'</div>';
     // Responded panel — full info
-    var panelResp='<div class="ebanner eb-sky">🤝 First Contact — Log Conversation</div>'
+    var svOpts='<option value="">— select —</option>'+(window._services||[]).map(function(s){return'<option>'+s+'</option>';}).join('');
+    panelResp='<div class="ebanner eb-sky">🤝 First Contact — Log Conversation</div>'
       +'<div class="egrid g4">'
         +'<div class="ef"><label>Response Method</label><select class="ep-resp-method">'+moptsSel+'</select></div>'
         +'<div class="ef"><label>Date &amp; Time</label><input type="text" disabled value="'+new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'"></div>'
@@ -612,7 +652,7 @@ function buildTbl(leads,type,tMs){
         +'<div class="ef"><label>Urgency Level</label><select class="ep-resp-urgency"><option value="">— select —</option><option>ASAP — within days</option><option>Within 2 weeks</option><option>Within a month</option><option>Just exploring</option></select></div>'
       +'</div>'
       +'<div class="egrid g3">'
-        +'<div class="ef"><label>Care Needs Identified</label><input type="text" class="ep-resp-needs" placeholder="Bathing, companionship, meals…"></div>'
+        +'<div class="ef"><label>Type of Care Needed</label><select class="ep-resp-needs">'+svOpts+'</select></div>'
         +'<div class="ef"><label>Safety Concerns</label><input type="text" class="ep-resp-safety" placeholder="Fall risk, alone at home…"></div>'
         +'<div class="ef"><label>Pay Type</label><select class="ep-resp-pay"><option value="">— select —</option><option>Private Pay</option><option>Medicaid / PASSPORT</option><option>Long-Term Care Insurance</option><option>VA Benefits</option><option>Unknown</option></select></div>'
       +'</div>'
@@ -695,6 +735,7 @@ async function saveEp(ri,pid){
       var st=ep.querySelector('.ep-status');if(st&&st.value)u[C.ST]=st.value;
       var fu=ep.querySelector('.ep-fu');if(fu&&fu.value)u[C.NF]=fu.value;
       var mt=ep.querySelector('.ep-method');if(mt&&mt.value)u[C.MT]=mt.value;
+      var nsm2=ep.querySelector('.ep-nsm');if(nsm2&&nsm2.value)u[C.NSM]=nsm2.value;
       var nt=ep.querySelector('.ep-notes');if(nt)u[C.NT]=nt.value;
       if(mt&&mt.value||fu&&fu.value)u[C.LC]=today;
     } else if(mode==='done'){
@@ -902,6 +943,13 @@ async function sendEmailNow(){
 }
 
 // Helpers
+function dialHCG(phone){
+  var clean=(phone||'').replace(/\D/g,'');
+  if(clean.length===10)clean='1'+clean;
+  // GHL direct dial URL
+  var url='https://app.homecaregrow.io/v2/location/'+GHL_LOC+'/contacts?search='+encodeURIComponent('+'+clean);
+  window.open(url,'hcg','width=1100,height=750,noopener');
+}
 async function gf(url,method,body){
   method=method||'GET';
   var opts={method:method,headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'}};
