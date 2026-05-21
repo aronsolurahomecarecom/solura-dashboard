@@ -252,12 +252,66 @@ tbody td{padding:12px 14px;font-size:13px;vertical-align:middle}
   <div class="sw sr"><div class="shdr"><div class="sdot2"></div><div class="stitle">Overdue — Contact First</div><div class="scnt" id="c0">0 leads</div></div><div class="tc" id="t0"></div></div>
   <div class="sw sa"><div class="shdr"><div class="sdot2"></div><div class="stitle">Due Today</div><div class="scnt" id="c1">0 leads</div></div><div class="tc" id="t1"></div></div>
   <div class="sw sg"><div class="shdr"><div class="sdot2"></div><div class="stitle">Due This Week</div><div class="scnt" id="c2">0 leads</div></div><div class="tc" id="t2"></div></div>
+  <div class="sw" style="margin-top:8px"><div class="shdr" style="border-bottom:2px solid var(--border)"><div class="sdot2" style="background:var(--soft)"></div><div class="stitle" style="color:var(--mid)">All Active Leads</div><div class="scnt" id="c3" style="background:#F0EFF4;color:#6B6980;border:1px solid #DDDDE8">0 leads</div></div><div class="tc" id="t3"></div></div>
 </div>
+</div>
+
+<div id="script-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:500;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--warm);border-radius:20px;max-width:620px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+    <div style="background:var(--sky-deep);padding:20px 24px;border-radius:20px 20px 0 0;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:500;color:var(--gold)" id="script-title">Call Script</div>
+      <button onclick="closeModal('script-modal')" style="background:rgba(255,255,255,.15);border:none;color:var(--gold);width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:16px">✕</button>
+    </div>
+    <div id="script-body" style="padding:20px 24px"></div>
+  </div>
+</div>
+<div id="email-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:500;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--warm);border-radius:20px;max-width:580px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+    <div style="background:var(--sky-deep);padding:18px 24px;border-radius:20px 20px 0 0;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-family:'Cormorant Garamond',serif;font-size:18px;color:var(--gold)">Send Email</div>
+      <button onclick="closeModal('email-modal')" style="background:rgba(255,255,255,.15);border:none;color:var(--gold);width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:16px">✕</button>
+    </div>
+    <div style="padding:20px 24px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">To</div>
+      <div id="email-to" style="font-size:13px;color:var(--mid);margin-bottom:12px;padding:8px 12px;background:var(--cream);border-radius:8px"></div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Subject</div>
+      <input id="email-subject" type="text" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;outline:none;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Message</div>
+      <textarea id="email-body" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;outline:none;min-height:160px;resize:vertical;margin-bottom:16px"></textarea>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="email-send-btn" onclick="sendEmailNow()" style="padding:9px 20px;background:var(--gold);color:#fff;border:none;border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer">Send via Outlook</button>
+        <button onclick="closeModal('email-modal')" style="padding:9px 16px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;cursor:pointer">Cancel</button>
+        <div id="email-sending" style="font-size:12px;color:var(--soft);display:none;align-items:center;gap:6px"><div class="mspin"></div> Sending...</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="sms-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:500;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--warm);border-radius:20px;max-width:500px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+    <div style="background:var(--sky-deep);padding:18px 24px;border-radius:20px 20px 0 0;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-family:'Cormorant Garamond',serif;font-size:18px;color:var(--gold)">Send SMS</div>
+      <button onclick="closeModal('sms-modal')" style="background:rgba(255,255,255,.15);border:none;color:var(--gold);width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:16px">✕</button>
+    </div>
+    <div style="padding:20px 24px">
+      <div style="font-size:12px;color:var(--soft);margin-bottom:12px">Review the message then send directly via HomeCareGrow:</div>
+      <textarea id="sms-preview" style="width:100%;padding:12px 14px;border:1.5px solid var(--sky-mid);border-radius:12px;font-size:13px;color:var(--dark);line-height:1.6;margin-bottom:16px;min-height:100px;resize:vertical;background:var(--sky-pale);font-family:'Plus Jakarta Sans',sans-serif;outline:none"></textarea>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="sms-send-btn" onclick="sendSMSNow()" style="padding:9px 20px;background:var(--grn);color:#fff;border:none;border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer">Send SMS Now</button>
+        <a id="sms-hcg-link" href="#" target="_blank" style="padding:9px 16px;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;text-decoration:none;display:inline-block">Open in HCG</a>
+        <button onclick="closeModal('sms-modal')" style="padding:9px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;cursor:pointer">Cancel</button>
+        <div id="sms-sending" style="font-size:12px;color:var(--soft);display:none;align-items:center;gap:6px"><div class="mspin"></div> Sending...</div>
+      </div>
+    </div>
+  </div>
 </div>
 <div class="toast" id="toast"></div>
 
 <script>
-var FN='Solura_Lead_Tracker.xlsx',GR='https://graph.microsoft.com/v1.0',
+var FN='Solura_Lead_Tracker.xlsx';
+var GHL_LOC='kWlzzI2WZaes2GnQf7DV';
+var GHL_KEY='pit-5df912ec-7542-4dc8-af5b-272472ba84e9';
+var GHL_BASE='https://services.leadconnectorhq.com';
+var GR='https://graph.microsoft.com/v1.0',
     TN='1b2cdbea-de19-47d2-9512-ea102905e3eb',
     RD='https://aronsolurahomecarecom.github.io/solura-dashboard/Solura_Dashboard.html',
     SC='Files.ReadWrite.All Sites.ReadWrite.All User.Read offline_access',
@@ -452,8 +506,22 @@ function buildUI(){
   var t0=el('t0');if(t0)t0.innerHTML=buildTbl(od,'od',tMs);
   var t1=el('t1');if(t1)t1.innerHTML=buildTbl(td2,'td',tMs);
   var t2=el('t2');if(t2)t2.innerHTML=buildTbl(wk,'wk',tMs);
-  var kb=el('kbar');if(kb)kb.style.display='grid';
-  var mn=el('main');if(mn)mn.classList.add('vis');
+  // All leads
+  var allL=[];
+  for(var ai=3;ai<rows.length;ai++){
+    var ar=rows[ai],an=ar[C.NM];if(!an)continue;
+    var ast=String(ar[C.ST]||"").trim();
+    if(EXCL.some(function(x){return ast.toLowerCase().indexOf(x)>-1;}))continue;
+    var ada=pd(ar[C.DA]),adO=ada?Math.max(0,Math.round((td-new Date(ada.getFullYear(),ada.getMonth(),ada.getDate()))/86400000)):0;
+    var asi=seqP(adO),asl=ar[C.SL]||"",aact=isActive(ast),ana=aact?null:nextAct(asi.p,asl,adO);
+    var afu=pd(ar[C.NF]),afud=afu?new Date(afu.getFullYear(),afu.getMonth(),afu.getDate()):null;
+    allL.push({ri:ai,no:ar[C.NO],name:an,phone:ar[C.PH]||"",email:ar[C.EM]||"",status:ast,method:ar[C.MT]||"",dm:ar[C.DM]||"",notes:ar[C.NT]||"",daysOld:adO,seqP:asi.p,seqLbl:asi.lbl,seqLast:asl,na:ana,active:aact,fu:afud,fuStr:afud?ds(afud):""});
+  }
+  allL.sort(function(a,b){if(!a.fu&&!b.fu)return 0;if(!a.fu)return 1;if(!b.fu)return -1;return a.fu-b.fu;});
+  var c3=el("c3");if(c3)c3.textContent=allL.length+" lead"+(allL.length!==1?"s":"");
+  var t3=el("t3");if(t3)t3.innerHTML=buildTbl(allL,"all",tMs);
+  var kb=el("kbar");if(kb)kb.style.display="grid";
+  var mn=el("main");if(mn)mn.classList.add("vis");
 }
 function copyLead(l){return Object.assign({},l,{fu:l.fu?new Date(l.fu.getTime()):null});}
 
@@ -470,6 +538,7 @@ function buildTbl(leads,type,tMs){
     return'<div class="empty">'+msgs[type]+'</div>';
   }
   var rhtml=leads.map(function(l){
+    var rowHtml='';
     var fMs=l.fu.getTime();
     var pill=type==='od'?'<span class="pill pr2">'+Math.round((tMs-fMs)/86400000)+'d overdue</span>'
             :type==='td'?'<span class="pill pa">Due today</span>'
@@ -484,10 +553,16 @@ function buildTbl(leads,type,tMs){
     // No-answer lead: show Done + Responded
     var btns='';
     if(l.active){
-      btns='<button class="rb rb-upd" id="'+pid+'-btn" onclick="openEp(\''+pid+'\',\'update\',event)">✏ Update</button>';
+      btns='<button class="rb rb-upd" data-pid="'+pid+'" data-mode="update" onclick="btnClick(this,event)">Update</button>'
+          +'<button class="rb" style="background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)" onclick="event.stopPropagation();openScript('+l.ri+')">Script</button>'
+          +'<button class="rb" style="background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)" onclick="event.stopPropagation();openEmail('+l.ri+')">Email</button>'
+          +'<button class="rb" style="background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)" onclick="event.stopPropagation();openSMS('+l.ri+')">SMS</button>';
     }else{
-      btns='<button class="rb rb-done" data-ri="'+l.ri+'" data-act="'+(l.na?l.na.text.replace(/"/g,'&quot;'):'')+'" onclick="event.stopPropagation();openEp(\''+pid+'\',\'done\',event)">✓ Done</button>'
-          +'<button class="rb rb-resp" onclick="event.stopPropagation();openEp(\''+pid+'\',\'responded\',event)">🤝 Responded</button>';
+      btns='<button class="rb rb-done" data-pid="'+pid+'" data-mode="done" onclick="btnClick(this,event)">Done</button>'
+          +'<button class="rb rb-resp" data-pid="'+pid+'" data-mode="responded" onclick="btnClick(this,event)">Responded</button>'
+          +'<button class="rb" style="background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)" onclick="event.stopPropagation();openScript('+l.ri+')">Script</button>'
+          +'<button class="rb" style="background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)" onclick="event.stopPropagation();openEmail('+l.ri+')">Email</button>'
+          +'<button class="rb" style="background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)" onclick="event.stopPropagation();openSMS('+l.ri+')">SMS</button>';
     }
     // Build panel based on mode (rendered for all, shown/hidden by JS)
     var soptsSel=stOpts.map(function(s){return'<option value="'+s+'"'+(s===l.status?' selected':'')+'>'+s+'</option>';}).join('');
@@ -517,7 +592,7 @@ function buildTbl(leads,type,tMs){
         +'<div class="ef"><label>Next Follow-Up Method</label><select class="ep-resp-next-method"><option value="">— select —</option>'+MOPS.slice(1).map(function(s){return'<option>'+s+'</option>';}).join('')+'</select></div>'
       +'</div>'
       +'<div class="ef" style="margin-bottom:14px"><label>Notes from Conversation</label><textarea class="ep-resp-notes" placeholder="What did they say? Key details, concerns, next steps…"></textarea></div>';
-    return'<tr class="dr'+(drawerRi===l.ri?' sel':'')+'" onclick="openDrawer('+l.ri+');hlRow(this)">'
+    rowHtml='<tr class="dr'+(drawerRi===l.ri?' sel':'')+'" onclick="openDrawer('+l.ri+');hlRow(this)">'
       +'<td><div class="tn">'+l.name+'</div><div class="ts">'+( l.dm||'')+'</div></td>'
       +'<td><div class="tc2">'+(ph||'')+( em||'')+(!ph&&!em?'<span style="color:var(--soft);font-size:12px">—</span>':'')+'</div></td>'
       +'<td>'+sbadge(l.status)+'</td>'
@@ -538,11 +613,18 @@ function buildTbl(leads,type,tMs){
           +'</div>'
         +'</div>'
       +'</td></tr>'
-      +'<script>window["_pd'+pid+'"]='+JSON.stringify({update:panelUpdate,done:panelDone,responded:panelResp})+';</'+'script>';
+      ;
+    window['_pd'+pid]={update:panelUpdate,done:panelDone,responded:panelResp};
+    return rowHtml;
   }).join('');
   return'<table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody>'+rhtml+'</tbody></table>';
 }
 
+function btnClick(btn,e){
+  if(e)e.stopPropagation();
+  var pid=btn.dataset.pid,mode=btn.dataset.mode;
+  if(pid&&mode)openEp(pid,mode,e);
+}
 function openEp(pid,mode,e){
   if(e)e.stopPropagation();
   // Close all others
@@ -795,6 +877,155 @@ function unspin(){var s=el('spinner');if(s)s.classList.remove('on');}
 function showErr(m){var e=el('err');if(e){e.textContent='⚠ '+m;e.classList.add('on');}}
 function clearErr(){var e=el('err');if(e)e.classList.remove('on');}
 function toast(msg){var t=el('toast');if(!t)return;t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},3200);}
+
+// ── Templates & SMS/Email ─────────────────────────────────────────────────────
+var TMPL={
+  p1_intro:["Hi {n}, this is Meir with Solura Home Care. We received your info from A Place for Mom and understand you are looking for care for {c}. We provide compassionate, reliable care. One of our team members will be calling you in about 5 minutes.","Hello {n}, Meir here from Solura Home Care. A Place for Mom shared your information with us. We would love to help with care for {c}. Expect a call from us in the next 5 minutes!","Hi {n}, this is Meir with Solura Home Care. We got your referral from A Place for Mom regarding care for {c}. Calling you shortly!"],
+  p1_missed:["Hi {n}, this is Meir with Solura Home Care. We tried reaching you today. We would love to connect about care for {c}. Call us at 929-545-4507 or we will follow up soon.","Hello {n}, Meir from Solura Home Care. We called but missed you regarding care for {c}. Please call 929-545-4507 or we will be in touch.","Hi {n}, Meir with Solura Home Care. Sorry we missed you today. Call us anytime at 929-545-4507."],
+  p2:["Hi {n}, Meir with Solura Home Care checking in. We would love to connect about care options. Give us a call at 929-545-4507 or reply here.","Hello {n}, Meir from Solura Home Care. Just following up about care for {c}. Reach us at 929-545-4507.","Hi {n}, Meir here with Solura Home Care. Still thinking of you and {c}. We are here when you are ready. 929-545-4507"],
+  p3:["Hi {n}, Meir with Solura Home Care. Just checking in about care options for {c}. We are here to help whenever the time is right. 929-545-4507.","Hello {n}, this is Meir from Solura Home Care. Thinking of you and {c} this week. We are just a call away: 929-545-4507.","Hi {n}, Meir with Solura Home Care. Hope {c} is doing well. We are still here if you need care support. 929-545-4507"],
+  p4:["Hi {n}, this is Meir with Solura Home Care. We are reaching out to check in about care options for {c}. We would be happy to help. Call 929-545-4507.","Hello {n}, Meir from Solura Home Care. Just wanted to check in on {c} and see if we can still help. 929-545-4507","Hi {n}, Meir here from Solura Home Care. Checking back in on care for {c}. No pressure, just want you to know we are here. 929-545-4507"],
+  esub:{p3:["Checking in on care for {c}","Still here for you and {c}","A quick note from Solura Home Care"],p5:["We are still here for {c}","Care options for {c}","Checking in from Solura Home Care"]},
+  ebody:{
+    p3:["Hi {n},\n\nI wanted to check in and see how {c} is doing. We know finding the right care takes time, and we are here whenever you are ready.\n\nAt Solura Home Care, we specialize in compassionate non-medical support tailored to {c}'s needs.\n\nWarm regards,\nMeir Schwimer\nSolura Home Care\n929-545-4507\nwww.solurahomecare.com","Hi {n},\n\nJust a quick note to let you know we are still thinking of you and {c}. No rush and no pressure.\n\nWhen you are ready, we would love to schedule a free in-home assessment.\n\nAlways here for you,\nMeir Schwimer\nSolura Home Care\n929-545-4507","Hi {n},\n\nHope you and {c} are doing well. Solura Home Care is still available and ready to help whenever the time is right.\n\nOur caregivers are trained, background-checked, and matched based on both skills and personality.\n\nBest,\nMeir\nSolura Home Care | 929-545-4507"],
+    p5:["Hi {n},\n\nI wanted to reach out one more time to let you know we are still here if you need care support for {c}.\n\nA free in-home assessment is always available. No commitment required.\n\nHoping you and {c} are well,\nMeir Schwimer\nSolura Home Care\n929-545-4507\nwww.solurahomecare.com","Hi {n},\n\nJust a friendly check-in from Solura Home Care. If you would like to revisit care options for {c}, we would be happy to chat.\n\nWarm wishes,\nMeir\n929-545-4507","Hi {n},\n\nThinking of you and {c}. Please do not hesitate to reach out if we can help.\n\nAlways here,\nMeir Schwimer\nSolura Home Care | 929-545-4507"]
+  }
+};
+
+function ft(s,n,c){return s.replace(/{n}/g,n||"there").replace(/{c}/g,c||"your loved one");}
+function getTmpl(arr,ri){return arr[ri%arr.length];}
+
+function getSMSTmpl(lead){
+  var n=lead.name,c=lead.name,ri=lead.ri,p=lead.seqP,l=lead.seqLast||"";
+  if(p===1){if(!l||l.indexOf("Intro text")===-1)return ft(getTmpl(TMPL.p1_intro,ri),n,c);return ft(getTmpl(TMPL.p1_missed,ri),n,c);}
+  if(p===2)return ft(getTmpl(TMPL.p2,ri),n,c);
+  if(p===3)return ft(getTmpl(TMPL.p3,ri),n,c);
+  if(p===4)return ft(getTmpl(TMPL.p4,ri),n,c);
+  return ft(getTmpl(TMPL.p3,ri),n,c);
+}
+function getEmailTmpl(lead){
+  var pk=lead.seqP>=5?"p5":"p3",t=TMPL.esub[pk],b=TMPL.ebody[pk],i=lead.ri%t.length;
+  return{subject:ft(t[i],lead.name,lead.name),body:ft(b[i],lead.name,lead.name)};
+}
+
+function getScript(lead){
+  var n=lead.name||"them";
+  var isAPFM=(lead.source||"").toLowerCase().indexOf("place for mom")>-1;
+  if(isAPFM){return{title:"A Place for Mom Call Script",sections:[
+    {h:"1. Opening",t:"Hi, is this "+n+"? Great, this is Meir with Solura Home Care. I am calling because we received your information from A Place for Mom. How are you doing today?"},
+    {h:"2. Frame the Call",t:"I would love to learn more about what is going on so we can recommend the right type of care. I will ask a few questions, and then we will schedule your in-home assessment."},
+    {h:"3. Emotional Discovery",t:"Before we go into details, how are you holding up with everything going on? What made today the day you reached out for help through A Place for Mom?"},
+    {h:"4. Care Needs Discovery",t:"Tell me about "+n+" - what has been happening recently? Prompts: Bathing/dressing, Fall risk, Mobility, Dementia, Toileting, Meal prep, Medication reminders, Overnight, Companionship"},
+    {h:"5. Safety + Urgency",t:"Have there been any recent falls or close calls? Is "+n+" safe when left alone? How soon are you hoping to have care start?"},
+    {h:"6. Assumptive Scheduling",t:"So the next step is simple - we will schedule your in-home assessment. That is where our care manager meets with you and "+n+" and creates a personalized care plan. We are doing assessments this week - I can do today at 4 PM or tomorrow morning at 10 AM. Which works best?"},
+    {h:"7. Hesitation Responses",t:"Need to talk to family: The assessment is the easiest way to get everyone on the same page. Comparing agencies: Meeting our care manager gives a much clearer picture. Not ready yet: The assessment does not commit you to anything - it simply gives you clarity."},
+    {h:"8. Closing",t:"Perfect - I have you down for [day & time]. We will send a confirmation shortly. We look forward to supporting your family."}
+  ]};}
+  return{title:"General Follow-Up Script",sections:[
+    {h:"Opening",t:"Hi, is this "+n+"? This is Meir with Solura Home Care. How are you today?"},
+    {h:"Purpose",t:"I am calling to follow up and see if you are still exploring care options, and to answer any questions."},
+    {h:"Discovery",t:"Tell me about what is going on - what kind of support are you looking for?"},
+    {h:"Close",t:"The easiest next step is a free in-home assessment - no commitment, just a conversation. Can we find a time this week?"}
+  ]};
+}
+
+function buildLeadObj(ri){
+  var r=rows[ri];if(!r)return null;
+  var da=pd(r[C.DA]),dO=da?Math.max(0,Math.round((new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate())-new Date(da.getFullYear(),da.getMonth(),da.getDate()))/86400000)):0;
+  var si=seqP(dO);
+  return{ri:ri,name:r[C.NM]||"",email:r[C.EM]||"",phone:r[C.PH]||"",status:r[C.ST]||"",source:r[C.SO]||"",seqP:si.p,seqLbl:si.lbl,seqLast:r[C.SL]||""};
+}
+
+var curEmailRi=null;
+function closeModal(id){var m=el(id);if(m)m.style.display="none";}
+function openModal(id){var m=el(id);if(m)m.style.display="flex";}
+
+function openScript(ri){
+  var lead=buildLeadObj(ri);if(!lead)return;
+  var s=getScript(lead);
+  el("script-title").textContent=s.title;
+  el("script-body").innerHTML=s.sections.map(function(sec){
+    return"<div style='margin-bottom:18px'><div style='font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--gold);margin-bottom:6px'>"+sec.h+"</div>"
+      +"<div style='font-size:13px;color:var(--mid);line-height:1.7;background:var(--cream);padding:12px 14px;border-radius:10px'>"+sec.t+"</div></div>";
+  }).join("");
+  openModal("script-modal");
+}
+
+function openSMS(ri){
+  var lead=buildLeadObj(ri);if(!lead)return;
+  if(!lead.phone){toast("No phone number for this lead");return;}
+  var msg=getSMSTmpl(lead);
+  el("sms-preview").value=msg;
+  el("sms-hcg-link").href="https://app.homecaregrow.io/v2/location/"+GHL_LOC+"/contacts";
+  window._smsRi=ri;window._smsPhone=lead.phone.replace(/\D/g,"");
+  if(window._smsPhone.length===10)window._smsPhone="1"+window._smsPhone;
+  openModal("sms-modal");
+}
+
+async function sendSMSNow(){
+  var ri=window._smsRi,phone=window._smsPhone,msg=el("sms-preview").value;
+  if(!phone||!msg)return;
+  var btn=el("sms-send-btn"),snd=el("sms-sending");
+  if(btn)btn.disabled=true;if(snd)snd.style.display="flex";
+  try{
+    var cid2=null;
+    var sr=await fetch(GHL_BASE+"/contacts/search/duplicate?locationId="+GHL_LOC+"&number="+encodeURIComponent("+"+phone),{headers:{Authorization:"Bearer "+GHL_KEY,Version:"2021-07-28"}});
+    if(sr.ok){var sj=await sr.json();if(sj.contact)cid2=sj.contact.id;}
+    if(!cid2){
+      var r2=await fetch(GHL_BASE+"/contacts/?locationId="+GHL_LOC+"&query="+encodeURIComponent("+"+phone),{headers:{Authorization:"Bearer "+GHL_KEY,Version:"2021-07-28"}});
+      if(r2.ok){var j2=await r2.json();if(j2.contacts&&j2.contacts.length>0)cid2=j2.contacts[0].id;}
+    }
+    if(!cid2&&rows[ri]){
+      var r3=rows[ri];
+      var cr=await fetch(GHL_BASE+"/contacts/",{method:"POST",headers:{Authorization:"Bearer "+GHL_KEY,Version:"2021-07-28","Content-Type":"application/json"},
+        body:JSON.stringify({locationId:GHL_LOC,firstName:(r3[C.NM]||"").split(" ")[0]||"",lastName:(r3[C.NM]||"").split(" ").slice(1).join(" ")||"",phone:"+"+phone,email:r3[C.EM]||""})});
+      if(cr.ok){var cj=await cr.json();cid2=cj.contact?cj.contact.id:null;}
+    }
+    if(!cid2)throw new Error("Could not find or create contact in HomeCareGrow.");
+    var smsr=await fetch(GHL_BASE+"/conversations/messages",{method:"POST",
+      headers:{Authorization:"Bearer "+GHL_KEY,Version:"2021-07-28","Content-Type":"application/json"},
+      body:JSON.stringify({type:"SMS",contactId:cid2,locationId:GHL_LOC,message:msg})});
+    if(!smsr.ok){var se=await smsr.json().catch(function(){return{};});throw new Error("SMS failed: "+(se.message||smsr.status));}
+    closeModal("sms-modal");toast("SMS sent via HomeCareGrow");
+    var today2=fd2(new Date());
+    await writeRow(ri,{[C.MT]:"SMS",[C.LC]:today2,[C.SL]:"SMS sent"});
+    setTimeout(loadData,600);
+  }catch(e){showErr("SMS error: "+e.message);}
+  finally{if(btn)btn.disabled=false;if(snd)snd.style.display="none";}
+}
+
+function openEmail(ri){
+  var lead=buildLeadObj(ri);if(!lead)return;
+  if(!lead.email){toast("No email address for this lead");return;}
+  curEmailRi=ri;
+  var t=getEmailTmpl(lead);
+  el("email-to").textContent=lead.name+" <"+lead.email+">";
+  el("email-subject").value=t.subject;
+  el("email-body").value=t.body;
+  openModal("email-modal");
+}
+
+async function sendEmailNow(){
+  var ri=curEmailRi;if(ri===null)return;
+  var toTxt=el("email-to").textContent,m=toTxt.match(/<([^>]+)>/),toAddr=m?m[1]:"";
+  if(!toAddr){toast("No email address");return;}
+  var subj=el("email-subject").value,body=el("email-body").value;
+  var btn=el("email-send-btn"),snd=el("email-sending");
+  if(btn)btn.disabled=true;if(snd)snd.style.display="flex";
+  try{
+    var res=await fetch("https://graph.microsoft.com/v1.0/me/sendMail",{method:"POST",
+      headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},
+      body:JSON.stringify({message:{subject:subj,body:{contentType:"Text",content:body},
+        toRecipients:[{emailAddress:{address:toAddr}}]},saveToSentItems:true})});
+    if(res.ok||res.status===202){
+      closeModal("email-modal");toast("Email sent to "+toAddr);
+      var today3=fd2(new Date());
+      await writeRow(ri,{[C.MT]:"Email",[C.LC]:today3,[C.SL]:"Email sent"});
+      setTimeout(loadData,600);
+    }else{var e2=await res.json().catch(function(){return{};});throw new Error(e2.error?e2.error.message:"Send failed: "+res.status);}
+  }catch(e){showErr("Email error: "+e.message);}
+  finally{if(btn)btn.disabled=false;if(snd)snd.style.display="none";}
+}
 </script>
 </body>
 </html>
