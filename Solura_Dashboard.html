@@ -192,9 +192,9 @@ tbody td{padding:12px 14px;font-size:13px;vertical-align:middle}
 
 <div class="hdr">
   <div class="hdr-l">
-    <div class="logo-wrap" style="position:relative">
-      <span class="logo-s" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;color:#fff">S</span>
-      <img src="https://aronsolurahomecarecom.github.io/solura-dashboard/logo.png" alt="" style="position:relative;z-index:1;width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display='none'">
+    <div class="logo-wrap">
+      <img src="https://aronsolurahomecarecom.github.io/solura-dashboard/logo.png" alt="S" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+      <span class="logo-s" style="display:none">S</span>
     </div>
     <div class="brand">Solura Home Care</div>
   </div>
@@ -216,9 +216,9 @@ tbody td{padding:12px 14px;font-size:13px;vertical-align:middle}
 
 <div id="ls">
   <div class="lcard">
-    <div class="llogo" style="position:relative">
-      <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',serif;font-size:32px;font-weight:600;color:#fff">S</span>
-      <img src="https://aronsolurahomecarecom.github.io/solura-dashboard/logo.png" alt="" style="position:relative;z-index:1;width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display='none'">
+    <div class="llogo">
+      <img src="https://aronsolurahomecarecom.github.io/solura-dashboard/logo.png" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+      <span class="llogo-s" style="display:none">S</span>
     </div>
     <div class="ltitle">Follow-Up Dashboard</div>
     <div class="lsub">Sign in with Microsoft to connect live to your <strong>Solura_Lead_Tracker.xlsx</strong> on OneDrive.</div>
@@ -394,9 +394,10 @@ function nextAct(p,last,d){
     return null;
   }
   if(p===2){
-    if(l.indexOf('AM')===-1)return{icon:'📞',text:'AM Call — Day '+d};
-    if(d%2===0&&l.indexOf('PM')===-1)return{icon:'💬',text:'PM Text — Day '+d};
-    if(d%2!==0&&l.indexOf('PM')===-1)return{icon:'📞',text:'PM Call — Day '+d};
+    var amDone=(l.indexOf('AM Call — Day '+d)>-1);
+    var pmDone=(l.indexOf('PM Call — Day '+d)>-1||l.indexOf('PM Text — Day '+d)>-1);
+    if(!amDone)return{icon:'📞',text:'AM Call — Day '+d};
+    if(!pmDone)return{icon:(d%2===0?'💬':'📞'),text:(d%2===0?'PM Text':'PM Call')+' — Day '+d};
     return null;
   }
   if(p===3){var din=(d-10)%7;if(din===0)return{icon:'💬',text:'Week '+(Math.floor((d-10)/7)+2)+' outreach — text or email'};return null;}
@@ -440,14 +441,9 @@ function buildUI(){
     if(fuRaw){var fu=pd(fuRaw);if(fu&&!isNaN(fu)){
       var fus=ds(fu),fud=new Date(fus);
       lead.fu=new Date(fud.getTime());lead.fuStr=fus;
-      // For no-answer track: only surface if there's an action due today or overdue
-      // For active track: surface based on follow-up date as normal
-      var shouldShow=true;
-      if(!active&&na===null){
-        // No action due — only show if overdue (past follow-up date)
-        shouldShow=(fus<ts);
-      }
-      if(shouldShow){
+      var actionDue=(na!==null);
+      var canShow=active?true:(actionDue||fus<ts);
+      if(canShow){
         if(fus<ts)od.push(copyLead(lead));
         else if(fus===ts)td2.push(copyLead(lead));
         else if(fud>td&&fud<=wd)wk.push(copyLead(lead));
@@ -493,10 +489,10 @@ function buildTbl(leads,type,tMs){
     // No-answer lead: show Done + Responded
     var btns='';
     if(l.active){
-      btns='<button class="rb rb-upd" id="'+pid+'-btn" data-pid="'+pid+'" data-mode="update" onclick="btnClick(this,event)">✏ Update</button>';
+      btns='<button class="rb rb-upd" id="'+pid+'-btn" onclick="openEp(\''+pid+'\',\'update\',event)">✏ Update</button>';
     }else{
-      btns='<button class="rb rb-done" data-pid="'+pid+'" data-mode="done" onclick="btnClick(this,event)">✓ Done</button>'
-          +'<button class="rb rb-resp" data-pid="'+pid+'" data-mode="responded" onclick="btnClick(this,event)">🤝 Responded</button>';
+      btns='<button class="rb rb-done" data-ri="'+l.ri+'" data-act="'+(l.na?l.na.text.replace(/"/g,'&quot;'):'')+'" onclick="event.stopPropagation();openEp(\''+pid+'\',\'done\',event)">✓ Done</button>'
+          +'<button class="rb rb-resp" onclick="event.stopPropagation();openEp(\''+pid+'\',\'responded\',event)">🤝 Responded</button>';
     }
     // Build panel based on mode (rendered for all, shown/hidden by JS)
     var soptsSel=stOpts.map(function(s){return'<option value="'+s+'"'+(s===l.status?' selected':'')+'>'+s+'</option>';}).join('');
@@ -526,7 +522,7 @@ function buildTbl(leads,type,tMs){
         +'<div class="ef"><label>Next Follow-Up Method</label><select class="ep-resp-next-method"><option value="">— select —</option>'+MOPS.slice(1).map(function(s){return'<option>'+s+'</option>';}).join('')+'</select></div>'
       +'</div>'
       +'<div class="ef" style="margin-bottom:14px"><label>Notes from Conversation</label><textarea class="ep-resp-notes" placeholder="What did they say? Key details, concerns, next steps…"></textarea></div>';
-    return'<tr class="dr'+(drawerRi===l.ri?' sel':'')+'" onclick="openDrawer('+l.ri+');hlRow(this)">'
+    var rowHtml='<tr class="dr'+(drawerRi===l.ri?' sel':'')+'" onclick="openDrawer('+l.ri+');hlRow(this)">'
       +'<td><div class="tn">'+l.name+'</div><div class="ts">'+( l.dm||'')+'</div></td>'
       +'<td><div class="tc2">'+(ph||'')+( em||'')+(!ph&&!em?'<span style="color:var(--soft);font-size:12px">—</span>':'')+'</div></td>'
       +'<td>'+sbadge(l.status)+'</td>'
@@ -547,16 +543,13 @@ function buildTbl(leads,type,tMs){
           +'</div>'
         +'</div>'
       +'</td></tr>'
-      +'<script>window["_pd'+pid+'"]='+JSON.stringify({update:panelUpdate,done:panelDone,responded:panelResp})+';</'+'script>';
+      ;
+    window['_pd'+pid]={update:panelUpdate,done:panelDone,responded:panelResp};
+    return rowHtml;
   }).join('');
   return'<table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody>'+rhtml+'</tbody></table>';
 }
 
-function btnClick(btn,e){
-  if(e)e.stopPropagation();
-  var pid=btn.dataset.pid,mode=btn.dataset.mode;
-  openEp(pid,mode,e);
-}
 function openEp(pid,mode,e){
   if(e)e.stopPropagation();
   // Close all others
