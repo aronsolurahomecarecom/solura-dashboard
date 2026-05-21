@@ -445,9 +445,13 @@ function nextAct(p,last,d){
     return null;
   }
   if(p===2){
-    var amDone=(l.indexOf('AM Call — Day '+d)>-1);
-    var pmDone=(l.indexOf('PM Call — Day '+d)>-1||l.indexOf('PM Text — Day '+d)>-1);
-    if(!amDone)return{icon:'📞',text:'AM Call — Day '+d};
+    // seqLast is a pipe-separated log: "AM Call — Day 5 | PM Call — Day 5 | AM Call — Day 6"
+    var amTag='AM Call — Day '+d;
+    var pmTag1='PM Call — Day '+d;
+    var pmTag2='PM Text — Day '+d;
+    var amDone=(l.indexOf(amTag)>-1);
+    var pmDone=(l.indexOf(pmTag1)>-1||l.indexOf(pmTag2)>-1);
+    if(!amDone)return{icon:'📞',text:amTag};
     if(!pmDone)return{icon:(d%2===0?'💬':'📞'),text:(d%2===0?'PM Text':'PM Call')+' — Day '+d};
     return null;
   }
@@ -620,7 +624,8 @@ function buildTbl(leads,type,tMs){
     }
     // Build panel based on mode (rendered for all, shown/hidden by JS)
     var soptsSel=stOpts.map(function(s){return'<option value="'+s+'"'+(s===l.status?' selected':'')+'>'+s+'</option>';}).join('');
-    var moptsSel=MOPS.map(function(s){return'<option value="'+s+'"'+(s===l.method?' selected':'')+'>'+( s||'— select —')+'</option>';}).join('');
+    var curNSM=rows[l.ri]?String(rows[l.ri][C.NSM]||'').trim():'';
+    var moptsSel=MOPS.map(function(s){return'<option value="'+s+'"'+(s&&s===curNSM?' selected':'')+'>'+(s||'— select —')+'</option>';}).join('');
     var def3=new Date();def3.setDate(def3.getDate()+3);
     // Update panel
     var panelUpdate='<div class="ebanner eb-gold">✏ Update Follow-Up</div>'
@@ -741,9 +746,16 @@ async function saveEp(ri,pid){
       if(mt&&mt.value||fu&&fu.value)u[C.LC]=today;
     } else if(mode==='done'){
       var mt2=ep.querySelector('.ep-method-done');if(mt2&&mt2.value)u[C.MT]=mt2.value;
-      var act=ep.querySelector('.ep-act-done');u[C.SL]=act?act.value:'Action logged';
+      var act=ep.querySelector('.ep-act-done');
+      var actText=act?act.value:'Action logged';
+      // Append to existing log rather than overwrite — keeps AM when PM is logged
+      var existingLog=rows[ri]?String(rows[ri][C.SL]||''):'';
+      var newLog=existingLog?existingLog+' | '+actText:actText;
+      // Keep only last 20 entries to avoid infinite growth
+      var parts=newLog.split(' | ');
+      if(parts.length>20)parts=parts.slice(parts.length-20);
+      u[C.SL]=parts.join(' | ');
       u[C.SD]=today;u[C.LC]=today;
-      if(mt2&&mt2.value){}// method already set
     } else if(mode==='responded'){
     var rm=ep.querySelector('.ep-resp-method');if(rm&&rm.value)u[C.MT]=rm.value;
     var rfu=ep.querySelector('.ep-resp-fu');if(rfu&&rfu.value)u[C.NF]=rfu.value;
