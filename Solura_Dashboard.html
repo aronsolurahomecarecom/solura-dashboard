@@ -413,12 +413,27 @@ function isActive(st){return ACTIVE_ST.some(function(x){return st.toLowerCase().
 
 // Date helpers
 function pd(v){
-  if(!v&&v!==0)return null;if(v instanceof Date)return v;
+  if(!v&&v!==0)return null;
+  if(v instanceof Date){
+    // Date from SheetJS with cellDates - extract local y/m/d to avoid UTC shift
+    return new Date(v.getFullYear(),v.getMonth(),v.getDate());
+  }
   var s=String(v).trim();
-  if(/^\d{4,6}$/.test(s))return new Date((parseInt(s)-25569)*86400000);
+  // Excel serial number
+  if(/^\d{4,6}$/.test(s)){
+    var ms=(parseInt(s)-25569)*86400000;
+    var d=new Date(ms);
+    // Convert UTC to local date
+    return new Date(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());
+  }
+  // yyyy-mm-dd string (always parse as local to avoid UTC midnight shift)
   var m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);
+  // m/d/yyyy
   m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);if(m)return new Date(+m[3],+m[1]-1,+m[2]);
-  var nd=new Date(s);if(!isNaN(nd))return nd;return null;
+  // Last resort - parse then extract local parts
+  var nd=new Date(s);
+  if(!isNaN(nd))return new Date(nd.getFullYear(),nd.getMonth(),nd.getDate());
+  return null;
 }
 function ds(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function fd2(d){return(d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear();}
