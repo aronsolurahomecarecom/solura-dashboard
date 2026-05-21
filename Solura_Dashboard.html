@@ -493,10 +493,10 @@ function buildTbl(leads,type,tMs){
     // No-answer lead: show Done + Responded
     var btns='';
     if(l.active){
-      btns='<button class="rb rb-upd" id="'+pid+'-btn" onclick="openEp(\''+pid+'\',\'update\',event)">✏ Update</button>';
+      btns='<button class="rb rb-upd" id="'+pid+'-btn" data-pid="'+pid+'" data-mode="update" onclick="btnClick(this,event)">✏ Update</button>';
     }else{
-      btns='<button class="rb rb-done" data-ri="'+l.ri+'" data-act="'+(l.na?l.na.text.replace(/"/g,'&quot;'):'')+'" onclick="event.stopPropagation();openEp(\''+pid+'\',\'done\',event)">✓ Done</button>'
-          +'<button class="rb rb-resp" onclick="event.stopPropagation();openEp(\''+pid+'\',\'responded\',event)">🤝 Responded</button>';
+      btns='<button class="rb rb-done" data-pid="'+pid+'" data-mode="done" onclick="btnClick(this,event)">✓ Done</button>'
+          +'<button class="rb rb-resp" data-pid="'+pid+'" data-mode="responded" onclick="btnClick(this,event)">🤝 Responded</button>';
     }
     // Build panel based on mode (rendered for all, shown/hidden by JS)
     var soptsSel=stOpts.map(function(s){return'<option value="'+s+'"'+(s===l.status?' selected':'')+'>'+s+'</option>';}).join('');
@@ -552,6 +552,11 @@ function buildTbl(leads,type,tMs){
   return'<table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody>'+rhtml+'</tbody></table>';
 }
 
+function btnClick(btn,e){
+  if(e)e.stopPropagation();
+  var pid=btn.dataset.pid,mode=btn.dataset.mode;
+  openEp(pid,mode,e);
+}
 function openEp(pid,mode,e){
   if(e)e.stopPropagation();
   // Close all others
