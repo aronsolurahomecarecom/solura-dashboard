@@ -496,9 +496,10 @@ function buildUI(){
     if(fuRaw){var fu=pd(fuRaw);if(fu&&!isNaN(fu)){
       var fus=ds(fu),fud=new Date(fus);
       lead.fu=new Date(fud.getTime());lead.fuStr=fus;
+      var actionDue=(na!==null);
       if(fus<ts)od.push(copyLead(lead));
-      else if(fus===ts)td2.push(copyLead(lead));
-      else if(fud>td&&fud<=wd)wk.push(copyLead(lead));
+      else if(fus===ts&&(active||actionDue))td2.push(copyLead(lead));
+      else if(fud>td&&fud<=wd&&(active||actionDue))wk.push(copyLead(lead));
     }}
   }
   od.sort(function(a,b){return a.fu-b.fu;});wk.sort(function(a,b){return a.fu-b.fu;});
@@ -637,7 +638,7 @@ function buildTbl(leads,type,tMs){
       +'</div>'
       +'<div class="ef" style="margin-bottom:14px"><label>Notes</label><textarea class="ep-notes">'+( l.notes||'')+'</textarea></div>';
     // Done panel — just asks for method
-    var recMethod=l.na?(l.na.icon==='📞'?'Phone call':l.na.icon==='💬'?'SMS':'Email'):'';
+    var recMethod=l.na?(l.na.text&&l.na.text.toLowerCase().indexOf('call')>-1?'Phone call':l.na.text&&l.na.text.toLowerCase().indexOf('text')>-1?'SMS':l.na.text&&l.na.text.toLowerCase().indexOf('email')>-1?'Email':'Phone call'):'';
     var doneMOpts=MOPS.map(function(s){return'<option value="'+s+'"'+(s&&s===recMethod?' selected':'')+'>'+(s||'— select —')+'</option>';}).join('');
     panelDone='<div class="ebanner eb-grn">✓ Log Completed Action</div>'
       +'<div class="egrid g2">'
