@@ -9,1646 +9,1378 @@
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
-:root{
-  --gold:#C8870A;--gold-l:#D9960F;--gold-p:#FEF5E4;--gold-m:#E8C07A;
-  --navy:#1C3A6E;--navy-m:#2A5298;--sky:#5B9BD5;--sky-p:#EBF3FB;--sky-m:#9DC4E8;
-  --green:#2E7D32;--green-p:#F0FDF4;--red:#B91C1C;--red-p:#FEF2F2;
-  --cream:#F5EFE6;--warm:#FDFCF9;
-  --radius:10px;--shadow:0 2px 12px rgba(28,58,110,.1);
+/* ─────────────────────────────────────────────
+   TOKENS
+───────────────────────────────────────────── */
+:root {
+  --gold:   #C8870A;
+  --gold-h: #D9960F;
+  --gold-bg:#FEF5E4;
+  --gold-m: #E8C07A;
+  --navy:   #1C3A6E;
+  --navy-h: #2A5298;
+  --sky:    #5B9BD5;
+  --sky-bg: #EBF3FB;
+  --sky-m:  #9DC4E8;
+  --green:  #2E7D32;
+  --grn-bg: #F0FDF4;
+  --red:    #B91C1C;
+  --red-bg: #FEF2F2;
+  --cream:  #F5EFE6;
+  --warm:   #FDFCF9;
+  --r:      10px;
+  --sh:     0 2px 12px rgba(28,58,110,.10);
 }
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--warm);color:#1a1a2e;min-height:100vh}
-h1,h2,h3,h4{font-family:'Cormorant Garamond',serif}
 
-/* ── Header ── */
-#hdr{position:sticky;top:0;z-index:100;background:var(--navy);color:#fff;
-  padding:0 20px;display:flex;align-items:center;gap:14px;height:58px;
-  box-shadow:0 2px 10px rgba(0,0,0,.25)}
-#hdr img{height:38px;width:auto}
-#hdr h1{font-size:1.35rem;color:var(--gold-m);letter-spacing:.02em;flex:1}
-#hdr .hdr-btns{display:flex;gap:8px;align-items:center}
-#hdr button{background:transparent;border:1px solid rgba(255,255,255,.3);color:#fff;
-  border-radius:6px;padding:5px 12px;font-size:.8rem;cursor:pointer;
-  font-family:'Plus Jakarta Sans',sans-serif}
-#hdr button:hover{border-color:var(--gold-m);color:var(--gold-m)}
-#sync-btn{background:var(--gold) !important;border-color:var(--gold) !important;
-  color:#fff !important;font-weight:600}
-#sync-btn:hover{background:var(--gold-l) !important}
-#hdr-user{font-size:.78rem;color:rgba(255,255,255,.6)}
-#err-bar{background:var(--red-p);border-bottom:2px solid var(--red);
-  color:var(--red);padding:8px 20px;font-size:.85rem;display:none}
-
-/* ── Login Screen ── */
-#login-screen{display:flex;flex-direction:column;align-items:center;
-  justify-content:center;min-height:calc(100vh - 58px);padding:40px 20px;
-  background:var(--warm)}
-.login-card{background:#fff;border-radius:16px;padding:48px 40px;
-  max-width:420px;width:100%;box-shadow:0 4px 32px rgba(28,58,110,.12);
-  text-align:center;border-top:4px solid var(--gold)}
-.login-card img{height:64px;margin-bottom:20px}
-.login-card h2{font-size:1.8rem;color:var(--navy);margin-bottom:8px}
-.login-card p{color:#666;margin-bottom:28px;font-size:.9rem;line-height:1.5}
-.btn-primary{display:inline-block;background:var(--gold);color:#fff;border:none;
-  border-radius:8px;padding:13px 28px;font-size:.95rem;font-weight:600;
-  cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;transition:background .2s}
-.btn-primary:hover{background:var(--gold-l)}
-.btn-sky{background:var(--sky) !important}
-.btn-sky:hover{background:var(--navy-m) !important}
-.btn-secondary{background:#fff;color:var(--navy);border:1.5px solid var(--navy-m);
-  border-radius:8px;padding:9px 18px;font-size:.85rem;font-weight:600;
-  cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif}
-
-/* ── Spinner ── */
-#spinner{position:fixed;inset:0;background:rgba(255,255,255,.85);z-index:500;
-  display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px}
-.spin-ring{width:48px;height:48px;border:4px solid var(--gold-p);
-  border-top-color:var(--gold);border-radius:50%;animation:spinr .8s linear infinite}
-@keyframes spinr{to{transform:rotate(360deg)}}
-#spin-msg{color:var(--navy);font-weight:600;font-size:.95rem}
-
-/* ── KPI Bar ── */
-#kpi-bar{display:flex;gap:12px;padding:16px 20px;background:var(--cream);
-  border-bottom:1px solid rgba(200,135,10,.2);overflow-x:auto}
-.kpi{background:#fff;border-radius:var(--radius);padding:12px 18px;
-  min-width:110px;text-align:center;box-shadow:var(--shadow);
-  border-top:3px solid transparent;flex:1}
-.kpi.kpi-red{border-top-color:var(--red)}
-.kpi.kpi-gold{border-top-color:var(--gold)}
-.kpi.kpi-sky{border-top-color:var(--sky)}
-.kpi.kpi-navy{border-top-color:var(--navy)}
-.kpi-val{font-size:1.7rem;font-weight:700;font-family:'Cormorant Garamond',serif;line-height:1}
-.kpi-lbl{font-size:.72rem;color:#777;margin-top:3px;text-transform:uppercase;letter-spacing:.04em}
-
-/* ── Mobile tab bar ── */
-#tab-bar{display:none;position:fixed;bottom:0;left:0;right:0;background:#fff;
-  border-top:1px solid #e5e7eb;z-index:90;height:52px}
-#tab-bar .tabs{display:flex;height:100%}
-#tab-bar .tab{flex:1;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;gap:2px;font-size:.68rem;color:#888;
-  cursor:pointer;background:none;border:none;font-family:'Plus Jakarta Sans',sans-serif}
-#tab-bar .tab.active{color:var(--gold)}
-#tab-bar .tab span{font-size:1.15rem}
-
-/* ── Main content ── */
-#app{display:none}
-#main{padding:20px;max-width:1200px;margin:0 auto}
-@media(max-width:768px){#main{padding:12px;padding-bottom:68px}#tab-bar{display:block}}
-
-/* ── Sections ── */
-.section{margin-bottom:28px}
-.section-hdr{display:flex;align-items:center;gap:10px;margin-bottom:12px}
-.section-hdr h2{font-size:1.2rem;color:var(--navy)}
-.section-badge{background:var(--navy);color:#fff;border-radius:20px;
-  padding:2px 9px;font-size:.75rem;font-weight:700}
-.section-badge.red{background:var(--red)}
-.section-badge.gold{background:var(--gold)}
-.section-badge.sky{background:var(--sky)}
-.empty-state{color:#aaa;font-size:.88rem;padding:18px;background:#fff;
-  border-radius:var(--radius);text-align:center;border:1px dashed #ddd}
-
-/* ── Lead Card ── */
-.lead-card{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);
-  padding:14px 16px;margin-bottom:10px;cursor:pointer;
-  transition:box-shadow .15s,transform .1s;border-left:4px solid transparent}
-.lead-card:hover{box-shadow:0 4px 20px rgba(28,58,110,.15);transform:translateY(-1px)}
-.lead-card.overdue{border-left-color:var(--red)}
-.lead-card.today{border-left-color:var(--gold)}
-.lead-card.week{border-left-color:var(--sky)}
-.lead-card.active{border-left-color:var(--navy)}
-.card-row1{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-.card-name{font-weight:700;font-size:1rem;color:var(--navy)}
-.card-row2{display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap}
-.card-row2 a{font-size:.82rem;color:var(--sky);text-decoration:none}
-.card-row2 a:hover{text-decoration:underline}
-.card-row3{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.urgency-pill{font-size:.72rem;padding:3px 9px;border-radius:20px;
-  font-weight:600;white-space:nowrap}
-.pill-red{background:var(--red-p);color:var(--red)}
-.pill-gold{background:var(--gold-p);color:#9a6200}
-.pill-sky{background:var(--sky-p);color:var(--navy-m)}
-.pill-navy{background:#e8edf7;color:var(--navy)}
-.na-text{font-size:.82rem;color:#555;flex:1;min-width:0}
-.card-cta{margin-left:auto;padding:5px 13px;border-radius:7px;font-size:.8rem;
-  font-weight:700;cursor:pointer;border:none;font-family:'Plus Jakarta Sans',sans-serif;
-  white-space:nowrap}
-.cta-call{background:var(--green-p);color:var(--green);border:1px solid var(--green)}
-.cta-text{background:var(--sky-p);color:var(--navy-m);border:1px solid var(--sky-m)}
-.cta-update{background:var(--gold-p);color:#9a6200;border:1px solid var(--gold-m)}
-
-/* ── Status Badge ── */
-.status-badge{font-size:.72rem;padding:3px 9px;border-radius:20px;
-  font-weight:600;text-transform:capitalize;white-space:nowrap}
-.badge-active{background:var(--green-p);color:var(--green)}
-.badge-new{background:var(--gold-p);color:#9a6200}
-.badge-default{background:#f3f4f6;color:#555}
-
-/* ── Panel ── */
-#panel{position:fixed;top:58px;right:0;bottom:0;width:440px;background:#fff;
-  box-shadow:-4px 0 24px rgba(0,0,0,.15);z-index:200;display:flex;flex-direction:column;
-  transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1)}
-#panel.open{transform:translateX(0)}
-#panel-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:199;display:none}
-#panel-overlay.show{display:block}
-@media(max-width:768px){
-  #panel{top:0;width:100%;height:88vh;bottom:0;
-    border-radius:16px 16px 0 0;box-shadow:0 -4px 24px rgba(0,0,0,.15)}
+/* ─────────────────────────────────────────────
+   RESET
+───────────────────────────────────────────── */
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background: var(--warm);
+  color: #1a1a2e;
+  min-height: 100vh;
 }
-#panel-hdr{background:var(--navy);color:#fff;padding:14px 18px;
-  display:flex;align-items:center;gap:10px;min-height:62px;flex-shrink:0}
-#panel-hdr .ph-info{flex:1;min-width:0}
-#panel-hdr .ph-name{font-family:'Cormorant Garamond',serif;font-size:1.25rem;
-  font-weight:700;color:var(--gold-m);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#panel-hdr .ph-phase{font-size:.75rem;color:rgba(255,255,255,.7);margin-top:2px}
-#panel-close{background:transparent;border:1px solid rgba(255,255,255,.3);
-  color:#fff;border-radius:6px;padding:5px 10px;cursor:pointer;
-  font-size:.85rem;font-family:'Plus Jakarta Sans',sans-serif;flex-shrink:0}
-#panel-body{flex:1;overflow-y:auto;padding:18px}
-.p-section{margin-bottom:20px;border-bottom:1px solid #f0f0f0;padding-bottom:18px}
-.p-section:last-child{border-bottom:none}
-.p-section h4{font-size:.85rem;font-weight:700;color:var(--navy);
-  text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
-.next-action-box{background:var(--sky-p);border:1px solid var(--sky-m);
-  border-radius:8px;padding:12px 14px}
-.next-action-box.overdue{background:var(--red-p);border-color:#f9a8a8}
-.na-icon{font-size:1.2rem;margin-right:6px}
-.na-label{font-weight:600;color:var(--navy);font-size:.9rem}
-.p-label{font-size:.78rem;font-weight:600;color:#888;text-transform:uppercase;
-  letter-spacing:.04em;margin-bottom:4px}
-.p-val{font-size:.9rem;color:#222;margin-bottom:10px}
-.p-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
-.p-log{font-size:.8rem;color:#555;line-height:1.7}
-.p-log-entry{padding:4px 0;border-bottom:1px solid #f5f5f5}
-.p-log-entry:last-child{border-bottom:none}
-.contact-btns{display:flex;gap:8px;flex-wrap:wrap}
-.contact-btns button{padding:7px 12px;border-radius:7px;font-size:.8rem;
-  font-weight:600;cursor:pointer;border:none;font-family:'Plus Jakarta Sans',sans-serif}
+h1,h2,h3,h4 { font-family:'Cormorant Garamond',serif; }
+button { font-family:'Plus Jakarta Sans',sans-serif; cursor:pointer; }
 
-/* ── Form elements ── */
-.form-group{margin-bottom:12px}
-.form-group label{display:block;font-size:.78rem;font-weight:600;color:#555;margin-bottom:4px}
-.form-group input,.form-group select,.form-group textarea{
-  width:100%;border:1.5px solid #e0e0e0;border-radius:7px;
-  padding:8px 10px;font-size:.88rem;font-family:'Plus Jakarta Sans',sans-serif;
-  color:#222;background:#fff;transition:border-color .15s}
-.form-group input:focus,.form-group select:focus,.form-group textarea:focus{
-  outline:none;border-color:var(--gold)}
-.form-group textarea{min-height:72px;resize:vertical}
-.form-group input[readonly]{background:#f8f8f8;color:#777;cursor:default}
+/* ─────────────────────────────────────────────
+   HEADER
+───────────────────────────────────────────── */
+#hdr {
+  position: sticky; top:0; z-index:100;
+  background: var(--navy); color:#fff;
+  display:flex; align-items:center; gap:14px;
+  padding:0 20px; height:58px;
+  box-shadow:0 2px 10px rgba(0,0,0,.25);
+}
+#hdr img   { height:38px; width:auto; }
+#hdr h1    { flex:1; font-size:1.35rem; color:var(--gold-m); letter-spacing:.02em; }
+#hdr-user  { font-size:.78rem; color:rgba(255,255,255,.55); }
+.hbtn {
+  background:transparent; border:1px solid rgba(255,255,255,.3); color:#fff;
+  border-radius:6px; padding:5px 12px; font-size:.8rem;
+}
+.hbtn:hover { border-color:var(--gold-m); color:var(--gold-m); }
+.hbtn-gold  { background:var(--gold)!important; border-color:var(--gold)!important; font-weight:700; }
+.hbtn-gold:hover { background:var(--gold-h)!important; }
+#err-bar {
+  display:none; background:var(--red-bg); color:var(--red);
+  border-bottom:2px solid var(--red); padding:8px 20px; font-size:.85rem;
+}
 
-/* ── Modal ── */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:400;
-  display:flex;align-items:center;justify-content:center;padding:20px}
-.modal{background:#fff;border-radius:14px;max-width:600px;width:100%;
-  max-height:90vh;display:flex;flex-direction:column;
-  box-shadow:0 8px 48px rgba(0,0,0,.2)}
-.modal-hdr{background:var(--navy);color:#fff;padding:16px 20px;
-  border-radius:14px 14px 0 0;display:flex;align-items:center;justify-content:space-between;
-  flex-shrink:0}
-.modal-hdr h3{font-family:'Cormorant Garamond',serif;font-size:1.25rem;color:var(--gold-m)}
-.modal-close{background:transparent;border:1px solid rgba(255,255,255,.35);
-  color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;
-  font-size:.85rem;font-family:'Plus Jakarta Sans',sans-serif}
-.modal-body{flex:1;overflow-y:auto;padding:20px}
-.modal-footer{padding:14px 20px;border-top:1px solid #eee;
-  display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;flex-shrink:0}
+/* ─────────────────────────────────────────────
+   SPINNER
+───────────────────────────────────────────── */
+#spinner {
+  position:fixed; inset:0; background:rgba(255,255,255,.86);
+  z-index:600; display:none;
+  flex-direction:column; align-items:center; justify-content:center; gap:14px;
+}
+.ring {
+  width:46px; height:46px; border-radius:50%;
+  border:4px solid var(--gold-bg); border-top-color:var(--gold);
+  animation:spin .8s linear infinite;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+#spin-lbl { font-weight:600; color:var(--navy); font-size:.95rem; }
 
-/* ── Script sections ── */
-.script-section{margin-bottom:14px;padding:12px 14px;background:var(--sky-p);
-  border-radius:8px;border-left:3px solid var(--sky)}
-.script-section h5{font-size:.8rem;font-weight:700;text-transform:uppercase;
-  color:var(--navy);margin-bottom:6px;letter-spacing:.04em}
-.script-section p,.script-section li{font-size:.85rem;color:#333;line-height:1.6}
-.script-section ul{padding-left:16px}
-.script-objection{background:var(--gold-p);border-left-color:var(--gold)}
+/* ─────────────────────────────────────────────
+   LOGIN
+───────────────────────────────────────────── */
+#login-screen {
+  display:none; flex-direction:column; align-items:center; justify-content:center;
+  min-height:calc(100vh - 58px); padding:40px 20px; background:var(--warm);
+}
+.login-card {
+  background:#fff; border-radius:16px; padding:48px 40px;
+  max-width:420px; width:100%; text-align:center;
+  box-shadow:0 4px 32px rgba(28,58,110,.12); border-top:4px solid var(--gold);
+}
+.login-card img { height:64px; margin-bottom:20px; }
+.login-card h2  { font-size:1.8rem; color:var(--navy); margin-bottom:8px; }
+.login-card p   { color:#666; font-size:.9rem; line-height:1.5; margin-bottom:28px; }
 
-/* ── Toast ── */
-#toast{position:fixed;bottom:24px;right:24px;background:#1a1a2e;color:#fff;
-  padding:12px 18px;border-radius:9px;border-left:4px solid var(--gold);
-  font-size:.88rem;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,.3);
-  z-index:999;opacity:0;transition:opacity .25s;pointer-events:none;max-width:320px}
-#toast.show{opacity:1}
+/* ─────────────────────────────────────────────
+   BUTTONS
+───────────────────────────────────────────── */
+.btn {
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  border:none; border-radius:8px; padding:11px 22px;
+  font-size:.9rem; font-weight:600; transition:background .15s;
+}
+.btn-primary { background:var(--gold); color:#fff; }
+.btn-primary:hover { background:var(--gold-h); }
+.btn-sky { background:var(--sky); color:#fff; }
+.btn-sky:hover { background:var(--navy-h); }
+.btn-outline {
+  background:#fff; color:var(--navy);
+  border:1.5px solid var(--navy-h); padding:8px 16px; font-size:.85rem;
+}
+.w100 { width:100%; }
 
-/* ── Helpers ── */
-.w100{width:100%}
-hr.divider{border:none;border-top:1px solid #eee;margin:14px 0}
-.responded-btn{width:100%;padding:11px;border-radius:8px;font-size:.9rem;
-  font-weight:700;cursor:pointer;border:none;font-family:'Plus Jakarta Sans',sans-serif;
-  background:var(--sky);color:#fff;display:flex;align-items:center;
-  justify-content:center;gap:6px}
-.responded-btn:hover{background:var(--navy-m)}
-.mt8{margin-top:8px}
+/* ─────────────────────────────────────────────
+   KPI BAR
+───────────────────────────────────────────── */
+#kpi-bar {
+  display:flex; gap:12px; padding:16px 20px;
+  background:var(--cream); border-bottom:1px solid rgba(200,135,10,.2);
+  overflow-x:auto;
+}
+.kpi {
+  flex:1; min-width:100px; background:#fff; border-radius:var(--r);
+  padding:12px 16px; text-align:center; box-shadow:var(--sh);
+  border-top:3px solid transparent;
+}
+.kpi.k-red   { border-top-color:var(--red);   }
+.kpi.k-gold  { border-top-color:var(--gold);  }
+.kpi.k-sky   { border-top-color:var(--sky);   }
+.kpi.k-navy  { border-top-color:var(--navy);  }
+.kpi-n { font-family:'Cormorant Garamond',serif; font-size:1.75rem; font-weight:700; line-height:1; }
+.kpi-l { font-size:.72rem; color:#777; text-transform:uppercase; letter-spacing:.04em; margin-top:3px; }
+
+/* ─────────────────────────────────────────────
+   MAIN / SECTIONS
+───────────────────────────────────────────── */
+#app { display:none; }
+#main { padding:20px; max-width:1200px; margin:0 auto; }
+@media(max-width:768px) { #main { padding:12px; padding-bottom:70px; } }
+
+.sec { margin-bottom:28px; }
+.sec-hdr { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.sec-hdr h2 { font-size:1.2rem; color:var(--navy); }
+.badge {
+  background:var(--navy); color:#fff; border-radius:20px;
+  padding:2px 9px; font-size:.75rem; font-weight:700;
+}
+.badge.red  { background:var(--red);  }
+.badge.gold { background:var(--gold); }
+.badge.sky  { background:var(--sky);  }
+.empty { color:#aaa; font-size:.88rem; padding:18px; background:#fff;
+  border-radius:var(--r); text-align:center; border:1px dashed #ddd; }
+
+/* ─────────────────────────────────────────────
+   LEAD CARD
+───────────────────────────────────────────── */
+.card {
+  background:#fff; border-radius:var(--r); box-shadow:var(--sh);
+  padding:14px 16px; margin-bottom:10px; cursor:pointer;
+  transition:box-shadow .15s, transform .1s;
+  border-left:4px solid transparent;
+}
+.card:hover { box-shadow:0 4px 20px rgba(28,58,110,.15); transform:translateY(-1px); }
+.card.overdue { border-left-color:var(--red);   }
+.card.today   { border-left-color:var(--gold);  }
+.card.week    { border-left-color:var(--sky);   }
+.card.all     { border-left-color:var(--navy);  }
+.card-r1 { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+.card-nm { font-weight:700; font-size:1rem; color:var(--navy); }
+.card-r2 { display:flex; gap:12px; margin-bottom:8px; flex-wrap:wrap; }
+.card-r2 a { font-size:.82rem; color:var(--sky); text-decoration:none; }
+.card-r2 a:hover { text-decoration:underline; }
+.card-r3 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.pill {
+  font-size:.72rem; padding:3px 9px; border-radius:20px;
+  font-weight:600; white-space:nowrap;
+}
+.pill-red  { background:var(--red-bg); color:var(--red);   }
+.pill-gold { background:var(--gold-bg); color:#9a6200;     }
+.pill-sky  { background:var(--sky-bg); color:var(--navy-h);}
+.pill-navy { background:#e8edf7; color:var(--navy);        }
+.st-badge {
+  font-size:.72rem; padding:3px 9px; border-radius:20px;
+  font-weight:600; text-transform:capitalize; white-space:nowrap;
+}
+.st-active  { background:var(--grn-bg); color:var(--green); }
+.st-new     { background:var(--gold-bg); color:#9a6200;     }
+.st-default { background:#f3f4f6; color:#555;               }
+.na-txt { font-size:.82rem; color:#555; flex:1; min-width:0; }
+.cta {
+  margin-left:auto; padding:5px 12px; border-radius:7px;
+  font-size:.8rem; font-weight:700; border:1px solid;
+  white-space:nowrap;
+}
+.cta-call  { background:var(--grn-bg); color:var(--green); border-color:var(--green); }
+.cta-text  { background:var(--sky-bg); color:var(--navy-h); border-color:var(--sky-m); }
+.cta-upd   { background:var(--gold-bg); color:#9a6200; border-color:var(--gold-m); }
+
+/* ─────────────────────────────────────────────
+   SIDE PANEL
+───────────────────────────────────────────── */
+#panel-ov {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,.35); z-index:200;
+}
+#panel-ov.on { display:block; }
+#panel {
+  position:fixed; top:58px; right:0; bottom:0; width:440px;
+  background:#fff; box-shadow:-4px 0 24px rgba(0,0,0,.15);
+  z-index:201; display:flex; flex-direction:column;
+  transform:translateX(100%); transition:transform .25s cubic-bezier(.4,0,.2,1);
+}
+#panel.open { transform:translateX(0); }
+@media(max-width:768px) {
+  #panel { top:0; width:100%; height:88vh; border-radius:16px 16px 0 0;
+    box-shadow:0 -4px 24px rgba(0,0,0,.15); }
+}
+#panel-hdr {
+  background:var(--navy); color:#fff; padding:14px 18px;
+  display:flex; align-items:center; gap:10px; min-height:62px; flex-shrink:0;
+}
+.ph-info { flex:1; min-width:0; }
+.ph-name {
+  font-family:'Cormorant Garamond',serif; font-size:1.25rem;
+  font-weight:700; color:var(--gold-m);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.ph-sub { font-size:.75rem; color:rgba(255,255,255,.65); margin-top:2px; }
+.panel-close {
+  background:transparent; border:1px solid rgba(255,255,255,.3);
+  color:#fff; border-radius:6px; padding:5px 10px; font-size:.85rem; flex-shrink:0;
+}
+#panel-body { flex:1; overflow-y:auto; padding:18px; }
+.ps { margin-bottom:20px; border-bottom:1px solid #f0f0f0; padding-bottom:18px; }
+.ps:last-child { border-bottom:none; }
+.ps-title {
+  font-size:.82rem; font-weight:700; color:var(--navy);
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px;
+}
+.na-box {
+  background:var(--sky-bg); border:1px solid var(--sky-m);
+  border-radius:8px; padding:12px 14px;
+}
+.na-box.late { background:var(--red-bg); border-color:#f9a8a8; }
+.na-lbl { font-weight:600; color:var(--navy); font-size:.9rem; }
+.na-warn { font-size:.78rem; color:var(--red); margin-top:4px; }
+.p-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; }
+.p-lbl { font-size:.75rem; font-weight:600; color:#888; text-transform:uppercase;
+  letter-spacing:.04em; margin-bottom:3px; }
+.p-val { font-size:.88rem; color:#222; margin-bottom:8px; }
+.p-log { font-size:.8rem; color:#555; line-height:1.7; }
+.p-log-e { padding:4px 0; border-bottom:1px solid #f5f5f5; }
+.p-log-e:last-child { border-bottom:none; }
+.cb-row { display:flex; gap:8px; flex-wrap:wrap; }
+.cb {
+  padding:7px 12px; border-radius:7px; font-size:.8rem;
+  font-weight:600; border:1px solid;
+}
+
+/* ─────────────────────────────────────────────
+   FORM
+───────────────────────────────────────────── */
+.fg { margin-bottom:12px; }
+.fg label { display:block; font-size:.78rem; font-weight:600; color:#555; margin-bottom:4px; }
+.fg input, .fg select, .fg textarea {
+  width:100%; border:1.5px solid #e0e0e0; border-radius:7px;
+  padding:8px 10px; font-size:.88rem; font-family:'Plus Jakarta Sans',sans-serif;
+  color:#222; background:#fff; transition:border-color .15s;
+}
+.fg input:focus, .fg select:focus, .fg textarea:focus {
+  outline:none; border-color:var(--gold);
+}
+.fg textarea { min-height:72px; resize:vertical; }
+.fg input[readonly] { background:#f8f8f8; color:#888; }
+.divider { border:none; border-top:1px solid #eee; margin:14px 0; }
+
+/* ─────────────────────────────────────────────
+   MODAL
+───────────────────────────────────────────── */
+.mo {
+  position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:400;
+  display:none; align-items:center; justify-content:center; padding:20px;
+}
+.mo.on { display:flex; }
+.mo-box {
+  background:#fff; border-radius:14px; max-width:600px; width:100%;
+  max-height:90vh; display:flex; flex-direction:column;
+  box-shadow:0 8px 48px rgba(0,0,0,.2);
+}
+.mo-hdr {
+  background:var(--navy); color:#fff; padding:16px 20px;
+  border-radius:14px 14px 0 0;
+  display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+}
+.mo-hdr h3 { font-family:'Cormorant Garamond',serif; font-size:1.25rem; color:var(--gold-m); }
+.mo-x {
+  background:transparent; border:1px solid rgba(255,255,255,.35);
+  color:#fff; border-radius:6px; padding:4px 10px; font-size:.85rem;
+}
+.mo-body { flex:1; overflow-y:auto; padding:20px; }
+.mo-foot {
+  padding:14px 20px; border-top:1px solid #eee;
+  display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; flex-shrink:0;
+}
+
+/* ─────────────────────────────────────────────
+   SCRIPT MODAL
+───────────────────────────────────────────── */
+.sc-block {
+  margin-bottom:14px; padding:12px 14px;
+  background:var(--sky-bg); border-radius:8px; border-left:3px solid var(--sky);
+}
+.sc-block.obj { background:var(--gold-bg); border-left-color:var(--gold); }
+.sc-block h5 {
+  font-size:.8rem; font-weight:700; text-transform:uppercase;
+  color:var(--navy); letter-spacing:.04em; margin-bottom:6px;
+}
+.sc-block p, .sc-block li { font-size:.85rem; color:#333; line-height:1.6; }
+.sc-block ul { padding-left:16px; }
+
+/* ─────────────────────────────────────────────
+   TOAST
+───────────────────────────────────────────── */
+#toast {
+  position:fixed; bottom:24px; right:24px; z-index:999;
+  background:#1a1a2e; color:#fff; padding:11px 18px; border-radius:9px;
+  border-left:4px solid var(--gold); font-size:.88rem; font-weight:500;
+  box-shadow:0 4px 20px rgba(0,0,0,.3);
+  opacity:0; pointer-events:none; transition:opacity .25s; max-width:320px;
+}
+#toast.show { opacity:1; }
+
+/* ─────────────────────────────────────────────
+   MOBILE TAB BAR
+───────────────────────────────────────────── */
+#tabbar {
+  display:none; position:fixed; bottom:0; left:0; right:0;
+  background:#fff; border-top:1px solid #e5e7eb; z-index:90; height:52px;
+}
+#tabbar .tabs { display:flex; height:100%; }
+.tab {
+  flex:1; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:2px; font-size:.68rem; color:#888;
+  background:none; border:none;
+}
+.tab.on { color:var(--gold); }
+.tab span { font-size:1.1rem; }
+@media(max-width:768px) { #tabbar { display:block; } }
 </style>
 </head>
 <body>
 
-<!-- ── Header ── -->
+<!-- HEADER -->
 <div id="hdr">
   <img src="https://aronsolurahomecarecom.github.io/solura-dashboard/logo.png" alt="Solura"/>
   <h1>Lead Dashboard</h1>
-  <div class="hdr-btns">
-    <span id="hdr-user"></span>
-    <button id="sync-btn" style="display:none" onclick="syncNow()">&#8635; Sync</button>
-    <button id="signout-btn" style="display:none" onclick="signOut()">Sign Out</button>
-  </div>
+  <span id="hdr-user"></span>
+  <button class="hbtn hbtn-gold" id="btn-sync" style="display:none" onclick="doSync()">&#8635; Sync</button>
+  <button class="hbtn" id="btn-out"  style="display:none" onclick="doSignOut()">Sign Out</button>
 </div>
-
-<!-- ── Error bar ── -->
 <div id="err-bar"></div>
 
-<!-- ── Spinner ── -->
+<!-- SPINNER -->
 <div id="spinner">
-  <div class="spin-ring"></div>
-  <div id="spin-msg">Loading&hellip;</div>
+  <div class="ring"></div>
+  <div id="spin-lbl">Loading&#8230;</div>
 </div>
 
-<!-- ── Login Screen ── -->
-<div id="login-screen" style="display:none">
+<!-- LOGIN -->
+<div id="login-screen">
   <div class="login-card">
     <img src="https://aronsolurahomecarecom.github.io/solura-dashboard/logo.png" alt="Solura Home Care"/>
     <h2>Solura Dashboard</h2>
     <p>Sign in with your Microsoft account to access the lead follow-up dashboard.</p>
-    <button class="btn-primary" onclick="signIn()">Sign in with Microsoft</button>
+    <button class="btn btn-primary" onclick="doSignIn()">Sign in with Microsoft</button>
   </div>
 </div>
 
-<!-- ── App Shell ── -->
+<!-- APP SHELL -->
 <div id="app">
   <div id="kpi-bar">
-    <div class="kpi kpi-red"><div class="kpi-val" id="k-od">0</div><div class="kpi-lbl">Overdue</div></div>
-    <div class="kpi kpi-gold"><div class="kpi-val" id="k-td">0</div><div class="kpi-lbl">Due Today</div></div>
-    <div class="kpi kpi-sky"><div class="kpi-val" id="k-wk">0</div><div class="kpi-lbl">This Week</div></div>
-    <div class="kpi kpi-navy"><div class="kpi-val" id="k-al">0</div><div class="kpi-lbl">Total Active</div></div>
+    <div class="kpi k-red">  <div class="kpi-n" id="k-od">0</div><div class="kpi-l">Overdue</div></div>
+    <div class="kpi k-gold"> <div class="kpi-n" id="k-td">0</div><div class="kpi-l">Due Today</div></div>
+    <div class="kpi k-sky">  <div class="kpi-n" id="k-wk">0</div><div class="kpi-l">This Week</div></div>
+    <div class="kpi k-navy"> <div class="kpi-n" id="k-al">0</div><div class="kpi-l">Total Active</div></div>
   </div>
   <div id="main">
-    <div id="sec-od" class="section">
-      <div class="section-hdr"><h2>Overdue</h2><span class="section-badge red" id="badge-od">0</span></div>
+    <div class="sec" id="sec-od">
+      <div class="sec-hdr"><h2>Overdue</h2><span class="badge red" id="b-od">0</span></div>
       <div id="list-od"></div>
     </div>
-    <div id="sec-td" class="section">
-      <div class="section-hdr"><h2>Due Today</h2><span class="section-badge gold" id="badge-td">0</span></div>
+    <div class="sec" id="sec-td">
+      <div class="sec-hdr"><h2>Due Today</h2><span class="badge gold" id="b-td">0</span></div>
       <div id="list-td"></div>
     </div>
-    <div id="sec-wk" class="section">
-      <div class="section-hdr"><h2>Due This Week</h2><span class="section-badge sky" id="badge-wk">0</span></div>
+    <div class="sec" id="sec-wk">
+      <div class="sec-hdr"><h2>Due This Week</h2><span class="badge sky" id="b-wk">0</span></div>
       <div id="list-wk"></div>
     </div>
-    <div id="sec-al" class="section">
-      <div class="section-hdr"><h2>All Active Leads</h2><span class="section-badge" id="badge-al">0</span></div>
+    <div class="sec" id="sec-al">
+      <div class="sec-hdr"><h2>All Active Leads</h2><span class="badge" id="b-al">0</span></div>
       <div id="list-al"></div>
     </div>
   </div>
 </div>
 
-<!-- ── Panel overlay + panel ── -->
-<div id="panel-overlay" onclick="closePanel()"></div>
+<!-- PANEL -->
+<div id="panel-ov" onclick="closePanel()"></div>
 <div id="panel">
   <div id="panel-hdr">
     <div class="ph-info">
       <div class="ph-name" id="ph-name">&mdash;</div>
-      <div class="ph-phase" id="ph-phase"></div>
+      <div class="ph-sub"  id="ph-sub"></div>
     </div>
-    <button id="panel-close" onclick="closePanel()">&#x2715; Close</button>
+    <button class="panel-close" onclick="closePanel()">&#x2715; Close</button>
   </div>
   <div id="panel-body"></div>
 </div>
 
-<!-- ── Responded Modal ── -->
-<div id="resp-modal" class="modal-overlay" style="display:none">
-  <div class="modal" style="max-width:620px">
-    <div class="modal-hdr">
-      <h3>&#129309; Lead Responded &mdash; First Contact</h3>
-      <button class="modal-close" onclick="closeModal('resp-modal')">&#x2715;</button>
+<!-- MODAL: Lead Responded -->
+<div id="m-resp" class="mo">
+  <div class="mo-box" style="max-width:620px">
+    <div class="mo-hdr">
+      <h3>&#129309; Lead Responded &#8212; First Contact</h3>
+      <button class="mo-x" onclick="closeMo('m-resp')">&#x2715;</button>
     </div>
-    <div class="modal-body" id="resp-body"></div>
-    <div class="modal-footer">
-      <button class="btn-secondary" onclick="closeModal('resp-modal')">Cancel</button>
-      <button class="btn-primary" onclick="saveResponded()">Save Response</button>
+    <div class="mo-body" id="m-resp-body"></div>
+    <div class="mo-foot">
+      <button class="btn btn-outline" onclick="closeMo('m-resp')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveResponded()">Save Response</button>
     </div>
   </div>
 </div>
 
-<!-- ── SMS Modal ── -->
-<div id="sms-modal" class="modal-overlay" style="display:none">
-  <div class="modal">
-    <div class="modal-hdr">
+<!-- MODAL: Send SMS -->
+<div id="m-sms" class="mo">
+  <div class="mo-box">
+    <div class="mo-hdr">
       <h3>&#128172; Send SMS</h3>
-      <button class="modal-close" onclick="closeModal('sms-modal')">&#x2715;</button>
+      <button class="mo-x" onclick="closeMo('m-sms')">&#x2715;</button>
     </div>
-    <div class="modal-body" id="sms-body"></div>
-    <div class="modal-footer">
-      <button class="btn-secondary" onclick="closeModal('sms-modal')">Cancel</button>
-      <button class="btn-primary btn-sky" onclick="sendSMS()">Send SMS</button>
+    <div class="mo-body" id="m-sms-body"></div>
+    <div class="mo-foot">
+      <button class="btn btn-outline" onclick="closeMo('m-sms')">Cancel</button>
+      <button class="btn btn-sky"     onclick="doSendSMS()">Send SMS</button>
     </div>
   </div>
 </div>
 
-<!-- ── Email Modal ── -->
-<div id="email-modal" class="modal-overlay" style="display:none">
-  <div class="modal">
-    <div class="modal-hdr">
+<!-- MODAL: Send Email -->
+<div id="m-email" class="mo">
+  <div class="mo-box">
+    <div class="mo-hdr">
       <h3>&#9993; Send Email</h3>
-      <button class="modal-close" onclick="closeModal('email-modal')">&#x2715;</button>
+      <button class="mo-x" onclick="closeMo('m-email')">&#x2715;</button>
     </div>
-    <div class="modal-body" id="email-body"></div>
-    <div class="modal-footer">
-      <button class="btn-secondary" onclick="closeModal('email-modal')">Cancel</button>
-      <button class="btn-primary" onclick="sendEmail()">Send Email</button>
+    <div class="mo-body" id="m-email-body"></div>
+    <div class="mo-foot">
+      <button class="btn btn-outline"  onclick="closeMo('m-email')">Cancel</button>
+      <button class="btn btn-primary"  onclick="doSendEmail()">Send Email</button>
     </div>
   </div>
 </div>
 
-<!-- ── Script Modal ── -->
-<div id="script-modal" class="modal-overlay" style="display:none">
-  <div class="modal" style="max-width:680px">
-    <div class="modal-hdr">
+<!-- MODAL: Call Script -->
+<div id="m-script" class="mo">
+  <div class="mo-box" style="max-width:680px">
+    <div class="mo-hdr">
       <h3>&#128203; Call Script</h3>
-      <button class="modal-close" onclick="closeModal('script-modal')">&#x2715;</button>
+      <button class="mo-x" onclick="closeMo('m-script')">&#x2715;</button>
     </div>
-    <div class="modal-body" id="script-body"></div>
-    <div class="modal-footer">
-      <button class="btn-primary" onclick="closeModal('script-modal')">Close</button>
+    <div class="mo-body" id="m-script-body"></div>
+    <div class="mo-foot">
+      <button class="btn btn-primary" onclick="closeMo('m-script')">Close</button>
     </div>
   </div>
 </div>
 
-<!-- ── Mobile Tab Bar ── -->
-<div id="tab-bar">
+<!-- MOBILE TAB BAR -->
+<div id="tabbar">
   <div class="tabs">
-    <button class="tab active" id="tab-queue" onclick="switchTab('queue')"><span>&#128203;</span>Queue</button>
-    <button class="tab" id="tab-all" onclick="switchTab('all')"><span>&#128101;</span>All Leads</button>
-    <button class="tab" id="tab-sync" onclick="syncNow()"><span>&#8635;</span>Sync</button>
+    <button class="tab on" id="tab-q" onclick="switchTab('q')"><span>&#128203;</span>Queue</button>
+    <button class="tab"    id="tab-a" onclick="switchTab('a')"><span>&#128101;</span>All Leads</button>
+    <button class="tab"               onclick="doSync()">      <span>&#8635;</span>Sync</button>
   </div>
 </div>
 
-<!-- ── Toast ── -->
+<!-- TOAST -->
 <div id="toast"></div>
 
 <script>
-// ══════════════════════════════════════════════════════════════════
-// CONFIG
-// ══════════════════════════════════════════════════════════════════
-var CID    = '1cb530f8-6c5f-4605-9590-068dd55e0b81';
-var TID    = '1b2cdbea-de19-47d2-9512-ea102905e3eb';
-var REDIR  = 'https://aronsolurahomecarecom.github.io/solura-dashboard/Solura_Dashboard.html';
-var SCOPES = 'Files.ReadWrite.All Sites.ReadWrite.All User.Read offline_access';
-var OD_PATH= '/personal/aron_solurahomecare_com/Documents/Solura_Lead_Tracker.xlsx';
-var GHL_LOC= 'kWlzzI2WZaes2GnQf7DV';
-var GHL_KEY= 'pit-5df912ec-7542-4dc8-af5b-272472ba84e9';
-var GHL_BASE='https://services.leadconnectorhq.com';
-var GR     = 'https://graph.microsoft.com/v1.0';
-var AGENCY_PHONE = '216-483-8981';
+'use strict';
 
-// Column indices (0-based)
-var C = {NO:0,DA:1,NM:2,PH:3,EM:4,AR:5,SO:6,SV:7,HR:8,ES:9,
-         ST:10,LC:11,MT:12,NF:13,DM:14,PT:15,MV:16,AG:17,NT:18,
-         SQ:19,SL:20,SD:21,SAFETY:22,REL:23,NSM:24};
+/* ═══════════════════════════════════════════════════════════
+   CONFIG
+═══════════════════════════════════════════════════════════ */
+var CFG = {
+  clientId:   '1cb530f8-6c5f-4605-9590-068dd55e0b81',
+  tenantId:   '1b2cdbea-de19-47d2-9512-ea102905e3eb',
+  redirect:   'https://aronsolurahomecarecom.github.io/solura-dashboard/Solura_Dashboard.html',
+  scopes:     'Files.ReadWrite.All Sites.ReadWrite.All User.Read offline_access',
+  odPath:     '/personal/aron_solurahomecare_com/Documents/Solura_Lead_Tracker.xlsx',
+  ghlLoc:     'kWlzzI2WZaes2GnQf7DV',
+  ghlKey:     'pit-5df912ec-7542-4dc8-af5b-272472ba84e9',
+  ghlBase:    'https://services.leadconnectorhq.com',
+  graphBase:  'https://graph.microsoft.com/v1.0',
+  agencyPhone:'216-483-8981'
+};
 
-var ACTIVE_ST = ['contacted','active conversation','assessment','proposal','negotiat','won'];
-var EXCL_ST   = ['lost','won','on hold'];
-var COLS_ABC  = 'ABCDEFGHIJKLMNOPQRSTUVWXY';
+/* ═══════════════════════════════════════════════════════════
+   COLUMN MAP  (0-based indices into each Excel row array)
+═══════════════════════════════════════════════════════════ */
+var C = {
+  NO:0, DA:1, NM:2, PH:3, EM:4, AR:5, SO:6, SV:7, HR:8, ES:9,
+  ST:10, LC:11, MT:12, NF:13, DM:14, PT:15, MV:16, AG:17, NT:18,
+  SQ:19, SL:20, SD:21, SAFETY:22, REL:23, NSM:24
+};
+var COL_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXY';
 
-// Runtime state
-var tok = '', fid = '', rows = [], stOpts = [];
-var curRi = -1, curSmsRi = -1, curEmailRi = -1;
-window._ld = {};
+var ACTIVE_KW = ['contacted','active conversation','assessment','proposal','negotiat','won'];
+var EXCL_KW   = ['lost','won','on hold'];
 
-// ══════════════════════════════════════════════════════════════════
-// UTILITIES
-// ══════════════════════════════════════════════════════════════════
-function escHtml(s) {
+/* ═══════════════════════════════════════════════════════════
+   RUNTIME STATE
+═══════════════════════════════════════════════════════════ */
+var _tok   = '';
+var _fid   = '';
+var _rows  = [];
+var _leads = {};
+var _stOpts= [];
+var _curRi = -1;
+var _smsRi = -1;
+var _emlRi = -1;
+
+/* ═══════════════════════════════════════════════════════════
+   UTILITIES
+═══════════════════════════════════════════════════════════ */
+function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
-function escAttr(s) { return escHtml(s); }
 
 function toast(msg) {
   var el = document.getElementById('toast');
   el.textContent = msg;
   el.classList.add('show');
   clearTimeout(el._t);
-  el._t = setTimeout(function(){ el.classList.remove('show'); }, 3000);
+  el._t = setTimeout(function(){ el.classList.remove('show'); }, 3200);
 }
+
 function showErr(msg) {
   var el = document.getElementById('err-bar');
   el.textContent = msg;
   el.style.display = msg ? 'block' : 'none';
 }
+
 function spin(msg) {
-  document.getElementById('spin-msg').textContent = msg || 'Loading…';
+  document.getElementById('spin-lbl').textContent = msg || 'Loading…';
   document.getElementById('spinner').style.display = 'flex';
 }
 function unspin() { document.getElementById('spinner').style.display = 'none'; }
 
-function todayLocal() {
+function todayMidnight() {
   var d = new Date();
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
-function parseDate(s) {
-  if (!s) return null;
-  s = String(s).trim();
+
+function parseDate(raw) {
+  if (!raw) return null;
+  var s = String(raw).trim();
   var n = parseFloat(s);
   if (!isNaN(n) && n > 10000 && !/[-\/]/.test(s)) {
-    var tmp = new Date((n - 25569) * 86400000);
-    return new Date(tmp.getUTCFullYear(), tmp.getUTCMonth(), tmp.getUTCDate());
+    var t = new Date((n - 25569) * 86400000);
+    return new Date(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate());
   }
   var m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
-  if (m) return new Date(parseInt(m[1]), parseInt(m[2])-1, parseInt(m[3]));
+  if (m) return new Date(+m[1], +m[2]-1, +m[3]);
   var m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (m2) return new Date(parseInt(m2[3]), parseInt(m2[1])-1, parseInt(m2[2]));
+  if (m2) return new Date(+m2[3], +m2[1]-1, +m2[2]);
   return null;
 }
-function fmtDate(d) {
-  if (!d) return '';
-  return (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear();
-}
-function fmtDateISO(d) {
-  if (!d) return '';
-  var y = d.getFullYear();
-  var m = String(d.getMonth()+1).padStart(2,'0');
-  var day = String(d.getDate()).padStart(2,'0');
-  return y+'-'+m+'-'+day;
-}
+
+function fmtDate(d)  { if (!d) return ''; return (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear(); }
+function pad(n)      { return String(n).padStart(2,'0'); }
+function isoDate(d)  { if (!d) return ''; return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+
 function nowStamp() {
   var d = new Date();
-  return (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear()+' '+
-    String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
-}
-function firstName(name) {
-  if (!name) return '';
-  return String(name).trim().split(/\s+/)[0];
+  return (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear()+' '+pad(d.getHours())+':'+pad(d.getMinutes());
 }
 
-// ══════════════════════════════════════════════════════════════════
-// PKCE AUTH
-// ══════════════════════════════════════════════════════════════════
+function firstName(name) { return String(name||'').trim().split(/\s+/)[0]; }
+
+/* ═══════════════════════════════════════════════════════════
+   PKCE AUTH
+═══════════════════════════════════════════════════════════ */
 function b64url(buf) {
-  var bytes = new Uint8Array(buf), str = '';
-  for (var i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
-  return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+  var a = new Uint8Array(buf), s = '';
+  for (var i=0;i<a.length;i++) s += String.fromCharCode(a[i]);
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
 }
-function randStr(n) {
-  var arr = new Uint8Array(n);
-  crypto.getRandomValues(arr);
-  return b64url(arr.buffer);
-}
-async function sha256(s) {
-  var enc = new TextEncoder().encode(s);
-  var hash = await crypto.subtle.digest('SHA-256', enc);
-  return b64url(hash);
+function randBytes(n) { var a=new Uint8Array(n); crypto.getRandomValues(a); return b64url(a.buffer); }
+async function sha256url(s) {
+  var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return b64url(buf);
 }
 
-async function signIn() {
-  var verifier = randStr(48);
-  var state    = randStr(16);
-  var challenge= await sha256(verifier);
-  localStorage.setItem('pv', verifier);
-  localStorage.setItem('ps', state);
-  localStorage.setItem('sc', CID);
-  var params = new URLSearchParams({
-    client_id: CID, response_type: 'code', redirect_uri: REDIR,
-    scope: SCOPES, state: state, code_challenge: challenge,
-    code_challenge_method: 'S256', response_mode: 'query', prompt: 'select_account'
+async function doSignIn() {
+  var ver = randBytes(48), st = randBytes(16);
+  localStorage.setItem('_pv', ver);
+  localStorage.setItem('_ps', st);
+  var p = new URLSearchParams({
+    client_id:CFG.clientId, response_type:'code', redirect_uri:CFG.redirect,
+    scope:CFG.scopes, state:st, code_challenge:await sha256url(ver),
+    code_challenge_method:'S256', response_mode:'query', prompt:'select_account'
   });
-  window.location.href = 'https://login.microsoftonline.com/'+TID+'/oauth2/v2.0/authorize?'+params.toString();
+  location.href = 'https://login.microsoftonline.com/'+CFG.tenantId+'/oauth2/v2.0/authorize?'+p;
+}
+
+async function tokenPost(body) {
+  var r = await fetch('https://login.microsoftonline.com/'+CFG.tenantId+'/oauth2/v2.0/token',
+    {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:body.toString()});
+  var d = await r.json();
+  if (!r.ok) throw new Error(d.error_description || 'Auth error');
+  return d;
 }
 
 async function exchangeCode(code) {
-  var body = new URLSearchParams({
-    client_id: CID, grant_type: 'authorization_code', code: code,
-    redirect_uri: REDIR, code_verifier: localStorage.getItem('pv')||'', scope: SCOPES
-  });
-  var res = await fetch('https://login.microsoftonline.com/'+TID+'/oauth2/v2.0/token',
-    {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body.toString()});
-  var data = await res.json();
-  if (!res.ok) throw new Error(data.error_description||'Token exchange failed');
-  return data;
+  return tokenPost(new URLSearchParams({
+    client_id:CFG.clientId, grant_type:'authorization_code',
+    code:code, redirect_uri:CFG.redirect,
+    code_verifier:localStorage.getItem('_pv')||'', scope:CFG.scopes
+  }));
 }
 
-async function refreshToken(rt) {
-  var body = new URLSearchParams({
-    client_id: CID, grant_type: 'refresh_token', refresh_token: rt,
-    redirect_uri: REDIR, scope: SCOPES
-  });
-  var res = await fetch('https://login.microsoftonline.com/'+TID+'/oauth2/v2.0/token',
-    {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body.toString()});
-  var data = await res.json();
-  if (!res.ok) throw new Error(data.error_description||'Refresh failed');
-  return data;
+async function refreshToken() {
+  var rt = localStorage.getItem('_rt');
+  if (!rt) throw new Error('No refresh token');
+  return tokenPost(new URLSearchParams({
+    client_id:CFG.clientId, grant_type:'refresh_token',
+    refresh_token:rt, redirect_uri:CFG.redirect, scope:CFG.scopes
+  }));
 }
 
-function storeTokens(data) {
-  tok = data.access_token;
-  sessionStorage.setItem('st', tok);
-  if (data.refresh_token) localStorage.setItem('sr', data.refresh_token);
+function storeTokens(d) {
+  _tok = d.access_token;
+  sessionStorage.setItem('_at', _tok);
+  if (d.refresh_token) localStorage.setItem('_rt', d.refresh_token);
 }
 
-function signOut() {
-  sessionStorage.removeItem('st');
-  localStorage.removeItem('sr');
-  localStorage.removeItem('pv');
-  localStorage.removeItem('ps');
-  localStorage.removeItem('sc');
-  window.location.reload();
+function doSignOut() {
+  ['_at','_rt','_pv','_ps'].forEach(function(k){ sessionStorage.removeItem(k); localStorage.removeItem(k); });
+  location.reload();
 }
 
+/* ═══════════════════════════════════════════════════════════
+   BOOT
+═══════════════════════════════════════════════════════════ */
 async function boot() {
   spin('Checking sign-in…');
   try {
-    var params    = new URLSearchParams(window.location.search);
-    var code      = params.get('code');
-    var state     = params.get('state');
-    var savedState= localStorage.getItem('ps');
-    if (code && state && state === savedState) {
-      history.replaceState({}, '', window.location.pathname);
-      var data = await exchangeCode(code);
-      storeTokens(data);
-      await signedIn(); return;
+    var p = new URLSearchParams(location.search);
+    var code = p.get('code'), st = p.get('state');
+    if (code && st && st === localStorage.getItem('_ps')) {
+      history.replaceState({}, '', location.pathname);
+      storeTokens(await exchangeCode(code));
+      await afterSignIn(); return;
     }
-    var rt = localStorage.getItem('sr');
-    if (rt) {
-      try {
-        var data2 = await refreshToken(rt);
-        storeTokens(data2);
-        await signedIn(); return;
-      } catch(e) { localStorage.removeItem('sr'); }
+    if (localStorage.getItem('_rt')) {
+      try { storeTokens(await refreshToken()); await afterSignIn(); return; }
+      catch(e) { localStorage.removeItem('_rt'); }
     }
-    var st = sessionStorage.getItem('st');
-    if (st) { tok = st; await signedIn(); return; }
+    var at = sessionStorage.getItem('_at');
+    if (at) { _tok = at; await afterSignIn(); return; }
     unspin();
     document.getElementById('login-screen').style.display = 'flex';
   } catch(e) {
-    unspin();
-    showErr('Sign-in error: '+e.message);
+    unspin(); showErr('Sign-in error: '+e.message);
     document.getElementById('login-screen').style.display = 'flex';
   }
 }
 
-async function signedIn() {
-  try {
-    var res = await fetch(GR+'/me', {headers:{Authorization:'Bearer '+tok}});
-    if (res.status === 401) {
-      var rt = localStorage.getItem('sr');
-      if (rt) { var d = await refreshToken(rt); storeTokens(d); }
-      else { unspin(); document.getElementById('login-screen').style.display='flex'; return; }
-      res = await fetch(GR+'/me', {headers:{Authorization:'Bearer '+tok}});
-    }
-    var me = await res.json();
-    document.getElementById('hdr-user').textContent = me.displayName||me.userPrincipalName||'';
-    document.getElementById('signout-btn').style.display = 'block';
-    document.getElementById('sync-btn').style.display    = 'block';
-    document.getElementById('login-screen').style.display= 'none';
-    document.getElementById('app').style.display         = 'block';
-    await loadData();
-    setInterval(loadData, 60*60*1000);
-  } catch(e) {
-    unspin();
-    showErr('Error: '+e.message);
-  }
+async function afterSignIn() {
+  var r  = await gfetch('/me');
+  var me = await r.json();
+  document.getElementById('hdr-user').textContent = me.displayName || me.userPrincipalName || '';
+  document.getElementById('btn-sync').style.display = 'block';
+  document.getElementById('btn-out').style.display  = 'block';
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  await loadData();
+  setInterval(loadData, 60*60*1000);
 }
 
-// ══════════════════════════════════════════════════════════════════
-// DATA LOADING
-// ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════
+   GRAPH FETCH HELPER  (auto-refresh 401)
+═══════════════════════════════════════════════════════════ */
+async function gfetch(path, opts) {
+  opts = opts || {};
+  var url = path.startsWith('http') ? path : (CFG.graphBase + path);
+  opts.headers = Object.assign({Authorization:'Bearer '+_tok}, opts.headers||{});
+  var r = await fetch(url, opts);
+  if (r.status === 401) {
+    storeTokens(await refreshToken());
+    opts.headers.Authorization = 'Bearer '+_tok;
+    r = await fetch(url, opts);
+  }
+  return r;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DATA LOADING
+═══════════════════════════════════════════════════════════ */
 async function ensureFid() {
-  if (fid) return;
-  var encPath = encodeURIComponent(OD_PATH);
-  var res = await fetch(GR+'/me/drive/root:'+encPath, {headers:{Authorization:'Bearer '+tok}});
-  if (!res.ok) throw new Error('File not found on OneDrive');
-  var data = await res.json();
-  fid = data.id;
+  if (_fid) return;
+  var r = await gfetch('/me/drive/root:'+encodeURIComponent(CFG.odPath));
+  if (!r.ok) throw new Error('OneDrive file not found');
+  _fid = (await r.json()).id;
 }
 
 async function loadData() {
-  spin('Loading leads…');
-  showErr('');
+  spin('Loading leads…'); showErr('');
   try {
     await ensureFid();
-    var res = await fetch(GR+'/me/drive/items/'+fid+'/content',
-      {headers:{Authorization:'Bearer '+tok}});
-    if (res.status === 401) {
-      var rt = localStorage.getItem('sr');
-      if (rt) { var d = await refreshToken(rt); storeTokens(d); }
-      res = await fetch(GR+'/me/drive/items/'+fid+'/content',
-        {headers:{Authorization:'Bearer '+tok}});
-    }
-    if (!res.ok) throw new Error('Download failed: '+res.status);
-    var buf = await res.arrayBuffer();
-    var wb  = XLSX.read(buf, {type:'array'});
-    var ws  = wb.Sheets['Lead Tracker'];
+    var r = await gfetch('/me/drive/items/'+_fid+'/content');
+    if (!r.ok) throw new Error('Download failed: '+r.status);
+    var wb = XLSX.read(await r.arrayBuffer(), {type:'array'});
+    var ws = wb.Sheets['Lead Tracker'];
     if (!ws) throw new Error('Sheet "Lead Tracker" not found');
-    var all = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, dateNF:'yyyy-mm-dd'});
-    rows = all;
-    // Collect status options from col ST (10), data rows 4+ = array index 3+
-    stOpts = [];
-    for (var i = 3; i < rows.length; i++) {
-      var r = rows[i];
-      if (!r || !r[C.NM]) continue;
-      var sv = String(r[C.ST]||'').trim().toLowerCase();
-      if (sv && stOpts.indexOf(sv) === -1) stOpts.push(sv);
+    _rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, dateNF:'yyyy-mm-dd'});
+    _stOpts = ['new'];
+    for (var i=3; i<_rows.length; i++) {
+      var sv = String(_rows[i][C.ST]||'').trim().toLowerCase();
+      if (sv && _stOpts.indexOf(sv)===-1) _stOpts.push(sv);
     }
-    if (stOpts.indexOf('new') === -1) stOpts.unshift('new');
-    if (stOpts.indexOf('active conversation') === -1) stOpts.push('active conversation');
+    if (_stOpts.indexOf('active conversation')===-1) _stOpts.push('active conversation');
     buildUI();
-  } catch(e) {
-    unspin();
-    showErr('Load error: '+e.message);
-  }
+  } catch(e) { unspin(); showErr('Load error: '+e.message); }
 }
 
-async function syncNow() { await loadData(); toast('Synced ✓'); }
+async function doSync() { await loadData(); toast('Synced ✓'); }
 
-// ══════════════════════════════════════════════════════════════════
-// SEQUENCE ENGINE
-// ══════════════════════════════════════════════════════════════════
-function isActiveStatus(st) {
+/* ═══════════════════════════════════════════════════════════
+   SEQUENCE ENGINE
+   Bug-free AM/PM logic:
+     amDone === pmDone  →  need AM for day (amDone+1)
+     amDone > pmDone    →  need PM for day (amDone)
+═══════════════════════════════════════════════════════════ */
+function isActive(st) {
   if (!st) return false;
-  var s = st.toLowerCase();
-  for (var i = 0; i < ACTIVE_ST.length; i++) {
-    if (s.indexOf(ACTIVE_ST[i]) !== -1) return true;
-  }
-  return false;
+  var s = String(st).toLowerCase();
+  return ACTIVE_KW.some(function(k){ return s.indexOf(k)!==-1; });
 }
 function isExcluded(st) {
   if (!st) return false;
-  var s = st.toLowerCase();
-  for (var i = 0; i < EXCL_ST.length; i++) {
-    if (s === EXCL_ST[i] || s.indexOf(EXCL_ST[i]) !== -1) return true;
-  }
-  return false;
+  var s = String(st).toLowerCase();
+  return EXCL_KW.some(function(k){ return s.indexOf(k)!==-1; });
 }
-function countLog(log, kw) {
+function logCount(log, kw) {
   if (!log) return 0;
-  var parts = String(log).split('|');
-  var kl = kw.toLowerCase(), n = 0;
-  for (var i = 0; i < parts.length; i++) {
-    if (parts[i].toLowerCase().indexOf(kl) !== -1) n++;
-  }
-  return n;
+  var kl = kw.toLowerCase();
+  return String(log).split('|').filter(function(e){ return e.toLowerCase().indexOf(kl)!==-1; }).length;
 }
-function hasLog(log, kw) { return countLog(log, kw) > 0; }
+function logHas(log, kw) { return logCount(log,kw) > 0; }
 
-function getNextAction(lead) {
-  if (isActiveStatus(lead.st)) return null;
+function nextAction(lead) {
+  if (isActive(lead.st)) return null;
   var log = lead.seqLog || '';
 
   // Phase 1
-  if (!hasLog(log,'intro text'))  return {icon:'&#128172;',text:'Send intro text',phase:1,method:'SMS'};
-  if (!hasLog(log,'first call'))  return {icon:'&#128222;',text:'First call (5 min after text)',phase:1,method:'Phone'};
-  if (!hasLog(log,'second call')) return {icon:'&#128222;',text:'Second call attempt',phase:1,method:'Phone'};
-  if (!hasLog(log,'missed you'))  return {icon:'&#128172;',text:'Send missed-you text',phase:1,method:'SMS'};
+  if (!logHas(log,'intro text'))  return {icon:'&#128172;', text:'Send intro text',             phase:1, method:'SMS'};
+  if (!logHas(log,'first call'))  return {icon:'&#128222;', text:'First call (5 min after text)',phase:1, method:'Phone'};
+  if (!logHas(log,'second call')) return {icon:'&#128222;', text:'Second call attempt',           phase:1, method:'Phone'};
+  if (!logHas(log,'missed you'))  return {icon:'&#128172;', text:'Send missed-you text',          phase:1, method:'SMS'};
 
-  // Phase 2
-  var amDone = countLog(log,'am call');
-  var pmDone = countLog(log,'pm call') + countLog(log,'pm text');
-  if (amDone === pmDone && amDone < 10) {
-    return {icon:'&#128222;',text:'AM Call — Day '+(amDone+1),phase:2,method:'Phone'};
-  }
-  if (amDone > pmDone && amDone <= 10) {
-    var dayN    = amDone;
-    var useText = (dayN % 2 === 0);
-    return {
-      icon: useText ? '&#128172;' : '&#128222;',
-      text: (useText ? 'PM Text' : 'PM Call')+' — Day '+dayN,
-      phase: 2,
-      method: useText ? 'SMS' : 'Phone'
-    };
+  // Phase 2 — pairs: AM then PM per day
+  var amDone = logCount(log,'am call');
+  var pmDone = logCount(log,'pm call') + logCount(log,'pm text');
+  if (amDone < 10) {
+    if (amDone === pmDone) {
+      return {icon:'&#128222;', text:'AM Call — Day '+(amDone+1), phase:2, method:'Phone'};
+    }
+    if (amDone > pmDone) {
+      var day  = amDone;
+      var useTxt = (day % 2 === 0);
+      return {
+        icon:   useTxt ? '&#128172;' : '&#128222;',
+        text:   (useTxt ? 'PM Text' : 'PM Call')+' — Day '+day,
+        phase:  2,
+        method: useTxt ? 'SMS' : 'Phone'
+      };
+    }
   }
 
   // Phase 3
-  var weeksDone = countLog(log,'week outreach') + countLog(log,'nurture outreach');
-  if (weeksDone < 6) {
-    return {icon:'&#128172;',text:'Week '+(weeksDone+1)+' outreach',phase:3,method:'SMS'};
-  }
+  var wkDone = logCount(log,'week outreach') + logCount(log,'nurture outreach');
+  if (wkDone < 6) return {icon:'&#128172;', text:'Week '+(wkDone+1)+' outreach', phase:3, method:'SMS'};
 
   // Phase 4
-  if (!hasLog(log,'re-engagement call')) return {icon:'&#128222;',text:'6-week re-engagement call',phase:4,method:'Phone'};
-  if (!hasLog(log,'re-engagement vm'))   return {icon:'&#128222;',text:'Leave voicemail + follow-up text',phase:4,method:'Phone'};
+  if (!logHas(log,'re-engagement call')) return {icon:'&#128222;', text:'6-week re-engagement call',        phase:4, method:'Phone'};
+  if (!logHas(log,'re-engagement vm'))   return {icon:'&#128222;', text:'Leave voicemail + follow-up text', phase:4, method:'Phone'};
 
   // Phase 5
-  return {icon:'&#128172;',text:'Long-term nurture outreach',phase:5,method:'SMS'};
+  return {icon:'&#128172;', text:'Long-term nurture outreach', phase:5, method:'SMS'};
 }
 
-function phaseName(ph) {
-  var map = {1:'Phase 1 — Initial Outreach',2:'Phase 2 — Daily Follow-up',
-             3:'Phase 3 — Weekly Nurture',4:'Phase 4 — Re-engagement',
-             5:'Phase 5 — Long-term Nurture'};
-  return map[ph] || '';
+function phaseLabel(ph) {
+  return ({1:'Phase 1 — Initial Outreach', 2:'Phase 2 — Daily Follow-up',
+           3:'Phase 3 — Weekly Nurture',   4:'Phase 4 — Re-engagement',
+           5:'Phase 5 — Long-term Nurture'})[ph] || '';
 }
 
-function autoFuForAction(actionText) {
-  var a = actionText.toLowerCase();
-  var today = todayLocal();
-  var tmr   = new Date(today); tmr.setDate(tmr.getDate()+1);
-  var nw    = new Date(today); nw.setDate(nw.getDate()+7);
-  if (a.indexOf('intro text') !== -1 || a.indexOf('first call') !== -1) return today;
-  if (a.indexOf('am call') !== -1) return today;
-  if (a.indexOf('pm') !== -1 || a.indexOf('second call') !== -1 || a.indexOf('missed you') !== -1) return tmr;
-  if (a.indexOf('week') !== -1 || a.indexOf('nurture') !== -1 || a.indexOf('re-engagement') !== -1) return nw;
+// Auto-set next follow-up date based on what was just logged
+function fuForAction(actionText) {
+  var a   = actionText.toLowerCase();
+  var now = todayMidnight();
+  var tmr = new Date(now); tmr.setDate(tmr.getDate()+1);
+  var nw  = new Date(now); nw.setDate(nw.getDate()+7);
+  if (a.indexOf('intro text')   !== -1) return now;   // PM step same day
+  if (a.indexOf('first call')   !== -1) return now;   // 2nd call same day
+  if (a.indexOf('am call')      !== -1) return now;   // PM same day
+  if (a.indexOf('pm')           !== -1) return tmr;   // AM tomorrow
+  if (a.indexOf('second call')  !== -1) return tmr;
+  if (a.indexOf('missed you')   !== -1) return tmr;
+  if (a.indexOf('week')         !== -1) return nw;
+  if (a.indexOf('nurture')      !== -1) return nw;
+  if (a.indexOf('re-engagement')!== -1) return nw;
   return null;
 }
 
-// ══════════════════════════════════════════════════════════════════
-// BUILD LEAD OBJECT
-// ══════════════════════════════════════════════════════════════════
-function buildLead(r, ri) {
-  var lead = {
-    ri: ri,
-    no: String(r[C.NO]||''),
-    da: r[C.DA]||'',
-    nm: String(r[C.NM]||'').trim(),
-    ph: String(r[C.PH]||'').trim(),
-    em: String(r[C.EM]||'').trim(),
-    ar: String(r[C.AR]||'').trim(),
-    so: String(r[C.SO]||'').trim(),
-    sv: String(r[C.SV]||'').trim(),
-    hr: String(r[C.HR]||'').trim(),
-    es: String(r[C.ES]||'').trim(),
-    st: String(r[C.ST]||'').trim(),
-    lc: r[C.LC]||'',
-    mt: String(r[C.MT]||'').trim(),
-    nf: r[C.NF]||'',
-    dm: r[C.DM]||'',
-    pt: String(r[C.PT]||'').trim(),
-    mv: String(r[C.MV]||'').trim(),
-    ag: String(r[C.AG]||'').trim(),
-    nt: String(r[C.NT]||'').trim(),
-    seqLog: String(r[C.SQ]||'').trim(),
-    sl: String(r[C.SL]||'').trim(),
-    sd: r[C.SD]||'',
-    safety: String(r[C.SAFETY]||'').trim(),
-    rel: String(r[C.REL]||'').trim(),
-    nsm: String(r[C.NSM]||'').trim(),
-    fuDate: parseDate(r[C.NF]),
-    na: null
+/* ═══════════════════════════════════════════════════════════
+   LEAD OBJECT
+═══════════════════════════════════════════════════════════ */
+function buildLead(row, ri) {
+  function g(ci){ return String(row[ci]==null?'':row[ci]).trim(); }
+  return {
+    ri:ri, nm:g(C.NM), ph:g(C.PH), em:g(C.EM), ar:g(C.AR), so:g(C.SO),
+    sv:g(C.SV), hr:g(C.HR), es:g(C.ES), st:g(C.ST), lc:g(C.LC), mt:g(C.MT),
+    nf:g(C.NF), pt:g(C.PT), mv:g(C.MV), ag:g(C.AG), nt:g(C.NT),
+    seqLog:g(C.SQ), sl:g(C.SL), safety:g(C.SAFETY), rel:g(C.REL), nsm:g(C.NSM),
+    fuDate:parseDate(g(C.NF)), na:null
   };
-  return lead;
 }
 
-// ══════════════════════════════════════════════════════════════════
-// BUILD UI
-// ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════
+   UI BUILD
+═══════════════════════════════════════════════════════════ */
 function buildUI() {
   unspin();
-  window._ld = {};
-  var today    = todayLocal();
-  var nextWeek = new Date(today); nextWeek.setDate(nextWeek.getDate()+7);
-  var od=[], td=[], wk=[], allL=[];
+  _leads = {};
+  var today = todayMidnight();
+  var nw    = new Date(today); nw.setDate(nw.getDate()+7);
+  var od=[], td=[], wk=[], al=[];
 
-  for (var i = 3; i < rows.length; i++) {
-    var r = rows[i];
-    if (!r || !r[C.NM]) continue;
-    var nm = String(r[C.NM]||'').trim();
-    if (!nm) continue;
-    var st = String(r[C.ST]||'').trim();
+  for (var i=3; i<_rows.length; i++) {
+    var row = _rows[i];
+    if (!row || !String(row[C.NM]||'').trim()) continue;
+    var st = String(row[C.ST]||'').trim();
     if (isExcluded(st)) continue;
-    var lead = buildLead(r, i);
-    lead.na  = getNextAction(lead);
-    window._ld[i] = lead;
-    allL.push(lead);
-    var fu     = lead.fuDate;
-    var active = isActiveStatus(st);
-    if (fu) {
-      if (fu < today) {
-        od.push(lead);
-      } else if (fu.getTime() === today.getTime()) {
-        if (active || lead.na !== null) td.push(lead);
-      } else if (fu <= nextWeek) {
-        wk.push(lead);
-      }
-    } else {
-      if (!active) od.push(lead);
-    }
+    var lead = buildLead(row, i);
+    lead.na  = nextAction(lead);
+    _leads[i] = lead;
+    al.push(lead);
+    var fu = lead.fuDate, active = isActive(st);
+    if (!fu)                            { if (!active) od.push(lead); }
+    else if (fu < today)                { od.push(lead); }
+    else if (fu.getTime()===today.getTime()) { if (active||lead.na!==null) td.push(lead); }
+    else if (fu <= nw)                  { wk.push(lead); }
   }
 
-  function sortFu(a, b) {
-    var fa = a.fuDate ? a.fuDate.getTime() : 0;
-    var fb = b.fuDate ? b.fuDate.getTime() : 0;
-    return fa - fb;
-  }
-  od.sort(sortFu); td.sort(sortFu); wk.sort(sortFu); allL.sort(sortFu);
+  function byFu(a,b){ return (a.fuDate?a.fuDate.getTime():0)-(b.fuDate?b.fuDate.getTime():0); }
+  od.sort(byFu); td.sort(byFu); wk.sort(byFu); al.sort(byFu);
 
-  document.getElementById('k-od').textContent    = od.length;
-  document.getElementById('k-td').textContent    = td.length;
-  document.getElementById('k-wk').textContent    = wk.length;
-  document.getElementById('k-al').textContent    = allL.length;
-  document.getElementById('badge-od').textContent= od.length;
-  document.getElementById('badge-td').textContent= td.length;
-  document.getElementById('badge-wk').textContent= wk.length;
-  document.getElementById('badge-al').textContent= allL.length;
+  function se(id,v){ document.getElementById(id).textContent=v; }
+  se('k-od',od.length); se('k-td',td.length); se('k-wk',wk.length); se('k-al',al.length);
+  se('b-od',od.length); se('b-td',td.length); se('b-wk',wk.length); se('b-al',al.length);
 
-  renderSection('list-od', od, 'overdue');
-  renderSection('list-td', td, 'today');
-  renderSection('list-wk', wk, 'week');
-  renderSection('list-al', allL, 'active');
+  renderList('list-od',od,'overdue');
+  renderList('list-td',td,'today');
+  renderList('list-wk',wk,'week');
+  renderList('list-al',al,'all');
 
-  if (curRi >= 0 && window._ld[curRi]) renderPanel(curRi);
+  if (_curRi>=0 && _leads[_curRi]) renderPanel(_curRi);
 }
 
-function renderSection(elId, leads, cls) {
-  var el = document.getElementById(elId);
-  if (!leads.length) {
-    el.innerHTML = '<div class="empty-state">No leads in this category.</div>';
-    return;
-  }
-  var html = '';
-  for (var i = 0; i < leads.length; i++) html += renderCard(leads[i], cls);
-  el.innerHTML = html;
+function renderList(id, leads, cls) {
+  var el = document.getElementById(id);
+  el.innerHTML = leads.length
+    ? leads.map(function(l){ return cardHtml(l,cls); }).join('')
+    : '<div class="empty">No leads in this category.</div>';
 }
 
-function statusBadgeHtml(st) {
-  var cl = 'badge-default';
-  if (isActiveStatus(st)) cl = 'badge-active';
-  else if (!st || st.toLowerCase() === 'new') cl = 'badge-new';
-  return '<span class="status-badge '+cl+'">'+escHtml(st||'new')+'</span>';
+function stBadge(st) {
+  var c = isActive(st)?'st-active':(!st||st.toLowerCase()==='new'?'st-new':'st-default');
+  return '<span class="st-badge '+c+'">'+esc(st||'new')+'</span>';
 }
 
-function urgencyPillHtml(lead, cls) {
-  var text='', pcls='pill-navy';
-  if (cls==='overdue') { text='Overdue'; pcls='pill-red'; }
-  else if (cls==='today') { text='Today'; pcls='pill-gold'; }
-  else if (cls==='week') { text='This Week'; pcls='pill-sky'; }
-  else { text = lead.fuDate ? fmtDate(lead.fuDate) : 'No date'; }
-  return '<span class="urgency-pill '+pcls+'">'+escHtml(text)+'</span>';
+function pill(lead, cls) {
+  var m = {overdue:['Overdue','pill-red'],today:['Today','pill-gold'],week:['This Week','pill-sky']};
+  var p = m[cls] || [lead.fuDate?fmtDate(lead.fuDate):'No date','pill-navy'];
+  return '<span class="pill '+p[1]+'">'+esc(p[0])+'</span>';
 }
 
-function renderCard(lead, cls) {
-  var ri     = lead.ri;
-  var na     = lead.na;
-  var active = isActiveStatus(lead.st);
-  var naText = na ? na.text : (active ? 'Active conversation' : '—');
-
-  // Phone link using data attribute — no escaped onclick string
-  var phHtml = '';
-  if (lead.ph) {
-    phHtml = '<a href="#" data-ri="'+ri+'" data-ph="'+escAttr(lead.ph)+'" class="ph-link">&#128222; '+escHtml(lead.ph)+'</a>';
+function cardCta(lead) {
+  var ri=lead.ri, na=lead.na;
+  if (!isActive(lead.st) && na) {
+    if (na.method==='Phone') return '<button class="cta cta-call" onclick="event.stopPropagation();btn('+ri+',\'call\')">&#128222; Call</button>';
+    if (na.method==='SMS')   return '<button class="cta cta-text" onclick="event.stopPropagation();btn('+ri+',\'sms\')">&#128172; Text</button>';
+    return '<button class="cta cta-text" onclick="event.stopPropagation();btn('+ri+',\'email\')">&#9993; Email</button>';
   }
-  var emHtml = '';
-  if (lead.em) {
-    emHtml = '<a href="mailto:'+escAttr(lead.em)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">&#9993; '+escHtml(lead.em)+'</a>';
-  }
+  return '<button class="cta cta-upd" onclick="event.stopPropagation();btn('+ri+',\'panel\')">&#9999; Update</button>';
+}
 
-  // CTA button
-  var ctaHtml = '';
-  if (!active && na) {
-    if (na.method === 'Phone') {
-      ctaHtml = '<button class="card-cta cta-call" data-ri="'+ri+'" data-action="call" onclick="event.stopPropagation();handleBtn('+ri+',\'call\')">&#128222; Call</button>';
-    } else if (na.method === 'SMS') {
-      ctaHtml = '<button class="card-cta cta-text" data-ri="'+ri+'" data-action="sms" onclick="event.stopPropagation();handleBtn('+ri+',\'sms\')">&#128172; Text</button>';
-    } else {
-      ctaHtml = '<button class="card-cta cta-text" data-ri="'+ri+'" data-action="email" onclick="event.stopPropagation();handleBtn('+ri+',\'email\')">&#9993; Email</button>';
-    }
-  } else {
-    ctaHtml = '<button class="card-cta cta-update" data-ri="'+ri+'" onclick="event.stopPropagation();handleBtn('+ri+',\'panel\')">&#9999; Update</button>';
-  }
-
-  return '<div class="lead-card '+cls+'" data-ri="'+ri+'" onclick="openPanel('+ri+')">' +
-    '<div class="card-row1"><span class="card-name">'+escHtml(lead.nm)+'</span>'+statusBadgeHtml(lead.st)+'</div>'+
-    '<div class="card-row2">'+phHtml+emHtml+'</div>'+
-    '<div class="card-row3">'+urgencyPillHtml(lead,cls)+
-    '<span class="na-text">'+escHtml(naText)+'</span>'+ctaHtml+'</div>'+
+function cardHtml(lead, cls) {
+  var ri=lead.ri;
+  var ph = lead.ph ? '<a href="#" class="ph-a" data-ph="'+esc(lead.ph)+'" onclick="event.stopPropagation()">&#128222; '+esc(lead.ph)+'</a>' : '';
+  var em = lead.em ? '<a href="mailto:'+esc(lead.em)+'" onclick="event.stopPropagation()">&#9993; '+esc(lead.em)+'</a>' : '';
+  var na = lead.na ? lead.na.icon+' '+esc(lead.na.text) : (isActive(lead.st)?'Active conversation':'—');
+  return '<div class="card '+cls+'" onclick="openPanel('+ri+')">' +
+    '<div class="card-r1"><span class="card-nm">'+esc(lead.nm)+'</span>'+stBadge(lead.st)+'</div>'+
+    '<div class="card-r2">'+ph+em+'</div>'+
+    '<div class="card-r3">'+pill(lead,cls)+'<span class="na-txt">'+na+'</span>'+cardCta(lead)+'</div>'+
     '</div>';
 }
 
-// Delegate phone link clicks
 document.addEventListener('click', function(e) {
-  var a = e.target.closest ? e.target.closest('a.ph-link') : null;
-  if (!a) { // Fallback for IE-like
-    var el = e.target;
-    while (el && el !== document.body) {
-      if (el.classList && el.classList.contains('ph-link')) { a = el; break; }
-      el = el.parentNode;
-    }
-  }
-  if (a) {
-    e.preventDefault();
-    e.stopPropagation();
-    dialHCG(a.getAttribute('data-ph'));
-  }
+  var a = e.target.closest ? e.target.closest('.ph-a') : null;
+  if (!a) { var n=e.target; while(n&&n!==document.body){ if(n.classList&&n.classList.contains('ph-a')){a=n;break;} n=n.parentNode; } }
+  if (a) { e.preventDefault(); e.stopPropagation(); openHCG(a.getAttribute('data-ph')); }
 });
 
-// ══════════════════════════════════════════════════════════════════
-// PANEL
-// ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════
+   SIDE PANEL
+═══════════════════════════════════════════════════════════ */
 function openPanel(ri) {
-  curRi = ri;
-  renderPanel(ri);
+  _curRi = ri; renderPanel(ri);
   document.getElementById('panel').classList.add('open');
-  document.getElementById('panel-overlay').classList.add('show');
+  document.getElementById('panel-ov').classList.add('on');
 }
 function closePanel() {
   document.getElementById('panel').classList.remove('open');
-  document.getElementById('panel-overlay').classList.remove('show');
-  curRi = -1;
+  document.getElementById('panel-ov').classList.remove('on');
+  _curRi = -1;
 }
 
 function renderPanel(ri) {
-  var lead   = window._ld[ri];
-  if (!lead) return;
-  var active = isActiveStatus(lead.st);
-  var na     = lead.na;
-  var today  = todayLocal();
-  var overdue= lead.fuDate && lead.fuDate < today;
+  var lead=_leads[ri]; if(!lead) return;
+  var na=lead.na, active=isActive(lead.st), late=lead.fuDate&&lead.fuDate<todayMidnight();
+  document.getElementById('ph-name').textContent = lead.nm||'—';
+  document.getElementById('ph-sub').textContent  = active?'Active Lead':(na?phaseLabel(na.phase):'Sequence Complete');
+  var h='';
 
-  document.getElementById('ph-name').textContent  = lead.nm || '—';
-  document.getElementById('ph-phase').textContent = active ? 'Active Lead' : (na ? phaseName(na.phase) : 'Sequence Complete');
-
-  var b = '';
-
-  // ── NO-ANSWER path ──
   if (!active) {
-    // Next Action box
-    b += '<div class="p-section">';
-    b += '<h4>Next Action</h4>';
-    if (na) {
-      b += '<div class="next-action-box'+(overdue?' overdue':'')+'">';
-      b += '<span class="na-label">'+na.icon+' '+escHtml(na.text)+'</span>';
-      if (overdue) b += '<div style="font-size:.78rem;color:var(--red);margin-top:4px">⚠ Overdue</div>';
-      b += '</div>';
-    } else {
-      b += '<div class="next-action-box"><span class="na-label">Sequence complete</span></div>';
-    }
-    b += '</div>';
+    // Next Action
+    h += '<div class="ps"><div class="ps-title">Next Action</div>';
+    h += na
+      ? '<div class="na-box'+(late?' late':'')+'"><div class="na-lbl">'+na.icon+' '+esc(na.text)+'</div>'+(late?'<div class="na-warn">&#9888; Overdue</div>':'')+'</div>'
+      : '<div class="na-box"><div class="na-lbl">Sequence complete</div></div>';
+    h += '</div>';
 
-    // Log Contact
-    var defMethod = na ? (na.method==='Phone'?'Phone call':na.method==='SMS'?'SMS':'Email') : 'Phone call';
-    b += '<div class="p-section"><h4>Log Contact</h4>';
-    b += '<div class="form-group"><label>Action Taken</label>';
-    b += '<input type="text" id="p-action" value="'+escAttr(na?na.text:'')+'" readonly/></div>';
-    b += '<div class="form-group"><label>Method Used</label><select id="p-method">';
-    var mOpts = ['Phone call','SMS','Email','Left Voicemail','No Answer'];
-    for (var mi = 0; mi < mOpts.length; mi++) {
-      b += '<option'+(mOpts[mi]===defMethod?' selected':'')+'>'+escHtml(mOpts[mi])+'</option>';
-    }
-    b += '</select></div>';
-    b += '<div class="form-group"><label>Notes (optional)</label>';
-    b += '<textarea id="p-notes" placeholder="Add notes…"></textarea></div>';
-    b += '<button class="btn-primary w100" onclick="handleBtn('+ri+',\'done\')">✓ Done — Save &amp; Advance</button>';
-    b += '</div>';
+    // Log Contact — method pre-selected from na.method
+    var defM = na ? (na.method==='Phone'?'Phone call':na.method==='SMS'?'SMS':'Email') : 'Phone call';
+    h += '<div class="ps"><div class="ps-title">Log Contact</div>';
+    h += '<div class="fg"><label>Action Taken</label><input id="p-action" type="text" value="'+esc(na?na.text:'')+'" readonly/></div>';
+    h += '<div class="fg"><label>Method Used</label><select id="p-method">';
+    ['Phone call','SMS','Email','Left Voicemail','No Answer'].forEach(function(m){
+      h += '<option'+(m===defM?' selected':'')+'>'+esc(m)+'</option>';
+    });
+    h += '</select></div>';
+    h += '<div class="fg"><label>Notes (optional)</label><textarea id="p-notes" placeholder="Add notes…"></textarea></div>';
+    h += '<button class="btn btn-primary w100" onclick="btn('+ri+',\'done\')">&#10003; Done — Save &amp; Advance</button>';
+    h += '</div>';
 
     // Responded
-    b += '<div class="p-section"><h4>Lead Responded</h4>';
-    b += '<button class="responded-btn" onclick="handleBtn('+ri+',\'responded\')">&#129309; Lead Responded</button>';
-    b += '</div>';
-  }
-  // ── ACTIVE path ──
-  else {
-    b += '<div class="p-section"><h4>Active Lead</h4>';
-    b += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">';
-    b += statusBadgeHtml(lead.st);
-    b += '<span style="font-size:.85rem;color:#555">In active conversation</span></div>';
-    b += '</div>';
-
-    b += '<div class="p-section"><h4>Log Update</h4>';
-    b += '<div class="form-group"><label>Status</label><select id="p-status">';
-    for (var si = 0; si < stOpts.length; si++) {
-      var sel = (stOpts[si] === lead.st.toLowerCase()) ? ' selected' : '';
-      b += '<option'+sel+'>'+escHtml(stOpts[si])+'</option>';
-    }
-    b += '</select></div>';
-    b += '<div class="form-group"><label>Next Follow-Up Date</label>';
-    b += '<input type="date" id="p-fudate" value="'+escAttr(lead.fuDate?fmtDateISO(lead.fuDate):'')+'" /></div>';
-    b += '<div class="form-group"><label>Contact Method Used</label><select id="p-cmethod">';
-    var cOpts = ['Phone call','SMS','Email'];
-    for (var ci = 0; ci < cOpts.length; ci++) {
-      var csel = (cOpts[ci] === lead.nsm) ? ' selected' : '';
-      b += '<option'+csel+'>'+escHtml(cOpts[ci])+'</option>';
-    }
-    b += '</select></div>';
-    b += '<div class="form-group"><label>Next Suggested Method</label><select id="p-nsm">';
-    for (var ni = 0; ni < cOpts.length; ni++) {
-      var nsel = (cOpts[ni] === lead.nsm) ? ' selected' : '';
-      b += '<option'+nsel+'>'+escHtml(cOpts[ni])+'</option>';
-    }
-    b += '</select></div>';
-    b += '<div class="form-group"><label>Notes</label>';
-    b += '<textarea id="p-notes" placeholder="Notes from this contact…"></textarea></div>';
-    b += '<button class="btn-primary w100" onclick="handleBtn('+ri+',\'save\')">Save Update</button>';
-    b += '</div>';
-  }
-
-  // ── Contact Actions (both paths) ──
-  b += '<div class="p-section"><h4>Contact Actions</h4>';
-  b += '<div class="contact-btns">';
-  b += '<button style="background:var(--green-p);color:var(--green);border:1px solid var(--green)" onclick="dialHCG(\''+escAttr(lead.ph)+'\')">&#128222; Call via HCG</button>';
-  b += '<button style="background:var(--sky-p);color:var(--navy-m);border:1px solid var(--sky-m)" onclick="handleBtn('+ri+',\'sms\')">&#128172; Send SMS</button>';
-  b += '<button style="background:var(--gold-p);color:#9a6200;border:1px solid var(--gold-m)" onclick="handleBtn('+ri+',\'email\')">&#9993; Send Email</button>';
-  b += '<button style="background:#f3f4f6;color:#333;border:1px solid #ddd" onclick="handleBtn('+ri+',\'script\')">&#128203; View Script</button>';
-  b += '</div></div>';
-
-  // ── Lead Details ──
-  b += '<div class="p-section"><h4>Lead Details</h4>';
-  b += '<div class="p-grid">';
-  var dFields = [
-    ['Phone',lead.ph],['Email',lead.em],['Area',lead.ar],['Source',lead.so],
-    ['Services',lead.sv],['Est. Hours/Wk',lead.hr],['Est. Start',lead.es],
-    ['Status',lead.st],['Pay Type',lead.pt],['Monthly Budget',lead.mv],
-    ['Agent',lead.ag],['Relationship',lead.rel],
-    ['Last Contact',lead.lc?fmtDate(parseDate(lead.lc)):''],
-    ['Contact Method',lead.mt],['Next Follow-Up',lead.fuDate?fmtDate(lead.fuDate):''],
-    ['Next Method',lead.nsm]
-  ];
-  for (var fi = 0; fi < dFields.length; fi++) {
-    b += '<div><div class="p-label">'+escHtml(dFields[fi][0])+'</div>';
-    b += '<div class="p-val">'+escHtml(dFields[fi][1]||'—')+'</div></div>';
-  }
-  b += '</div>';
-  if (lead.safety) {
-    b += '<div class="mt8"><div class="p-label">Safety Concerns</div>';
-    b += '<div class="p-val" style="white-space:pre-wrap">'+escHtml(lead.safety)+'</div></div>';
-  }
-  if (lead.nt) {
-    b += '<div class="mt8"><div class="p-label">Notes</div>';
-    b += '<div class="p-val" style="white-space:pre-wrap">'+escHtml(lead.nt)+'</div></div>';
-  }
-  b += '</div>';
-
-  // ── Activity Log ──
-  b += '<div class="p-section"><h4>Activity Log</h4>';
-  if (lead.seqLog) {
-    var entries = lead.seqLog.split('|').filter(function(s){return s.trim();}).reverse();
-    b += '<div class="p-log">';
-    for (var ei = 0; ei < entries.length; ei++) {
-      b += '<div class="p-log-entry">'+escHtml(entries[ei].trim())+'</div>';
-    }
-    b += '</div>';
+    h += '<div class="ps"><div class="ps-title">Lead Responded?</div>';
+    h += '<button class="btn btn-sky w100" onclick="btn('+ri+',\'responded\')">&#129309; Lead Responded — Log First Contact</button>';
+    h += '</div>';
   } else {
-    b += '<div class="p-log" style="color:#aaa">No activity logged yet.</div>';
-  }
-  b += '</div>';
+    // Active lead update form
+    h += '<div class="ps"><div class="ps-title">Active Lead</div>';
+    h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+stBadge(lead.st)+'<span style="font-size:.85rem;color:#555">In active conversation</span></div></div>';
 
-  document.getElementById('panel-body').innerHTML = b;
+    h += '<div class="ps"><div class="ps-title">Log Update</div>';
+    h += '<div class="fg"><label>Status</label><select id="p-status">';
+    _stOpts.forEach(function(s){ h+='<option'+(s===lead.st.toLowerCase()?' selected':'')+'>'+esc(s)+'</option>'; });
+    h += '</select></div>';
+    h += '<div class="fg"><label>Next Follow-Up Date</label><input type="date" id="p-fudate" value="'+esc(lead.fuDate?isoDate(lead.fuDate):'')+'" /></div>';
+    h += '<div class="fg"><label>Method Used This Contact</label><select id="p-cmethod">';
+    ['Phone call','SMS','Email'].forEach(function(m){ h+='<option'+(m===lead.nsm?' selected':'')+'>'+esc(m)+'</option>'; });
+    h += '</select></div>';
+    h += '<div class="fg"><label>Next Suggested Method</label><select id="p-nsm">';
+    ['Phone call','SMS','Email'].forEach(function(m){ h+='<option'+(m===lead.nsm?' selected':'')+'>'+esc(m)+'</option>'; });
+    h += '</select></div>';
+    h += '<div class="fg"><label>Notes</label><textarea id="p-notes" placeholder="Notes from this contact…"></textarea></div>';
+    h += '<button class="btn btn-primary w100" onclick="btn('+ri+',\'save\')">Save Update</button>';
+    h += '</div>';
+  }
+
+  // Contact Actions
+  h += '<div class="ps"><div class="ps-title">Contact Actions</div><div class="cb-row">';
+  h += '<button class="cb" style="background:var(--grn-bg);color:var(--green);border-color:var(--green)" onclick="openHCG(\''+esc(lead.ph)+'\')">&#128222; Call via HCG</button>';
+  h += '<button class="cb" style="background:var(--sky-bg);color:var(--navy-h);border-color:var(--sky-m)" onclick="btn('+ri+',\'sms\')">&#128172; Send SMS</button>';
+  h += '<button class="cb" style="background:var(--gold-bg);color:#9a6200;border-color:var(--gold-m)" onclick="btn('+ri+',\'email\')">&#9993; Send Email</button>';
+  h += '<button class="cb" style="background:#f3f4f6;color:#333;border-color:#ddd" onclick="btn('+ri+',\'script\')">&#128203; Script</button>';
+  h += '</div></div>';
+
+  // Lead Details
+  h += '<div class="ps"><div class="ps-title">Lead Details</div><div class="p-grid">';
+  [['Phone',lead.ph],['Email',lead.em],['Area',lead.ar],['Source',lead.so],
+   ['Services',lead.sv],['Est Hrs/Wk',lead.hr],['Est Start',lead.es],['Status',lead.st],
+   ['Pay Type',lead.pt],['Monthly Budget',lead.mv],['Agent',lead.ag],['Relationship',lead.rel],
+   ['Last Contact',lead.lc?fmtDate(parseDate(lead.lc)):''],['Contact Method',lead.mt],
+   ['Next Follow-Up',lead.fuDate?fmtDate(lead.fuDate):''],['Next Method',lead.nsm]
+  ].forEach(function(f){
+    h+='<div><div class="p-lbl">'+esc(f[0])+'</div><div class="p-val">'+esc(f[1]||'—')+'</div></div>';
+  });
+  h += '</div>';
+  if (lead.safety) h+='<div style="margin-top:10px"><div class="p-lbl">Safety Concerns</div><div class="p-val" style="white-space:pre-wrap">'+esc(lead.safety)+'</div></div>';
+  if (lead.nt)     h+='<div style="margin-top:6px"><div class="p-lbl">Notes</div><div class="p-val" style="white-space:pre-wrap">'+esc(lead.nt)+'</div></div>';
+  h += '</div>';
+
+  // Activity Log
+  h += '<div class="ps"><div class="ps-title">Activity Log</div>';
+  if (lead.seqLog) {
+    var entries = lead.seqLog.split('|').map(function(s){return s.trim();}).filter(Boolean).reverse();
+    h += '<div class="p-log">';
+    entries.forEach(function(e){ h+='<div class="p-log-e">'+esc(e)+'</div>'; });
+    h += '</div>';
+  } else {
+    h += '<div style="color:#aaa;font-size:.85rem">No activity logged yet.</div>';
+  }
+  h += '</div>';
+
+  document.getElementById('panel-body').innerHTML = h;
 }
 
-// ══════════════════════════════════════════════════════════════════
-// WRITE ROW
-// ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════
+   WRITE TO EXCEL  (patch individual cells via Graph API)
+═══════════════════════════════════════════════════════════ */
+async function patchCell(exRow, colIdx, value) {
+  var addr = COL_LETTERS[colIdx]+exRow;
+  var url  = CFG.graphBase+'/me/drive/items/'+_fid+"/workbook/worksheets/Lead%20Tracker/range(address='"+addr+"')";
+  var r = await gfetch(url, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({values:[[value]]})});
+  if (!r.ok) { var e=await r.json().catch(function(){return{};}); throw new Error('Write failed: '+(e.error?e.error.message:r.status)); }
+}
+
 async function writeRow(ri, updates) {
-  var exRow = ri + 1;
-  var base  = GR+'/me/drive/items/'+fid+'/workbook';
-  var keys  = Object.keys(updates);
-  for (var k = 0; k < keys.length; k++) {
-    var ci  = parseInt(keys[k]);
-    var val = updates[keys[k]];
-    var addr= COLS_ABC[ci]+exRow;
-    var url = base+"/worksheets/Lead%20Tracker/range(address='"+addr+"')";
-    var res = await fetch(url, {
-      method: 'PATCH',
-      headers: {Authorization:'Bearer '+tok,'Content-Type':'application/json'},
-      body: JSON.stringify({values:[[val]]})
-    });
-    if (!res.ok) {
-      var er = await res.json().catch(function(){return {};});
-      throw new Error('Save failed: '+(er.error ? er.error.message : res.status));
-    }
-  }
+  var exRow = ri+1;
+  var cols  = Object.keys(updates);
+  for (var i=0; i<cols.length; i++) await patchCell(exRow, parseInt(cols[i]), updates[cols[i]]);
 }
 
-// ══════════════════════════════════════════════════════════════════
-// LOG ACTION (no-answer leads)
-// ══════════════════════════════════════════════════════════════════
-async function writeLog(ri) {
-  var lead = window._ld[ri];
-  if (!lead) return;
-  var actionEl = document.getElementById('p-action');
-  var methodEl = document.getElementById('p-method');
-  var notesEl  = document.getElementById('p-notes');
-  if (!actionEl) return;
-  var action = actionEl.value.trim();
-  var method = methodEl ? methodEl.value : 'Phone call';
-  var notes  = notesEl  ? notesEl.value.trim() : '';
-  if (!action) { toast('Please enter an action.'); return; }
+/* ═══════════════════════════════════════════════════════════
+   LOCAL STATE UPDATE  (no loadData — eliminates race condition)
+═══════════════════════════════════════════════════════════ */
+function applyAndRefresh(ri, updates) {
+  Object.keys(updates).forEach(function(ci){ _rows[ri][parseInt(ci)] = updates[ci]; });
+  var lead = buildLead(_rows[ri], ri);
+  lead.na  = nextAction(lead);
+  _leads[ri] = lead;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LOG CONTACT  (no-answer path)
+═══════════════════════════════════════════════════════════ */
+async function logContact(ri) {
+  var lead=_leads[ri]; if(!lead) return;
+  var ae=document.getElementById('p-action'), me=document.getElementById('p-method'), ne=document.getElementById('p-notes');
+  if(!ae) return;
+  var action=ae.value.trim(), method=me?me.value:'Phone call', notes=ne?ne.value.trim():'';
+  if(!action){ toast('No action to log.'); return; }
   spin('Saving…');
   try {
     var stamp  = nowStamp();
     var entry  = stamp+' — '+action+' ('+method+')'+(notes?' | '+notes:'');
-    var newLog = lead.seqLog ? (lead.seqLog+'|'+entry) : entry;
-    var fu     = autoFuForAction(action);
-    var updates= {};
-    updates[C.SQ] = newLog;
-    updates[C.LC] = stamp.split(' ')[0];
-    updates[C.MT] = method;
-    if (fu) updates[C.NF] = fmtDateISO(fu);
-    if (notes) {
-      var existNt = lead.nt ? lead.nt+'\n' : '';
-      updates[C.NT] = existNt+stamp+': '+notes;
-    }
-    await writeRow(ri, updates);
-    // In-place update
-    rows[ri][C.SQ] = newLog;
-    rows[ri][C.LC] = updates[C.LC];
-    rows[ri][C.MT] = method;
-    if (fu) rows[ri][C.NF] = fmtDateISO(fu);
-    if (notes) rows[ri][C.NT] = updates[C.NT];
-    var ul = buildLead(rows[ri], ri);
-    ul.na = getNextAction(ul);
-    window._ld[ri] = ul;
-    unspin();
-    toast('Action logged ✓');
+    var newLog = lead.seqLog ? lead.seqLog+'|'+entry : entry;
+    var fu     = fuForAction(action);
+    var upd    = {};
+    upd[C.SQ] = newLog;
+    upd[C.LC] = stamp.split(' ')[0];
+    upd[C.MT] = method;
+    if (fu)    upd[C.NF] = isoDate(fu);
+    if (notes) upd[C.NT] = (lead.nt?lead.nt+'\n':'')+stamp+': '+notes;
+    await writeRow(ri, upd);
+    applyAndRefresh(ri, upd);
+    unspin(); toast('Action logged ✓');
     buildUI();
-    if (curRi === ri) renderPanel(ri);
-  } catch(e) {
-    unspin();
-    showErr('Save error: '+e.message);
-  }
+    if (_curRi===ri) renderPanel(ri);
+  } catch(e) { unspin(); showErr('Save error: '+e.message); }
 }
 
-// ══════════════════════════════════════════════════════════════════
-// SAVE UPDATE (active leads)
-// ══════════════════════════════════════════════════════════════════
-async function saveUpdate(ri) {
-  var lead = window._ld[ri];
-  if (!lead) return;
-  var status = document.getElementById('p-status').value;
-  var fudate = document.getElementById('p-fudate').value;
-  var cmethod= document.getElementById('p-cmethod').value;
-  var nsm    = document.getElementById('p-nsm').value;
-  var notes  = document.getElementById('p-notes').value.trim();
+/* ═══════════════════════════════════════════════════════════
+   SAVE UPDATE  (active lead path)
+═══════════════════════════════════════════════════════════ */
+async function saveActiveUpdate(ri) {
+  var lead=_leads[ri]; if(!lead) return;
+  var status=document.getElementById('p-status').value;
+  var fudate=document.getElementById('p-fudate').value;
+  var cmethod=document.getElementById('p-cmethod').value;
+  var nsm=document.getElementById('p-nsm').value;
+  var notes=document.getElementById('p-notes').value.trim();
   spin('Saving…');
   try {
-    var stamp   = nowStamp();
-    var updates = {};
-    updates[C.ST]  = status;
-    if (fudate) updates[C.NF] = fudate;
-    updates[C.MT]  = cmethod;
-    updates[C.NSM] = nsm;
-    updates[C.LC]  = stamp.split(' ')[0];
-    if (notes) {
-      var existNt = lead.nt ? lead.nt+'\n' : '';
-      updates[C.NT] = existNt+stamp+': '+notes;
-    }
-    var logEntry = stamp+' — Status: '+status+(notes?' | '+notes:'');
-    var newSl    = lead.sl ? (lead.sl+'|'+logEntry) : logEntry;
-    updates[C.SL] = newSl;
-    await writeRow(ri, updates);
-    rows[ri][C.ST]  = status;
-    if (fudate) rows[ri][C.NF] = fudate;
-    rows[ri][C.MT]  = cmethod;
-    rows[ri][C.NSM] = nsm;
-    rows[ri][C.LC]  = updates[C.LC];
-    if (notes) rows[ri][C.NT] = updates[C.NT];
-    rows[ri][C.SL]  = newSl;
-    var ul = buildLead(rows[ri], ri);
-    ul.na  = getNextAction(ul);
-    window._ld[ri] = ul;
-    unspin();
-    toast('Update saved ✓');
+    var stamp=nowStamp();
+    var logLine=stamp+' — Status: '+status+(notes?' | '+notes:'');
+    var newSl=lead.sl?lead.sl+'|'+logLine:logLine;
+    var upd={};
+    upd[C.ST]=status; upd[C.MT]=cmethod; upd[C.NSM]=nsm;
+    upd[C.LC]=stamp.split(' ')[0]; upd[C.SL]=newSl;
+    if(fudate) upd[C.NF]=fudate;
+    if(notes)  upd[C.NT]=(lead.nt?lead.nt+'\n':'')+stamp+': '+notes;
+    await writeRow(ri, upd);
+    applyAndRefresh(ri, upd);
+    unspin(); toast('Update saved ✓');
     buildUI();
-    if (curRi === ri) renderPanel(ri);
-  } catch(e) {
-    unspin();
-    showErr('Save error: '+e.message);
-  }
+    if (_curRi===ri) renderPanel(ri);
+  } catch(e) { unspin(); showErr('Save error: '+e.message); }
 }
 
-// ══════════════════════════════════════════════════════════════════
-// RESPONDED MODAL
-// ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════
+   RESPONDED MODAL
+═══════════════════════════════════════════════════════════ */
 function openResponded(ri) {
-  curRi = ri;
-  var lead = window._ld[ri];
-  if (!lead) return;
-
-  // Unique services from sheet
-  var svSet = [];
-  for (var i = 3; i < rows.length; i++) {
-    var sv = String(rows[i][C.SV]||'').trim();
-    if (sv && svSet.indexOf(sv) === -1) svSet.push(sv);
-  }
-
-  var nowStr = nowStamp();
-  var b = '';
-  b += '<div class="form-group"><label>Response Method</label><select id="rm-method">';
-  var rmOpts = ['Phone call','SMS','Text','Email','Walk-in'];
-  for (var i = 0; i < rmOpts.length; i++) b += '<option>'+escHtml(rmOpts[i])+'</option>';
-  b += '</select></div>';
-  b += '<div class="form-group"><label>Response Date/Time</label>';
-  b += '<input type="text" id="rm-stamp" value="'+escAttr(nowStr)+'" readonly/></div>';
-  b += '<div class="form-group"><label>Care is for</label>';
-  b += '<input type="text" id="rm-carefor" placeholder="e.g. Mother, Father, Self…"/></div>';
-  b += '<div class="form-group"><label>Relationship to Client</label><select id="rm-rel">';
-  var relOpts = ['Parent','Spouse/Partner','Sibling','Child','Self','Other'];
-  for (var ri2 = 0; ri2 < relOpts.length; ri2++) b += '<option>'+escHtml(relOpts[ri2])+'</option>';
-  b += '</select></div>';
-  b += '<div class="form-group"><label>Care Needs</label><select id="rm-sv"><option value="">&#8212; Select &#8212;</option>';
-  for (var si2 = 0; si2 < svSet.length; si2++) b += '<option>'+escHtml(svSet[si2])+'</option>';
-  b += '<option>Other</option></select></div>';
-  b += '<div class="form-group"><label>Est. Hours/Week</label>';
-  b += '<input type="number" id="rm-hr" min="0" placeholder="e.g. 20"/></div>';
-  b += '<div class="form-group"><label>Est. Start Date</label><input type="date" id="rm-es"/></div>';
-  b += '<div class="form-group"><label>Monthly Budget ($)</label>';
-  b += '<input type="number" id="rm-mv" min="0" placeholder="e.g. 3000"/></div>';
-  b += '<div class="form-group"><label>Pay Type</label><select id="rm-pt">';
-  var ptOpts = ['Private Pay','Long-Term Care Insurance','VA Benefits','Medicaid','Other'];
-  for (var pi = 0; pi < ptOpts.length; pi++) b += '<option>'+escHtml(ptOpts[pi])+'</option>';
-  b += '</select></div>';
-  b += '<div class="form-group"><label>Safety Concerns</label>';
-  b += '<textarea id="rm-safety" placeholder="Any safety concerns noted…"></textarea></div>';
-  b += '<div class="form-group"><label>Notes from this conversation</label>';
-  b += '<textarea id="rm-notes" placeholder="Key points, concerns, next steps…"></textarea></div>';
-  b += '<hr class="divider"/>';
-  b += '<div class="form-group"><label>Next Follow-Up Date <span style="color:var(--red)">*</span></label>';
-  b += '<input type="date" id="rm-nf" required/></div>';
-  b += '<div class="form-group"><label>Next Follow-Up Method</label><select id="rm-nsm">';
-  var nsmOpts = ['Phone call','SMS','Email'];
-  for (var nsi = 0; nsi < nsmOpts.length; nsi++) b += '<option>'+escHtml(nsmOpts[nsi])+'</option>';
-  b += '</select></div>';
-  b += '<div class="form-group"><label>New Status</label><select id="rm-status">';
-  for (var sti = 0; sti < stOpts.length; sti++) {
-    var sel = (stOpts[sti]==='active conversation') ? ' selected' : '';
-    b += '<option'+sel+'>'+escHtml(stOpts[sti])+'</option>';
-  }
-  b += '</select></div>';
-
-  document.getElementById('resp-body').innerHTML = b;
-  document.getElementById('resp-modal').style.display = 'flex';
+  _curRi = ri;
+  var lead=_leads[ri]; if(!lead) return;
+  var svSet=[];
+  for(var i=3;i<_rows.length;i++){var sv=String(_rows[i][C.SV]||'').trim();if(sv&&svSet.indexOf(sv)===-1)svSet.push(sv);}
+  var now=nowStamp(), h='';
+  h+='<div class="fg"><label>Response Method</label><select id="r-method">';
+  ['Phone call','SMS','Text','Email','Walk-in'].forEach(function(m){h+='<option>'+esc(m)+'</option>';});
+  h+='</select></div>';
+  h+='<div class="fg"><label>Date / Time</label><input type="text" id="r-stamp" value="'+esc(now)+'" readonly/></div>';
+  h+='<div class="fg"><label>Care is for</label><input type="text" id="r-carefor" placeholder="e.g. Mother, Father, Self…"/></div>';
+  h+='<div class="fg"><label>Relationship to Client</label><select id="r-rel">';
+  ['Parent','Spouse/Partner','Sibling','Child','Self','Other'].forEach(function(o){h+='<option>'+esc(o)+'</option>';});
+  h+='</select></div>';
+  h+='<div class="fg"><label>Care Needs</label><select id="r-sv"><option value="">— Select —</option>';
+  svSet.forEach(function(s){h+='<option>'+esc(s)+'</option>';});
+  h+='<option>Other</option></select></div>';
+  h+='<div class="fg"><label>Est. Hours / Week</label><input type="number" id="r-hr" min="0" placeholder="e.g. 20"/></div>';
+  h+='<div class="fg"><label>Est. Start Date</label><input type="date" id="r-es"/></div>';
+  h+='<div class="fg"><label>Monthly Budget ($)</label><input type="number" id="r-mv" min="0" placeholder="e.g. 3000"/></div>';
+  h+='<div class="fg"><label>Pay Type</label><select id="r-pt">';
+  ['Private Pay','Long-Term Care Insurance','VA Benefits','Medicaid','Other'].forEach(function(o){h+='<option>'+esc(o)+'</option>';});
+  h+='</select></div>';
+  h+='<div class="fg"><label>Safety Concerns</label><textarea id="r-safety" placeholder="Any safety concerns noted…"></textarea></div>';
+  h+='<div class="fg"><label>Notes from this conversation</label><textarea id="r-notes" placeholder="Key points, next steps…"></textarea></div>';
+  h+='<hr class="divider"/>';
+  h+='<div class="fg"><label>Next Follow-Up Date <span style="color:var(--red)">*</span></label><input type="date" id="r-nf" required/></div>';
+  h+='<div class="fg"><label>Next Follow-Up Method</label><select id="r-nsm">';
+  ['Phone call','SMS','Email'].forEach(function(m){h+='<option>'+esc(m)+'</option>';});
+  h+='</select></div>';
+  h+='<div class="fg"><label>New Status</label><select id="r-status">';
+  _stOpts.forEach(function(s){h+='<option'+(s==='active conversation'?' selected':'')+'>'+esc(s)+'</option>';});
+  h+='</select></div>';
+  document.getElementById('m-resp-body').innerHTML=h;
+  openMo('m-resp');
 }
 
 async function saveResponded() {
-  var ri   = curRi;
-  var lead = window._ld[ri];
-  if (!lead) return;
-  var nf = document.getElementById('rm-nf').value;
-  if (!nf) { toast('Please set a next follow-up date.'); return; }
+  var ri=_curRi, lead=_leads[ri]; if(!lead) return;
+  var nf=document.getElementById('r-nf').value;
+  if(!nf){toast('Please set a next follow-up date.');return;}
   spin('Saving…');
   try {
-    var method  = document.getElementById('rm-method').value;
-    var stamp   = document.getElementById('rm-stamp').value;
-    var carefor = document.getElementById('rm-carefor').value.trim();
-    var rel     = document.getElementById('rm-rel').value;
-    var sv      = document.getElementById('rm-sv').value;
-    var hr      = document.getElementById('rm-hr').value;
-    var es      = document.getElementById('rm-es').value;
-    var mv      = document.getElementById('rm-mv').value;
-    var pt      = document.getElementById('rm-pt').value;
-    var safety  = document.getElementById('rm-safety').value.trim();
-    var notes   = document.getElementById('rm-notes').value.trim();
-    var nsm     = document.getElementById('rm-nsm').value;
-    var status  = document.getElementById('rm-status').value;
-
-    var existNt  = lead.nt ? lead.nt+'\n' : '';
-    var ntAppend = stamp+' [RESPONDED via '+method+']: '+(notes||carefor||'First contact made');
-    var slEntry  = 'Responded: '+method+' '+stamp;
-    var newSl    = lead.sl ? (lead.sl+'|'+slEntry) : slEntry;
-
-    var updates = {};
-    updates[C.ST]  = status;
-    updates[C.LC]  = stamp.split(' ')[0];
-    updates[C.MT]  = method;
-    updates[C.NF]  = nf;
-    updates[C.NSM] = nsm;
-    updates[C.NT]  = existNt+ntAppend;
-    if (sv)     updates[C.SV]     = sv;
-    if (hr)     updates[C.HR]     = hr;
-    if (es)     updates[C.ES]     = es;
-    if (mv)     updates[C.MV]     = mv;
-    if (pt)     updates[C.PT]     = pt;
-    if (safety) updates[C.SAFETY] = safety;
-    if (rel)    updates[C.REL]    = rel;
-    updates[C.SL] = newSl;
-
-    await writeRow(ri, updates);
-
-    rows[ri][C.ST]  = status;
-    rows[ri][C.LC]  = updates[C.LC];
-    rows[ri][C.MT]  = method;
-    rows[ri][C.NF]  = nf;
-    rows[ri][C.NSM] = nsm;
-    rows[ri][C.NT]  = updates[C.NT];
-    if (sv)     rows[ri][C.SV]     = sv;
-    if (hr)     rows[ri][C.HR]     = hr;
-    if (es)     rows[ri][C.ES]     = es;
-    if (mv)     rows[ri][C.MV]     = mv;
-    if (pt)     rows[ri][C.PT]     = pt;
-    if (safety) rows[ri][C.SAFETY] = safety;
-    if (rel)    rows[ri][C.REL]    = rel;
-    rows[ri][C.SL] = newSl;
-
-    var ul = buildLead(rows[ri], ri);
-    ul.na  = getNextAction(ul);
-    window._ld[ri] = ul;
-    unspin();
-    closeModal('resp-modal');
-    toast('Response logged ✓');
-    buildUI();
-    openPanel(ri);
-  } catch(e) {
-    unspin();
-    showErr('Save error: '+e.message);
-  }
+    var method=document.getElementById('r-method').value;
+    var stamp=document.getElementById('r-stamp').value;
+    var sv=document.getElementById('r-sv').value;
+    var hr=document.getElementById('r-hr').value;
+    var es=document.getElementById('r-es').value;
+    var mv=document.getElementById('r-mv').value;
+    var pt=document.getElementById('r-pt').value;
+    var safety=document.getElementById('r-safety').value.trim();
+    var notes=document.getElementById('r-notes').value.trim();
+    var nsm=document.getElementById('r-nsm').value;
+    var status=document.getElementById('r-status').value;
+    var rel=document.getElementById('r-rel').value;
+    var ntLine=stamp+' [RESPONDED via '+method+']: '+(notes||'First contact made');
+    var slLine='Responded: '+method+' '+stamp;
+    var upd={};
+    upd[C.ST]=status; upd[C.LC]=stamp.split(' ')[0]; upd[C.MT]=method;
+    upd[C.NF]=nf; upd[C.NSM]=nsm; upd[C.REL]=rel;
+    upd[C.NT]=(lead.nt?lead.nt+'\n':'')+ntLine;
+    upd[C.SL]=lead.sl?lead.sl+'|'+slLine:slLine;
+    if(sv)     upd[C.SV]=sv;
+    if(hr)     upd[C.HR]=hr;
+    if(es)     upd[C.ES]=es;
+    if(mv)     upd[C.MV]=mv;
+    if(pt)     upd[C.PT]=pt;
+    if(safety) upd[C.SAFETY]=safety;
+    await writeRow(ri,upd);
+    applyAndRefresh(ri,upd);
+    unspin(); closeMo('m-resp'); toast('Response logged ✓');
+    buildUI(); openPanel(ri);
+  } catch(e){unspin();showErr('Save error: '+e.message);}
 }
 
-// ══════════════════════════════════════════════════════════════════
-// SMS MODAL
-// ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════
+   SMS MODAL
+═══════════════════════════════════════════════════════════ */
 function openSMS(ri) {
-  curSmsRi = ri;
-  var lead = window._ld[ri];
-  if (!lead) return;
-  var fn    = firstName(lead.nm);
-  var na    = lead.na;
-  var phase = na ? na.phase : 5;
-
-  var msgText = '';
-  if (phase === 1) {
-    if (!hasLog(lead.seqLog,'intro text')) {
-      msgText = 'Hi, this is Aron from Solura Home Care! We received your inquiry and I\'d love to connect. I\'ll be calling you in about 5 minutes. Our number is '+AGENCY_PHONE+' if you want to reach us first. Looking forward to speaking with you, '+fn+'!';
-    } else {
-      msgText = 'Hi '+fn+', this is Aron from Solura Home Care. I tried reaching you a couple of times — I\'d love to connect! Feel free to call or text us at '+AGENCY_PHONE+' whenever works. We\'re here to help.';
-    }
-  } else if (phase === 2) {
-    var wk2  = countLog(lead.seqLog,'week outreach')+countLog(lead.seqLog,'nurture outreach');
-    var p2   = [
-      'Hi '+fn+', Aron here from Solura Home Care — just following up! Is now a good time, or shall I try again later? You can also reach us at '+AGENCY_PHONE+'.',
-      'Hi '+fn+', just checking in from Solura Home Care. I know finding the right care can take time — we\'re here whenever you\'re ready. '+AGENCY_PHONE+'.',
-      'Hi '+fn+', Aron from Solura Home Care. Hope you\'re doing well! I\'d love to answer any questions about our care services. Feel free to reply or call '+AGENCY_PHONE+'.'
-    ];
-    msgText = p2[wk2 % 3];
+  _smsRi=ri;
+  var lead=_leads[ri]; if(!lead) return;
+  var fn=firstName(lead.nm), na=lead.na, phase=na?na.phase:5, ph=CFG.agencyPhone;
+  var msg='';
+  if(phase===1){
+    msg=!logHas(lead.seqLog,'intro text')
+      ?'Hi, this is Aron from Solura Home Care! We received your inquiry and I\'d love to connect. I\'ll be calling in about 5 minutes — our number is '+ph+' if you want to reach us first. Looking forward to speaking with you, '+fn+'!'
+      :'Hi '+fn+', this is Aron from Solura Home Care. I tried reaching you a couple of times — I\'d love to connect! Feel free to call or text us at '+ph+' whenever works.';
+  } else if(phase===2){
+    var p2=['Hi '+fn+', Aron here from Solura Home Care — just following up! Is now a good time, or shall I try again later? You can reach us at '+ph+'.','Hi '+fn+', just checking in from Solura Home Care. I know finding the right care takes time — we\'re here whenever you\'re ready. '+ph+'.','Hi '+fn+', Aron from Solura Home Care. Hope you\'re doing well! Happy to answer any questions. '+ph+'.'];
+    msg=p2[logCount(lead.seqLog,'pm text')%3];
   } else {
-    var wk3  = countLog(lead.seqLog,'week outreach')+countLog(lead.seqLog,'nurture outreach');
-    var p3   = [
-      'Hi '+fn+', just a quick hello from Solura Home Care. We\'re always here when you\'re ready to explore care options. '+AGENCY_PHONE+'.',
-      'Hi '+fn+', Aron from Solura Home Care. Checking in to see if anything has changed with your care needs. Happy to chat whenever works! '+AGENCY_PHONE+'.'
-    ];
-    msgText = p3[wk3 % 2];
+    var p3=['Hi '+fn+', just a quick hello from Solura Home Care. We\'re here whenever you\'re ready. '+ph+'.','Hi '+fn+', Aron from Solura Home Care. Checking in — has anything changed with your care needs? Happy to chat! '+ph+'.'];
+    msg=p3[logCount(lead.seqLog,'nurture outreach')%2];
   }
-
-  var b = '';
-  b += '<div class="form-group"><label>To</label>';
-  b += '<input type="text" id="sms-to" value="'+escAttr(lead.ph)+'" readonly/></div>';
-  b += '<div class="form-group"><label>Message</label>';
-  b += '<textarea id="sms-msg" style="min-height:120px">'+escHtml(msgText)+'</textarea></div>';
-  b += '<div style="font-size:.78rem;color:#888;margin-top:4px">Sending via GoHighLevel</div>';
-
-  document.getElementById('sms-body').innerHTML = b;
-  document.getElementById('sms-modal').style.display = 'flex';
+  var h='';
+  h+='<div class="fg"><label>To</label><input type="text" id="s-to" value="'+esc(lead.ph)+'" readonly/></div>';
+  h+='<div class="fg"><label>Message</label><textarea id="s-msg" style="min-height:120px">'+esc(msg)+'</textarea></div>';
+  h+='<p style="font-size:.78rem;color:#888;margin-top:4px">Sending via GoHighLevel (HomeCareGrow)</p>';
+  document.getElementById('m-sms-body').innerHTML=h;
+  openMo('m-sms');
 }
 
-async function sendSMS() {
-  var ri   = curSmsRi;
-  var lead = window._ld[ri];
-  if (!lead) { closeModal('sms-modal'); return; }
-  var phone = document.getElementById('sms-to').value.trim();
-  var msg   = document.getElementById('sms-msg').value.trim();
-  if (!phone || !msg) { toast('Phone and message required.'); return; }
+async function doSendSMS() {
+  var ri=_smsRi, lead=_leads[ri]; if(!lead){closeMo('m-sms');return;}
+  var phone=document.getElementById('s-to').value.trim();
+  var msg=document.getElementById('s-msg').value.trim();
+  if(!phone||!msg){toast('Phone and message required.');return;}
   spin('Sending SMS…');
   try {
-    var clean  = phone.replace(/\D/g,'');
-    var ph     = '+1'+clean;
-    var contactId = '';
-
-    // Search GHL
-    var searchRes = await fetch(
-      GHL_BASE+'/contacts/search?query='+encodeURIComponent(ph)+'&locationId='+GHL_LOC,
-      {headers:{Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28'}}
-    );
-    if (searchRes.ok) {
-      var sd = await searchRes.json();
-      if (sd.contacts && sd.contacts.length > 0) contactId = sd.contacts[0].id;
+    var e164='+1'+phone.replace(/\D/g,''), cid='';
+    var sr=await fetch(CFG.ghlBase+'/contacts/search?query='+encodeURIComponent(e164)+'&locationId='+CFG.ghlLoc,{headers:{Authorization:'Bearer '+CFG.ghlKey,Version:'2021-07-28'}});
+    if(sr.ok){var sd=await sr.json();if(sd.contacts&&sd.contacts.length)cid=sd.contacts[0].id;}
+    if(!cid){
+      var cr=await fetch(CFG.ghlBase+'/contacts/',{method:'POST',headers:{Authorization:'Bearer '+CFG.ghlKey,'Content-Type':'application/json',Version:'2021-07-28'},body:JSON.stringify({firstName:firstName(lead.nm),lastName:String(lead.nm||'').split(/\s+/).slice(1).join(' '),phone:e164,locationId:CFG.ghlLoc})});
+      if(cr.ok){var cd=await cr.json();cid=(cd.contact&&cd.contact.id)||cd.id||'';}
     }
-    if (!contactId) {
-      // Create contact
-      var cr = await fetch(GHL_BASE+'/contacts/', {
-        method:'POST',
-        headers:{Authorization:'Bearer '+GHL_KEY,'Content-Type':'application/json',Version:'2021-07-28'},
-        body:JSON.stringify({
-          firstName: firstName(lead.nm),
-          lastName:  String(lead.nm||'').split(/\s+/).slice(1).join(' '),
-          phone: ph, locationId: GHL_LOC
-        })
-      });
-      if (cr.ok) {
-        var cd = await cr.json();
-        contactId = (cd.contact&&cd.contact.id) ? cd.contact.id : (cd.id||'');
-      }
-    }
-    if (!contactId) throw new Error('Could not find or create GHL contact');
-
-    // Send SMS
-    var sr = await fetch(GHL_BASE+'/conversations/messages', {
-      method:'POST',
-      headers:{Authorization:'Bearer '+GHL_KEY,'Content-Type':'application/json',Version:'2021-07-28'},
-      body:JSON.stringify({type:'SMS',contactId:contactId,locationId:GHL_LOC,message:msg})
-    });
-    if (!sr.ok) {
-      var se = await sr.json().catch(function(){return {};});
-      throw new Error('SMS failed: '+(se.message||sr.status));
-    }
-
-    // Log
-    var stamp  = nowStamp();
-    var action = lead.na ? lead.na.text : 'SMS Sent';
-    var entry  = stamp+' — '+action+' (SMS)';
-    var newLog = lead.seqLog ? (lead.seqLog+'|'+entry) : entry;
-    var fu     = autoFuForAction(action);
-    var upd    = {};
-    upd[C.SQ] = newLog; upd[C.LC] = stamp.split(' ')[0]; upd[C.MT] = 'SMS';
-    if (fu) upd[C.NF] = fmtDateISO(fu);
-    await writeRow(ri, upd);
-    rows[ri][C.SQ]=newLog; rows[ri][C.LC]=upd[C.LC]; rows[ri][C.MT]='SMS';
-    if (fu) rows[ri][C.NF]=fmtDateISO(fu);
-    var ul=buildLead(rows[ri],ri); ul.na=getNextAction(ul); window._ld[ri]=ul;
-    unspin();
-    closeModal('sms-modal');
-    toast('SMS sent ✓');
-    buildUI();
-  } catch(e) {
-    unspin();
-    showErr('SMS error: '+e.message);
-  }
+    if(!cid) throw new Error('Could not find or create GHL contact');
+    var sendR=await fetch(CFG.ghlBase+'/conversations/messages',{method:'POST',headers:{Authorization:'Bearer '+CFG.ghlKey,'Content-Type':'application/json',Version:'2021-07-28'},body:JSON.stringify({type:'SMS',contactId:cid,locationId:CFG.ghlLoc,message:msg})});
+    if(!sendR.ok){var se=await sendR.json().catch(function(){return{};});throw new Error('SMS failed: '+(se.message||sendR.status));}
+    var stamp=nowStamp(), action=lead.na?lead.na.text:'SMS Sent';
+    var entry=stamp+' — '+action+' (SMS)';
+    var newLog=lead.seqLog?lead.seqLog+'|'+entry:entry;
+    var fu=fuForAction(action), upd={};
+    upd[C.SQ]=newLog; upd[C.LC]=stamp.split(' ')[0]; upd[C.MT]='SMS';
+    if(fu) upd[C.NF]=isoDate(fu);
+    await writeRow(ri,upd);
+    applyAndRefresh(ri,upd);
+    unspin(); closeMo('m-sms'); toast('SMS sent ✓'); buildUI();
+  } catch(e){unspin();showErr('SMS error: '+e.message);}
 }
 
-// ══════════════════════════════════════════════════════════════════
-// EMAIL MODAL
-// ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════
+   EMAIL MODAL
+═══════════════════════════════════════════════════════════ */
 function openEmail(ri) {
-  curEmailRi = ri;
-  var lead = window._ld[ri];
-  if (!lead) return;
-  var fn    = firstName(lead.nm);
-  var na    = lead.na;
-  var phase = na ? na.phase : 5;
-
-  var subj = '', bodyText = '';
-  if (phase === 1 && !hasLog(lead.seqLog,'first call')) {
-    subj = 'Reaching Out — Solura Home Care';
-    bodyText = 'Dear '+fn+',\n\nThank you for reaching out to Solura Home Care! My name is Aron, and I\'m personally committed to helping your family find the right care solution.\n\nI\'d love to connect for a brief call to learn about your needs. Please reply here or call us at '+AGENCY_PHONE+'.\n\nWarm regards,\nAron\nSolura Home Care\n'+AGENCY_PHONE;
+  _emlRi=ri;
+  var lead=_leads[ri]; if(!lead) return;
+  var fn=firstName(lead.nm), na=lead.na, phase=na?na.phase:5, ph=CFG.agencyPhone;
+  var subj,body;
+  if(phase===1&&!logHas(lead.seqLog,'first call')){
+    subj='Reaching Out — Solura Home Care';
+    body='Dear '+fn+',\n\nThank you for reaching out to Solura Home Care! My name is Aron, and I\'m personally committed to helping your family find the right care solution.\n\nI\'d love to connect for a brief call to learn more about your needs. Please reply here or call us at '+ph+'.\n\nWarm regards,\nAron\nSolura Home Care\n'+ph;
   } else {
-    subj = 'Following Up — Solura Home Care';
-    bodyText = 'Dear '+fn+',\n\nI hope you\'re well. I wanted to follow up on our earlier conversation about home care services.\n\nPlease don\'t hesitate to reach out — I\'m here to help your family find the right fit.\n\nWarm regards,\nAron\nSolura Home Care\n'+AGENCY_PHONE;
+    subj='Following Up — Solura Home Care';
+    body='Dear '+fn+',\n\nI hope you\'re well! I wanted to follow up on our earlier conversation about home care services.\n\nPlease don\'t hesitate to reach out — I\'m here to help your family find the right fit.\n\nWarm regards,\nAron\nSolura Home Care\n'+ph;
   }
-
-  var b = '';
-  b += '<div class="form-group"><label>To</label>';
-  b += '<input type="text" id="email-to" value="'+escAttr(lead.em)+'" readonly/></div>';
-  b += '<div class="form-group"><label>Subject</label>';
-  b += '<input type="text" id="email-subj" value="'+escAttr(subj)+'"/></div>';
-  b += '<div class="form-group"><label>Body</label>';
-  b += '<textarea id="email-body-txt" style="min-height:160px">'+escHtml(bodyText)+'</textarea></div>';
-  b += '<div style="font-size:.78rem;color:#888;margin-top:4px">Sending via Microsoft Graph</div>';
-
-  document.getElementById('email-body').innerHTML = b;
-  document.getElementById('email-modal').style.display = 'flex';
+  var h='';
+  h+='<div class="fg"><label>To</label><input type="text" id="e-to" value="'+esc(lead.em)+'" readonly/></div>';
+  h+='<div class="fg"><label>Subject</label><input type="text" id="e-subj" value="'+esc(subj)+'"/></div>';
+  h+='<div class="fg"><label>Body</label><textarea id="e-body" style="min-height:160px">'+esc(body)+'</textarea></div>';
+  h+='<p style="font-size:.78rem;color:#888;margin-top:4px">Sending via Microsoft Graph (your Outlook)</p>';
+  document.getElementById('m-email-body').innerHTML=h;
+  openMo('m-email');
 }
 
-async function sendEmail() {
-  var ri   = curEmailRi;
-  var lead = window._ld[ri];
-  if (!lead) { closeModal('email-modal'); return; }
-  var toAddr  = document.getElementById('email-to').value.trim();
-  var subj    = document.getElementById('email-subj').value.trim();
-  var bodyTxt = document.getElementById('email-body-txt').value.trim();
-  if (!toAddr) { toast('No email address for this lead.'); return; }
-  if (!subj || !bodyTxt) { toast('Subject and body required.'); return; }
+async function doSendEmail() {
+  var ri=_emlRi, lead=_leads[ri]; if(!lead){closeMo('m-email');return;}
+  var to=document.getElementById('e-to').value.trim();
+  var subj=document.getElementById('e-subj').value.trim();
+  var body=document.getElementById('e-body').value.trim();
+  if(!to){toast('No email address for this lead.');return;}
+  if(!subj||!body){toast('Subject and body required.');return;}
   spin('Sending email…');
   try {
-    var payload = {
-      message: {
-        subject: subj,
-        body: {contentType:'Text', content:bodyTxt},
-        toRecipients: [{emailAddress:{address:toAddr}}]
-      },
-      saveToSentItems: true
-    };
-    var res = await fetch(GR+'/me/sendMail', {
-      method:'POST',
-      headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
-      body:JSON.stringify(payload)
-    });
-    if (!res.ok && res.status !== 202) {
-      var er = await res.json().catch(function(){return {};});
-      throw new Error('Email failed: '+(er.error?er.error.message:res.status));
-    }
-    var stamp  = nowStamp();
-    var action = lead.na ? lead.na.text : 'Email Sent';
-    var entry  = stamp+' — '+action+' (Email)';
-    var newLog = lead.seqLog ? (lead.seqLog+'|'+entry) : entry;
-    var fu     = autoFuForAction(action);
-    var upd    = {};
+    var r=await gfetch('/me/sendMail',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:{subject:subj,body:{contentType:'Text',content:body},toRecipients:[{emailAddress:{address:to}}]},saveToSentItems:true})});
+    if(!r.ok&&r.status!==202){var er=await r.json().catch(function(){return{};});throw new Error('Email failed: '+(er.error?er.error.message:r.status));}
+    var stamp=nowStamp(), action=lead.na?lead.na.text:'Email Sent';
+    var entry=stamp+' — '+action+' (Email)';
+    var newLog=lead.seqLog?lead.seqLog+'|'+entry:entry;
+    var fu=fuForAction(action), upd={};
     upd[C.SQ]=newLog; upd[C.LC]=stamp.split(' ')[0]; upd[C.MT]='Email';
-    if (fu) upd[C.NF]=fmtDateISO(fu);
-    await writeRow(ri, upd);
-    rows[ri][C.SQ]=newLog; rows[ri][C.LC]=upd[C.LC]; rows[ri][C.MT]='Email';
-    if (fu) rows[ri][C.NF]=fmtDateISO(fu);
-    var ul=buildLead(rows[ri],ri); ul.na=getNextAction(ul); window._ld[ri]=ul;
-    unspin();
-    closeModal('email-modal');
-    toast('Email sent ✓');
-    buildUI();
-  } catch(e) {
-    unspin();
-    showErr('Email error: '+e.message);
-  }
+    if(fu) upd[C.NF]=isoDate(fu);
+    await writeRow(ri,upd);
+    applyAndRefresh(ri,upd);
+    unspin(); closeMo('m-email'); toast('Email sent ✓'); buildUI();
+  } catch(e){unspin();showErr('Email error: '+e.message);}
 }
 
-// ══════════════════════════════════════════════════════════════════
-// SCRIPT MODAL
-// ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════
+   CALL SCRIPT MODAL
+═══════════════════════════════════════════════════════════ */
 function openScript(ri) {
-  var lead   = window._ld[ri];
-  if (!lead) return;
-  var fn     = firstName(lead.nm);
-  var active = isActiveStatus(lead.st);
-  var b = '';
-
-  if (!active) {
-    b += '<div class="script-section"><h5>Opener</h5>';
-    b += '<p>"Hi, may I speak with '+escHtml(fn)+'? &hellip; Hi '+escHtml(fn)+'! This is Aron calling from Solura Home Care. I just sent you a quick text — hope I\'m not catching you at a bad time?"</p></div>';
-    b += '<div class="script-section"><h5>Purpose</h5>';
-    b += '<p>"We received your inquiry about home care and I wanted to personally reach out to learn a little more about your situation."</p></div>';
-    b += '<div class="script-section"><h5>Key Questions</h5><ul>';
-    b += '<li>"Can you tell me about the situation — who would be receiving care?"</li>';
-    b += '<li>"What are the main challenges or concerns you\'re trying to address right now?"</li>';
-    b += '<li>"Have you explored home care before, or is this new territory?"</li>';
-    b += '<li>"What type of schedule are you thinking — a few hours, or more consistent support?"</li>';
-    b += '<li>"Is there a timeline you\'re working toward?"</li>';
-    b += '</ul></div>';
-    b += '<div class="script-section"><h5>Close</h5>';
-    b += '<p>"Based on what you\'ve shared, I\'d love to schedule a needs assessment — it\'s free, no obligation, and it gives us a clear picture to put together a care plan that really fits. Does [day] or [day] work?"</p></div>';
-    b += '<div class="script-section script-objection"><h5>Objection — Price</h5>';
-    b += '<p>"I completely understand. Let me walk you through what\'s typically included so we can see what makes sense for your situation…"</p></div>';
-    b += '<div class="script-section script-objection"><h5>Objection — Not Ready</h5>';
-    b += '<p>"Absolutely, no pressure at all. Would it be okay if I checked back in [timeframe]? I want to make sure you have all the information when the time is right."</p></div>';
+  var lead=_leads[ri]; if(!lead) return;
+  var fn=firstName(lead.nm), active=isActive(lead.st), h='';
+  if(!active){
+    h+='<div class="sc-block"><h5>Opener</h5><p>"Hi, may I speak with '+esc(fn)+'? … Hi '+esc(fn)+'! This is Aron calling from Solura Home Care. I just sent you a quick text — hope I\'m not catching you at a bad time?"</p></div>';
+    h+='<div class="sc-block"><h5>Purpose</h5><p>"We received your inquiry about home care and I wanted to personally reach out to learn more about your situation."</p></div>';
+    h+='<div class="sc-block"><h5>Discovery Questions</h5><ul><li>"Can you tell me about the situation — who would be receiving care?"</li><li>"What are the main challenges you\'re trying to address right now?"</li><li>"Have you explored home care before, or is this new territory?"</li><li>"What type of schedule are you thinking — a few hours, or consistent support?"</li><li>"Is there a timeline you\'re working toward?"</li></ul></div>';
+    h+='<div class="sc-block"><h5>Close</h5><p>"Based on what you\'ve shared, I\'d love to schedule a free needs assessment — it gives us a clear picture to put together a care plan that really fits. Does [day] or [day] work?"</p></div>';
+    h+='<div class="sc-block obj"><h5>Objection — Price</h5><p>"I completely understand. Let me walk you through what\'s typically included so we can see what makes sense for your situation…"</p></div>';
+    h+='<div class="sc-block obj"><h5>Objection — Not Ready</h5><p>"Absolutely, no pressure at all. Would it be okay if I checked back in [timeframe]? I want to make sure you have all the information when the time is right."</p></div>';
   } else {
-    b += '<div class="script-section"><h5>Opener</h5>';
-    b += '<p>"Hi '+escHtml(fn)+', this is Aron from Solura Home Care — we\'ve spoken before about care services. Is now an okay time?"</p></div>';
-    b += '<div class="script-section"><h5>Check-in</h5>';
-    b += '<p>"I wanted to follow up and make sure you got everything you needed, and see if any questions came up."</p></div>';
-    b += '<div class="script-section"><h5>Questions</h5><ul>';
-    b += '<li>"Has anything changed with the care situation since we last spoke?"</li>';
-    b += '<li>"Did you have a chance to think about the assessment we discussed?"</li>';
-    b += '<li>"What\'s most important to you in choosing a care provider?"</li>';
-    b += '</ul></div>';
-    b += '<div class="script-section"><h5>Close</h5>';
-    b += '<p>"I\'d love to set up that assessment when you\'re ready — it really helps us give you a clear picture. What day works this week or next?"</p></div>';
+    h+='<div class="sc-block"><h5>Opener</h5><p>"Hi '+esc(fn)+', this is Aron from Solura Home Care — we\'ve spoken before about care services. Is now an okay time?"</p></div>';
+    h+='<div class="sc-block"><h5>Check-In</h5><p>"I wanted to follow up and make sure you got everything you needed, and see if any questions came up."</p></div>';
+    h+='<div class="sc-block"><h5>Questions</h5><ul><li>"Has anything changed with the care situation since we last spoke?"</li><li>"Did you have a chance to think about the assessment we discussed?"</li><li>"What\'s most important to you in choosing a care provider?"</li></ul></div>';
+    h+='<div class="sc-block"><h5>Close</h5><p>"I\'d love to set up that assessment when you\'re ready — it really helps us give you a clear picture. What day works this week or next?"</p></div>';
   }
-
-  document.getElementById('script-body').innerHTML = b;
-  document.getElementById('script-modal').style.display = 'flex';
+  document.getElementById('m-script-body').innerHTML=h;
+  openMo('m-script');
 }
 
-// ══════════════════════════════════════════════════════════════════
-// DIAL HCG
-// ══════════════════════════════════════════════════════════════════
-function dialHCG(phone) {
-  var clean = String(phone||'').replace(/\D/g,'');
-  window.open(
-    'https://app.homecaregrow.io/v2/location/kWlzzI2WZaes2GnQf7DV/contacts?search='+encodeURIComponent('+1'+clean),
-    '_blank','noopener'
-  );
+/* ═══════════════════════════════════════════════════════════
+   HCG DIAL
+═══════════════════════════════════════════════════════════ */
+function openHCG(phone) {
+  window.open('https://app.homecaregrow.io/v2/location/'+CFG.ghlLoc+'/contacts?search='+encodeURIComponent('+1'+String(phone||'').replace(/\D/g,'')),'_blank','noopener');
 }
 
-// ══════════════════════════════════════════════════════════════════
-// GLOBAL BUTTON HANDLER
-// ══════════════════════════════════════════════════════════════════
-function handleBtn(ri, action) {
-  var lead = window._ld[ri];
-  if (!lead) return;
-  if      (action === 'call')      dialHCG(lead.ph);
-  else if (action === 'sms')       openSMS(ri);
-  else if (action === 'email')     openEmail(ri);
-  else if (action === 'panel')     openPanel(ri);
-  else if (action === 'done')      writeLog(ri);
-  else if (action === 'save')      saveUpdate(ri);
-  else if (action === 'responded') openResponded(ri);
-  else if (action === 'script')    openScript(ri);
+/* ═══════════════════════════════════════════════════════════
+   BUTTON DISPATCHER
+═══════════════════════════════════════════════════════════ */
+function btn(ri, action) {
+  var lead=_leads[ri]; if(!lead) return;
+  ({call:function(){openHCG(lead.ph);}, sms:function(){openSMS(ri);},
+    email:function(){openEmail(ri);},  panel:function(){openPanel(ri);},
+    done:function(){logContact(ri);},  save:function(){saveActiveUpdate(ri);},
+    responded:function(){openResponded(ri);}, script:function(){openScript(ri);}
+  })[action]&&({call:function(){openHCG(lead.ph);},sms:function(){openSMS(ri);},
+    email:function(){openEmail(ri);},panel:function(){openPanel(ri);},
+    done:function(){logContact(ri);},save:function(){saveActiveUpdate(ri);},
+    responded:function(){openResponded(ri);},script:function(){openScript(ri);}
+  })[action]();
 }
 
-// ══════════════════════════════════════════════════════════════════
-// MODAL HELPERS
-// ══════════════════════════════════════════════════════════════════
-function closeModal(id) {
-  document.getElementById(id).style.display = 'none';
-}
+/* ═══════════════════════════════════════════════════════════
+   MODAL OPEN / CLOSE
+═══════════════════════════════════════════════════════════ */
+function openMo(id) { document.getElementById(id).classList.add('on'); }
+function closeMo(id){ document.getElementById(id).classList.remove('on'); }
 
-// Close modal when clicking outside the inner .modal div
-document.addEventListener('click', function(e) {
-  var ids = ['resp-modal','sms-modal','email-modal','script-modal'];
-  for (var i = 0; i < ids.length; i++) {
-    var el = document.getElementById(ids[i]);
-    if (el && e.target === el) el.style.display = 'none';
-  }
+document.addEventListener('click', function(e){
+  ['m-resp','m-sms','m-email','m-script'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el&&e.target===el) closeMo(id);
+  });
 });
 
-// ══════════════════════════════════════════════════════════════════
-// MOBILE TABS
-// ══════════════════════════════════════════════════════════════════
-function switchTab(tab) {
-  document.getElementById('tab-queue').classList.toggle('active', tab==='queue');
-  document.getElementById('tab-all').classList.toggle('active',   tab==='all');
-  var hide = (tab==='queue') ? ['sec-al'] : ['sec-od','sec-td','sec-wk'];
-  var show = (tab==='queue') ? ['sec-od','sec-td','sec-wk'] : ['sec-al'];
-  for (var i=0;i<hide.length;i++) document.getElementById(hide[i]).style.display='none';
-  for (var j=0;j<show.length;j++) document.getElementById(show[j]).style.display='';
-  if (tab==='sync') syncNow();
+/* ═══════════════════════════════════════════════════════════
+   MOBILE TABS
+═══════════════════════════════════════════════════════════ */
+function switchTab(t) {
+  document.getElementById('tab-q').classList.toggle('on',t==='q');
+  document.getElementById('tab-a').classList.toggle('on',t==='a');
+  (t==='q'?['sec-al']:['sec-od','sec-td','sec-wk']).forEach(function(id){document.getElementById(id).style.display='none';});
+  (t==='q'?['sec-od','sec-td','sec-wk']:['sec-al']).forEach(function(id){document.getElementById(id).style.display='';});
 }
 
-// ══════════════════════════════════════════════════════════════════
-// BOOT
-// ══════════════════════════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', function() {
-  boot();
-});
+/* ═══════════════════════════════════════════════════════════
+   START
+═══════════════════════════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', boot);
 </script>
 </body>
 </html>
