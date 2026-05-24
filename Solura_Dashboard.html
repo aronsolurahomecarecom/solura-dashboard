@@ -661,11 +661,14 @@ function buildTbl(leads,type,tMs){
   }
   var rhtml=leads.map(function(l){
     var rowHtml='';
-    var fMs=l.fu.getTime();
-    var pill=type==='od'?'<span class="pill pr2">'+Math.round((tMs-fMs)/86400000)+'d overdue</span>'
+    var fMs=l.fu?l.fu.getTime():null;
+    var pill=!fMs?'<span class="pill" style="background:#F0EFF4;color:#6B6980">No date</span>'
+            :type==='od'?'<span class="pill pr2">'+Math.round((tMs-fMs)/86400000)+'d overdue</span>'
             :type==='td'?'<span class="pill pa">Due today</span>'
+            :type==='all'&&fMs<tMs?'<span class="pill pr2">'+Math.round((tMs-fMs)/86400000)+'d overdue</span>'
+            :type==='all'&&fMs===tMs?'<span class="pill pa">Due today</span>'
             :'<span class="pill pg">in '+Math.round((fMs-tMs)/86400000)+'d</span>';
-    var fuD=l.fu.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    var fuD=l.fu?l.fu.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
     var cleanPh=l.phone?l.phone.replace(/\D/g,''):'';
     var ph=l.phone?'<a class="ph" href="#" onclick="event.stopPropagation();event.preventDefault();window.open(\'https://app.homecaregrow.io/v2/location/kWlzzI2WZaes2GnQf7DV/contacts?search=\'+encodeURIComponent(\'+1'+cleanPh+'\')+\'\',\'hcg\',\'width=1100,height=750,noopener\')">📞 '+l.phone+'</a>':'';
     var em=l.email?'<a class="em" href="mailto:'+l.email+'" onclick="event.stopPropagation()">✉ '+l.email+'</a>':'';
