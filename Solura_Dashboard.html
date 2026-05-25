@@ -273,7 +273,43 @@ td{padding:13px 16px;vertical-align:top;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 
 /* ── Empty ── */
-.empty{padding:36px;text-align:center;color:var(--softer);font-size:13px;font-style:italic;}
+.empty{padding:44px 36px;text-align:center;}
+.empty-icon{font-size:32px;margin-bottom:10px;}
+.empty-txt{font-size:13px;color:var(--softer);font-style:italic;}
+
+/* ── Row status border ── */
+.dr{position:relative;}
+.dr td:first-child{padding-left:20px;}
+.dr td:first-child::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:0 2px 2px 0;}
+.dr.border-red td:first-child::before{background:var(--red);}
+.dr.border-gold td:first-child::before{background:var(--gold);}
+.dr.border-grn td:first-child::before{background:var(--grn);}
+.dr.border-sky td:first-child::before{background:var(--sky);}
+.dr.border-soft td:first-child::before{background:var(--softer);}
+
+/* ── DM tag ── */
+.dm-tag{font-size:10px;color:var(--soft);margin-top:3px;display:flex;align-items:center;gap:3px;}
+.dm-tag span{color:var(--mid);font-weight:600;}
+
+/* ── Responded badge ── */
+.seq-responded{display:inline-flex;align-items:center;gap:5px;background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid);border-radius:10px;padding:4px 10px;font-size:10px;font-weight:700;}
+.seq-active{display:inline-flex;align-items:center;gap:5px;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);border-radius:10px;padding:4px 10px;font-size:10px;font-weight:700;}
+
+/* ── Section header timestamp ── */
+.shdr-time{font-size:10px;color:var(--soft);margin-left:auto;margin-right:8px;}
+
+/* ── Sync bar upgrade ── */
+.sync-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding:10px 14px;background:#fff;border-radius:10px;border:1px solid var(--border-soft);box-shadow:var(--shadow-sm);}
+.sync-file{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--mid);font-weight:500;}
+.sync-dot{width:7px;height:7px;border-radius:50%;background:var(--grn);box-shadow:0 0 0 3px rgba(61,122,52,.15);}
+.sync-time{font-size:11px;color:var(--soft);}
+
+/* ── All Leads section header ── */
+.sw-all .shdr{background:linear-gradient(to right,#F2EDE4,#FAF8F5);}
+.sw-all .stitle{color:var(--soft);font-size:17px;}
+
+/* ── Button area card feel ── */
+.bwrap{background:var(--cream);border-radius:10px;padding:8px;border:1px solid var(--border-soft);}
 </style>
 </head>
 <body>
@@ -328,7 +364,7 @@ td{padding:13px 16px;vertical-align:top;}
   <div class="sw"><div class="shdr"><div class="sdot2 red"></div><div class="stitle">Overdue — Contact First</div><div class="scnt" id="c0">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t0"></tbody></table></div></div>
   <div class="sw"><div class="shdr"><div class="sdot2 gold"></div><div class="stitle">Due Today</div><div class="scnt" id="c1">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t1"></tbody></table></div></div>
   <div class="sw"><div class="shdr"><div class="sdot2 grn"></div><div class="stitle">Due This Week</div><div class="scnt" id="c2">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t2"></tbody></table></div></div>
-  <div class="sw" style="margin-top:8px"><div class="shdr"><div class="sdot2 soft"></div><div class="stitle" style="color:var(--mid)">All Active Leads</div><div class="scnt" id="c3">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t3"></tbody></table></div></div>
+  <div class="sw sw-all" style="margin-top:8px"><div class="shdr"><div class="sdot2 soft"></div><div class="stitle" style="color:var(--mid)">All Active Leads</div><div class="scnt" id="c3">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t3"></tbody></table></div></div>
 </div>
 
 <!-- Script Modal -->
@@ -656,31 +692,36 @@ function buildUI(){
 }
 
 function buildRows(leads,today){
-  if(!leads.length)return '<tr><td colspan="6" class="empty">Nothing here — great work!</td></tr>';
-  var ts=ds(today);
+  if(!leads.length)return '<tr><td colspan="6" class="empty"><div class="empty-icon">✓</div><div class="empty-txt">Nothing here — great work!</div></td></tr>';
   return leads.map(function(l){
-    var fuDs=l.fuDs||'';
     var daysOff=l.fu?Math.round((today.getTime()-l.fu.getTime())/86400000):0;
     var pill=!l.fu?'<span class="pill" style="background:var(--cream);color:var(--soft)">No date</span>'
       :daysOff>0?'<span class="pill pr2">'+daysOff+'d overdue</span>'
       :daysOff===0?'<span class="pill pa">Due today</span>'
       :'<span class="pill pg">in '+Math.abs(daysOff)+'d</span>';
-
-    var ph=l.phone?'<a class="ph" href="#" onclick="event.stopPropagation();event.preventDefault();dialHCG(\''+l.phone+'\')">📞 '+l.phone+'</a>':'';
+    var borderCls=daysOff>0?'border-red':daysOff===0?'border-gold':l.active?'border-sky':'border-grn';
+    var ph=l.phone?'<a class="ph" href="#" onclick="event.stopPropagation();event.preventDefault();dialHCG(&quot;'+l.phone+'&quot;)">📞 '+l.phone+'</a>':'';
     var em=l.email?'<div><a class="em" href="mailto:'+l.email+'">✉ '+l.email+'</a></div>':'';
-    var seqHtml=l.na?'<div class="sbadge">'+l.seqLbl+'</div><div class="snxt">'+l.na.icon+' '+l.na.text+'</div>':'<div class="sbadge">'+l.seqLbl+'</div>';
-
-    // Buttons
+    var dmHtml=l.dm&&l.dm!==l.name?'<div class="dm-tag">via <span>'+l.dm.split(' ')[0]+'</span></div>':'';
+    var seqHtml='';
+    if(l.active){
+      var logLower=(l.log||'').toLowerCase();
+      var hasResp=logLower.indexOf('responded')>-1||logLower.indexOf('first contact')>-1;
+      seqHtml=hasResp?'<div class="seq-responded">✓ Responded</div>':'<div class="seq-active">● Active</div>';
+    }else if(l.na){
+      seqHtml='<div class="sbadge">'+l.seqLbl+'</div><div class="snxt">'+l.na.icon+' '+l.na.text+'</div>';
+    }else{
+      seqHtml='<div class="sbadge" style="color:var(--softer);border-color:var(--border-soft)">—</div>';
+    }
     var btns=buildBtns(l);
-
     var pid='ep-'+l.ri;
-    return '<tr class="dr'+(drawerRi===l.ri?' sel':'')+'" id="row-'+l.ri+'" onclick="openDrawer('+l.ri+')">'
-      +'<td><div class="tn">'+l.name+'</div><div class="ts">'+(l.dm||'')+'</div></td>'
+    return '<tr class="dr '+borderCls+(drawerRi===l.ri?' sel':'')+'" id="row-'+l.ri+'" onclick="openDrawer('+l.ri+')">'
+      +'<td><div class="tn">'+l.name+'</div>'+dmHtml+'</td>'
       +'<td>'+ph+em+'</td>'
       +'<td>'+sbadge(l.status)+'</td>'
       +'<td>'+pill+'<div style="font-size:11px;color:var(--soft);margin-top:3px">'+l.fuStr+'</div></td>'
       +'<td>'+seqHtml+'</td>'
-      +'<td onclick="event.stopPropagation()" style="width:175px;padding:8px 10px">'+btns+'</td>'
+      +'<td onclick="event.stopPropagation()" style="width:180px;padding:8px 10px">'+btns+'</td>'
       +'</tr>'
       +'<tr class="ep-wrap" id="'+pid+'-wrap"><td colspan="6"><div class="ep" id="'+pid+'"></div></td></tr>';
   }).join('');
