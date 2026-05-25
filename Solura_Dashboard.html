@@ -405,7 +405,7 @@ async function loadData(){
     if(!ws)throw new Error("No 'Lead Tracker' tab found.");
     rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'yyyy-mm-dd'});
     var ss=new Set(['New','Contacted','No answer','Active Conversation','Needs Assessment','Assessment Scheduled','Proposal Sent','Negotiating','Won – Active','Lost','On Hold']);
-    for(var i=3;i<rows.length;i++){var s=rows[i][C.ST];if(s&&String(s).trim())ss.add(String(s).trim());}
+    for(var i=4;i<rows.length;i++){var s=rows[i][C.ST];if(s&&String(s).trim())ss.add(String(s).trim());}
     stOpts=Array.from(ss).sort();
     buildUI();
     var lr=el('lref');if(lr)lr.textContent='Refreshed: '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
@@ -485,13 +485,13 @@ function fd2(d){return(d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear();}
 function buildUI(){
   var now=new Date(),td=new Date(now.getFullYear(),now.getMonth(),now.getDate()),ts=ds(td),wd=new Date(td.getFullYear(),td.getMonth(),td.getDate()+7);
   var od=[],td2=[],wk=[],al=[];
-  for(var i=3;i<rows.length;i++){
+  for(var i=4;i<rows.length;i++){
     var r=rows[i],name=r[C.NM];if(!name)continue;
     var st=String(r[C.ST]||'').trim();
     if(EXCL.some(function(x){return st.toLowerCase().indexOf(x)>-1;}))continue;
     al.push(name);
     var da=pd(r[C.DA]),daysOld=da?Math.max(0,Math.round((td-new Date(da.getFullYear(),da.getMonth(),da.getDate()))/86400000)):0;
-    var seqLast=r[C.SL]||'',active=isActive(st),na=active?null:getNextFromLog(seqLast);var si=na?{p:na.phase||1,lbl:na.lbl||getSeqLabel(seqLast)}:seqP(daysOld);
+    var sl=r[C.SL]||'',seqLast=sl,active=isActive(st),na=active?null:getNextFromLog(seqLast);var si=na?{p:na.phase||1,lbl:na.lbl||getSeqLabel(seqLast)}:seqP(daysOld);
     var lead={ri:i,no:r[C.NO],name:name,phone:r[C.PH]||'',email:r[C.EM]||'',status:st,
       method:r[C.MT]||'',dm:r[C.DM]||'',notes:r[C.NT]||'',daysOld:daysOld,
       seqP:si.p,seqLbl:si.lbl,seqLast:sl,na:na,active:active,fu:null,fuStr:''};
@@ -514,7 +514,7 @@ function buildUI(){
   var t2=el('t2');if(t2)t2.innerHTML=buildTbl(wk,'wk',tMs);
   // All leads
   var allL=[];
-  for(var ai=3;ai<rows.length;ai++){
+  for(var ai=4;ai<rows.length;ai++){
     var ar=rows[ai],an=ar[C.NM];if(!an)continue;
     var ast=String(ar[C.ST]||"").trim();
     if(EXCL.some(function(x){return ast.toLowerCase().indexOf(x)>-1;}))continue;
