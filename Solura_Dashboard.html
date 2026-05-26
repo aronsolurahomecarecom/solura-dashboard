@@ -1041,6 +1041,16 @@ function buildUI(){
     if(!fuLocal)continue;
     var actionDue=active||(na!==null);
     if(!actionDue)continue;
+    // Phase 2: time window controls visibility
+    if(na&&na.ph===2&&na.trigger==='time'){
+      var inWindow=isActionAvailableNow(na);
+      var p2overdue=fuDs<ts; // follow-up date is in the past
+      if(!inWindow&&!p2overdue)continue; // outside window and not overdue — skip
+      if(p2overdue)od.push(lead);
+      else td2.push(lead); // window open = Due Today
+      continue;
+    }
+    // All other phases: bucket by follow-up date
     if(fuDs<ts)od.push(lead);
     else if(fuDs===ts)td2.push(lead);
     else if(fuLocal>today&&fuLocal<=weekEnd)wk.push(lead);
@@ -1256,6 +1266,16 @@ async function saveEp(ri,mode){
       var newLog=appendLog(String(r[C.SL]||''),actText,mt);
       u[C.SL]=newLog;
       u[C.LC]=today;u[C.SD]=today;
+      // If Phase 1 just completed (Missed you text logged), set NF to tomorrow
+      if(actText.indexOf('Missed you text')>-1){
+        var tomorrow=new Date();tomorrow.setDate(tomorrow.getDate()+1);
+        u[C.NF]=(tomorrow.getMonth()+1)+'/'+tomorrow.getDate()+'/'+tomorrow.getFullYear();
+      }
+      // If completing Phase 1 final action (Missed you text), set NF to tomorrow
+      if(actText.indexOf('Missed you text')>-1){
+        var tmrw=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate()+1);
+        u[C.NF]=fd(tmrw);
+      }
     }else if(mode==='responded'){
       var mt2=q('.ep-mt'),fu=q('.ep-fu'),dm=q('.ep-dm'),rel=q('.ep-rel');
       var budget=q('.ep-budget'),hrs=q('.ep-hrs'),urg=q('.ep-urgency'),start=q('.ep-start');
@@ -1340,11 +1360,21 @@ async function sendSMS(){
   try{
     var clean=phone.replace(/\D/g,'');if(clean.length===10)clean='1'+clean;
     var cid=null;
-    var sr=await fetch(GHL_BASE+'/contacts/search/duplicate?locationId='+GHL_LOC+'&number='+encodeURIComponent('+'+clean),{headers:{Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28'}});
-    if(sr.ok){var sj=await sr.json();if(sj.contact)cid=sj.contact.id;}
+    var ghlHeaders={Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Accept':'application/json'};
+    function fetchWithTimeout(url,opts,ms){
+      var ctrl=new AbortController();
+      var tid=setTimeout(function(){ctrl.abort();},ms||8000);
+      return fetch(url,Object.assign({},opts,{signal:ctrl.signal})).finally(function(){clearTimeout(tid);});
+    }
+    try{
+      var sr=await fetchWithTimeout(GHL_BASE+'/contacts/search/duplicate?locationId='+GHL_LOC+'&number='+encodeURIComponent('+'+clean),{headers:ghlHeaders},6000);
+      if(sr.ok){var sj=await sr.json();if(sj.contact)cid=sj.contact.id;}
+    }catch(te){console.log('GHL search timeout, trying query...');}
     if(!cid){
-      var r2=await fetch(GHL_BASE+'/contacts/?locationId='+GHL_LOC+'&query='+encodeURIComponent('+'+clean),{headers:{Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28'}});
-      if(r2.ok){var j2=await r2.json();if(j2.contacts&&j2.contacts.length>0)cid=j2.contacts[0].id;}
+      try{
+        var r2=await fetchWithTimeout(GHL_BASE+'/contacts/?locationId='+GHL_LOC+'&query='+encodeURIComponent('+'+clean),{headers:ghlHeaders},6000);
+        if(r2.ok){var j2=await r2.json();if(j2.contacts&&j2.contacts.length>0)cid=j2.contacts[0].id;}
+      }catch(te2){console.log('GHL query timeout, will create contact...');}
     }
     if(!cid){
       var r3=rows[ri]||[];
@@ -1362,7 +1392,9 @@ async function sendSMS(){
     var smsNa=getNextAction(String(smsR[C.SL]||''),0,null);
     var smsActText=smsNa?smsNa.text:'SMS sent';
     var smsNewLog=appendLog(String(smsR[C.SL]||''),smsActText,'SMS');
-    await writeRow(ri,{[C.MT]:'SMS',[C.LC]:fd(localToday()),[C.SL]:smsNewLog});
+    var smsExtra={[C.MT]:'SMS',[C.LC]:fd(localToday()),[C.SL]:smsNewLog};
+    if(smsActText.indexOf('Missed you text')>-1){var t2=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate()+1);smsExtra[C.NF]=fd(t2);}
+    await writeRow(ri,smsExtra);
     setTimeout(loadData,600);
   }catch(e){showErr('SMS error: '+e.message);}
   finally{btn.disabled=false;spin.style.display='none';}
