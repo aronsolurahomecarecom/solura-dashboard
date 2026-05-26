@@ -1251,7 +1251,9 @@ async function saveEp(ri,mode){
     if(mode==='done'){
       var mt=q('.ep-mt'),act=q('.ep-act');
       if(mt)u[C.MT]=mt;
-      var newLog=appendLog(String(r[C.SL]||''),act,mt);
+      // Use current na text if act field is empty
+      var actText=act&&act.trim()?act.trim():(function(){var curNa=getNextAction(String(r[C.SL]||''),0,null);return curNa?curNa.text:'Done';}());
+      var newLog=appendLog(String(r[C.SL]||''),actText,mt);
       u[C.SL]=newLog;
       u[C.LC]=today;u[C.SD]=today;
     }else if(mode==='responded'){
@@ -1356,7 +1358,11 @@ async function sendSMS(){
       body:JSON.stringify({type:'SMS',contactId:cid,locationId:GHL_LOC,message:msg})});
     if(!smsr.ok){var se=await smsr.json().catch(function(){return{};});throw new Error('SMS failed: '+(se.message||smsr.status));}
     closeModal('modal-sms');toast('✓ SMS sent');
-    await writeRow(ri,{[C.MT]:'SMS',[C.LC]:fd(localToday())});
+    var smsR=rows[ri]||[];
+    var smsNa=getNextAction(String(smsR[C.SL]||''),0,null);
+    var smsActText=smsNa?smsNa.text:'SMS sent';
+    var smsNewLog=appendLog(String(smsR[C.SL]||''),smsActText,'SMS');
+    await writeRow(ri,{[C.MT]:'SMS',[C.LC]:fd(localToday()),[C.SL]:smsNewLog});
     setTimeout(loadData,600);
   }catch(e){showErr('SMS error: '+e.message);}
   finally{btn.disabled=false;spin.style.display='none';}
@@ -1391,7 +1397,11 @@ async function sendEmail(){
       body:JSON.stringify({message:{subject:subj,body:{contentType:'Text',content:body},toRecipients:[{emailAddress:{address:toAddr}}]},saveToSentItems:true})});
     if(res.ok||res.status===202){
       closeModal('modal-email');toast('✓ Email sent');
-      await writeRow(ri,{[C.MT]:'Email',[C.LC]:fd(localToday())});
+      var emR=rows[ri]||[];
+      var emNa=getNextAction(String(emR[C.SL]||''),0,null);
+      var emActText=emNa?emNa.text:'Email sent';
+      var emNewLog=appendLog(String(emR[C.SL]||''),emActText,'Email');
+      await writeRow(ri,{[C.MT]:'Email',[C.LC]:fd(localToday()),[C.SL]:emNewLog});
       setTimeout(loadData,600);
     }else{var e=await res.json().catch(function(){return{};});throw new Error(e.error?e.error.message:'Send failed: '+res.status);}
   }catch(e){showErr('Email error: '+e.message);}
