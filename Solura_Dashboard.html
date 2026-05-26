@@ -985,6 +985,7 @@ async function loadData(){
     var ws=wb.Sheets['Lead Tracker'];
     if(!ws)throw new Error('Sheet "Lead Tracker" not found');
     rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+    console.log('Rows loaded:',rows.length,'Last row name:',rows[rows.length-1]?rows[rows.length-1][2]:'empty');
     var t=new Date();
     el('sync-time').textContent='Refreshed: '+t.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
     buildUI();
@@ -1037,10 +1038,9 @@ function buildUI(){
 
     al.push(lead);
 
-    if(!fuLocal){console.log('SKIP '+name+': no fuLocal, fuDs='+fuDs+' r[C.NF]='+r[C.NF]);continue;}
+    if(!fuLocal)continue;
     var actionDue=active||(na!==null);
-    if(!actionDue){console.log('SKIP '+name+': actionDue=false na='+JSON.stringify(na)+' active='+active+' log='+log);continue;}
-    console.log('ADD '+name+': fuDs='+fuDs+' ts='+ts+' actionDue='+actionDue+' na='+JSON.stringify(na));
+    if(!actionDue)continue;
     if(fuDs<ts)od.push(lead);
     else if(fuDs===ts)td2.push(lead);
     else if(fuLocal>today&&fuLocal<=weekEnd)wk.push(lead);
@@ -1058,15 +1058,10 @@ function buildUI(){
   el('c2').textContent=wk.length+' lead'+(wk.length!==1?'s':'');
   el('c3').textContent=al.length+' lead'+(al.length!==1?'s':'');
 
-  console.log('Rendering: od='+od.length+' td2='+td2.length+' wk='+wk.length+' al='+al.length);
   el('t0').innerHTML=buildRows(od,today);
-  console.log('t0 done, rendering t1...');
   el('t1').innerHTML=buildRows(td2,today);
-  console.log('t1 done, rendering t2...');
   el('t2').innerHTML=buildRows(wk,today);
-  console.log('t2 done, rendering t3...');
   el('t3').innerHTML=buildRows(al,today);
-  console.log('all tables rendered');
 
   el('kbar').style.display='grid';
   el('main').style.display='block';
