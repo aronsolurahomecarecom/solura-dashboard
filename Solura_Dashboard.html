@@ -567,7 +567,9 @@ function getNextAction(log,dO,dateAdded){
   }
 
   // ── Phase 1 (action-triggered) ───────────────────────────────────────────
-  if(!logged('Intro text — notify calling in 5 min'))
+  // "SMS sent" in log also counts as intro text done
+  var introLogged=logged('Intro text — notify calling in 5 min')||logged('SMS sent');
+  if(!introLogged)
     return SEQ[0]; // Intro text
   if(!logged('First call'))
     return SEQ[1];
@@ -602,13 +604,12 @@ function getNextAction(log,dO,dateAdded){
     if(!amLogged&&!pmLogged){
       // Neither done today yet
       if(h<amW.end){
-        // AM window still open
-        if(h>=amW.start)return amItem; // AM window active
-        return amItem; // Before 8 AM, show AM as coming up
+        return amItem; // AM window open or not yet started
       }
-      // AM window closed, check PM
-      if(h>=pmW.start&&h<pmW.end)return pmItem;
-      if(h<pmW.start)return pmItem; // gap between AM and PM
+      // AM window closed
+      if(h<pmW.end){
+        return pmItem; // PM window open or in gap
+      }
       // Both windows closed for this day — advance to next day
       continue;
     }
@@ -1365,8 +1366,9 @@ function openEmail(ri){
   var email=String(r[C.EM]||'').trim();
   if(!email){toast('No email address');return;}
   var c=getEmailContent(ri);
-  var dm=getDM(ri),name=String(r[C.NM]||'').trim();
-  el('email-to').textContent=(dm||name)+' <'+email+'>';
+  var names3=getNames(ri);
+  var dm=names3.dm||String(r[C.NM]||'').trim().split(' ')[0];
+  el('email-to').textContent=(dm||'Contact')+' <'+email+'>';
   el('email-subj').value=c.subject;
   el('email-body').value=c.body;
   el('modal-email').dataset.ri=ri;
