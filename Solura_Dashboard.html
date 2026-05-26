@@ -579,17 +579,14 @@ function getNextAction(log,dO,dateAdded){
     return SEQ[3];
 
   // ── Phase 2 (time-triggered, 10 days) ────────────────────────────────────
-  // Find current P2 day based on time since Phase 1 completed
-  // Phase 2 starts the day after Phase 1 is completed
-  // Each calendar day = one P2 day
-  var p2StartIdx=4; // index in SEQ where P2 begins
+  var h=now.getHours()+(now.getMinutes()/60);
   for(var d=1;d<=10;d++){
     var amText='AM Call — Day '+d;
     var pmText=d%2!==0?'PM Call — Day '+d:'PM Text — Day '+d;
     var amLogged=logged(amText);
     var pmLogged=logged(pmText);
 
-    // Find the SEQ items for this day
+    // Find SEQ items for this day
     var amItem=null,pmItem=null;
     for(var si=0;si<SEQ.length;si++){
       if(SEQ[si].ph===2&&SEQ[si].day===d&&SEQ[si].slot==='am')amItem=SEQ[si];
@@ -597,33 +594,35 @@ function getNextAction(log,dO,dateAdded){
     }
     if(!amItem||!pmItem)continue;
 
-    var h=now.getHours()+(now.getMinutes()/60);
     var amW=getP2Window(amItem);
     var pmW=getP2Window(pmItem);
+    var amWindowOpen=h>=amW.start&&h<amW.end;
+    var amWindowPassed=h>=amW.end;
+    var pmWindowOpen=h>=pmW.start&&h<pmW.end;
+    var pmWindowPassed=h>=pmW.end;
 
-    if(!amLogged&&!pmLogged){
-      // Neither done today yet
-      if(h<amW.end){
-        return amItem; // AM window open or not yet started
+    // If both logged — next day
+    if(amLogged&&pmLogged)continue;
+
+    // If AM not logged
+    if(!amLogged){
+      if(amWindowPassed){
+        // AM window closed without being done — it's gone, skip to PM
+        if(!pmLogged){
+          if(pmWindowPassed)continue; // PM also gone — next day
+          return pmItem; // PM still available
+        }
+        continue; // PM done too — next day
       }
-      // AM window closed
-      if(h<pmW.end){
-        return pmItem; // PM window open or in gap
-      }
-      // Both windows closed for this day — advance to next day
-      continue;
+      // AM window open or not started yet — show AM
+      return amItem;
     }
-    if(amLogged&&!pmLogged){
-      // AM done, check PM window
-      if(h<pmW.end)return pmItem;
-      // PM window closed — next day
-      continue;
+
+    // AM logged, PM not logged
+    if(!pmLogged){
+      if(pmWindowPassed)continue; // PM window closed — next day
+      return pmItem;
     }
-    if(!amLogged&&pmLogged){
-      // PM done but AM wasn't — weird state, move on
-      continue;
-    }
-    // Both logged — next day
   }
 
   // ── Phase 3 (time-triggered, weekly weeks 2-6) ───────────────────────────
@@ -1382,7 +1381,14 @@ async function sendSMS(){
         body:JSON.stringify({locationId:GHL_LOC,firstName:String(r3[C.NM]||'').split(' ')[0],phone:'+'+clean,email:String(r3[C.EM]||'')})});
       if(cr.ok){var cj=await cr.json();cid=cj.contact?cj.contact.id:null;}
     }
-    if(!cid)throw new Error('Could not find or create contact in HCG');
+    if(!cid){
+      // CORS may be blocking GHL API - open HCG directly as fallback
+      toast('Opening HCG to send manually...');
+      var fallClean=phone.replace(/\D/g,'');if(fallClean.length===10)fallClean='1'+fallClean;
+      window.open('https://app.homecaregrow.io/v2/location/'+GHL_LOC+'/contacts?search='+encodeURIComponent('+'+fallClean),'hcg','width=1200,height=800,noopener');
+      closeModal('modal-sms');
+      return;
+    }
     var smsr=await fetch(GHL_BASE+'/conversations/messages',{method:'POST',
       headers:{Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Content-Type':'application/json'},
       body:JSON.stringify({type:'SMS',contactId:cid,locationId:GHL_LOC,message:msg})});
