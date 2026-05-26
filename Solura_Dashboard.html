@@ -482,46 +482,420 @@ function sbadge(st){
   return '<span class="pill" style="background:var(--cream);color:var(--mid)">'+s+'</span>';
 }
 
-// ── Sequence Engine ───────────────────────────────────────────────────────────
+// ── Sequence + Templates ────────────────────────────────────────────────────
 var SEQ=[];
 (function(){
-  SEQ.push({ph:1,icon:'💬',text:'Intro text — notify calling in 5 min',type:'sms'});
-  SEQ.push({ph:1,icon:'📞',text:'First call',type:'call'});
-  SEQ.push({ph:1,icon:'📞',text:'Second call attempt',type:'call'});
-  SEQ.push({ph:1,icon:'💬',text:'Missed you text',type:'sms'});
+  // Phase 1 — action triggered (4 steps)
+  SEQ.push({ph:1,icon:'💬',text:'Intro text — notify calling in 5 min',type:'sms',trigger:'action'});
+  SEQ.push({ph:1,icon:'📞',text:'First call',type:'call',trigger:'action'});
+  SEQ.push({ph:1,icon:'📞',text:'Second call attempt',type:'call',trigger:'action'});
+  SEQ.push({ph:1,icon:'💬',text:'Missed you text',type:'sms',trigger:'action'});
+  // Phase 2 — time triggered (10 days x 2)
   for(var d=1;d<=10;d++){
-    SEQ.push({ph:2,icon:'📞',text:'AM Call — Day '+d,type:'call',day:d,lbl:'Phase 2 · Day '+d});
-    var pm=d%2===0?{icon:'💬',text:'PM Text — Day '+d,type:'sms'}:{icon:'📞',text:'PM Call — Day '+d,type:'call'};
-    pm.ph=2;pm.day=d;pm.lbl='Phase 2 · Day '+d;
-    SEQ.push(pm);
-  }
-  for(var w=2;w<=6;w++)SEQ.push({ph:3,icon:'💬',text:'Week '+w+' outreach',type:'sms',week:w,lbl:'Phase 3 · Wk '+w});
-  SEQ.push({ph:4,icon:'📞',text:'6-week re-engagement call',type:'call',lbl:'Phase 4'});
-  SEQ.push({ph:4,icon:'💬',text:'Voicemail + follow-up text',type:'sms',lbl:'Phase 4'});
-})();
-
-function getNext(log){
-  // log = pipe-separated string of completed action texts
-  var entries=(log||'').split(' | ').filter(function(e){return e.trim();});
-  var lastDone=-1;
-  for(var i=SEQ.length-1;i>=0;i--){
-    var tag=SEQ[i].text;
-    for(var j=0;j<entries.length;j++){
-      if(entries[j].indexOf(tag)>-1){if(i>lastDone)lastDone=i;break;}
+    var pmIsCall=(d%2!==0); // odd days = PM call, even days = PM text
+    SEQ.push({ph:2,icon:'📞',text:'AM Call — Day '+d,type:'call',trigger:'time',day:d,slot:'am',pmIsCall:pmIsCall,lbl:'Phase 2 · Day '+d});
+    if(pmIsCall){
+      SEQ.push({ph:2,icon:'📞',text:'PM Call — Day '+d,type:'call',trigger:'time',day:d,slot:'pm',pmIsCall:true,lbl:'Phase 2 · Day '+d});
+    }else{
+      SEQ.push({ph:2,icon:'💬',text:'PM Text — Day '+d,type:'sms',trigger:'time',day:d,slot:'pm',pmIsCall:false,lbl:'Phase 2 · Day '+d});
     }
   }
-  var next=lastDone+1;
-  if(next>=SEQ.length)return{ph:5,icon:'💬',text:'Weekly nurture',type:'sms',lbl:'Phase 5'};
-  var a=SEQ[next];
-  return{ph:a.ph,icon:a.icon,text:a.text,type:a.type,lbl:a.lbl||(a.ph===1?'Phase 1':'Phase '+a.ph)};
+  // Phase 3 — time triggered (5 weeks, weekly)
+  for(var w=2;w<=6;w++){
+    SEQ.push({ph:3,icon:'💬',text:'Week '+w+' check-in',type:'sms',trigger:'time',week:w,lbl:'Phase 3 · Wk '+w});
+  }
+  // Phase 4 — action triggered (2 steps)
+  SEQ.push({ph:4,icon:'📞',text:'6-week re-engagement call',type:'call',trigger:'action',lbl:'Phase 4'});
+  SEQ.push({ph:4,icon:'💬',text:'Voicemail + follow-up text',type:'sms',trigger:'action',lbl:'Phase 4'});
+  // Phase 5 — time triggered (ongoing weekly)
+  SEQ.push({ph:5,icon:'💬',text:'Long-term nurture — weekly',type:'sms',trigger:'time',lbl:'Phase 5'});
+})();
+
+// ── Timing Engine ─────────────────────────────────────────────────────────────
+// Returns current action for a no-answer lead based on time-trigger rules
+// Phase 1 & 4: action-triggered (advance only when logged)
+// Phase 2: time-triggered with strict windows per slot
+// Phase 3 & 5: time-triggered weekly (available Mon-Sun, then next week)
+
+function getNow(){return new Date();}
+
+function getP2Window(seqItem){
+  // Returns {start:HH, end:HH} for a Phase 2 action based on day/slot/type
+  // pmIsCall = true means this day's PM is a call
+  if(seqItem.slot==='am'){
+    // AM call window: 8 AM to 1 PM (PM call day) or 8 AM to 5 PM (PM text day)
+    return{start:8,end:seqItem.pmIsCall?13:17};
+  }else{
+    // PM slot: call = 3 PM to 9 PM, text = 2 PM to 22 (10 PM)
+    return{start:seqItem.pmIsCall?15:14,end:seqItem.pmIsCall?21:22};
+  }
 }
+
+function isP2WindowOpen(seqItem,now){
+  var h=now.getHours()+(now.getMinutes()/60);
+  var w=getP2Window(seqItem);
+  return h>=w.start&&h<w.end;
+}
+
+function getP2DayForLead(log,daysOld){
+  // Based on daysOld, determine current Phase 2 day (1-10)
+  // daysOld starts at 0 on day added, Phase 2 starts when Phase 1 complete
+  // For time-triggered Phase 2, day = daysOld since P2 started
+  // We track P2 start by presence of Phase 1 completion in log
+  var p1Done=log&&(log.indexOf('Missed you text')>-1||log.indexOf('Intro text')>-1);
+  // Find when P2 started from log entries, or estimate from daysOld
+  // Simple: if Phase 1 is done, P2 day = daysOld - estimated P1 days
+  // But we track actual P2 day from log
+  for(var d=10;d>=1;d--){
+    if(log&&(log.indexOf('AM Call — Day '+d)>-1||log.indexOf('PM Call — Day '+d)>-1||log.indexOf('PM Text — Day '+d)>-1)){
+      // Found last logged P2 day
+      return d+1<=10?d+1:null; // next day, or null if done
+    }
+  }
+  return 1; // P2 day 1 if nothing logged yet
+}
+
+function getNextAction(log,dO,dateAdded){
+  // log = pipe-separated completed action log
+  // dO = days since lead was added
+  // dateAdded = Date object
+  var now=getNow();
+  var entries=(log||'').split(' | ').filter(function(e){return e.trim();});
+
+  function logged(text){
+    return entries.some(function(e){return e.indexOf(text)>-1;});
+  }
+
+  // ── Phase 1 (action-triggered) ───────────────────────────────────────────
+  if(!logged('Intro text — notify calling in 5 min'))
+    return SEQ[0]; // Intro text
+  if(!logged('First call'))
+    return SEQ[1];
+  if(!logged('Second call attempt'))
+    return SEQ[2];
+  if(!logged('Missed you text'))
+    return SEQ[3];
+
+  // ── Phase 2 (time-triggered, 10 days) ────────────────────────────────────
+  // Find current P2 day based on time since Phase 1 completed
+  // Phase 2 starts the day after Phase 1 is completed
+  // Each calendar day = one P2 day
+  var p2StartIdx=4; // index in SEQ where P2 begins
+  for(var d=1;d<=10;d++){
+    var amText='AM Call — Day '+d;
+    var pmText=d%2!==0?'PM Call — Day '+d:'PM Text — Day '+d;
+    var amLogged=logged(amText);
+    var pmLogged=logged(pmText);
+
+    // Find the SEQ items for this day
+    var amItem=null,pmItem=null;
+    for(var si=0;si<SEQ.length;si++){
+      if(SEQ[si].ph===2&&SEQ[si].day===d&&SEQ[si].slot==='am')amItem=SEQ[si];
+      if(SEQ[si].ph===2&&SEQ[si].day===d&&SEQ[si].slot==='pm')pmItem=SEQ[si];
+    }
+    if(!amItem||!pmItem)continue;
+
+    var h=now.getHours()+(now.getMinutes()/60);
+    var amW=getP2Window(amItem);
+    var pmW=getP2Window(pmItem);
+
+    if(!amLogged&&!pmLogged){
+      // Neither done today yet
+      if(h<amW.end){
+        // AM window still open
+        if(h>=amW.start)return amItem; // AM window active
+        return amItem; // Before 8 AM, show AM as coming up
+      }
+      // AM window closed, check PM
+      if(h>=pmW.start&&h<pmW.end)return pmItem;
+      if(h<pmW.start)return pmItem; // gap between AM and PM
+      // Both windows closed for this day — advance to next day
+      continue;
+    }
+    if(amLogged&&!pmLogged){
+      // AM done, check PM window
+      if(h<pmW.end)return pmItem;
+      // PM window closed — next day
+      continue;
+    }
+    if(!amLogged&&pmLogged){
+      // PM done but AM wasn't — weird state, move on
+      continue;
+    }
+    // Both logged — next day
+  }
+
+  // ── Phase 3 (time-triggered, weekly weeks 2-6) ───────────────────────────
+  for(var w=2;w<=6;w++){
+    var wText='Week '+w+' check-in';
+    if(!logged(wText)){
+      // Find what day of week we're on
+      // Each week corresponds to a calendar week starting from lead date
+      // Week 2 = 2nd week after lead added, etc.
+      // Available Monday through Sunday of that week
+      // If current week matches and within Sun boundary, show it
+      var today2=localToday();
+      var dayOfWeek=today2.getDay(); // 0=Sun,1=Mon,...,6=Sat
+      // Week window: Monday = dayOfWeek 1, Sunday = dayOfWeek 0 (next week)
+      // Show if we're in the right week (Mon-Sun)
+      // We show this item and let the user act; it expires Sunday 11:59 PM
+      // Simple: just show the next unlogged week item
+      var p3Item=null;
+      for(var si2=0;si2<SEQ.length;si2++){
+        if(SEQ[si2].ph===3&&SEQ[si2].week===w){p3Item=SEQ[si2];break;}
+      }
+      if(p3Item)return p3Item;
+    }
+  }
+
+  // ── Phase 4 (action-triggered) ───────────────────────────────────────────
+  if(!logged('6-week re-engagement call')){
+    for(var si3=0;si3<SEQ.length;si3++){
+      if(SEQ[si3].text==='6-week re-engagement call')return SEQ[si3];
+    }
+  }
+  if(!logged('Voicemail + follow-up text')){
+    for(var si4=0;si4<SEQ.length;si4++){
+      if(SEQ[si4].text==='Voicemail + follow-up text')return SEQ[si4];
+    }
+  }
+
+  // ── Phase 5 (time-triggered, ongoing weekly) ─────────────────────────────
+  return{ph:5,icon:'💬',text:'Long-term nurture — weekly',type:'sms',trigger:'time',lbl:'Phase 5'};
+}
+
 function appendLog(existing,actionText,method){
   var entry=actionText+(method?' via '+method:'');
   var parts=(existing||'').split(' | ').filter(function(e){return e.trim();});
   parts.push(entry);
-  if(parts.length>30)parts=parts.slice(parts.length-30);
+  if(parts.length>40)parts=parts.slice(parts.length-40);
   return parts.join(' | ');
 }
+
+// Check if a Phase 2 action is currently in window (for display)
+function isActionAvailableNow(na){
+  if(!na)return false;
+  if(na.trigger==='action')return true; // action-triggered always available
+  if(na.ph===2){
+    return isP2WindowOpen(na,getNow());
+  }
+  return true; // Phase 3,5 — always available during their week
+}
+
+
+// ── Name Logic ────────────────────────────────────────────────────────────────
+function getNames(ri){
+  var r=rows[ri]||[];
+  var dmFull=String(r[C.DM]||'').trim();
+  var clientFull=String(r[C.NM]||'').trim();
+  // DM first name
+  var dmFirst=dmFull?dmFull.split(' ')[0]:'';
+  // Patient: client name, only if different from DM
+  var ptFirst='';
+  if(clientFull){
+    var clientFirst=clientFull.split(' ')[0];
+    // If client first name is same as DM first name, same person
+    if(dmFirst&&clientFirst.toLowerCase()===dmFirst.toLowerCase()){
+      ptFirst=''; // same person, don't mention separately
+    }else{
+      ptFirst=clientFirst;
+    }
+  }
+  return{dm:dmFirst,pt:ptFirst,hasDM:!!dmFirst};
+}
+
+function fillNames(s,names){
+  var dm=names.dm||'there';
+  s=s.replace(/{dm}/g,dm);
+  if(names.pt){
+    s=s.replace(/{pt}/g,names.pt);
+    // Keep "for {pt}" references as is since pt exists
+  }else{
+    // Remove patient references smoothly
+    s=s.replace(/\s+for\s+\{pt\}/gi,'');
+    s=s.replace(/\s+about\s+\{pt\}/gi,'');
+    s=s.replace(/\s+on\s+\{pt\}/gi,'');
+    s=s.replace(/\s+and\s+\{pt\}/gi,'');
+    s=s.replace(/\s+\{pt\}/g,'');
+    s=s.replace(/\{pt\}/g,'');
+  }
+  return s.trim().replace(/\s+/g,' ');
+}
+
+function isAPFM(ri){return String(rows[ri]&&rows[ri][C.SO]||'').toLowerCase().indexOf('place for mom')>-1;}
+
+// ── Templates ─────────────────────────────────────────────────────────────────
+// COLD templates — for no-answer leads only (Phases 1-5 sequence)
+// WARM templates — for active/responded leads only
+
+var COLD={
+  // APFM leads
+  apfm:{
+    p1_intro:[
+      "Hi {dm}, this is Meir with Solura Home Care. We received your information from A Place for Mom regarding care for {pt}. We'd love to help and one of our team members will be calling you in the next 5 minutes. — Meir, 216-483-8981",
+      "Hi {dm}, Meir here from Solura Home Care. A Place for Mom connected us about care for {pt}. We're excited to help — expect a call from us shortly! — 216-483-8981",
+      "Hi {dm}, this is Meir with Solura Home Care. We got your referral from A Place for Mom for {pt} and we're calling you in just a few minutes. — Meir"
+    ],
+    p1_missed:[
+      "Hi {dm}, Meir from Solura Home Care. We tried reaching you today — A Place for Mom connected us about care for {pt}. Call us at 216-483-8981 or we'll follow up soon.",
+      "Hi {dm}, we called but missed you. Following up on your A Place for Mom inquiry for {pt}. Reach us anytime at 216-483-8981. — Meir, Solura Home Care",
+      "Hi {dm}, Meir with Solura Home Care. Sorry we missed you — we received your A Place for Mom referral for {pt}. Call us at 216-483-8981."
+    ],
+    p2:[
+      "Hi {dm}, Meir with Solura Home Care checking in. We'd love to connect about care for {pt}. Give us a call at 216-483-8981 or reply anytime.",
+      "Hello {dm}, Meir from Solura Home Care. Just following up about care for {pt} — we're here to help. 216-483-8981.",
+      "Hi {dm}, Meir here with Solura Home Care. Still thinking of you and {pt} — we're here when you're ready. 216-483-8981"
+    ],
+    p3:[
+      "Hi {dm}, Meir with Solura Home Care. Just checking in about care for {pt}. We're here whenever the time is right — 216-483-8981.",
+      "Hello {dm}, Meir from Solura Home Care. Thinking of you and {pt} this week. We're just a call away: 216-483-8981.",
+      "Hi {dm}, Meir with Solura Home Care. Hope {pt} is doing well. Still here if you need support — 216-483-8981."
+    ],
+    p4:[
+      "Hi {dm}, Meir with Solura Home Care. Reaching out one more time about care for {pt}. Happy to answer any questions — 216-483-8981.",
+      "Hello {dm}, Meir from Solura Home Care. Checking in on {pt} — we'd still love to help. No pressure. 216-483-8981.",
+      "Hi {dm}, Meir here from Solura Home Care. Just wanted to make sure you know we're here for {pt} whenever you're ready. 216-483-8981."
+    ],
+    p5:[
+      "Hi {dm}, Meir with Solura Home Care. Thinking of you and {pt} — we're still here whenever you need us. 216-483-8981.",
+      "Hello {dm}, Meir from Solura Home Care. Just a friendly check-in for {pt}. Call or text anytime. 216-483-8981.",
+      "Hi {dm}, Meir with Solura Home Care. Hope all is well with {pt}. We're here whenever the time is right. 216-483-8981."
+    ]
+  },
+  // Non-APFM leads
+  gen:{
+    p1_intro:[
+      "Hi {dm}, this is Meir with Solura Home Care. We received your inquiry and wanted to reach out personally. One of our team members will be calling you in the next 5 minutes. — 216-483-8981",
+      "Hi {dm}, Meir here from Solura Home Care. We received your request and we'd love to help. Expect a call from us shortly! — 216-483-8981",
+      "Hi {dm}, this is Meir with Solura Home Care. We got your inquiry and we're calling you in just a few minutes. — 216-483-8981"
+    ],
+    p1_missed:[
+      "Hi {dm}, Meir from Solura Home Care. We tried reaching you today and would love to connect. Call us at 216-483-8981 or we'll follow up soon.",
+      "Hi {dm}, we called but missed you. We'd love to learn more about how we can help. Reach us anytime at 216-483-8981. — Meir, Solura Home Care",
+      "Hi {dm}, Meir with Solura Home Care. Sorry we missed you today. Call us at 216-483-8981 — we're here to help."
+    ],
+    p2:[
+      "Hi {dm}, Meir with Solura Home Care checking in. We'd love to connect about care support. Call us at 216-483-8981 or reply here.",
+      "Hello {dm}, Meir from Solura Home Care. Just following up on your inquiry — we're here whenever you're ready. 216-483-8981.",
+      "Hi {dm}, Meir here with Solura Home Care. Still thinking of you — available to help whenever the time is right. 216-483-8981"
+    ],
+    p3:[
+      "Hi {dm}, Meir with Solura Home Care. Just checking in to see if you're still exploring care options. We're here when you need us. 216-483-8981.",
+      "Hello {dm}, Meir from Solura Home Care. Thinking of you this week. Just a call away if anything has changed. 216-483-8981.",
+      "Hi {dm}, Meir with Solura Home Care. Hope all is well. Still here if you need care support — 216-483-8981."
+    ],
+    p4:[
+      "Hi {dm}, Meir with Solura Home Care. Reaching out one more time to see if you're still exploring care options. 216-483-8981.",
+      "Hello {dm}, Meir from Solura Home Care. Just checking in to see how things are going and if we can still help. 216-483-8981.",
+      "Hi {dm}, Meir here from Solura Home Care. No pressure at all — just want you to know we're here whenever you're ready. 216-483-8981."
+    ],
+    p5:[
+      "Hi {dm}, Meir with Solura Home Care. Just a quick check-in — we're still here if you ever need care support. 216-483-8981.",
+      "Hello {dm}, Meir from Solura Home Care. Thinking of you. Call or text anytime — we're here. 216-483-8981.",
+      "Hi {dm}, Meir with Solura Home Care. Hope you're doing well. Still here whenever the time is right. 216-483-8981."
+    ]
+  }
+};
+
+var WARM={
+  // Warm follow-up for active/responded leads (used for Script button only)
+  sms:[
+    "Hi {dm}, it's Meir from Solura Home Care. Just following up from our last conversation — how are things going? We're here whenever you're ready to take the next step. 216-483-8981.",
+    "Hello {dm}, Meir here from Solura Home Care. Wanted to check in and see if you have any questions or updates. Feel free to call or text anytime. 216-483-8981.",
+    "Hi {dm}, Meir with Solura Home Care. Just thinking of you and wanted to reach out. We're still here and ready to help whenever you need us. 216-483-8981."
+  ],
+  email:{
+    subj:[
+      "Following up — Solura Home Care",
+      "Checking in — Solura Home Care",
+      "A note from Meir at Solura Home Care"
+    ],
+    body:[
+      "Hi {dm},\n\nI wanted to follow up from our last conversation and see how things are progressing. We're still here and ready to help whenever you're ready to move forward.\n\nIf you have any questions or would like to schedule that in-home assessment, just give me a call or reply to this email.\n\nWarm regards,\nMeir Schwimer\nSolura Home Care\n216-483-8981\nwww.solurahomecare.com",
+      "Hi {dm},\n\nJust a quick note to check in and see if there's anything I can help with. We're here whenever you're ready.\n\nA free in-home assessment is always available — no commitment required. Just a conversation to help you make the best decision.\n\nAlways here for you,\nMeir Schwimer\nSolura Home Care\n216-483-8981",
+      "Hi {dm},\n\nHope you're doing well. I'm reaching out to let you know Solura Home Care is still here and ready to support you whenever the time is right.\n\nDon't hesitate to reach out with any questions.\n\nBest,\nMeir\nSolura Home Care | 216-483-8981"
+    ]
+  }
+};
+
+// Cold email templates (for sequence phases 3, 4, 5)
+var COLD_EMAIL={
+  apfm:{
+    subj:["Checking in — care support for {pt}","Still here for you and {pt}","A note from Solura Home Care"],
+    body:[
+      "Hi {dm},\n\nI wanted to check in and see how {pt} is doing. Finding the right care takes time, and we're here whenever you're ready.\n\nAt Solura Home Care, we specialize in compassionate non-medical support tailored to {pt}'s needs. A free in-home assessment is always available.\n\nWarm regards,\nMeir Schwimer\nSolura Home Care\n216-483-8981\nwww.solurahomecare.com",
+      "Hi {dm},\n\nJust a quick note — we're still thinking of you and {pt}. No rush, no pressure.\n\nWhenever you're ready, we'd love to schedule a free in-home assessment to create a personalized care plan.\n\nAlways here,\nMeir Schwimer\nSolura Home Care\n216-483-8981",
+      "Hi {dm},\n\nHope you and {pt} are doing well. Solura Home Care is still available and ready to help whenever the time is right.\n\nOur caregivers are trained, background-checked, and matched based on both skills and personality.\n\nBest,\nMeir\nSolura Home Care | 216-483-8981"
+    ]
+  },
+  gen:{
+    subj:["Following up on your care inquiry","We're still here to help","A note from Solura Home Care"],
+    body:[
+      "Hi {dm},\n\nI wanted to follow up on your inquiry and see if you're still exploring home care options. We know these decisions take time, and we're here whenever you're ready.\n\nA free in-home assessment is always available — no commitment required.\n\nWarm regards,\nMeir Schwimer\nSolura Home Care\n216-483-8981\nwww.solurahomecare.com",
+      "Hi {dm},\n\nJust a quick note to let you know we're still here if you need home care support. No rush at all.\n\nWhenever you're ready, we'd love to have a conversation.\n\nAlways here,\nMeir Schwimer\nSolura Home Care\n216-483-8981",
+      "Hi {dm},\n\nHope all is well. Solura Home Care is still available and ready to help whenever the time is right.\n\nDon't hesitate to reach out with any questions.\n\nBest,\nMeir\nSolura Home Care | 216-483-8981"
+    ]
+  }
+};
+
+function getTpl(arr,ri){return arr[ri%arr.length];}
+
+function getSMSText(ri){
+  var r=rows[ri]||[];
+  var names=getNames(ri);
+  var log=String(r[C.SL]||'');
+  var active=isActive(r[C.ST]||'');
+
+  // Active/responded leads get warm templates only
+  if(active){
+    var s=getTpl(WARM.sms,ri);
+    return fillNames(s,names);
+  }
+
+  // No-answer leads get cold sequence templates
+  var apfm=isAPFM(ri);
+  var na=getNextAction(log,0,pd(r[C.DA]));
+  var ph=na?na.ph:5;
+  var set=apfm?COLD.apfm:COLD.gen;
+  var arr;
+
+  if(ph===1){
+    var introLogged=log.indexOf('Intro text')>-1;
+    arr=introLogged?set.p1_missed:set.p1_intro;
+  }else if(ph===2)arr=set.p2;
+  else if(ph===3)arr=set.p3;
+  else if(ph===4)arr=set.p4;
+  else arr=set.p5;
+
+  var s=getTpl(arr,ri);
+  return fillNames(s,names);
+}
+
+function getEmailContent(ri){
+  var r=rows[ri]||[];
+  var names=getNames(ri);
+  var active=isActive(r[C.ST]||'');
+
+  // Active/responded leads get warm email templates
+  if(active){
+    var idx=ri%WARM.email.subj.length;
+    return{
+      subject:fillNames(WARM.email.subj[idx],names),
+      body:fillNames(WARM.email.body[idx],names)
+    };
+  }
+
+  // No-answer leads get cold email templates
+  var apfm=isAPFM(ri);
+  var set=apfm?COLD_EMAIL.apfm:COLD_EMAIL.gen;
+  var idx2=ri%set.subj.length;
+  return{
+    subject:fillNames(set.subj[idx2],names),
+    body:fillNames(set.body[idx2],names)
+  };
+}
+
+
 
 // ── Auth (PKCE) ───────────────────────────────────────────────────────────────
 async function genPKCE(){
@@ -645,7 +1019,7 @@ function buildUI(){
 
     var active=isActive(st);
     var log=String(r[C.SL]||'').trim();
-    var na=active?null:getNext(log);
+    var na=active?null:getNextAction(log,dO,pd(r[C.DA]));
     var dO=daysAgo(r[C.DA]);
     var seqLbl=na?na.lbl:'—';
 
@@ -702,7 +1076,7 @@ function buildRows(leads,today){
     var borderCls=daysOff>0?'border-red':daysOff===0?'border-gold':l.active?'border-sky':'border-grn';
     var ph=l.phone?'<a class="ph" href="#" onclick="event.stopPropagation();event.preventDefault();dialHCG(&quot;'+l.phone+'&quot;)">📞 '+l.phone+'</a>':'';
     var em=l.email?'<div><a class="em" href="mailto:'+l.email+'">✉ '+l.email+'</a></div>':'';
-    var dmHtml=l.dm&&l.dm!==l.name?'<div class="dm-tag">via <span>'+l.dm.split(' ')[0]+'</span></div>':'';
+    var dmHtml=l.dm&&l.dm!==l.name?'<div class="dm-tag">via <span>'+l.dm+'</span></div>':'';
     var seqHtml='';
     if(l.active){
       var logLower=(l.log||'').toLowerCase();
@@ -797,7 +1171,7 @@ function openEp(ri,mode){
   epEl.dataset.ri=ri;
 
   var r=rows[ri]||[];
-  var na=isActive(r[C.ST]||'')?null:getNext(String(r[C.SL]||''));
+  var na=isActive(r[C.ST]||'')?null:getNextAction(String(r[C.SL]||''),0,pd(r[C.DA]));
   var today=localToday();
   var def3=new Date(today.getFullYear(),today.getMonth(),today.getDate()+3);
 
@@ -922,75 +1296,6 @@ async function saveEp(ri,mode){
   }
 }
 
-// ── Templates ─────────────────────────────────────────────────────────────────
-function getDM(ri){var r=rows[ri]||[];var dm=String(r[C.DM]||'').trim();var nm=String(r[C.NM]||'').trim();return dm?dm.split(' ')[0]:nm?nm.split(' ')[0]:'';}
-function getPT(ri){var r=rows[ri]||[];var nm=String(r[C.NM]||'').trim().split(' ')[0];var dm=String(r[C.DM]||'').trim().split(' ')[0];if(!nm)return '';if(nm.toLowerCase()===dm.toLowerCase())return '';return nm;}
-function isAPFM(ri){return String(rows[ri]&&rows[ri][C.SO]||'').toLowerCase().indexOf('place for mom')>-1;}
-function hasDM(ri){return !!(rows[ri]&&String(rows[ri][C.DM]||'').trim());}
-function fillT(s,dm,pt){
-  var d=dm||'there',p=pt;
-  s=s.replace(/{dm}/g,d);
-  if(p)s=s.replace(/{pt}/g,p);
-  else s=s.replace(/\s*(for|about|on)\s*\{pt\}/gi,'').replace(/{pt}/g,'');
-  return s.trim();
-}
-function tpl(arr,ri){return arr[ri%arr.length];}
-
-var T={
-  apfm_p1i:["Hi {dm}, this is Meir with Solura Home Care. We received your information from A Place for Mom and understand you're looking for care for {pt}. We provide compassionate, reliable home care and one of our team members will be calling you in the next 5 minutes. — Meir, "+PHONE,"Hi {dm}, Meir here from Solura Home Care. A Place for Mom connected us — we'd love to help find the right care for {pt}. Expect a call from us shortly! — "+PHONE,"Hi {dm}, this is Meir with Solura Home Care. We got your referral from A Place for Mom regarding care for {pt} and we're giving you a call in just a few minutes. — Meir"],
-  apfm_p1m:["Hi {dm}, Meir from Solura Home Care. We tried reaching you today after A Place for Mom connected us about care for {pt}. We'd love to connect — call us at "+PHONE+" or we'll follow up soon.","Hi {dm}, we called but missed you. We're following up on the care inquiry through A Place for Mom for {pt}. Reach us anytime at "+PHONE+". — Meir, Solura Home Care","Hi {dm}, Meir with Solura Home Care. Sorry we missed you — we received your A Place for Mom referral for {pt}. Call us at "+PHONE+", we're here to help."],
-  apfm_p2:["Hi {dm}, Meir with Solura Home Care checking in. We'd love to connect about care options for {pt}. Give us a call at "+PHONE+" or reply here anytime.","Hello {dm}, this is Meir from Solura Home Care. Just following up about care for {pt} — we're here to help. Reach us at "+PHONE+".","Hi {dm}, Meir here with Solura Home Care. Still thinking of you and {pt} — we're here when you're ready. "+PHONE],
-  apfm_nur:["Hi {dm}, Meir with Solura Home Care. Just checking in to see if you're still exploring care options for {pt}. We're here whenever the time is right — "+PHONE+".","Hello {dm}, Meir from Solura Home Care. Thinking of you and {pt} this week. We're just a call away: "+PHONE+".","Hi {dm}, Meir with Solura Home Care. Hope {pt} is doing well. We're still here if you need support — "+PHONE+" or reply anytime."],
-  apfm_p4:["Hi {dm}, Meir with Solura Home Care. Reaching out to see if you're still exploring care for {pt}. Happy to answer questions — "+PHONE+".","Hello {dm}, Meir from Solura Home Care. Just wanted to check in on {pt} and see if we can still help. No pressure — we're here. "+PHONE,"Hi {dm}, Meir here from Solura Home Care. Checking back in on care for {pt}. Call us anytime at "+PHONE+"."],
-  gen_p1i:["Hi {dm}, this is Meir with Solura Home Care. We received your inquiry and wanted to reach out personally. We specialize in compassionate home care and one of our team members will be calling you in the next 5 minutes. — "+PHONE,"Hi {dm}, Meir here from Solura Home Care. We received your inquiry and we'd love to help. Expect a call from us shortly! — "+PHONE,"Hi {dm}, this is Meir with Solura Home Care. We received your request for home care and we're calling you in just a few minutes. — "+PHONE],
-  gen_p1m:["Hi {dm}, Meir from Solura Home Care. We tried reaching you today and would love to connect. Call us at "+PHONE+" or we'll follow up soon.","Hi {dm}, we called but missed you. We'd love to learn more about how we can help. Reach us anytime at "+PHONE+". — Meir, Solura Home Care","Hi {dm}, Meir with Solura Home Care. Sorry we missed you today. Call us at "+PHONE+", we're here to help."],
-  gen_p2:["Hi {dm}, Meir with Solura Home Care checking in. We'd love to connect and learn more about how we can help. Call us at "+PHONE+" or reply here.","Hello {dm}, Meir from Solura Home Care. Just following up on your home care inquiry — we're here whenever you're ready. "+PHONE+".","Hi {dm}, Meir here with Solura Home Care. Still thinking of you — we're available to help whenever the time is right. "+PHONE],
-  gen_nur:["Hi {dm}, Meir with Solura Home Care. Just a quick check-in to see if you're still exploring care options. No rush — we're here when you need us. "+PHONE+".","Hello {dm}, Meir from Solura Home Care. Thinking of you this week. We're just a call away if anything has changed. "+PHONE+".","Hi {dm}, Meir with Solura Home Care. Hope all is well. We're still here if you need compassionate care support — "+PHONE+"."],
-  gen_p4:["Hi {dm}, Meir with Solura Home Care. Reaching out to see if you're still looking into care options. Happy to answer any questions — "+PHONE+".","Hello {dm}, Meir from Solura Home Care. Just checking in to see how things are going and if we can still be of help. "+PHONE+".","Hi {dm}, Meir here from Solura Home Care. No pressure at all — just want you to know we're here whenever you're ready. "+PHONE+"."],
-  email_apfm:{
-    s:["Checking in — Care Support for {pt}","Still here for you and {pt}","A quick note from Solura Home Care"],
-    b:["Hi {dm},\n\nI wanted to check in and see how {pt} is doing. We know finding the right care takes time, and we're here whenever you're ready.\n\nAt Solura Home Care, we specialize in compassionate non-medical support tailored to {pt}'s needs. A free in-home assessment is always available.\n\nWarm regards,\nMeir Schwimer\nSolura Home Care\n"+PHONE+"\nwww.solurahomecare.com","Hi {dm},\n\nJust a quick note to let you know we're still thinking of you and {pt}. No rush and no pressure.\n\nWhenever you're ready, we'd love to schedule a free in-home assessment.\n\nAlways here for you,\nMeir Schwimer\nSolura Home Care\n"+PHONE,"Hi {dm},\n\nHope you and {pt} are doing well. Solura Home Care is still available and ready to help whenever the time is right.\n\nBest,\nMeir\nSolura Home Care | "+PHONE]
-  },
-  email_gen:{
-    s:["Following up on your care inquiry","We're still here to help","A note from Solura Home Care"],
-    b:["Hi {dm},\n\nI wanted to follow up on your inquiry and see if you're still exploring home care options. We know this process takes time, and we're here whenever you're ready.\n\nA free in-home assessment is always available — no commitment required.\n\nWarm regards,\nMeir Schwimer\nSolura Home Care\n"+PHONE+"\nwww.solurahomecare.com","Hi {dm},\n\nJust a quick note to let you know we're still here if you need home care support. No rush — we understand these decisions take time.\n\nAlways here for you,\nMeir Schwimer\nSolura Home Care\n"+PHONE,"Hi {dm},\n\nHope all is well. I'm reaching out to let you know Solura Home Care is still available and ready to help whenever the time is right.\n\nBest,\nMeir\nSolura Home Care | "+PHONE]
-  }
-};
-
-function getSMSText(ri){
-  var r=rows[ri]||[];
-  var dm=getDM(ri),pt=getPT(ri),log=String(r[C.SL]||'');
-  var apfm=isAPFM(ri),noDM=!hasDM(ri);
-  var na=getNext(log);
-  var ph=na?na.ph:5,txt=na?na.text:'';
-  var arr;
-  if(apfm){
-    if(ph===1){arr=log.indexOf('Intro text')===-1?T.apfm_p1i:T.apfm_p1m;}
-    else if(ph===2)arr=T.apfm_p2;
-    else if(ph===4)arr=T.apfm_p4;
-    else arr=T.apfm_nur;
-  }else{
-    if(ph===1){arr=log.indexOf('Intro text')===-1?T.gen_p1i:T.gen_p1m;}
-    else if(ph===2)arr=T.gen_p2;
-    else if(ph===4)arr=T.gen_p4;
-    else arr=T.gen_nur;
-  }
-  var s=tpl(arr,ri);
-  if(noDM)s=s.replace(/Hi \{dm\}/g,'Hi there').replace(/Hello \{dm\}/g,'Hello');
-  return fillT(s,dm,pt);
-}
-
-function getEmailContent(ri){
-  var r=rows[ri]||[];
-  var dm=getDM(ri),pt=getPT(ri);
-  var apfm=isAPFM(ri),noDM=!hasDM(ri);
-  var set=apfm?T.email_apfm:T.email_gen;
-  var idx=ri%set.s.length;
-  var subj=set.s[idx],body=set.b[idx];
-  if(noDM){subj=subj.replace(/\{dm\}/g,'');body=body.replace(/Hi \{dm\}/g,'Hi there');}
-  return{subject:fillT(subj,dm,pt),body:fillT(body,dm,pt)};
-}
-
 // ── Actions ───────────────────────────────────────────────────────────────────
 async function dialHCG(phone){
   if(!phone)return;
@@ -1091,7 +1396,7 @@ async function sendEmail(){
 
 function openScript(ri){
   var r=rows[ri]||[];
-  var dm=getDM(ri)||'them';
+  var names2=getNames(ri);var dm=names2.dm||'them';
   var apfm=isAPFM(ri);
   var st=String(r[C.ST]||'').toLowerCase();
   var isActv=isActive(r[C.ST]||'');
@@ -1137,7 +1442,7 @@ function openDrawer(ri){
   var name=String(r[C.NM]||'').trim();
   el('d-name').textContent=name;
   var log=String(r[C.SL]||'').trim();
-  var na=isActive(r[C.ST]||'')?null:getNext(log);
+  var na=isActive(r[C.ST]||'')?null:getNextAction(log,0,pd(r[C.DA]));
   var fields=[
     ['Phone',String(r[C.PH]||'')],['Email',String(r[C.EM]||'')],
     ['Status',String(r[C.ST]||'')],['Decision Maker',String(r[C.DM]||'')],
