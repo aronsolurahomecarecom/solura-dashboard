@@ -1197,6 +1197,7 @@ function openEp(ri,mode){
     html='<div class="ebanner eb-sky">🤝 First Contact — Log Conversation</div>'
       +'<div class="egrid g4">'
       +'<div class="ef"><label>Response Method</label><select class="ep-mt">'+moptsSel+'</select></div>'
+      +'<div class="ef"><label>Update Status</label><select class="ep-st">'+soptsSel+'</select></div>'
       +'<div class="ef"><label>Date & Time</label><input type="text" disabled value="'+new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'"></div>'
       +'<div class="ef"><label>Decision Maker</label><input type="text" class="ep-dm" placeholder="Who did you speak with?"></div>'
       +'<div class="ef"><label>Relationship</label><input type="text" class="ep-rel" placeholder="Son, daughter, spouse…"></div>'
@@ -1272,7 +1273,7 @@ async function saveEp(ri,mode){
       if(urg)np.push('Urgency: '+urg);
       if(np.length)u[C.NT]=np.filter(Boolean).join(' | ');
       u[C.SL]=appendLog(String(r[C.SL]||''),'Lead responded — first contact',mt2);
-      u[C.ST]='Active Conversation';u[C.LC]=today;u[C.SD]=today;
+      var respSt=q('.ep-st');u[C.ST]=(respSt&&respSt.trim())||'Active Conversation';u[C.LC]=today;u[C.SD]=today;
     }else if(mode==='update'){
       var st=q('.ep-st'),fu2=q('.ep-fu'),mt3=q('.ep-mt'),nsm2=q('.ep-nsm'),notes2=q('.ep-notes');
       if(st)u[C.ST]=st;
@@ -1443,7 +1444,10 @@ function openDrawer(ri){
   el('d-name').textContent=name;
   var log=String(r[C.SL]||'').trim();
   var na=isActive(r[C.ST]||'')?null:getNextAction(log,0,pd(r[C.DA]));
+  var dO2=daysAgo(r[C.DA]);
+  var dO2Str=dO2<14?dO2+' day'+(dO2!==1?'s':''):dO2<60?Math.floor(dO2/7)+' week'+(Math.floor(dO2/7)!==1?'s':''):Math.floor(dO2/30)+' month'+(Math.floor(dO2/30)!==1?'s':'');
   var fields=[
+    ['In Pipeline',dO2Str+' (added '+( pd(r[C.DA])?pd(r[C.DA]).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'unknown')+')'],
     ['Phone',String(r[C.PH]||'')],['Email',String(r[C.EM]||'')],
     ['Status',String(r[C.ST]||'')],['Decision Maker',String(r[C.DM]||'')],
     ['Source',String(r[C.SO]||'')],['Services',String(r[C.SV]||'')],
