@@ -985,7 +985,6 @@ async function loadData(){
     var ws=wb.Sheets['Lead Tracker'];
     if(!ws)throw new Error('Sheet "Lead Tracker" not found');
     rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-    console.log('Rows loaded:',rows.length,'Last row name:',rows[rows.length-1]?rows[rows.length-1][2]:'empty');
     var t=new Date();
     el('sync-time').textContent='Refreshed: '+t.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
     buildUI();
@@ -1015,7 +1014,7 @@ function buildUI(){
   for(var i=DATA_START;i<rows.length;i++){
     var r=rows[i];
     var name=String(r[C.NM]||'').trim();
-    if(name.indexOf('Renee')>-1||name.indexOf('Delores')>-1)console.log('FOUND '+name+' at row index '+i+': st='+String(r[C.ST]||'')+' nf='+String(r[C.NF]||'')+' log='+String(r[C.SL]||''));
+    if(!name)name=String(r[C.DM]||'').trim(); // fall back to DM name if client name empty
     if(!name)continue;
     var st=String(r[C.ST]||'').trim();
     if(isExcluded(st))continue;
