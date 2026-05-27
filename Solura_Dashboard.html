@@ -1022,6 +1022,16 @@ function buildUI(){
     var log=String(r[C.SL]||'').trim();
     var dO=daysAgo(r[C.DA]);
     var na=active?null:getNextAction(log,dO,pd(r[C.DA]));
+    // Auto-advance NF to tomorrow when Phase 1 just completed
+    if(na&&na.ph===2&&!active){
+      var fuCheck=pd(r[C.NF]);
+      var fuCheckStr=fuCheck?ds(fuCheck):'';
+      if(!fuCheckStr||fuCheckStr<=ts){
+        // NF is today or past — set to tomorrow automatically
+        var tmrw=new Date(localToday());tmrw.setDate(tmrw.getDate()+1);
+        writeRow(i,{[C.NF]:fd(tmrw)}).catch(function(){});
+      }
+    }
     var seqLbl=na?na.lbl:'—';
 
     var fu=pd(r[C.NF]);
