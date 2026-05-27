@@ -1279,9 +1279,12 @@ async function saveEp(ri,mode){
           u[C.NF]=(tomorrow.getMonth()+1)+'/'+tomorrow.getDate()+'/'+tomorrow.getFullYear();
         }
       }
-      // If logging Phase 2 AM action, keep NF as today so PM slot shows later
-      var doneNa=getNextAction(String(r[C.SL]||''),0,null);
-      if(doneNa&&doneNa.ph===2&&doneNa.slot==='am'){u[C.NF]=fd(localToday());}
+      // After logging this action, check what comes next
+      var doneNaNext=getNextAction(newLog,0,null);
+      // If next action is Phase 2 PM (AM was just logged), keep NF today so PM shows later
+      if(doneNaNext&&doneNaNext.ph===2&&doneNaNext.slot==='pm'&&doneNaNext.day===(getNextAction(String(r[C.SL]||''),0,null)||{day:0}).day){
+        u[C.NF]=fd(localToday());
+      }
       // If completing Phase 1 final action (Missed you text), set NF to tomorrow
       if(actText.indexOf('Missed you text')>-1){
         var tmrw=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate()+1);
