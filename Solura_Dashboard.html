@@ -416,7 +416,7 @@ var ACTIVE_ST=['contacted','active conversation','assessment scheduled','assessm
 var EXCL_ST=['closed','lost','not interested','duplicate','wrong number','deceased'];
 
 // Migration marker
-var MIGRATION_VERSION='v8.0.1';
+var MIGRATION_VERSION='v8.0.2';
 
 // Runtime state
 var tok='', fid='', rows=[], drawerRi=-1, lastLoadAt=null;
@@ -840,22 +840,31 @@ function inferStepFromLog(rowArr){
       return STEP_P3_FIRST+(w-2)+1;
     }
   }
-  // Phase 2 — find highest day with PM logged
-  for(var d=10;d>=1;d--){
-    if(log.indexOf('PM Call — Day '+d)>-1||log.indexOf('PM Text — Day '+d)>-1){
-      // PM done → next is next day's AM, or Phase 3 if d===10
-      if(d===10)return STEP_P3_FIRST;
-      return STEP_P2_FIRST + d*2; // d=1 → 6 (AM Day 2), d=2 → 8 (AM Day 3)
-    }
+  // Phase 2 — derive day from NF + date_added, force AM slot.
+  // Any P2 log entry signals the lead is in P2; the specific day/slot
+  // logged is unreliable because v7.0 sometimes auto-logged actions
+  // when days rolled rather than when the user actually completed them.
+  var inP2 = false;
+  for(var dCheck=1;dCheck<=10;dCheck++){
+    if(log.indexOf('Day '+dCheck)>-1){ inP2 = true; break; }
   }
-  // Phase 2 — find highest day with AM logged but PM not
-  for(var d2=10;d2>=1;d2--){
-    if(log.indexOf('AM Call — Day '+d2)>-1){
-      return STEP_P2_FIRST + (d2-1)*2 + 1; // d2=1 → 5 (PM Day 1)
+  if(log.indexOf('Missed you text')>-1) inP2 = true;
+  if(inP2){
+    var nfD=pd(rowArr[C.NF]);
+    var addedD=pd(rowArr[C.DA]);
+    // Phase 2 Day 1 typically starts ~day after Phase 1 completes (~4 days after lead added)
+    // So Phase 2 Day N falls on (date_added + 4 + N - 1) = date_added + 3 + N
+    // → N = (NF − date_added) − 3
+    var dayN=null;
+    if(nfD&&addedD){
+      var gap=daysBetween(nfD,addedD); // NF − dateAdded in days
+      dayN=gap-3;
     }
+    if(!dayN||dayN<1)dayN=1;
+    if(dayN>10)dayN=10;
+    return STEP_P2_FIRST + (dayN-1)*2; // AM slot of dayN
   }
   // Phase 1
-  if(log.indexOf('Missed you text')>-1)return STEP_P2_FIRST; // 4 = AM Day 1
   if(log.indexOf('Second call attempt')>-1)return 3;
   if(log.indexOf('First call')>-1)return 2;
   if(log.indexOf('Intro text')>-1||log.indexOf('SMS sent')>-1)return 1;
@@ -866,9 +875,10 @@ async function maybeRunMigration(){
   var key='solura_migration_'+MIGRATION_VERSION;
   if(localStorage.getItem(key)==='done')return;
 
-  // v8.0.1 also re-anchors Phase 2 leads that were migrated under v8.0
-  // with step_done_at = load time (instead of properly-offset anchor).
-  var v8_0_done=localStorage.getItem('solura_migration_v8.0')==='done';
+  // Any earlier v8.0.x migration marker triggers a re-anchor pass for
+  // Phase 2 leads, since earlier versions had bad Phase 2 step inference.
+  var earlierMig = localStorage.getItem('solura_migration_v8.0')==='done'
+                || localStorage.getItem('solura_migration_v8.0.1')==='done';
 
   // Check whether any row actually needs migration
   var needsMig=[];
@@ -882,7 +892,7 @@ async function maybeRunMigration(){
     var existing=r[C.STEP];
     if(existing!==''&&existing!=null&&!isNaN(parseInt(existing,10))){
       // Existing migrated row — does it need re-anchoring?
-      if(v8_0_done){
+      if(earlierMig){
         var es=parseInt(existing,10);
         if(es>=STEP_P2_FIRST&&es<=STEP_P2_LAST){
           needsReanchor.push({ri:i,step:es});
@@ -936,29 +946,29 @@ async function maybeRunMigration(){
       u[C.STEP_AT]=anchorDate.toISOString();
       await writeRow(m.ri,u);
     }
-    // Re-anchor pass: fix Phase 2 leads that were migrated under v8.0 with
-    // step_done_at set to load-time instead of the proper offset anchor.
-    // Use each lead's existing NF as the source of truth for when their
-    // current step should be due, and back-derive step_done_at from that.
+    // Re-anchor pass: fix Phase 2 leads that were migrated under earlier v8.0.x.
+    // Force the step to AM of the day derived from NF + date_added, and
+    // anchor step_done_at so the migrated step lands on NF date.
     for(var k2=0;k2<needsReanchor.length;k2++){
       var ra=needsReanchor[k2];
       mt.textContent='Re-anchoring '+(needsMig.length+k2+1)+' of '+totalCount+'…';
       var u2={};
-      var raAction=SEQ[ra.step];
       var rRow=rows[ra.ri]||[];
-      // Read existing NF — that's what the user thinks "this step is due"
       var raNf=pd(rRow[C.NF]);
-      // Fall back to today if no NF set
-      var raTarget=raNf||localToday();
-      var raAnchor;
-      if(raAction&&raAction.slot==='am'){
-        // AM: p2DateFor = doneAt + 1 day. Want it = raTarget → doneAt = raTarget - 1.
-        var prev=addDays(raTarget,-1);
-        raAnchor=new Date(prev.getFullYear(),prev.getMonth(),prev.getDate(),12,0,0);
-      }else{
-        // PM: p2DateFor = doneAt-as-date. Want it = raTarget → doneAt = raTarget.
-        raAnchor=new Date(raTarget.getFullYear(),raTarget.getMonth(),raTarget.getDate(),12,0,0);
+      var raAdded=pd(rRow[C.DA]);
+      // Recompute Phase 2 day from NF and date_added
+      var raDay=null;
+      if(raNf&&raAdded){
+        raDay=daysBetween(raNf,raAdded)-3;
       }
+      if(!raDay||raDay<1)raDay=1;
+      if(raDay>10)raDay=10;
+      var newStep=STEP_P2_FIRST + (raDay-1)*2; // AM slot
+      u2[C.STEP]=newStep;
+      // Anchor doneAt for AM: p2DateFor = doneAt+1, want = NF (or today)
+      var raTarget=raNf||localToday();
+      var prev=addDays(raTarget,-1);
+      var raAnchor=new Date(prev.getFullYear(),prev.getMonth(),prev.getDate(),12,0,0);
       u2[C.STEP_AT]=raAnchor.toISOString();
       await writeRow(ra.ri,u2);
     }
