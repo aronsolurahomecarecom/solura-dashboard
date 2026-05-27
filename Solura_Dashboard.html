@@ -416,7 +416,7 @@ var ACTIVE_ST=['contacted','active conversation','assessment scheduled','assessm
 var EXCL_ST=['closed','lost','not interested','duplicate','wrong number','deceased'];
 
 // Migration marker
-var MIGRATION_VERSION='v8.0';
+var MIGRATION_VERSION='v8.0.1';
 
 // Runtime state
 var tok='', fid='', rows=[], drawerRi=-1, lastLoadAt=null;
@@ -866,8 +866,13 @@ async function maybeRunMigration(){
   var key='solura_migration_'+MIGRATION_VERSION;
   if(localStorage.getItem(key)==='done')return;
 
+  // v8.0.1 also re-anchors Phase 2 leads that were migrated under v8.0
+  // with step_done_at = load time (instead of properly-offset anchor).
+  var v8_0_done=localStorage.getItem('solura_migration_v8.0')==='done';
+
   // Check whether any row actually needs migration
   var needsMig=[];
+  var needsReanchor=[];
   for(var i=DATA_START;i<rows.length;i++){
     var r=rows[i];
     if(!r)continue;
@@ -875,34 +880,75 @@ async function maybeRunMigration(){
     if(!nm)continue;
     // Already has step_idx?
     var existing=r[C.STEP];
-    if(existing!==''&&existing!=null&&!isNaN(parseInt(existing,10)))continue;
+    if(existing!==''&&existing!=null&&!isNaN(parseInt(existing,10))){
+      // Existing migrated row — does it need re-anchoring?
+      if(v8_0_done){
+        var es=parseInt(existing,10);
+        if(es>=STEP_P2_FIRST&&es<=STEP_P2_LAST){
+          needsReanchor.push({ri:i,step:es});
+        }
+      }
+      continue;
+    }
     var inferred=inferStepFromLog(r);
     if(inferred==null)continue; // excluded
     needsMig.push({ri:i,step:inferred});
   }
 
-  if(!needsMig.length){
+  if(!needsMig.length&&!needsReanchor.length){
     localStorage.setItem(key,'done');
     return;
   }
 
+  var totalCount=needsMig.length+needsReanchor.length;
+
   // Show banner
   var mb=el('migbar'), mt=el('migbar-txt');
   mb.classList.add('on');
-  mt.textContent='Running one-time migration on '+needsMig.length+' lead(s)…';
+  mt.textContent='Running one-time migration on '+totalCount+' lead(s)…';
 
   try{
-    var nowIso=new Date().toISOString();
     for(var k=0;k<needsMig.length;k++){
       var m=needsMig[k];
       mt.textContent='Migrating '+(k+1)+' of '+needsMig.length+'…';
       var u={};
       u[C.STEP]=m.step;
-      u[C.STEP_AT]=nowIso;
+      // Set step_done_at so the migrated step lands on today.
+      // - Phase 2 AM step → p2DateFor returns doneAt+1, so we want doneAt = yesterday
+      // - Phase 2 PM step → p2DateFor returns doneAt-as-date, so we want doneAt = today
+      // - Anything else → use today noon as a neutral anchor
+      var anchorDate;
+      if(m.step>=STEP_P2_FIRST&&m.step<=STEP_P2_LAST){
+        var sAction=SEQ[m.step];
+        if(sAction&&sAction.slot==='am'){
+          anchorDate=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate()-1,12,0,0);
+        }else{
+          anchorDate=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate(),12,0,0);
+        }
+      }else{
+        anchorDate=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate(),12,0,0);
+      }
+      u[C.STEP_AT]=anchorDate.toISOString();
       await writeRow(m.ri,u);
     }
+    // Re-anchor pass: fix Phase 2 leads that were migrated under v8.0 with
+    // step_done_at set to load-time instead of the proper offset anchor.
+    for(var k2=0;k2<needsReanchor.length;k2++){
+      var ra=needsReanchor[k2];
+      mt.textContent='Re-anchoring '+(needsMig.length+k2+1)+' of '+totalCount+'…';
+      var u2={};
+      var raAction=SEQ[ra.step];
+      var raAnchor;
+      if(raAction&&raAction.slot==='am'){
+        raAnchor=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate()-1,12,0,0);
+      }else{
+        raAnchor=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate(),12,0,0);
+      }
+      u2[C.STEP_AT]=raAnchor.toISOString();
+      await writeRow(ra.ri,u2);
+    }
     localStorage.setItem(key,'done');
-    mt.textContent='Migration complete · '+needsMig.length+' leads';
+    mt.textContent='Migration complete · '+totalCount+' leads';
     setTimeout(function(){mb.classList.remove('on');},2500);
   }catch(e){
     mt.textContent='Migration paused — '+e.message+' (will retry next load)';
@@ -1111,14 +1157,18 @@ function advanceLead(ri,methodUsed){
   if(step===STEP_OFF_SEQUENCE)return null;
   if(step<0)step=0;
   var u={};
-  var nowIso=new Date().toISOString();
+  var t=localToday();
+  // Pin step_done_at to noon of today rather than the actual click time.
+  // This makes the date math invariant to whether the user clicks at 11:59pm
+  // or 12:01am — the calendar day owns the action.
+  var noonToday=new Date(t.getFullYear(),t.getMonth(),t.getDate(),12,0,0).toISOString();
   var todayStr=fd(localToday());
   var tomorrowStr=fd(addDays(localToday(),1));
 
   // Phase 5 is sticky — re-do the same step
   if(step===STEP_P5){
     u[C.STEP]=STEP_P5;
-    u[C.STEP_AT]=nowIso;
+    u[C.STEP_AT]=noonToday;
     u[C.LC]=todayStr;
     if(methodUsed)u[C.MT]=methodUsed;
     // Append to human-readable log
@@ -1131,7 +1181,7 @@ function advanceLead(ri,methodUsed){
   var nextStep=step+1;
   if(nextStep>=SEQ.length)nextStep=SEQ.length-1;
   u[C.STEP]=nextStep;
-  u[C.STEP_AT]=nowIso;
+  u[C.STEP_AT]=noonToday;
   u[C.LC]=todayStr;
   if(methodUsed)u[C.MT]=methodUsed;
 
