@@ -1269,21 +1269,19 @@ async function saveEp(ri,mode){
       var newLog=appendLog(String(r[C.SL]||''),actText,mt);
       u[C.SL]=newLog;
       u[C.LC]=today;u[C.SD]=today;
-      // If Phase 1 just completed (Missed you text logged), set NF to tomorrow only if not already future
+      // Set NF based on what was just logged
+      var prevNa=getNextAction(String(r[C.SL]||''),0,null); // action before this log
       if(actText.indexOf('Missed you text')>-1){
-        var curNF=pd(r[C.NF]);
-        var curNFStr=curNF?ds(curNF):'';
-        var tsNow=ds(localToday());
-        if(!curNFStr||curNFStr<=tsNow){
-          var tomorrow=new Date();tomorrow.setDate(tomorrow.getDate()+1);
-          u[C.NF]=(tomorrow.getMonth()+1)+'/'+tomorrow.getDate()+'/'+tomorrow.getFullYear();
-        }
-      }
-      // After logging this action, check what comes next
-      var doneNaNext=getNextAction(newLog,0,null);
-      // If next action is Phase 2 PM (AM was just logged), keep NF today so PM shows later
-      if(doneNaNext&&doneNaNext.ph===2&&doneNaNext.slot==='pm'&&doneNaNext.day===(getNextAction(String(r[C.SL]||''),0,null)||{day:0}).day){
+        // Phase 1 complete — set NF to tomorrow for Phase 2 AM
+        var tmrw2=new Date(localToday());tmrw2.setDate(tmrw2.getDate()+1);
+        u[C.NF]=fd(tmrw2);
+      } else if(prevNa&&prevNa.ph===2&&prevNa.slot==='am'){
+        // Just logged Phase 2 AM — keep NF today so PM slot shows later today
         u[C.NF]=fd(localToday());
+      } else if(prevNa&&prevNa.ph===2&&prevNa.slot==='pm'){
+        // Just logged Phase 2 PM — set NF to tomorrow for next day's AM
+        var tmrw3=new Date(localToday());tmrw3.setDate(tmrw3.getDate()+1);
+        u[C.NF]=fd(tmrw3);
       }
       // If completing Phase 1 final action (Missed you text), set NF to tomorrow
       if(actText.indexOf('Missed you text')>-1){
@@ -1404,9 +1402,14 @@ async function sendSMS(){
     var smsActText=smsNa?smsNa.text:'SMS sent';
     var smsNewLog=appendLog(String(smsR[C.SL]||''),smsActText,'SMS');
     var smsExtra={[C.MT]:'SMS',[C.LC]:fd(localToday()),[C.SL]:smsNewLog};
-    if(smsActText.indexOf('Missed you text')>-1){var curNF2=pd(smsR[C.NF]);var curNF2Str=curNF2?ds(curNF2):'';if(!curNF2Str||curNF2Str<=ts){var t2=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate()+1);smsExtra[C.NF]=fd(t2);}}
-    // If logging a Phase 2 AM action, keep NF as today so PM slot shows later today
-    if(smsNa&&smsNa.ph===2&&smsNa.slot==='am'){smsExtra[C.NF]=fd(localToday());}
+    if(smsActText.indexOf('Missed you text')>-1){var curNF2=pd(smsR[C.NF]);var curNF2Str=curNF2?ds(curNF2):'';var tsNow2=ds(localToday());if(!curNF2Str||curNF2Str<=tsNow2){var t2=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate()+1);smsExtra[C.NF]=fd(t2);}}
+    // Set NF based on what was just logged
+    if(smsNa&&smsNa.ph===2&&smsNa.slot==='am'){
+      smsExtra[C.NF]=fd(localToday()); // AM done — keep today so PM shows later
+    } else if(smsNa&&smsNa.ph===2&&smsNa.slot==='pm'){
+      var tmrw4=new Date(localToday());tmrw4.setDate(tmrw4.getDate()+1);
+      smsExtra[C.NF]=fd(tmrw4); // PM done — move to tomorrow
+    }
     await writeRow(ri,smsExtra);
     setTimeout(loadData,600);
   }catch(e){showErr('SMS error: '+e.message);}
