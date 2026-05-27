@@ -1,18 +1,17 @@
 <!DOCTYPE html>
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<!-- v7.0 CLEAN BUILD -->
+<!-- Solura Home Care — Lead Tracker Dashboard v8.0 (clean rebuild) -->
+<!-- Architecture: integer step_idx state, computed visibility, event delegation, retry-on-401 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Solura Home Care — Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
-
 :root{
-  --gold:#C8870A;--gold-mid:#E8B84B;--gold-pale:#FEF7E8;--gold-glow:rgba(200,135,10,.15);
+  --gold:#C8870A;--gold-mid:#E8B84B;--gold-pale:#FEF7E8;
   --sky:#3A7DC9;--sky-mid:#9DC4E8;--sky-pale:#EBF3FB;--sky-deep:#1E4E8C;
   --grn:#3D7A34;--grn-mid:#8FCC87;--grn-pale:#EBF5EA;
   --red:#B03025;--red-pale:#FDECEA;
@@ -27,36 +26,15 @@
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--cream);color:var(--dark);min-height:100vh;-webkit-font-smoothing:antialiased;}
 
-/* ── Header ── */
-.hdr{
-  background:linear-gradient(135deg,#1A3F72 0%,var(--sky-deep) 60%,#1E5094 100%);
-  border-bottom:2px solid var(--gold);
-  padding:0 24px;height:60px;
-  display:flex;align-items:center;justify-content:space-between;
-  position:sticky;top:0;z-index:100;
-  box-shadow:0 2px 16px rgba(0,0,0,.18);
-}
+/* Header */
+.hdr{background:linear-gradient(135deg,#1A3F72 0%,var(--sky-deep) 60%,#1E5094 100%);border-bottom:2px solid var(--gold);padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 16px rgba(0,0,0,.18);}
 .hdr-l{display:flex;align-items:center;gap:12px;}
-.logo-wrap{
-  width:40px;height:40px;border-radius:50%;overflow:hidden;
-  border:2px solid var(--gold);background:#fff;
-  display:flex;align-items:center;justify-content:center;
-  box-shadow:0 0 0 3px rgba(200,135,10,.25);
-}
+.logo-wrap{width:40px;height:40px;border-radius:50%;overflow:hidden;border:2px solid var(--gold);background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px rgba(200,135,10,.25);}
 .logo-wrap img{width:100%;height:100%;object-fit:cover;}
-.logo-s{
-  width:36px;height:36px;background:linear-gradient(135deg,var(--gold),#E8A020);
-  border-radius:50%;display:flex;align-items:center;justify-content:center;
-  font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:600;color:#fff;
-}
+.logo-s{width:36px;height:36px;background:linear-gradient(135deg,var(--gold),#E8A020);border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:600;color:#fff;}
 .brand{font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:500;color:var(--gold);letter-spacing:.01em;}
 .hdr-r{display:flex;align-items:center;gap:8px;}
-.sync-pill{
-  display:flex;align-items:center;gap:6px;padding:5px 13px;
-  background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);
-  border-radius:20px;font-size:11px;color:rgba(255,255,255,.8);
-  backdrop-filter:blur(4px);
-}
+.sync-pill{display:flex;align-items:center;gap:6px;padding:5px 13px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:20px;font-size:11px;color:rgba(255,255,255,.8);backdrop-filter:blur(4px);}
 .sdot{width:7px;height:7px;border-radius:50%;background:var(--soft);}
 .sdot.live{background:#4ADE80;box-shadow:0 0 6px rgba(74,222,128,.5);}
 .hbtn{padding:7px 16px;border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;border:none;transition:all .15s;}
@@ -65,77 +43,77 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--cream);color:va
 .hbtn-ghost{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.25);}
 .hbtn-ghost:hover{background:rgba(255,255,255,.2);}
 
-/* ── Login ── */
+/* Login */
 #ls{min-height:calc(100vh - 60px);display:flex;align-items:center;justify-content:center;padding:20px;background:radial-gradient(ellipse at 50% 0%,rgba(58,125,201,.08) 0%,transparent 70%);}
-.lcard{
-  background:#fff;border-radius:var(--radius-xl);padding:44px 40px;
-  max-width:400px;width:100%;text-align:center;
-  box-shadow:var(--shadow-xl);border:1px solid var(--border-soft);
-}
+.lcard{background:#fff;border-radius:var(--radius-xl);padding:44px 40px;max-width:400px;width:100%;text-align:center;box-shadow:var(--shadow-xl);border:1px solid var(--border-soft);}
 .llogo{margin-bottom:20px;}
 .llogo img,.llogo .ls-fb{width:72px;height:72px;border-radius:50%;margin:0 auto;box-shadow:0 4px 16px rgba(200,135,10,.25);}
 .ls-fb{background:linear-gradient(135deg,var(--gold),#D4920F);display:flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',serif;font-size:34px;color:#fff;}
 .ltitle{font-family:'Cormorant Garamond',serif;font-size:28px;font-weight:500;margin-bottom:8px;color:var(--dark);}
 .lsub{font-size:13px;color:var(--soft);margin-bottom:28px;line-height:1.6;}
-.lcid{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);margin-bottom:6px;text-align:left;}
-.lcid-val{width:100%;padding:10px 14px;border:1.5px solid var(--border);border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;margin-bottom:18px;outline:none;background:var(--cream);color:var(--mid);transition:border-color .15s;}
-.lcid-val:focus{border-color:var(--sky-mid);}
 .lbtn{width:100%;padding:13px;background:linear-gradient(135deg,var(--sky),var(--sky-deep));color:#fff;border:none;border-radius:11px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;box-shadow:0 4px 14px rgba(58,125,201,.35);transition:all .15s;}
 .lbtn:hover{box-shadow:0 6px 20px rgba(58,125,201,.5);transform:translateY(-1px);}
 
-/* ── KPI bar ── */
-.kbar{display:none;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--border);background:#fff;box-shadow:var(--shadow-sm);}
+/* KPI bar */
+.kbar{display:none;grid-template-columns:repeat(5,1fr);border-bottom:1px solid var(--border);background:#fff;box-shadow:var(--shadow-sm);}
 .kv{padding:16px 24px;border-right:1px solid var(--border-soft);position:relative;overflow:hidden;}
 .kv:last-child{border-right:none;}
 .kv::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
 .kv:nth-child(1)::before{background:var(--red);}
 .kv:nth-child(2)::before{background:var(--gold);}
-.kv:nth-child(3)::before{background:var(--grn);}
-.kv:nth-child(4)::before{background:var(--sky);}
+.kv:nth-child(3)::before{background:var(--sky);}
+.kv:nth-child(4)::before{background:var(--grn);}
+.kv:nth-child(5)::before{background:var(--softer);}
 .kv-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--soft);margin-bottom:6px;}
 .kv-num{font-size:32px;font-weight:700;line-height:1;letter-spacing:-.02em;}
-.kv-num.red{color:var(--red);}
-.kv-num.gold{color:var(--gold);}
-.kv-num.grn{color:var(--grn);}
-.kv-num.sky{color:var(--sky);}
+.kv-num.red{color:var(--red);}.kv-num.gold{color:var(--gold);}.kv-num.sky{color:var(--sky);}.kv-num.grn{color:var(--grn);}.kv-num.soft{color:var(--soft);}
 .kv-sub{font-size:10px;color:var(--soft);margin-top:3px;}
 
-/* ── Main ── */
+/* Main */
 #main{display:none;padding:20px 20px 40px;}
-.sync-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
-.sync-file{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--soft);}
-.sync-dot{width:6px;height:6px;border-radius:50%;background:var(--grn);}
+.sync-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding:10px 14px;background:#fff;border-radius:10px;border:1px solid var(--border-soft);box-shadow:var(--shadow-sm);}
+.sync-file{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--mid);font-weight:500;}
+.sync-dot{width:7px;height:7px;border-radius:50%;background:var(--grn);box-shadow:0 0 0 3px rgba(61,122,52,.15);}
 .sync-time{font-size:11px;color:var(--soft);}
 
-/* ── Sections ── */
+/* Sections */
 .sw{background:#fff;border-radius:var(--radius-lg);border:1px solid var(--border);overflow:hidden;margin-bottom:16px;box-shadow:var(--shadow-sm);transition:box-shadow .2s;}
 .sw:hover{box-shadow:var(--shadow-md);}
 .shdr{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border-soft);background:linear-gradient(to right,#FAFAF8,#fff);}
 .sdot2{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
 .sdot2.red{background:var(--red);box-shadow:0 0 0 3px rgba(176,48,37,.12);}
 .sdot2.gold{background:var(--gold);box-shadow:0 0 0 3px rgba(200,135,10,.12);}
+.sdot2.sky{background:var(--sky);box-shadow:0 0 0 3px rgba(58,125,201,.12);}
 .sdot2.grn{background:var(--grn);box-shadow:0 0 0 3px rgba(61,122,52,.12);}
 .sdot2.soft{background:var(--softer);}
 .stitle{font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:500;flex:1;color:var(--dark);}
 .scnt{font-size:10px;font-weight:700;padding:3px 10px;border-radius:12px;background:var(--cream);color:var(--soft);border:1px solid var(--border);}
 .tc{overflow-x:auto;}
 
-/* ── Table ── */
+/* Table */
 table{width:100%;border-collapse:collapse;}
 thead{background:linear-gradient(to right,var(--sky-deep),#1E5FA8);}
 th{padding:9px 16px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--gold);white-space:nowrap;}
-.dr{border-bottom:1px solid var(--border-soft);cursor:pointer;transition:background .12s;}
+.dr{border-bottom:1px solid var(--border-soft);cursor:pointer;transition:background .12s;position:relative;}
 .dr:hover{background:#F8F4EE;}
 .dr.sel{background:var(--sky-pale);}
 td{padding:13px 16px;vertical-align:top;}
+.dr td:first-child{padding-left:20px;}
+.dr td:first-child::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:0 2px 2px 0;}
+.dr.bd-red td:first-child::before{background:var(--red);}
+.dr.bd-gold td:first-child::before{background:var(--gold);}
+.dr.bd-sky td:first-child::before{background:var(--sky);}
+.dr.bd-grn td:first-child::before{background:var(--grn);}
+.dr.bd-soft td:first-child::before{background:var(--softer);}
 .tn{font-weight:700;font-size:13.5px;color:var(--dark);}
-.ts{font-size:11px;color:var(--soft);margin-top:2px;}
 .ph{color:var(--sky);font-size:12px;font-weight:600;text-decoration:none;display:flex;align-items:center;gap:4px;transition:color .12s;}
 .ph:hover{color:var(--sky-deep);}
 .em{color:var(--grn);font-size:11px;text-decoration:none;transition:color .12s;}
 .em:hover{color:#2D5C25;}
+.dm-tag{font-size:10px;color:var(--soft);margin-top:3px;display:flex;align-items:center;gap:3px;}
+.dm-tag span{color:var(--mid);font-weight:600;}
 
-/* ── Pills ── */
+/* Pills */
 .pill{font-size:10px;font-weight:700;padding:3px 9px;border-radius:10px;display:inline-block;letter-spacing:.02em;}
 .pr2{background:var(--red-pale);color:var(--red);border:1px solid #EFC4C0;}
 .pa{background:#FEF3DC;color:#9A6100;border:1px solid #F5D98A;}
@@ -143,47 +121,40 @@ td{padding:13px 16px;vertical-align:top;}
 .pna{background:#FDF2F2;color:#A04040;border:1px solid #F0C8C8;}
 .pnew{background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);}
 .pact{background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid);}
+.psoft{background:var(--cream);color:var(--soft);}
 
-/* ── Seq badge ── */
+/* Sequence badge */
 .sbadge{font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px;display:inline-block;background:var(--cream);color:var(--mid);border:1px solid var(--border);}
 .snxt{font-size:11px;color:var(--soft);margin-top:5px;display:flex;align-items:center;gap:4px;}
+.seq-responded{display:inline-flex;align-items:center;gap:5px;background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid);border-radius:10px;padding:4px 10px;font-size:10px;font-weight:700;}
+.seq-active{display:inline-flex;align-items:center;gap:5px;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);border-radius:10px;padding:4px 10px;font-size:10px;font-weight:700;}
 
-/* ── Buttons ── */
-.btn-primary{
-  width:100%;padding:10px 14px;border-radius:9px;
-  font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;
-  cursor:pointer;border:none;transition:all .15s;text-align:center;
-  box-shadow:0 2px 6px rgba(0,0,0,.1);
-}
+/* Buttons */
+.btn-primary{width:100%;padding:10px 14px;border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;border:none;transition:all .15s;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.1);}
 .btn-primary:hover{transform:translateY(-1px);box-shadow:0 4px 10px rgba(0,0,0,.15);}
 .btn-primary:active{transform:translateY(0);}
-.btn-sec{
-  padding:7px 11px;border-radius:8px;
-  font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:700;
-  cursor:pointer;transition:all .15s;text-align:center;
-}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed;transform:none;}
+.btn-sec{padding:7px 11px;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;text-align:center;border:1.5px solid transparent;}
 .btn-sec:hover{filter:brightness(.94);}
-.btn-sm{
-  padding:5px 9px;border-radius:7px;
-  font-family:'Plus Jakarta Sans',sans-serif;font-size:10px;font-weight:600;
-  cursor:pointer;transition:all .15s;text-align:center;
-}
+.btn-sm{padding:5px 9px;border-radius:7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:10px;font-weight:600;cursor:pointer;transition:all .15s;text-align:center;border:1px solid transparent;}
 .btn-sm:hover{filter:brightness(.92);}
-.bwrap{display:flex;flex-direction:column;gap:5px;width:160px;}
+.bwrap{display:flex;flex-direction:column;gap:5px;width:170px;background:var(--cream);border-radius:10px;padding:8px;border:1px solid var(--border-soft);}
 .brow{display:flex;gap:4px;}
 
-/* ── Expand panel ── */
+/* Color variants for buttons */
+.bg-sky{background:var(--sky-deep);color:#fff;border:none;}
+.bg-grn{background:var(--grn);color:#fff;border:none;}
+.bg-gold{background:var(--gold);color:#fff;border:none;}
+.bg-sky-l{background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);}
+.bg-grn-l{background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid);}
+.bg-gold-l{background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid);}
+.bg-cream{background:var(--cream);color:var(--mid);border:1px solid var(--border);}
+
+/* Expand panel */
 .ep-wrap{display:none;}
 .ep-wrap.open{display:table-row;}
-.ep{
-  padding:20px 24px;
-  background:linear-gradient(135deg,#F0F6FF 0%,#EBF3FB 100%);
-  border-top:2px solid var(--sky-mid);
-}
-.ebanner{
-  font-size:12px;font-weight:700;padding:9px 14px;border-radius:9px;
-  margin-bottom:16px;display:flex;align-items:center;gap:7px;
-}
+.ep{padding:20px 24px;background:linear-gradient(135deg,#F0F6FF 0%,#EBF3FB 100%);border-top:2px solid var(--sky-mid);}
+.ebanner{font-size:12px;font-weight:700;padding:9px 14px;border-radius:9px;margin-bottom:16px;display:flex;align-items:center;gap:7px;}
 .eb-grn{background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid);}
 .eb-sky{background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);}
 .eb-gold{background:var(--gold-pale);color:#9A6100;border:1px solid var(--gold-mid);}
@@ -191,125 +162,68 @@ td{padding:13px 16px;vertical-align:top;}
 .g2{grid-template-columns:1fr 1fr;}
 .g3{grid-template-columns:1fr 1fr 1fr;}
 .g4{grid-template-columns:1fr 1fr 1fr 1fr;}
+@media (max-width:900px){.g3,.g4{grid-template-columns:1fr 1fr;}}
+@media (max-width:600px){.g2,.g3,.g4{grid-template-columns:1fr;}}
 .ef label{display:block;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);margin-bottom:5px;}
-.ef input,.ef select,.ef textarea{
-  width:100%;padding:8px 11px;border:1.5px solid var(--border);
-  border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;
-  outline:none;background:#fff;color:var(--dark);transition:border-color .15s,box-shadow .15s;
-}
+.ef input,.ef select,.ef textarea{width:100%;padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;outline:none;background:#fff;color:var(--dark);transition:border-color .15s,box-shadow .15s;}
 .ef textarea{min-height:72px;resize:vertical;}
 .ef input:focus,.ef select:focus,.ef textarea:focus{border-color:var(--sky-mid);box-shadow:0 0 0 3px rgba(58,125,201,.1);}
 .ef input[disabled]{background:var(--cream);color:var(--soft);}
-.esave{
-  padding:9px 20px;background:linear-gradient(135deg,var(--sky),var(--sky-deep));
-  color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;
-  font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(58,125,201,.3);
-  transition:all .15s;
-}
+.esave{padding:9px 20px;background:linear-gradient(135deg,var(--sky),var(--sky-deep));color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(58,125,201,.3);transition:all .15s;}
 .esave:hover{box-shadow:0 4px 12px rgba(58,125,201,.45);transform:translateY(-1px);}
+.esave:disabled{opacity:.5;cursor:not-allowed;}
 .ecancel{padding:9px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;cursor:pointer;transition:all .15s;}
 .ecancel:hover{border-color:var(--soft);color:var(--mid);}
 .esaving{display:none;align-items:center;gap:6px;font-size:12px;color:var(--soft);}
 .mspin{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--sky);border-radius:50%;animation:spin .7s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
 
-/* ── Drawer ── */
+/* Drawer */
 .doverlay{display:none;position:fixed;inset:0;background:rgba(10,20,40,.45);z-index:200;backdrop-filter:blur(2px);}
 .doverlay.open{display:block;}
-.drawer{
-  position:fixed;right:-440px;top:0;bottom:0;width:440px;
-  background:#fff;z-index:201;overflow-y:auto;
-  transition:right .28s cubic-bezier(.4,0,.2,1);
-  box-shadow:-8px 0 40px rgba(0,0,0,.16);
-}
+.drawer{position:fixed;right:-440px;top:0;bottom:0;width:440px;background:#fff;z-index:201;overflow-y:auto;transition:right .28s cubic-bezier(.4,0,.2,1);box-shadow:-8px 0 40px rgba(0,0,0,.16);}
 .drawer.open{right:0;}
-.dhead{
-  background:linear-gradient(135deg,#1A3F72,var(--sky-deep));
-  padding:18px 22px;display:flex;align-items:center;justify-content:space-between;
-  border-bottom:2px solid var(--gold);
-}
+.dhead{background:linear-gradient(135deg,#1A3F72,var(--sky-deep));padding:18px 22px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--gold);}
 .dname{font-family:'Cormorant Garamond',serif;font-size:24px;color:var(--gold);font-weight:500;}
-.dclose{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.8);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;transition:all .15s;}
-.dclose:hover{background:rgba(255,255,255,.25);color:#fff;}
+.dclose,.mclose{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.8);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;transition:all .15s;}
+.dclose:hover,.mclose:hover{background:rgba(255,255,255,.25);color:#fff;}
 .dbody{padding:22px;}
 .drow{display:flex;gap:10px;margin-bottom:12px;align-items:flex-start;padding-bottom:12px;border-bottom:1px solid var(--border-soft);}
 .drow:last-child{border-bottom:none;margin-bottom:0;}
 .dlabel{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);min-width:110px;padding-top:2px;flex-shrink:0;}
-.dval{font-size:13px;color:var(--dark);flex:1;line-height:1.5;}
+.dval{font-size:13px;color:var(--dark);flex:1;line-height:1.5;word-break:break-word;}
 
-/* ── Modals ── */
+/* Modals */
 .modal{display:none;position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:300;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px);}
 .modal.open{display:flex;}
-.mbox{
-  background:var(--warm);border-radius:var(--radius-xl);
-  max-width:620px;width:100%;max-height:88vh;overflow-y:auto;
-  box-shadow:var(--shadow-xl);border:1px solid var(--border-soft);
-  animation:modalIn .2s ease;
-}
+.mbox{background:var(--warm);border-radius:var(--radius-xl);max-width:620px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:var(--shadow-xl);border:1px solid var(--border-soft);animation:modalIn .2s ease;}
 @keyframes modalIn{from{opacity:0;transform:scale(.96) translateY(8px);}to{opacity:1;transform:scale(1) translateY(0);}}
-.mhead{
-  background:linear-gradient(135deg,#1A3F72,var(--sky-deep));
-  padding:18px 24px;border-radius:var(--radius-xl) var(--radius-xl) 0 0;
-  display:flex;align-items:center;justify-content:space-between;
-  border-bottom:2px solid var(--gold);
-}
+.mhead{background:linear-gradient(135deg,#1A3F72,var(--sky-deep));padding:18px 24px;border-radius:var(--radius-xl) var(--radius-xl) 0 0;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--gold);}
 .mtitle{font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:500;color:var(--gold);}
-.mclose{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.8);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;transition:all .15s;}
-.mclose:hover{background:rgba(255,255,255,.25);color:#fff;}
 .mbody{padding:22px 26px;}
 .ssec{margin-bottom:18px;}
 .ssec-h{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--gold);margin-bottom:7px;}
 .ssec-t{font-size:13px;color:var(--mid);line-height:1.75;background:var(--cream);padding:13px 16px;border-radius:10px;border:1px solid var(--border-soft);}
 
-/* ── Error + Toast ── */
+/* Error + Toast */
 .err{display:none;align-items:center;gap:8px;background:#FFF1F0;color:var(--red);border:1px solid #FBBBB7;padding:11px 18px;border-radius:10px;font-size:12px;margin:12px 20px 0;box-shadow:var(--shadow-sm);}
 .err.on{display:flex;}
-.toast{
-  position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(16px);
-  background:var(--dark);color:#fff;padding:11px 22px;border-radius:12px;
-  font-size:13px;font-weight:500;opacity:0;transition:all .25s;z-index:400;pointer-events:none;
-  box-shadow:0 8px 24px rgba(0,0,0,.2);
-}
+.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(16px);background:var(--dark);color:#fff;padding:11px 22px;border-radius:12px;font-size:13px;font-weight:500;opacity:0;transition:all .25s;z-index:400;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.2);}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 
-/* ── Empty ── */
+/* Empty */
 .empty{padding:44px 36px;text-align:center;}
 .empty-icon{font-size:32px;margin-bottom:10px;}
 .empty-txt{font-size:13px;color:var(--softer);font-style:italic;}
 
-/* ── Row status border ── */
-.dr{position:relative;}
-.dr td:first-child{padding-left:20px;}
-.dr td:first-child::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:0 2px 2px 0;}
-.dr.border-red td:first-child::before{background:var(--red);}
-.dr.border-gold td:first-child::before{background:var(--gold);}
-.dr.border-grn td:first-child::before{background:var(--grn);}
-.dr.border-sky td:first-child::before{background:var(--sky);}
-.dr.border-soft td:first-child::before{background:var(--softer);}
+/* Migration banner */
+.migbar{display:none;background:linear-gradient(135deg,#FFF7E0,#FEF3DC);border:1px solid var(--gold-mid);color:#8B6500;padding:12px 18px;margin:12px 20px;border-radius:10px;font-size:12px;align-items:center;gap:10px;}
+.migbar.on{display:flex;}
+.migbar .mspin{border-top-color:var(--gold);}
 
-/* ── DM tag ── */
-.dm-tag{font-size:10px;color:var(--soft);margin-top:3px;display:flex;align-items:center;gap:3px;}
-.dm-tag span{color:var(--mid);font-weight:600;}
-
-/* ── Responded badge ── */
-.seq-responded{display:inline-flex;align-items:center;gap:5px;background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid);border-radius:10px;padding:4px 10px;font-size:10px;font-weight:700;}
-.seq-active{display:inline-flex;align-items:center;gap:5px;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);border-radius:10px;padding:4px 10px;font-size:10px;font-weight:700;}
-
-/* ── Section header timestamp ── */
-.shdr-time{font-size:10px;color:var(--soft);margin-left:auto;margin-right:8px;}
-
-/* ── Sync bar upgrade ── */
-.sync-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding:10px 14px;background:#fff;border-radius:10px;border:1px solid var(--border-soft);box-shadow:var(--shadow-sm);}
-.sync-file{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--mid);font-weight:500;}
-.sync-dot{width:7px;height:7px;border-radius:50%;background:var(--grn);box-shadow:0 0 0 3px rgba(61,122,52,.15);}
-.sync-time{font-size:11px;color:var(--soft);}
-
-/* ── All Leads section header ── */
+/* All-leads section subdued */
 .sw-all .shdr{background:linear-gradient(to right,#F2EDE4,#FAF8F5);}
 .sw-all .stitle{color:var(--soft);font-size:17px;}
-
-/* ── Button area card feel ── */
-.bwrap{background:var(--cream);border-radius:10px;padding:8px;border:1px solid var(--border-soft);}
 </style>
 </head>
 <body>
@@ -324,12 +238,13 @@ td{padding:13px 16px;vertical-align:top;}
   </div>
   <div class="hdr-r">
     <div class="sync-pill"><div class="sdot" id="sdot"></div><span id="slabel">Not connected</span></div>
-    <button class="hbtn hbtn-gold" id="btn-refresh" onclick="loadData()" style="display:none">↺ Refresh</button>
-    <button class="hbtn hbtn-ghost" id="btn-out" onclick="signOut()" style="display:none">Sign out</button>
+    <button class="hbtn hbtn-gold" id="btn-refresh" style="display:none" data-action="refresh">↺ Refresh</button>
+    <button class="hbtn hbtn-ghost" id="btn-out" style="display:none" data-action="signout">Sign out</button>
   </div>
 </div>
 
 <div class="err" id="err"></div>
+<div class="migbar" id="migbar"><div class="mspin"></div><span id="migbar-txt">Running one-time migration…</span></div>
 
 <div id="ls">
   <div class="lcard">
@@ -339,21 +254,19 @@ td{padding:13px 16px;vertical-align:top;}
     </div>
     <div class="ltitle">Follow-Up Dashboard</div>
     <div class="lsub">Sign in with Microsoft to connect live to your<br><strong>Solura_Lead_Tracker.xlsx</strong> on OneDrive.</div>
-    <div class="lcid">Azure Client ID</div>
-    <input class="lcid-val" id="cid-input" value="1cb530f8-6c5f-4605-9590-068dd55e0b81">
-    <button class="lbtn" onclick="signIn()">
+    <button class="lbtn" data-action="signin">
       <svg width="16" height="16" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
       Sign in with Microsoft
     </button>
-    <div style="font-size:10px;color:var(--soft);margin-top:12px" id="cid-disp"></div>
   </div>
 </div>
 
 <div class="kbar" id="kbar">
   <div class="kv"><div class="kv-label">Overdue</div><div class="kv-num red" id="kv0">0</div><div class="kv-sub">contact immediately</div></div>
-  <div class="kv"><div class="kv-label">Due Today</div><div class="kv-num gold" id="kv1">0</div><div class="kv-sub">follow up now</div></div>
-  <div class="kv"><div class="kv-label">This Week</div><div class="kv-num grn" id="kv2">0</div><div class="kv-sub">coming up soon</div></div>
-  <div class="kv"><div class="kv-label">Active Leads</div><div class="kv-num sky" id="kv3">0</div><div class="kv-sub">in pipeline</div></div>
+  <div class="kv"><div class="kv-label">Due Now</div><div class="kv-num gold" id="kv1">0</div><div class="kv-sub">window is open</div></div>
+  <div class="kv"><div class="kv-label">Later Today</div><div class="kv-num sky" id="kv2">0</div><div class="kv-sub">opens later today</div></div>
+  <div class="kv"><div class="kv-label">This Week</div><div class="kv-num grn" id="kv3">0</div><div class="kv-sub">upcoming</div></div>
+  <div class="kv"><div class="kv-label">Active</div><div class="kv-num soft" id="kv4">0</div><div class="kv-sub">in conversation</div></div>
 </div>
 
 <div id="main">
@@ -361,16 +274,17 @@ td{padding:13px 16px;vertical-align:top;}
     <div class="sync-file"><div class="sync-dot"></div><span>Solura_Lead_Tracker.xlsx — OneDrive</span></div>
     <div class="sync-time" id="sync-time"></div>
   </div>
-  <div class="sw"><div class="shdr"><div class="sdot2 red"></div><div class="stitle">Overdue — Contact First</div><div class="scnt" id="c0">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t0"></tbody></table></div></div>
-  <div class="sw"><div class="shdr"><div class="sdot2 gold"></div><div class="stitle">Due Today</div><div class="scnt" id="c1">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t1"></tbody></table></div></div>
-  <div class="sw"><div class="shdr"><div class="sdot2 grn"></div><div class="stitle">Due This Week</div><div class="scnt" id="c2">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t2"></tbody></table></div></div>
-  <div class="sw sw-all" style="margin-top:8px"><div class="shdr"><div class="sdot2 soft"></div><div class="stitle" style="color:var(--mid)">All Active Leads</div><div class="scnt" id="c3">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t3"></tbody></table></div></div>
+  <div class="sw"><div class="shdr"><div class="sdot2 red"></div><div class="stitle">Overdue</div><div class="scnt" id="c0">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t0"></tbody></table></div></div>
+  <div class="sw"><div class="shdr"><div class="sdot2 gold"></div><div class="stitle">Due Now</div><div class="scnt" id="c1">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t1"></tbody></table></div></div>
+  <div class="sw"><div class="shdr"><div class="sdot2 sky"></div><div class="stitle">Later Today</div><div class="scnt" id="c2">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t2"></tbody></table></div></div>
+  <div class="sw"><div class="shdr"><div class="sdot2 grn"></div><div class="stitle">This Week</div><div class="scnt" id="c3">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t3"></tbody></table></div></div>
+  <div class="sw sw-all" style="margin-top:8px"><div class="shdr"><div class="sdot2 soft"></div><div class="stitle">All Active Leads</div><div class="scnt" id="c4">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t4"></tbody></table></div></div>
 </div>
 
 <!-- Script Modal -->
 <div class="modal" id="modal-script">
   <div class="mbox">
-    <div class="mhead"><div class="mtitle" id="script-title">Call Script</div><button class="mclose" onclick="closeModal('modal-script')">✕</button></div>
+    <div class="mhead"><div class="mtitle" id="script-title">Call Script</div><button class="mclose" data-action="close-modal" data-mid="modal-script">✕</button></div>
     <div class="mbody" id="script-body"></div>
   </div>
 </div>
@@ -378,14 +292,14 @@ td{padding:13px 16px;vertical-align:top;}
 <!-- SMS Modal -->
 <div class="modal" id="modal-sms">
   <div class="mbox" style="max-width:500px">
-    <div class="mhead"><div class="mtitle">Send SMS</div><button class="mclose" onclick="closeModal('modal-sms')">✕</button></div>
+    <div class="mhead"><div class="mtitle">Send SMS</div><button class="mclose" data-action="close-modal" data-mid="modal-sms">✕</button></div>
     <div class="mbody">
       <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Review and send via HomeCareGrow:</div>
       <textarea id="sms-text" style="width:100%;padding:10px 12px;border:1.5px solid var(--sky-mid);border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;min-height:100px;resize:vertical;outline:none;background:var(--sky-pale);margin-bottom:14px"></textarea>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button id="sms-send-btn" onclick="sendSMS()" style="padding:9px 18px;background:var(--grn);color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer">Send SMS</button>
-        <a id="sms-hcg-link" href="#" target="_blank" style="padding:9px 14px;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);border-radius:8px;font-size:12px;font-weight:600;text-decoration:none">Open in HCG</a>
-        <button onclick="closeModal('modal-sms')" style="padding:9px 12px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer">Cancel</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button id="sms-send-btn" data-action="send-sms" style="padding:9px 18px;background:var(--grn);color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer">Send SMS</button>
+        <a id="sms-hcg-link" href="#" target="_blank" rel="noopener" style="padding:9px 14px;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);border-radius:8px;font-size:12px;font-weight:600;text-decoration:none">Open in HCG</a>
+        <button data-action="close-modal" data-mid="modal-sms" style="padding:9px 12px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer">Cancel</button>
         <div id="sms-spin" style="display:none;align-items:center;gap:5px;font-size:11px;color:var(--soft)"><div class="mspin"></div>Sending…</div>
       </div>
     </div>
@@ -395,7 +309,7 @@ td{padding:13px 16px;vertical-align:top;}
 <!-- Email Modal -->
 <div class="modal" id="modal-email">
   <div class="mbox" style="max-width:560px">
-    <div class="mhead"><div class="mtitle">Send Email</div><button class="mclose" onclick="closeModal('modal-email')">✕</button></div>
+    <div class="mhead"><div class="mtitle">Send Email</div><button class="mclose" data-action="close-modal" data-mid="modal-email">✕</button></div>
     <div class="mbody">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">To</div>
       <div id="email-to" style="font-size:12px;color:var(--mid);margin-bottom:12px;padding:8px 10px;background:var(--cream);border-radius:8px"></div>
@@ -403,9 +317,9 @@ td{padding:13px 16px;vertical-align:top;}
       <input id="email-subj" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;outline:none;margin-bottom:12px">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Message</div>
       <textarea id="email-body" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;min-height:160px;resize:vertical;outline:none;margin-bottom:14px"></textarea>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button id="email-send-btn" onclick="sendEmail()" style="padding:9px 18px;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer">Send via Outlook</button>
-        <button onclick="closeModal('modal-email')" style="padding:9px 12px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer">Cancel</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button id="email-send-btn" data-action="send-email" style="padding:9px 18px;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer">Send via Outlook</button>
+        <button data-action="close-modal" data-mid="modal-email" style="padding:9px 12px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer">Cancel</button>
         <div id="email-spin" style="display:none;align-items:center;gap:5px;font-size:11px;color:var(--soft)"><div class="mspin"></div>Sending…</div>
       </div>
     </div>
@@ -413,17 +327,43 @@ td{padding:13px 16px;vertical-align:top;}
 </div>
 
 <!-- Drawer -->
-<div class="doverlay" id="doverlay" onclick="closeDrawer()"></div>
+<div class="doverlay" id="doverlay" data-action="close-drawer"></div>
 <div class="drawer" id="drawer">
-  <div class="dhead"><div class="dname" id="d-name"></div><button class="dclose" onclick="closeDrawer()">✕</button></div>
+  <div class="dhead"><div class="dname" id="d-name"></div><button class="dclose" data-action="close-drawer">✕</button></div>
   <div class="dbody" id="d-body"></div>
 </div>
 
 <div class="toast" id="toast"></div>
-</body>
-</html>
+
 <script>
-// ── Config ────────────────────────────────────────────────────────────────────
+/* ============================================================================
+ * Solura Dashboard v8.0 — clean rebuild
+ *
+ * Architectural principles:
+ *   1. Lead state lives in integer step_idx (col Z) + timestamp step_done_at (col AA).
+ *      The free-text SeqLog (col U) is a sidecar for human eyes only — never read.
+ *   2. NF (col N) is YOUR field. Engine writes it in exactly three moments:
+ *      lead-creation, Phase 1 completion, Phase 2 PM completion. Otherwise hands off.
+ *   3. Visibility for time-triggered phases (2, 3, 5) is computed from step + clock,
+ *      not from NF.
+ *   4. Every Graph/GHL fetch goes through gfetch() with one retry on 401.
+ *   5. Buttons use event delegation with data-action attributes. Zero inline onclick.
+ *
+ * Layout of this script:
+ *   §1 Config + constants
+ *   §2 Sequence definition (frozen, single source of truth)
+ *   §3 Templates (verbatim from v7.0)
+ *   §4 Helpers (DOM, dates, names, status)
+ *   §5 Auth (PKCE)
+ *   §6 Data load + write (with retry)
+ *   §7 Migration (one-time backfill of step_idx)
+ *   §8 Sequence engine (currentStep, whenShouldShow)
+ *   §9 Bucket builder + table renderer
+ *   §10 Action handlers (Done, Responded, Update, SMS, Email, Call, Script)
+ *   §11 Event delegation
+ * ========================================================================= */
+
+/* ─── §1 Config + constants ─────────────────────────────────────────────── */
 var CLIENT_ID='1cb530f8-6c5f-4605-9590-068dd55e0b81';
 var TENANT='1b2cdbea-de19-47d2-9512-ea102905e3eb';
 var REDIRECT=location.href.split('?')[0].split('#')[0];
@@ -432,67 +372,75 @@ var GHL_BASE='https://services.leadconnectorhq.com';
 var GHL_LOC='kWlzzI2WZaes2GnQf7DV';
 var GHL_KEY='pit-5df912ec-7542-4dc8-af5b-272472ba84e9';
 var FN='Solura_Lead_Tracker.xlsx';
-var PHONE='(216) 770-4886';
+var PHONE_DISPLAY='(216) 770-4886';
 
-// Column map — headers in row 4, data from row 5 (SheetJS index 4)
-var C={NO:0,DA:1,NM:2,PH:3,EM:4,AR:5,SO:6,SV:7,HR:8,ES:9,ST:10,LC:11,MT:12,NF:13,DM:14,PT:15,MV:16,AG:17,NT:18,SQ:19,SL:20,SD:21,SAFETY:22,REL:23,NSM:24};
-var DATA_START=4; // row index where data begins (0-based)
+// Column map. Indices are 0-based SheetJS positions = Excel column letter offset.
+var C={
+  NO:0,    // A  Lead #
+  DA:1,    // B  Date Added
+  NM:2,    // C  Client Name
+  PH:3,    // D  Phone
+  EM:4,    // E  Email
+  AR:5,    // F  Area
+  SO:6,    // G  Source
+  SV:7,    // H  Services
+  HR:8,    // I  Hrs/Wk
+  ES:9,    // J  Est. Start
+  ST:10,   // K  Status
+  LC:11,   // L  Last Contact
+  MT:12,   // M  Method
+  NF:13,   // N  Next Follow-Up
+  DM:14,   // O  Decision Maker
+  PT:15,   // P  Pay Type
+  MV:16,   // Q  Monthly Value
+  AG:17,   // R  Agreement Signed
+  NT:18,   // S  Notes
+  SQ:19,   // T  Sequence Phase (legacy human-readable; engine ignores)
+  SL:20,   // U  Sequence Log (legacy human-readable sidecar; engine ignores)
+  SD:21,   // V  Seq Date (legacy; engine ignores)
+  SAFETY:22, // W
+  REL:23,    // X
+  NSM:24,    // Y  Next Suggested Method
+  STEP:25,   // Z  step_idx  (NEW — engine state)
+  STEP_AT:26,// AA step_done_at  (NEW — when current step was completed)
+  NUR_OV:27  // AB nurture_weekday_override  (NEW — blank or 0-6)
+};
+var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
-// State
-var tok='',fid='',rows=[],drawerRi=-1,curEmailRi=null;
+// Sentinel values for STEP column
+var STEP_NEW=-1;          // never started, treat as 0 for engine purposes
+var STEP_OFF_SEQUENCE=999; // lead responded, manual mode
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function el(id){return document.getElementById(id);}
-function toast(m){var t=el('toast');if(!t)return;t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},3000);}
-function showErr(m){var e=el('err');if(e){e.textContent='⚠ '+m;e.classList.add('on');}}
-function clearErr(){var e=el('err');if(e)e.classList.remove('on');}
-
-// Date parse — handles Excel serial, ISO 8601 with T, yyyy-mm-dd, m/d/yyyy
-function pd(v){
-  if(!v&&v!==0)return null;
-  if(v instanceof Date)return new Date(v.getFullYear(),v.getMonth(),v.getDate());
-  var s=String(v).trim();
-  if(/^\d{4,6}$/.test(s)){var d=new Date((parseInt(s)-25569)*86400000);return new Date(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());}
-  if(s.indexOf('T')>-1){var d2=new Date(s);if(!isNaN(d2))return new Date(d2.getFullYear(),d2.getMonth(),d2.getDate());}
-  var m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);
-  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);if(m)return new Date(+m[3],+m[1]-1,+m[2]);
-  var d3=new Date(s);if(!isNaN(d3))return new Date(d3.getFullYear(),d3.getMonth(),d3.getDate());
-  return null;
-}
-function ds(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
-function fd(d){return(d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear();}
-function localToday(){var n=new Date();return new Date(n.getFullYear(),n.getMonth(),n.getDate());}
-function daysAgo(dateVal){
-  var d=pd(dateVal);if(!d)return 0;
-  var today=localToday();
-  return Math.max(0,Math.round((today-d)/86400000));
-}
-
-// Status helpers
+// Status helpers — case-insensitive substring matching
 var ACTIVE_ST=['contacted','active conversation','assessment scheduled','assessment completed','proposal sent','signed','on service','hold'];
 var EXCL_ST=['closed','lost','not interested','duplicate','wrong number','deceased'];
-function isActive(st){var s=String(st||'').toLowerCase().trim();return ACTIVE_ST.some(function(a){return s.indexOf(a)>-1;});}
-function isExcluded(st){var s=String(st||'').toLowerCase().trim();if(!s||s==='new'||s==='no answer')return false;return EXCL_ST.some(function(a){return s.indexOf(a)>-1;});}
 
-function sbadge(st){
-  var s=String(st||'').trim();
-  if(!s||s==='New')return '<span class="pill pnew">New</span>';
-  if(s.toLowerCase()==='no answer')return '<span class="pill pna">No answer</span>';
-  if(isActive(s))return '<span class="pill pact">'+s+'</span>';
-  return '<span class="pill" style="background:var(--cream);color:var(--mid)">'+s+'</span>';
-}
+// Migration marker
+var MIGRATION_VERSION='v8.0';
 
-// ── Sequence + Templates ────────────────────────────────────────────────────
+// Runtime state
+var tok='', fid='', rows=[], drawerRi=-1, lastLoadAt=null;
+
+/* ─── §2 Sequence definition ─────────────────────────────────────────────
+ * The single source of truth for what action a lead should take next.
+ * Indexed by step_idx. Total: 32 steps.
+ *   0-3   Phase 1 (action-triggered)
+ *   4-23  Phase 2 (time-triggered, 10 days × 2 slots = 20 actions)
+ *   24-28 Phase 3 (time-triggered, weeks 2-6, weekly)
+ *   29-30 Phase 4 (action-triggered)
+ *   31    Phase 5 (time-triggered, perpetual weekly nurture)
+ *
+ * Step 31 is sticky — after completing it, step_idx stays at 31 and step_done_at
+ * gets updated. The lead loops on Phase 5 forever until they respond or get disqualified.
+ * ─────────────────────────────────────────────────────────────────────── */
 var SEQ=[];
 (function(){
-  // Phase 1 — action triggered (4 steps)
-  SEQ.push({ph:1,icon:'💬',text:'Intro text — notify calling in 5 min',type:'sms',trigger:'action'});
-  SEQ.push({ph:1,icon:'📞',text:'First call',type:'call',trigger:'action'});
-  SEQ.push({ph:1,icon:'📞',text:'Second call attempt',type:'call',trigger:'action'});
-  SEQ.push({ph:1,icon:'💬',text:'Missed you text',type:'sms',trigger:'action'});
-  // Phase 2 — time triggered (10 days x 2)
+  SEQ.push({ph:1,icon:'💬',text:'Intro text — notify calling in 5 min',type:'sms',trigger:'action',lbl:'Phase 1'});
+  SEQ.push({ph:1,icon:'📞',text:'First call',type:'call',trigger:'action',lbl:'Phase 1'});
+  SEQ.push({ph:1,icon:'📞',text:'Second call attempt',type:'call',trigger:'action',lbl:'Phase 1'});
+  SEQ.push({ph:1,icon:'💬',text:'Missed you text',type:'sms',trigger:'action',lbl:'Phase 1'});
   for(var d=1;d<=10;d++){
-    var pmIsCall=(d%2!==0); // odd days = PM call, even days = PM text
+    var pmIsCall=(d%2!==0);
     SEQ.push({ph:2,icon:'📞',text:'AM Call — Day '+d,type:'call',trigger:'time',day:d,slot:'am',pmIsCall:pmIsCall,lbl:'Phase 2 · Day '+d});
     if(pmIsCall){
       SEQ.push({ph:2,icon:'📞',text:'PM Call — Day '+d,type:'call',trigger:'time',day:d,slot:'pm',pmIsCall:true,lbl:'Phase 2 · Day '+d});
@@ -500,224 +448,28 @@ var SEQ=[];
       SEQ.push({ph:2,icon:'💬',text:'PM Text — Day '+d,type:'sms',trigger:'time',day:d,slot:'pm',pmIsCall:false,lbl:'Phase 2 · Day '+d});
     }
   }
-  // Phase 3 — time triggered (5 weeks, weekly)
   for(var w=2;w<=6;w++){
     SEQ.push({ph:3,icon:'💬',text:'Week '+w+' check-in',type:'sms',trigger:'time',week:w,lbl:'Phase 3 · Wk '+w});
   }
-  // Phase 4 — action triggered (2 steps)
   SEQ.push({ph:4,icon:'📞',text:'6-week re-engagement call',type:'call',trigger:'action',lbl:'Phase 4'});
   SEQ.push({ph:4,icon:'💬',text:'Voicemail + follow-up text',type:'sms',trigger:'action',lbl:'Phase 4'});
-  // Phase 5 — time triggered (ongoing weekly)
   SEQ.push({ph:5,icon:'💬',text:'Long-term nurture — weekly',type:'sms',trigger:'time',lbl:'Phase 5'});
 })();
+// Index references for clarity in engine code
+var STEP_P1_LAST=3;   // index of "Missed you text" — Phase 1 final action
+var STEP_P2_FIRST=4;  // index of first Phase 2 action (AM Day 1)
+var STEP_P2_LAST=23;  // index of last Phase 2 action (PM Day 10)
+var STEP_P3_FIRST=24;
+var STEP_P3_LAST=28;
+var STEP_P4_FIRST=29;
+var STEP_P4_LAST=30;
+var STEP_P5=31;
 
-// ── Timing Engine ─────────────────────────────────────────────────────────────
-// Returns current action for a no-answer lead based on time-trigger rules
-// Phase 1 & 4: action-triggered (advance only when logged)
-// Phase 2: time-triggered with strict windows per slot
-// Phase 3 & 5: time-triggered weekly (available Mon-Sun, then next week)
-
-function getNow(){return new Date();}
-
-function getP2Window(seqItem){
-  // Returns {start:HH, end:HH} for a Phase 2 action based on day/slot/type
-  // pmIsCall = true means this day's PM is a call
-  if(seqItem.slot==='am'){
-    // AM call window: 8 AM to 1 PM (PM call day) or 8 AM to 5 PM (PM text day)
-    return{start:8,end:seqItem.pmIsCall?13:17};
-  }else{
-    // PM slot: call = 3 PM to 9 PM, text = 2 PM to 22 (10 PM)
-    return{start:seqItem.pmIsCall?15:14,end:seqItem.pmIsCall?21:22};
-  }
-}
-
-function isP2WindowOpen(seqItem,now){
-  var h=now.getHours()+(now.getMinutes()/60);
-  var w=getP2Window(seqItem);
-  return h>=w.start&&h<w.end;
-}
-
-function getNextAction(log,dO,dateAdded){
-  // log = pipe-separated completed action log
-  // dO = days since lead was added
-  // dateAdded = Date object
-  var now=getNow();
-  var entries=(log||'').split(' | ').filter(function(e){return e.trim();});
-
-  function logged(text){
-    return entries.some(function(e){return e.indexOf(text)>-1;});
-  }
-
-  // ── Phase 1 (action-triggered) ───────────────────────────────────────────
-  // 'SMS sent' is a legacy log marker from older code paths — kept so historical
-  // rows don't loop back to Phase 1 forever. New writes always use na.text.
-  var introLogged=logged('Intro text — notify calling in 5 min')||logged('SMS sent');
-  if(!introLogged)
-    return SEQ[0]; // Intro text
-  if(!logged('First call'))
-    return SEQ[1];
-  if(!logged('Second call attempt'))
-    return SEQ[2];
-  if(!logged('Missed you text'))
-    return SEQ[3];
-
-  // ── Phase 2 (time-triggered, 10 days) ────────────────────────────────────
-  var h=now.getHours()+(now.getMinutes()/60);
-  // Only apply time window cuts when NF date is today
-  // If NF is tomorrow or future, always start from AM (fresh day)
-  var nfDate=dateAdded; // reuse dateAdded param — caller passes pd(r[C.NF]) as 3rd arg
-  var nfStr=nfDate?ds(nfDate):'';
-  var todayStr=ds(now);
-  var nfIsToday=nfStr===todayStr;
-
-  for(var d=1;d<=10;d++){
-    var amText='AM Call — Day '+d;
-    var pmText=d%2!==0?'PM Call — Day '+d:'PM Text — Day '+d;
-    var amLogged=logged(amText);
-    var pmLogged=logged(pmText);
-
-    // Find SEQ items for this day
-    var amItem=null,pmItem=null;
-    for(var si=0;si<SEQ.length;si++){
-      if(SEQ[si].ph===2&&SEQ[si].day===d&&SEQ[si].slot==='am')amItem=SEQ[si];
-      if(SEQ[si].ph===2&&SEQ[si].day===d&&SEQ[si].slot==='pm')pmItem=SEQ[si];
-    }
-    if(!amItem||!pmItem)continue;
-
-    // If both logged — next day
-    if(amLogged&&pmLogged)continue;
-
-    // If NF is today, apply time window cuts
-    if(nfIsToday){
-      var amW=getP2Window(amItem);
-      var pmW=getP2Window(pmItem);
-      var amWindowPassed=h>=amW.end;
-      var pmWindowPassed=h>=pmW.end;
-
-      if(!amLogged){
-        if(amWindowPassed){
-          if(!pmLogged){
-            if(pmWindowPassed)continue;
-            return pmItem;
-          }
-          continue;
-        }
-        return amItem;
-      }
-      if(!pmLogged){
-        if(pmWindowPassed)continue;
-        return pmItem;
-      }
-    } else {
-      // NF is future — always return AM first, ignore time windows
-      if(!amLogged)return amItem;
-      if(!pmLogged)return pmItem;
-    }
-  }
-
-  // ── Phase 3 (time-triggered, weekly weeks 2-6) ───────────────────────────
-  for(var w=2;w<=6;w++){
-    var wText='Week '+w+' check-in';
-    if(!logged(wText)){
-      // Find what day of week we're on
-      // Each week corresponds to a calendar week starting from lead date
-      // Week 2 = 2nd week after lead added, etc.
-      // Available Monday through Sunday of that week
-      // If current week matches and within Sun boundary, show it
-      var today2=localToday();
-      var dayOfWeek=today2.getDay(); // 0=Sun,1=Mon,...,6=Sat
-      // Week window: Monday = dayOfWeek 1, Sunday = dayOfWeek 0 (next week)
-      // Show if we're in the right week (Mon-Sun)
-      // We show this item and let the user act; it expires Sunday 11:59 PM
-      // Simple: just show the next unlogged week item
-      var p3Item=null;
-      for(var si2=0;si2<SEQ.length;si2++){
-        if(SEQ[si2].ph===3&&SEQ[si2].week===w){p3Item=SEQ[si2];break;}
-      }
-      if(p3Item)return p3Item;
-    }
-  }
-
-  // ── Phase 4 (action-triggered) ───────────────────────────────────────────
-  if(!logged('6-week re-engagement call')){
-    for(var si3=0;si3<SEQ.length;si3++){
-      if(SEQ[si3].text==='6-week re-engagement call')return SEQ[si3];
-    }
-  }
-  if(!logged('Voicemail + follow-up text')){
-    for(var si4=0;si4<SEQ.length;si4++){
-      if(SEQ[si4].text==='Voicemail + follow-up text')return SEQ[si4];
-    }
-  }
-
-  // ── Phase 5 (time-triggered, ongoing weekly) ─────────────────────────────
-  return{ph:5,icon:'💬',text:'Long-term nurture — weekly',type:'sms',trigger:'time',lbl:'Phase 5'};
-}
-
-function appendLog(existing,actionText,method){
-  var entry=actionText+(method?' via '+method:'');
-  var parts=(existing||'').split(' | ').filter(function(e){return e.trim();});
-  parts.push(entry);
-  if(parts.length>40)parts=parts.slice(parts.length-40);
-  return parts.join(' | ');
-}
-
-// Check if a Phase 2 action is currently in window (for display)
-function isActionAvailableNow(na){
-  if(!na)return false;
-  if(na.trigger==='action')return true; // action-triggered always available
-  if(na.ph===2){
-    return isP2WindowOpen(na,getNow());
-  }
-  return true; // Phase 3,5 — always available during their week
-}
-
-
-// ── Name Logic ────────────────────────────────────────────────────────────────
-function getNames(ri){
-  var r=rows[ri]||[];
-  var dmFull=String(r[C.DM]||'').trim();
-  var clientFull=String(r[C.NM]||'').trim();
-  // DM first name
-  var dmFirst=dmFull?dmFull.split(' ')[0]:'';
-  // Patient: client name, only if different from DM
-  var ptFirst='';
-  if(clientFull){
-    var clientFirst=clientFull.split(' ')[0];
-    // If client first name is same as DM first name, same person
-    if(dmFirst&&clientFirst.toLowerCase()===dmFirst.toLowerCase()){
-      ptFirst=''; // same person, don't mention separately
-    }else{
-      ptFirst=clientFirst;
-    }
-  }
-  return{dm:dmFirst,pt:ptFirst,hasDM:!!dmFirst};
-}
-
-function fillNames(s,names){
-  var dm=names.dm||'there';
-  s=s.replace(/{dm}/g,dm);
-  if(names.pt){
-    s=s.replace(/{pt}/g,names.pt);
-    // Keep "for {pt}" references as is since pt exists
-  }else{
-    // Remove patient references smoothly
-    s=s.replace(/\s+for\s+\{pt\}/gi,'');
-    s=s.replace(/\s+about\s+\{pt\}/gi,'');
-    s=s.replace(/\s+on\s+\{pt\}/gi,'');
-    s=s.replace(/\s+and\s+\{pt\}/gi,'');
-    s=s.replace(/\s+\{pt\}/g,'');
-    s=s.replace(/\{pt\}/g,'');
-  }
-  return s.trim().replace(/\s+/g,' ');
-}
-
-function isAPFM(ri){return String(rows[ri]&&rows[ri][C.SO]||'').toLowerCase().indexOf('place for mom')>-1;}
-
-// ── Templates ─────────────────────────────────────────────────────────────────
-// COLD templates — for no-answer leads only (Phases 1-5 sequence)
-// WARM templates — for active/responded leads only
-
+/* ─── §3 Templates ───────────────────────────────────────────────────────
+ * Two sets: COLD (for no-answer leads in active sequence) and WARM (for
+ * leads who have responded). Each set has APFM and generic variants.
+ * Each phase has 3 rotating templates; lead's row index selects which.
+ * ─────────────────────────────────────────────────────────────────────── */
 var COLD={
   // APFM leads
   apfm:{
@@ -830,382 +582,939 @@ var COLD_EMAIL={
 
 function getTpl(arr,ri){return arr[ri%arr.length];}
 
-function getSMSText(ri){
-  var r=rows[ri]||[];
-  var names=getNames(ri);
-  var log=String(r[C.SL]||'');
-  var active=isActive(r[C.ST]||'');
+/* ─── §4 Helpers ─────────────────────────────────────────────────────────  */
+function el(id){return document.getElementById(id);}
+function $$(sel,root){return Array.prototype.slice.call((root||document).querySelectorAll(sel));}
+function toast(m){var t=el('toast');if(!t)return;t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},3000);}
+function showErr(m){var e=el('err');if(e){e.textContent='⚠ '+m;e.classList.add('on');}}
+function clearErr(){var e=el('err');if(e)e.classList.remove('on');}
+function escapeHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
-  // Active/responded leads get warm templates only
-  if(active){
-    var s=getTpl(WARM.sms,ri);
-    return fillNames(s,names);
-  }
+// Date helpers — all timezone-safe local-time
+function localToday(){var n=new Date();return new Date(n.getFullYear(),n.getMonth(),n.getDate());}
+function pd(v){
+  // Parse Excel/string/ISO date into local-midnight Date, or null
+  if(!v&&v!==0)return null;
+  if(v instanceof Date)return new Date(v.getFullYear(),v.getMonth(),v.getDate());
+  var s=String(v).trim();
+  if(!s)return null;
+  // Excel serial (4-6 digits)
+  if(/^\d{4,6}$/.test(s)){var d=new Date((parseInt(s,10)-25569)*86400000);return new Date(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());}
+  // ISO with T
+  if(s.indexOf('T')>-1){var d2=new Date(s);if(!isNaN(d2))return new Date(d2.getFullYear(),d2.getMonth(),d2.getDate());}
+  // yyyy-mm-dd
+  var m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);
+  // m/d/yyyy
+  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);if(m)return new Date(+m[3],+m[1]-1,+m[2]);
+  var d3=new Date(s);if(!isNaN(d3))return new Date(d3.getFullYear(),d3.getMonth(),d3.getDate());
+  return null;
+}
+function ds(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function fd(d){return(d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear();}
+function addDays(d,n){var x=new Date(d.getFullYear(),d.getMonth(),d.getDate());x.setDate(x.getDate()+n);return x;}
+function daysBetween(a,b){return Math.round((a.getTime()-b.getTime())/86400000);}
+function nowDecimalHour(){var n=new Date();return n.getHours()+n.getMinutes()/60;}
 
-  // No-answer leads get cold sequence templates
-  var apfm=isAPFM(ri);
-  var na=getNextAction(log,0,pd(r[C.NF]));
-  var ph=na?na.ph:5;
-  var set=apfm?COLD.apfm:COLD.gen;
-  var arr;
+// Status checks — substring, lowercased, trimmed
+function lc(v){return String(v||'').toLowerCase().trim();}
+function isActive(st){var s=lc(st);return ACTIVE_ST.some(function(a){return s.indexOf(a)>-1;});}
+function isExcluded(st){var s=lc(st);if(!s||s==='new'||s==='no answer')return false;return EXCL_ST.some(function(a){return s.indexOf(a)>-1;});}
 
-  if(ph===1){
-    var introLogged=log.indexOf('Intro text')>-1;
-    arr=introLogged?set.p1_missed:set.p1_intro;
-  }else if(ph===2)arr=set.p2;
-  else if(ph===3)arr=set.p3;
-  else if(ph===4)arr=set.p4;
-  else arr=set.p5;
-
-  var s=getTpl(arr,ri);
-  return fillNames(s,names);
+function sbadge(st){
+  var s=String(st||'').trim();
+  if(!s||s==='New')return '<span class="pill pnew">New</span>';
+  if(s.toLowerCase()==='no answer')return '<span class="pill pna">No answer</span>';
+  if(isActive(s))return '<span class="pill pact">'+escapeHtml(s)+'</span>';
+  return '<span class="pill psoft">'+escapeHtml(s)+'</span>';
 }
 
-function getEmailContent(ri){
+// Names — DM is always the addressee; patient only mentioned if different
+function getNames(ri){
   var r=rows[ri]||[];
-  var names=getNames(ri);
-  var active=isActive(r[C.ST]||'');
-
-  // Active/responded leads get warm email templates
-  if(active){
-    var idx=ri%WARM.email.subj.length;
-    return{
-      subject:fillNames(WARM.email.subj[idx],names),
-      body:fillNames(WARM.email.body[idx],names)
-    };
+  var dmFull=String(r[C.DM]||'').trim();
+  var clientFull=String(r[C.NM]||'').trim();
+  var dmFirst=dmFull?dmFull.split(/\s+/)[0]:'';
+  var ptFirst='';
+  if(clientFull){
+    var clientFirst=clientFull.split(/\s+/)[0];
+    if(!dmFirst||clientFirst.toLowerCase()!==dmFirst.toLowerCase()){
+      ptFirst=clientFirst;
+    }
   }
-
-  // No-answer leads get cold email templates
-  var apfm=isAPFM(ri);
-  var set=apfm?COLD_EMAIL.apfm:COLD_EMAIL.gen;
-  var idx2=ri%set.subj.length;
-  return{
-    subject:fillNames(set.subj[idx2],names),
-    body:fillNames(set.body[idx2],names)
-  };
+  return {dm:dmFirst,pt:ptFirst,hasDM:!!dmFirst};
 }
+function fillNames(s,names){
+  var dm=names.dm||'there';
+  s=String(s||'').replace(/\{dm\}/g,dm);
+  if(names.pt){
+    s=s.replace(/\{pt\}/g,names.pt);
+  }else{
+    s=s.replace(/\s+for\s+\{pt\}/gi,'');
+    s=s.replace(/\s+about\s+\{pt\}/gi,'');
+    s=s.replace(/\s+on\s+\{pt\}/gi,'');
+    s=s.replace(/\s+and\s+\{pt\}/gi,'');
+    s=s.replace(/\s+\{pt\}/g,'');
+    s=s.replace(/\{pt\}/g,'');
+  }
+  return s.trim().replace(/\s+/g,' ');
+}
+function isAPFM(ri){return lc((rows[ri]||[])[C.SO]).indexOf('place for mom')>-1;}
 
-
-
-// ── Auth (PKCE) ───────────────────────────────────────────────────────────────
+/* ─── §5 Auth (PKCE) ─────────────────────────────────────────────────────  */
 async function genPKCE(){
   var v=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
-  var enc=new TextEncoder().encode(v);
-  var hash=await crypto.subtle.digest('SHA-256',enc);
+  var hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));
   var b64=btoa(String.fromCharCode.apply(null,new Uint8Array(hash))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-  return{verifier:v,challenge:b64};
+  return {verifier:v,challenge:b64};
 }
 
-window.addEventListener('load',async function(){
-  el('cid-disp').textContent='Client ID: '+CLIENT_ID;
-  tok=sessionStorage.getItem('st')||'';
-  var rt=localStorage.getItem('sr');
-  if(tok){signedIn();return;}
-  // Handle OAuth callback
-  var params=new URLSearchParams(location.search);
-  var code=params.get('code');
-  if(code){
-    history.replaceState({},'',REDIRECT);
-    var ver=sessionStorage.getItem('pkce_v');
-    if(!ver){showErr('PKCE verifier missing');return;}
-    try{
-      var body=new URLSearchParams({client_id:CLIENT_ID,code:code,redirect_uri:REDIRECT,grant_type:'authorization_code',code_verifier:ver});
-      var r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
-      var j=await r.json();
-      if(j.access_token){tok=j.access_token;sessionStorage.setItem('st',tok);if(j.refresh_token)localStorage.setItem('sr',j.refresh_token);signedIn();}
-      else showErr('Token error: '+(j.error_description||j.error));
-    }catch(e){showErr('Auth error: '+e.message);}
-    return;
-  }
-  // Try refresh token
-  if(rt){
-    try{
-      var body2=new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:'openid profile email Files.ReadWrite Mail.Send offline_access'});
-      var r2=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body2});
-      var j2=await r2.json();
-      if(j2.access_token){tok=j2.access_token;sessionStorage.setItem('st',tok);if(j2.refresh_token)localStorage.setItem('sr',j2.refresh_token);signedIn();return;}
-    }catch(e){}
-    localStorage.removeItem('sr');
-  }
-});
-
 async function signIn(){
-  var cid=el('cid-input').value.trim()||CLIENT_ID;
   var pkce=await genPKCE();
   sessionStorage.setItem('pkce_v',pkce.verifier);
   var url='https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/authorize?'
-    +'client_id='+cid+'&response_type=code&redirect_uri='+encodeURIComponent(REDIRECT)
+    +'client_id='+CLIENT_ID+'&response_type=code&redirect_uri='+encodeURIComponent(REDIRECT)
     +'&scope='+encodeURIComponent('openid profile email Files.ReadWrite Mail.Send offline_access')
     +'&code_challenge='+pkce.challenge+'&code_challenge_method=S256&prompt=select_account';
   location.href=url;
 }
-function signedIn(){
+function signOut(){sessionStorage.clear();localStorage.removeItem('sr');location.reload();}
+
+async function refreshToken(){
+  var rt=localStorage.getItem('sr');
+  if(!rt)return false;
+  try{
+    var body=new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:'openid profile email Files.ReadWrite Mail.Send offline_access'});
+    var r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
+    var j=await r.json();
+    if(j.access_token){
+      tok=j.access_token;
+      sessionStorage.setItem('st',tok);
+      if(j.refresh_token)localStorage.setItem('sr',j.refresh_token);
+      return true;
+    }
+  }catch(e){}
+  localStorage.removeItem('sr');
+  return false;
+}
+
+function onSignedIn(){
   el('ls').style.display='none';
-  el('btn-refresh').style.display='flex';
-  el('btn-out').style.display='flex';
+  el('btn-refresh').style.display='inline-block';
+  el('btn-out').style.display='inline-block';
   el('sdot').className='sdot live';
   el('slabel').textContent='Connected to OneDrive';
   loadData();
 }
-function signOut(){sessionStorage.clear();localStorage.removeItem('sr');location.reload();}
 
-// ── Data ──────────────────────────────────────────────────────────────────────
-async function gf(url,method,body){
-  var opts={method:method||'GET',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'}};
-  if(body)opts.body=JSON.stringify(body);
-  return fetch(url,opts);
+async function handleAuthCallback(){
+  var params=new URLSearchParams(location.search);
+  var code=params.get('code');
+  if(!code)return false;
+  history.replaceState({},'',REDIRECT);
+  var ver=sessionStorage.getItem('pkce_v');
+  if(!ver){showErr('PKCE verifier missing');return true;}
+  try{
+    var body=new URLSearchParams({client_id:CLIENT_ID,code:code,redirect_uri:REDIRECT,grant_type:'authorization_code',code_verifier:ver});
+    var r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
+    var j=await r.json();
+    if(j.access_token){
+      tok=j.access_token;
+      sessionStorage.setItem('st',tok);
+      if(j.refresh_token)localStorage.setItem('sr',j.refresh_token);
+      onSignedIn();
+    }else{
+      showErr('Token error: '+(j.error_description||j.error||'unknown'));
+    }
+  }catch(e){showErr('Auth error: '+e.message);}
+  return true;
+}
+
+/* ─── §6 Data load + write (with 401 retry) ─────────────────────────────  */
+
+// One central fetch wrapper. Retries once on 401 by refreshing the token.
+async function gfetch(url,opts){
+  opts=opts||{};
+  opts.headers=opts.headers||{};
+  opts.headers['Authorization']='Bearer '+tok;
+  if(opts.body&&!opts.headers['Content-Type'])opts.headers['Content-Type']='application/json';
+  var r=await fetch(url,opts);
+  if(r.status===401){
+    var refreshed=await refreshToken();
+    if(refreshed){
+      opts.headers['Authorization']='Bearer '+tok;
+      r=await fetch(url,opts);
+    }
+  }
+  return r;
 }
 
 async function loadData(){
   clearErr();
   try{
-    // Find file
-    var r=await gf(GR+'/me/drive/root/search(q=\''+FN+'\')');
+    var r=await gfetch(GR+"/me/drive/root/search(q='"+encodeURIComponent(FN)+"')");
     if(!r.ok)throw new Error('Drive search failed: '+r.status);
     var j=await r.json();
     var f=(j.value||[]).find(function(x){return x.name===FN;});
     if(!f)throw new Error(FN+' not found in OneDrive');
     fid=f.id;
-    // Download
-    var r2=await gf(GR+'/me/drive/items/'+fid+'/content');
+    var r2=await gfetch(GR+'/me/drive/items/'+fid+'/content');
     if(!r2.ok)throw new Error('Download failed: '+r2.status);
     var buf=await r2.arrayBuffer();
     var wb=XLSX.read(buf,{type:'array',cellDates:true});
     var ws=wb.Sheets['Lead Tracker'];
     if(!ws)throw new Error('Sheet "Lead Tracker" not found');
     rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-    var t=new Date();
-    el('sync-time').textContent='Refreshed: '+t.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    lastLoadAt=new Date();
+    el('sync-time').textContent='Refreshed: '+lastLoadAt.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+
+    // Run migration if needed before rendering
+    await maybeRunMigration();
+
     buildUI();
   }catch(e){showErr(e.message);}
 }
 
+// Write specific columns to a row. updates is an object {colIndex: value, ...}.
+// Batches into one Graph "session" of patches.
 async function writeRow(ri,updates){
-  var cols='ABCDEFGHIJKLMNOPQRSTUVWXY',base=GR+'/me/drive/items/'+fid+'/workbook';
+  var cols='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  // For column AA (index 26), AB (27), we use double letters
+  function colLetter(i){
+    if(i<26)return cols[i];
+    return cols[Math.floor(i/26)-1]+cols[i%26];
+  }
   var exRow=ri+1; // SheetJS 0-based to Excel 1-based
-  var ents=Object.entries(updates);
+  var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
+  var ents=Object.keys(updates);
   for(var i=0;i<ents.length;i++){
-    var ci=parseInt(ents[i][0]),val=ents[i][1],addr=cols[ci]+exRow;
-    var res=await fetch(base+'/worksheets/Lead%20Tracker/range(address=\''+addr+'\')',{
-      method:'PATCH',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
+    var ci=parseInt(ents[i],10), val=updates[ents[i]], addr=colLetter(ci)+exRow;
+    var res=await gfetch(base+"/range(address='"+addr+"')",{
+      method:'PATCH',
       body:JSON.stringify({values:[[val]]})
     });
-    if(!res.ok){var e=await res.json().catch(function(){return{};});throw new Error('Save failed col '+cols[ci]+': '+(e.error?e.error.message:res.status));}
+    if(!res.ok){
+      var e=await res.json().catch(function(){return{};});
+      throw new Error('Save failed col '+colLetter(ci)+': '+(e.error?e.error.message:res.status));
+    }
+    // Also update local cache so reads stay consistent until next loadData
+    if(rows[ri]){
+      while(rows[ri].length<=ci)rows[ri].push('');
+      rows[ri][ci]=val;
+    }
   }
 }
 
-// ── Build UI ──────────────────────────────────────────────────────────────────
-function buildUI(){
-  var today=localToday(),ts=ds(today);
-  var weekEnd=new Date(today.getFullYear(),today.getMonth(),today.getDate()+7);
-  var od=[],td2=[],wk=[],al=[];
+/* ─── §7 Migration ───────────────────────────────────────────────────────
+ * Runs once per device when first loading v8.0. Reads each lead's existing
+ * SeqLog (col U) and infers step_idx, writing it to col Z. After the
+ * migration completes successfully, sets a localStorage marker so it never
+ * runs again on this device.
+ *
+ * Inference rules (in order):
+ *   - Lead status is excluded (closed/lost/etc) → skip migration, leave blank
+ *   - Lead status is active (responded) → step_idx = 999 (off-sequence)
+ *   - Log contains "Voicemail + follow-up text" → step 31 (Phase 5 perpetual)
+ *   - Log contains "6-week re-engagement call" → step 30 (Phase 4 second step)
+ *   - Log contains "Week N check-in" → step (24 + N - 2 + 1)
+ *   - Log contains highest "PM ... Day N" → next step after that
+ *   - Log contains highest "AM Call — Day N" → next step after that
+ *   - Log contains "Missed you text" → step 4 (Phase 2 Day 1 AM)
+ *   - Log contains "Second call attempt" → step 3 (Missed you text)
+ *   - Log contains "First call" → step 2 (Second call attempt)
+ *   - Log contains "Intro text" or "SMS sent" → step 1 (First call)
+ *   - Otherwise → step 0 (Intro text not yet done)
+ * ─────────────────────────────────────────────────────────────────────── */
+function inferStepFromLog(rowArr){
+  var st=lc(rowArr[C.ST]);
+  if(EXCL_ST.some(function(a){return st.indexOf(a)>-1;}))return null; // skip
+  if(ACTIVE_ST.some(function(a){return st.indexOf(a)>-1;}))return STEP_OFF_SEQUENCE;
+  var log=String(rowArr[C.SL]||'');
+  if(!log.trim())return 0;
+  if(log.indexOf('Voicemail + follow-up text')>-1)return STEP_P5;
+  if(log.indexOf('6-week re-engagement call')>-1)return STEP_P4_LAST; // next is voicemail
+  // Phase 3 weeks
+  for(var w=6;w>=2;w--){
+    if(log.indexOf('Week '+w+' check-in')>-1){
+      // next is next week (or Phase 4 after week 6)
+      if(w===6)return STEP_P4_FIRST;
+      return STEP_P3_FIRST+(w-2)+1;
+    }
+  }
+  // Phase 2 — find highest day with PM logged
+  for(var d=10;d>=1;d--){
+    if(log.indexOf('PM Call — Day '+d)>-1||log.indexOf('PM Text — Day '+d)>-1){
+      // PM done → next is next day's AM, or Phase 3 if d===10
+      if(d===10)return STEP_P3_FIRST;
+      return STEP_P2_FIRST + d*2; // d=1 → 6 (AM Day 2), d=2 → 8 (AM Day 3)
+    }
+  }
+  // Phase 2 — find highest day with AM logged but PM not
+  for(var d2=10;d2>=1;d2--){
+    if(log.indexOf('AM Call — Day '+d2)>-1){
+      return STEP_P2_FIRST + (d2-1)*2 + 1; // d2=1 → 5 (PM Day 1)
+    }
+  }
+  // Phase 1
+  if(log.indexOf('Missed you text')>-1)return STEP_P2_FIRST; // 4 = AM Day 1
+  if(log.indexOf('Second call attempt')>-1)return 3;
+  if(log.indexOf('First call')>-1)return 2;
+  if(log.indexOf('Intro text')>-1||log.indexOf('SMS sent')>-1)return 1;
+  return 0;
+}
+
+async function maybeRunMigration(){
+  var key='solura_migration_'+MIGRATION_VERSION;
+  if(localStorage.getItem(key)==='done')return;
+
+  // Check whether any row actually needs migration
+  var needsMig=[];
+  for(var i=DATA_START;i<rows.length;i++){
+    var r=rows[i];
+    if(!r)continue;
+    var nm=String(r[C.NM]||r[C.DM]||'').trim();
+    if(!nm)continue;
+    // Already has step_idx?
+    var existing=r[C.STEP];
+    if(existing!==''&&existing!=null&&!isNaN(parseInt(existing,10)))continue;
+    var inferred=inferStepFromLog(r);
+    if(inferred==null)continue; // excluded
+    needsMig.push({ri:i,step:inferred});
+  }
+
+  if(!needsMig.length){
+    localStorage.setItem(key,'done');
+    return;
+  }
+
+  // Show banner
+  var mb=el('migbar'), mt=el('migbar-txt');
+  mb.classList.add('on');
+  mt.textContent='Running one-time migration on '+needsMig.length+' lead(s)…';
+
+  try{
+    var nowIso=new Date().toISOString();
+    for(var k=0;k<needsMig.length;k++){
+      var m=needsMig[k];
+      mt.textContent='Migrating '+(k+1)+' of '+needsMig.length+'…';
+      var u={};
+      u[C.STEP]=m.step;
+      u[C.STEP_AT]=nowIso;
+      await writeRow(m.ri,u);
+    }
+    localStorage.setItem(key,'done');
+    mt.textContent='Migration complete · '+needsMig.length+' leads';
+    setTimeout(function(){mb.classList.remove('on');},2500);
+  }catch(e){
+    mt.textContent='Migration paused — '+e.message+' (will retry next load)';
+    // Do not set the done marker; next load retries
+    throw e;
+  }
+}
+
+/* ─── §8 Sequence engine ─────────────────────────────────────────────────  */
+function getStep(ri){
+  var r=rows[ri]||[];
+  var v=r[C.STEP];
+  if(v===''||v==null)return STEP_NEW;
+  var n=parseInt(v,10);
+  if(isNaN(n))return STEP_NEW;
+  return n;
+}
+function getStepDoneAt(ri){
+  var v=(rows[ri]||[])[C.STEP_AT];
+  if(!v)return null;
+  var d=new Date(v);
+  return isNaN(d)?null:d;
+}
+function isOffSequence(ri){return getStep(ri)===STEP_OFF_SEQUENCE;}
+
+// Current pending action (or null if off-sequence/excluded)
+function currentAction(ri){
+  var step=getStep(ri);
+  if(step===STEP_OFF_SEQUENCE)return null;
+  if(step<0)return SEQ[0]; // new lead → intro text
+  if(step>=SEQ.length)return SEQ[SEQ.length-1]; // phase 5 sticky
+  return SEQ[step];
+}
+
+// Phase 2 time windows
+function p2Window(action){
+  // returns {amStart,amEnd,pmStart,pmEnd} hours decimal
+  if(!action||action.ph!==2)return null;
+  if(action.pmIsCall){
+    return {start:action.slot==='am'?8:15, end:action.slot==='am'?13:21};
+  }else{
+    return {start:action.slot==='am'?8:14, end:action.slot==='am'?17:22};
+  }
+}
+
+// Which calendar date does this lead's Phase 2 step belong to?
+// Anchored by step_done_at of the LAST completed step. The first Phase 2
+// action lands on the day AFTER Phase 1 completed (i.e. the day after step
+// 3's done_at).
+function p2DateFor(ri){
+  var step=getStep(ri);
+  if(step<STEP_P2_FIRST||step>STEP_P2_LAST)return null;
+  var doneAt=getStepDoneAt(ri);
+  if(!doneAt)return localToday(); // no anchor → assume today
+  // step_done_at is the timestamp of completing the PREVIOUS step.
+  // For Phase 2 AM, the day is doneAt+1 (because previous step was either
+  // Phase 1 last step or previous day's PM).
+  // For Phase 2 PM same day, the day is the same as doneAt (because previous
+  // step was today's AM).
+  var action=SEQ[step];
+  if(!action)return localToday();
+  if(action.slot==='am'){
+    // Previous step was either Missed you text (step 3) or prev day's PM
+    // Either way, today's AM = doneAt + 1 calendar day
+    var doneLocal=new Date(doneAt.getFullYear(),doneAt.getMonth(),doneAt.getDate());
+    return addDays(doneLocal,1);
+  }else{
+    // PM slot → same calendar day as the AM that was just completed
+    return new Date(doneAt.getFullYear(),doneAt.getMonth(),doneAt.getDate());
+  }
+}
+
+// Anchor date for Phase 3/5 weekly nurture
+function nurtureWeekday(ri){
+  var r=rows[ri]||[];
+  var ov=r[C.NUR_OV];
+  if(ov!==''&&ov!=null&&!isNaN(parseInt(ov,10))){
+    var n=parseInt(ov,10);
+    if(n>=0&&n<=6)return n;
+  }
+  var added=pd(r[C.DA]);
+  return added?added.getDay():localToday().getDay();
+}
+
+// Visibility decision — the single source of truth for bucketing.
+// Returns one of:
+//   {bucket:'overdue'}
+//   {bucket:'now'}
+//   {bucket:'later', at:Date}     -- opens later today
+//   {bucket:'week', at:Date}      -- shows on a future day this week
+//   {bucket:'future', at:Date}    -- beyond this week
+//   {bucket:'active'}             -- responded, in All Active
+//   {bucket:'hidden'}             -- excluded or no action
+function whenToShow(ri){
+  var r=rows[ri]||[];
+  var st=String(r[C.ST]||'');
+  if(isExcluded(st))return {bucket:'hidden'};
+  if(isOffSequence(ri)||isActive(st)){
+    // Active leads sort by NF
+    var nf=pd(r[C.NF]);
+    var today=localToday();
+    if(nf){
+      var diff=daysBetween(nf,today);
+      if(diff<0)return {bucket:'overdue',at:nf};
+      if(diff===0)return {bucket:'now',at:nf};
+      if(diff<=7)return {bucket:'week',at:nf};
+      return {bucket:'future',at:nf};
+    }
+    return {bucket:'active'};
+  }
+
+  var action=currentAction(ri);
+  if(!action)return {bucket:'hidden'};
+  var today=localToday();
+
+  // Action-triggered phases (1 & 4) use NF as visibility signal
+  if(action.trigger==='action'){
+    var nf2=pd(r[C.NF]);
+    if(!nf2)return {bucket:'now'}; // no date → show now
+    var diff2=daysBetween(nf2,today);
+    if(diff2<0)return {bucket:'overdue',at:nf2};
+    if(diff2===0)return {bucket:'now',at:nf2};
+    if(diff2<=7)return {bucket:'week',at:nf2};
+    return {bucket:'future',at:nf2};
+  }
+
+  // Phase 2 — time-window-gated
+  if(action.ph===2){
+    var p2Date=p2DateFor(ri);
+    if(!p2Date)return {bucket:'now'};
+    var dayDiff=daysBetween(p2Date,today);
+    if(dayDiff<0)return {bucket:'overdue',at:p2Date};
+    if(dayDiff>0){
+      if(dayDiff<=7)return {bucket:'week',at:p2Date};
+      return {bucket:'future',at:p2Date};
+    }
+    // It's today — check time window
+    var w=p2Window(action);
+    var h=nowDecimalHour();
+    if(h<w.start){
+      // Window opens later today
+      var openAt=new Date(today.getFullYear(),today.getMonth(),today.getDate(),Math.floor(w.start),Math.round((w.start%1)*60));
+      return {bucket:'later',at:openAt};
+    }
+    if(h>=w.end){
+      // Window closed. The action is gone — advance to next slot.
+      // We don't auto-advance the column here (engine stays read-only during render);
+      // instead we just treat it as overdue so it shows up. The next save fires
+      // a recompute. But for cleanliness: if AM window closed today AND PM exists
+      // today (same step+1 if same day), the PM might still be open. The renderer
+      // shouldn't show the stale AM — so we return hidden, and rely on action
+      // auto-skip elsewhere. Actually: simplest is to expire silently.
+      return {bucket:'hidden'};
+    }
+    return {bucket:'now',at:today};
+  }
+
+  // Phase 3 — weekly check-in
+  if(action.ph===3){
+    var weekday=nurtureWeekday(ri);
+    var todayDay=today.getDay();
+    var doneAt=getStepDoneAt(ri);
+    // If step_done_at is in the current ISO week, this week's check-in is done
+    // (since completing step N moves us to step N+1 with this exact done_at).
+    // The "current week" window for the next step starts the day after.
+    // Simplest model: the week's window is Monday-Sunday of the current week.
+    // Available if today is in the window AND step_done_at is not in this week.
+    var monday=addDays(today,-((todayDay+6)%7)); // Monday of this week
+    var sunday=addDays(monday,6);
+    var doneThisWeek=doneAt&&doneAt>=monday&&doneAt<=addDays(sunday,1);
+    if(doneThisWeek){
+      // Wait for next week
+      var nextMonday=addDays(monday,7);
+      var dayDiff3=daysBetween(nextMonday,today);
+      if(dayDiff3<=7)return {bucket:'week',at:nextMonday};
+      return {bucket:'future',at:nextMonday};
+    }
+    // Open this week — show as "now" if we're in the window, "week" if future
+    return {bucket:'now',at:today};
+  }
+
+  // Phase 5 — perpetual weekly nurture, same as Phase 3 logic
+  if(action.ph===5){
+    var doneAt5=getStepDoneAt(ri);
+    var weekday5=nurtureWeekday(ri);
+    var todayDay5=today.getDay();
+    var monday5=addDays(today,-((todayDay5+6)%7));
+    var sunday5=addDays(monday5,6);
+    var doneThisWeek5=doneAt5&&doneAt5>=monday5&&doneAt5<=addDays(sunday5,1);
+    if(doneThisWeek5){
+      var nextMonday5=addDays(monday5,7);
+      var dd5=daysBetween(nextMonday5,today);
+      if(dd5<=7)return {bucket:'week',at:nextMonday5};
+      return {bucket:'future',at:nextMonday5};
+    }
+    return {bucket:'now',at:today};
+  }
+
+  return {bucket:'now'};
+}
+
+// Advance the lead's step_idx after an action completes, computing new NF and step_done_at.
+// Returns an updates object suitable for writeRow.
+function advanceLead(ri,methodUsed){
+  var step=getStep(ri);
+  if(step===STEP_OFF_SEQUENCE)return null;
+  if(step<0)step=0;
+  var u={};
+  var nowIso=new Date().toISOString();
+  var todayStr=fd(localToday());
+  var tomorrowStr=fd(addDays(localToday(),1));
+
+  // Phase 5 is sticky — re-do the same step
+  if(step===STEP_P5){
+    u[C.STEP]=STEP_P5;
+    u[C.STEP_AT]=nowIso;
+    u[C.LC]=todayStr;
+    if(methodUsed)u[C.MT]=methodUsed;
+    // Append to human-readable log
+    var logHist=String((rows[ri]||[])[C.SL]||'');
+    var actText=SEQ[STEP_P5].text;
+    u[C.SL]=appendLogStr(logHist,actText,methodUsed);
+    return u;
+  }
+
+  var nextStep=step+1;
+  if(nextStep>=SEQ.length)nextStep=SEQ.length-1;
+  u[C.STEP]=nextStep;
+  u[C.STEP_AT]=nowIso;
+  u[C.LC]=todayStr;
+  if(methodUsed)u[C.MT]=methodUsed;
+
+  var prevAction=SEQ[step];
+  var logHist2=String((rows[ri]||[])[C.SL]||'');
+  u[C.SL]=appendLogStr(logHist2,prevAction.text,methodUsed);
+
+  // NF rules per spec
+  if(step===STEP_P1_LAST){
+    // Just finished Missed you text → Phase 2 starts tomorrow
+    u[C.NF]=tomorrowStr;
+  }else if(prevAction.ph===2&&prevAction.slot==='pm'){
+    // Just finished Phase 2 PM → next AM tomorrow
+    u[C.NF]=tomorrowStr;
+  }
+  // All other completions: engine does not touch NF.
+
+  return u;
+}
+
+function appendLogStr(existing,actionText,method){
+  var entry=actionText+(method?' via '+method:'');
+  var parts=(existing||'').split(' | ').filter(function(e){return e.trim();});
+  parts.push(entry);
+  if(parts.length>40)parts=parts.slice(parts.length-40);
+  return parts.join(' | ');
+}
+
+// Auto-advance expired Phase 2 windows.
+// Runs once per loadData, AFTER migration, BEFORE bucketing. For each
+// no-answer lead in Phase 2 whose current step's time window has fully
+// closed for the day, advance step_idx to the next slot WITHOUT updating
+// step_done_at (so the calendar anchor doesn't shift). Writes batched.
+//
+// IMPORTANT: this is the ONLY place the engine silently advances state.
+// Everywhere else, state changes only on explicit user action.
+async function autoExpirePhase2(){
+  var today=localToday();
+  var todayStr=ds(today);
+  var h=nowDecimalHour();
+  var updates=[]; // [{ri, newStep}]
 
   for(var i=DATA_START;i<rows.length;i++){
     var r=rows[i];
-    var name=String(r[C.NM]||'').trim();
-    if(!name)name=String(r[C.DM]||'').trim(); // fall back to DM name if client name empty
-    if(!name)continue;
-    var st=String(r[C.ST]||'').trim();
-    if(isExcluded(st))continue;
+    if(!r)continue;
+    var nm=String(r[C.NM]||r[C.DM]||'').trim();
+    if(!nm)continue;
+    if(isExcluded(r[C.ST])||isActive(r[C.ST])||isOffSequence(i))continue;
+    var step=getStep(i);
+    if(step<STEP_P2_FIRST||step>STEP_P2_LAST)continue;
 
-    var active=isActive(st);
-    var log=String(r[C.SL]||'').trim();
-    var dO=daysAgo(r[C.DA]);
-    var na=active?null:getNextAction(log,dO,pd(r[C.NF]));
+    var p2Date=p2DateFor(i);
+    if(!p2Date)continue;
+    // Only expire steps anchored to today or earlier
+    if(ds(p2Date)>todayStr)continue;
 
-    var seqLbl=na?na.lbl:'—';
-
-    var fu=pd(r[C.NF]);
-    var fuLocal=fu?new Date(fu.getFullYear(),fu.getMonth(),fu.getDate()):null;
-    var fuStr=fuLocal?fuLocal.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
-    var fuDs=fuLocal?ds(fuLocal):'';
-
-    var lead={ri:i,name:name,phone:String(r[C.PH]||'').trim(),email:String(r[C.EM]||'').trim(),
-      status:st,source:String(r[C.SO]||'').trim(),dm:String(r[C.DM]||'').trim(),
-      notes:String(r[C.NT]||'').trim(),method:String(r[C.MT]||'').trim(),
-      services:String(r[C.SV]||'').trim(),nsm:String(r[C.NSM]||'').trim(),
-      dO:dO,na:na,seqLbl:seqLbl,active:active,log:log,fu:fuLocal,fuStr:fuStr,fuDs:fuDs};
-
-    al.push(lead);
-
-    if(!fuLocal)continue;
-    var actionDue=active||(na!==null);
-    if(!actionDue)continue;
-    // Phase 2: use NF date for bucketing, time windows only affect visibility within Due Today
-    if(na&&na.ph===2&&na.trigger==='time'){
-      if(fuDs<ts)od.push(lead);
-      else if(fuDs===ts){
-        var h2=getNow().getHours()+(getNow().getMinutes()/60);
-        var w2=getP2Window(na);
-        if(h2>=w2.start&&h2<w2.end){
-          td2.push(lead); // window is open right now only
-        }
-        // Before window or after window — don't show
-      }else if(fuLocal>today&&fuLocal<=weekEnd)wk.push(lead);
+    var action=SEQ[step];
+    var w=p2Window(action);
+    // Window status for today: if p2Date < today, all today's slots are
+    // implicitly past. We push to today's AM (= advance by however many
+    // day-slots have passed). For simplicity, only handle the "today's
+    // window has fully ended" case here — past-day rollover is handled
+    // by the next-day's check the next time the dashboard opens.
+    if(ds(p2Date)<todayStr){
+      // Step is on a past day. Each missed day = 2 slots gone.
+      // Advance step by 2 * (days late), capped at STEP_P3_FIRST.
+      var daysLate=daysBetween(today,p2Date); // positive
+      var jump=daysLate*2;
+      var newStepPast=step+jump;
+      if(newStepPast>STEP_P2_LAST)newStepPast=STEP_P3_FIRST;
+      var uPast={};
+      uPast[C.STEP]=newStepPast;
+      // Anchor done_at so the new step's p2DateFor lands on today (AM) or yesterday (PM same day).
+      // SEQ[newStepPast] tells us which slot.
+      var newAction=SEQ[newStepPast];
+      if(newAction&&newAction.slot==='am'){
+        // For AM, p2DateFor returns doneAt+1, so we want doneAt = yesterday
+        uPast[C.STEP_AT]=addDays(today,-1).toISOString();
+      }else{
+        // For PM, p2DateFor returns doneAt-as-date, so we want doneAt = today
+        uPast[C.STEP_AT]=today.toISOString();
+      }
+      var lgP=String(r[C.SL]||'');
+      uPast[C.SL]=appendLogStr(lgP,'Phase 2 skipped '+daysLate+' day(s)','');
+      updates.push({ri:i,u:uPast});
       continue;
     }
-    // All other phases: bucket by follow-up date
-    if(fuDs<ts)od.push(lead);
-    else if(fuDs===ts)td2.push(lead);
-    else if(fuLocal>today&&fuLocal<=weekEnd)wk.push(lead);
+    // p2Date is today. Has today's window for this step ended?
+    if(h>=w.end){
+      // Step expired today. Advance to next step.
+      // If this was the AM slot, next step is same-day PM (step+1).
+      // If this was PM slot, next step is tomorrow AM (step+1) — but its
+      // p2DateFor will compute relative to step_done_at, which DIDN'T
+      // change. So we need to update step_done_at too, to anchor it.
+      var newStep=step+1;
+      if(newStep>STEP_P2_LAST){
+        // Past Phase 2 entirely → move to Phase 3
+        newStep=STEP_P3_FIRST;
+      }
+      var u={};
+      u[C.STEP]=newStep;
+      if(action.slot==='pm'){
+        // PM expired → anchor for next day's AM is today (so AM lands tomorrow)
+        u[C.STEP_AT]=new Date(today.getFullYear(),today.getMonth(),today.getDate(),23,59).toISOString();
+        // Also log the skip in the human log
+        var lg=String(r[C.SL]||'');
+        u[C.SL]=appendLogStr(lg,action.text+' (window expired)','');
+      }else{
+        // AM expired → PM is same day, step_done_at can stay unchanged
+        // But we still want a record. Append to log.
+        var lg2=String(r[C.SL]||'');
+        u[C.SL]=appendLogStr(lg2,action.text+' (window expired)','');
+      }
+      updates.push({ri:i,u:u});
+    }
   }
 
-  var sortFu=function(a,b){return(a.fu?a.fu.getTime():0)-(b.fu?b.fu.getTime():0);};
-  od.sort(sortFu);td2.sort(sortFu);wk.sort(sortFu);
-  al.sort(function(a,b){if(!a.fu&&!b.fu)return 0;if(!a.fu)return 1;if(!b.fu)return -1;return a.fu-b.fu;});
+  // Apply updates
+  for(var k=0;k<updates.length;k++){
+    try{await writeRow(updates[k].ri,updates[k].u);}catch(e){
+      console.warn('Auto-expire failed for row',updates[k].ri,e.message);
+    }
+  }
+}
 
-  // KPI
-  el('kv0').textContent=od.length;el('kv1').textContent=td2.length;
-  el('kv2').textContent=wk.length;el('kv3').textContent=al.length;
-  el('c0').textContent=od.length+' lead'+(od.length!==1?'s':'');
-  el('c1').textContent=td2.length+' lead'+(td2.length!==1?'s':'');
-  el('c2').textContent=wk.length+' lead'+(wk.length!==1?'s':'');
-  el('c3').textContent=al.length+' lead'+(al.length!==1?'s':'');
+/* ─── §9 Bucket + render ─────────────────────────────────────────────────  */
+async function buildUI(){
+  // Run auto-expire before bucketing (writes to sheet; may take a moment)
+  try{await autoExpirePhase2();}catch(e){console.warn('autoExpirePhase2:',e.message);}
 
-  el('t0').innerHTML=buildRows(od,today);
-  el('t1').innerHTML=buildRows(td2,today);
-  el('t2').innerHTML=buildRows(wk,today);
-  el('t3').innerHTML=buildRows(al,today);
+  var today=localToday();
+  var buckets={overdue:[],now:[],later:[],week:[],active:[]};
+
+  for(var i=DATA_START;i<rows.length;i++){
+    var r=rows[i];
+    if(!r)continue;
+    var nm=String(r[C.NM]||r[C.DM]||'').trim();
+    if(!nm)continue;
+    if(isExcluded(r[C.ST]))continue;
+
+    var when=whenToShow(i);
+    if(when.bucket==='hidden')continue;
+
+    var lead=buildLeadView(i);
+    lead._when=when;
+
+    // Active leads always go into the All Active list,
+    // plus their NF-based bucket if applicable
+    if(isOffSequence(i)||isActive(r[C.ST])){
+      buckets.active.push(lead);
+      if(when.bucket==='overdue')buckets.overdue.push(lead);
+      else if(when.bucket==='now')buckets.now.push(lead);
+      else if(when.bucket==='week')buckets.week.push(lead);
+      continue;
+    }
+    // No-answer leads — route by bucket
+    if(when.bucket==='overdue')buckets.overdue.push(lead);
+    else if(when.bucket==='now')buckets.now.push(lead);
+    else if(when.bucket==='later')buckets.later.push(lead);
+    else if(when.bucket==='week')buckets.week.push(lead);
+    // 'future' beyond a week not shown anywhere
+  }
+
+  var sortByFu=function(a,b){
+    var fa=a.fu?a.fu.getTime():(a._when.at?a._when.at.getTime():0);
+    var fb=b.fu?b.fu.getTime():(b._when.at?b._when.at.getTime():0);
+    return fa-fb;
+  };
+  buckets.overdue.sort(sortByFu);
+  buckets.now.sort(sortByFu);
+  buckets.later.sort(sortByFu);
+  buckets.week.sort(sortByFu);
+  buckets.active.sort(sortByFu);
+
+  // KPIs
+  el('kv0').textContent=buckets.overdue.length;
+  el('kv1').textContent=buckets.now.length;
+  el('kv2').textContent=buckets.later.length;
+  el('kv3').textContent=buckets.week.length;
+  el('kv4').textContent=buckets.active.length;
+  var pl=function(n){return n+' lead'+(n!==1?'s':'');};
+  el('c0').textContent=pl(buckets.overdue.length);
+  el('c1').textContent=pl(buckets.now.length);
+  el('c2').textContent=pl(buckets.later.length);
+  el('c3').textContent=pl(buckets.week.length);
+  el('c4').textContent=pl(buckets.active.length);
+
+  el('t0').innerHTML=renderRows(buckets.overdue);
+  el('t1').innerHTML=renderRows(buckets.now);
+  el('t2').innerHTML=renderRows(buckets.later);
+  el('t3').innerHTML=renderRows(buckets.week);
+  el('t4').innerHTML=renderRows(buckets.active);
 
   el('kbar').style.display='grid';
   el('main').style.display='block';
 }
 
-function buildRows(leads,today){
+function buildLeadView(ri){
+  var r=rows[ri]||[];
+  var fu=pd(r[C.NF]);
+  var fuLocal=fu?new Date(fu.getFullYear(),fu.getMonth(),fu.getDate()):null;
+  var fuStr=fuLocal?fuLocal.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
+  var st=String(r[C.ST]||'').trim();
+  var active=isActive(st)||isOffSequence(ri);
+  var step=getStep(ri);
+  var action=currentAction(ri);
+  return {
+    ri:ri,
+    name:String(r[C.NM]||r[C.DM]||'').trim(),
+    phone:String(r[C.PH]||'').trim(),
+    email:String(r[C.EM]||'').trim(),
+    status:st,
+    source:String(r[C.SO]||'').trim(),
+    dm:String(r[C.DM]||'').trim(),
+    notes:String(r[C.NT]||'').trim(),
+    nsm:String(r[C.NSM]||'').trim(),
+    fu:fuLocal,
+    fuStr:fuStr,
+    active:active,
+    step:step,
+    action:action,
+    isAPFM:isAPFM(ri)
+  };
+}
+
+function renderRows(leads){
   if(!leads.length)return '<tr><td colspan="6" class="empty"><div class="empty-icon">✓</div><div class="empty-txt">Nothing here — great work!</div></td></tr>';
+  var today=localToday();
   return leads.map(function(l){
-    var daysOff=l.fu?Math.round((today.getTime()-l.fu.getTime())/86400000):0;
-    var pill=!l.fu?'<span class="pill" style="background:var(--cream);color:var(--soft)">No date</span>'
-      :daysOff>0?'<span class="pill pr2">'+daysOff+'d overdue</span>'
-      :daysOff===0?'<span class="pill pa">Due today</span>'
-      :'<span class="pill pg">in '+Math.abs(daysOff)+'d</span>';
-    var borderCls=daysOff>0?'border-red':daysOff===0?'border-gold':l.active?'border-sky':'border-grn';
-    var ph=l.phone?'<a class="ph" href="#" onclick="event.stopPropagation();event.preventDefault();dialHCG(&quot;'+l.phone+'&quot;)">📞 '+l.phone+'</a>':'';
-    var em=l.email?'<div><a class="em" href="mailto:'+l.email+'">✉ '+l.email+'</a></div>':'';
-    var dmHtml=l.dm&&l.dm!==l.name?'<div class="dm-tag">via <span>'+l.dm+'</span></div>':'';
+    var daysOff=l.fu?daysBetween(today,l.fu):0;
+    var pill;
+    if(!l.fu)pill='<span class="pill psoft">No date</span>';
+    else if(daysOff>0)pill='<span class="pill pr2">'+daysOff+'d overdue</span>';
+    else if(daysOff===0)pill='<span class="pill pa">Due today</span>';
+    else pill='<span class="pill pg">in '+Math.abs(daysOff)+'d</span>';
+
+    var bd=daysOff>0?'bd-red':daysOff===0?'bd-gold':l.active?'bd-sky':'bd-grn';
+
+    var phoneHtml=l.phone?'<a class="ph" href="#" data-action="call" data-ri="'+l.ri+'">📞 '+escapeHtml(l.phone)+'</a>':'';
+    var emailHtml=l.email?'<div><a class="em" href="mailto:'+escapeHtml(l.email)+'">✉ '+escapeHtml(l.email)+'</a></div>':'';
+    var dmHtml=l.dm&&l.dm!==l.name?'<div class="dm-tag">via <span>'+escapeHtml(l.dm)+'</span></div>':'';
+
     var seqHtml='';
     if(l.active){
-      var logLower=(l.log||'').toLowerCase();
-      var hasResp=logLower.indexOf('responded')>-1||logLower.indexOf('first contact')>-1;
+      // Check log for whether responded was logged
+      var log=lc((rows[l.ri]||[])[C.SL]);
+      var hasResp=log.indexOf('responded')>-1||log.indexOf('first contact')>-1;
       seqHtml=hasResp?'<div class="seq-responded">✓ Responded</div>':'<div class="seq-active">● Active</div>';
-    }else if(l.na){
-      seqHtml='<div class="sbadge">'+l.seqLbl+'</div><div class="snxt">'+l.na.icon+' '+l.na.text+'</div>';
+    }else if(l.action){
+      seqHtml='<div class="sbadge">'+escapeHtml(l.action.lbl||('Phase '+l.action.ph))+'</div>'
+        +'<div class="snxt">'+l.action.icon+' '+escapeHtml(l.action.text)+'</div>';
     }else{
-      seqHtml='<div class="sbadge" style="color:var(--softer);border-color:var(--border-soft)">—</div>';
+      seqHtml='<div class="sbadge psoft">—</div>';
     }
-    var btns=buildBtns(l);
+
+    var btns=buildButtons(l);
     var pid='ep-'+l.ri;
-    return '<tr class="dr '+borderCls+(drawerRi===l.ri?' sel':'')+'" id="row-'+l.ri+'" onclick="openDrawer('+l.ri+')">'
-      +'<td><div class="tn">'+l.name+'</div>'+dmHtml+'</td>'
-      +'<td>'+ph+em+'</td>'
+
+    return '<tr class="dr '+bd+(drawerRi===l.ri?' sel':'')+'" data-action="open-drawer" data-ri="'+l.ri+'" id="row-'+l.ri+'">'
+      +'<td><div class="tn">'+escapeHtml(l.name)+'</div>'+dmHtml+'</td>'
+      +'<td>'+phoneHtml+emailHtml+'</td>'
       +'<td>'+sbadge(l.status)+'</td>'
-      +'<td>'+pill+'<div style="font-size:11px;color:var(--soft);margin-top:3px">'+l.fuStr+'</div></td>'
+      +'<td>'+pill+'<div style="font-size:11px;color:var(--soft);margin-top:3px">'+escapeHtml(l.fuStr)+'</div></td>'
       +'<td>'+seqHtml+'</td>'
-      +'<td onclick="event.stopPropagation()" style="width:180px;padding:8px 10px">'+btns+'</td>'
+      +'<td data-action="ignore-cell" style="width:190px;padding:8px 10px">'+btns+'</td>'
       +'</tr>'
       +'<tr class="ep-wrap" id="'+pid+'-wrap"><td colspan="6"><div class="ep" id="'+pid+'"></div></td></tr>';
   }).join('');
 }
 
-function buildBtns(l){
+function buildButtons(l){
   var ri=l.ri;
   if(l.active){
-    // Active lead: next suggested method + update, then alts + script
-    var nsm=l.nsm.toLowerCase();
-    var mainBtn='';
+    // Active lead: primary suggested method + update + alts
+    var nsm=lc(l.nsm);
+    var primary;
     if(nsm.indexOf('call')>-1||nsm.indexOf('phone')>-1){
-      mainBtn='<button class="btn-primary" style="flex:1;background:var(--sky-deep);color:#fff;border:none" onclick="dialHCG(\''+l.phone+'\')">📞 Call</button>';
+      primary='<button class="btn-primary bg-sky" data-action="call" data-ri="'+ri+'">📞 Call</button>';
     }else if(nsm.indexOf('sms')>-1||nsm.indexOf('text')>-1){
-      mainBtn='<button class="btn-primary" style="flex:1;background:var(--grn);color:#fff;border:none" onclick="openSMS('+ri+')">💬 Text</button>';
+      primary='<button class="btn-primary bg-grn" data-action="open-sms" data-ri="'+ri+'">💬 Text</button>';
     }else if(nsm.indexOf('email')>-1){
-      mainBtn='<button class="btn-primary" style="flex:1;background:var(--gold);color:#fff;border:none" onclick="openEmail('+ri+')">✉ Email</button>';
+      primary='<button class="btn-primary bg-gold" data-action="open-email" data-ri="'+ri+'">✉ Email</button>';
     }else{
-      mainBtn='<button class="btn-primary" style="flex:1;background:var(--sky-deep);color:#fff;border:none" onclick="dialHCG(\''+l.phone+'\')">📞 Call</button>';
+      primary='<button class="btn-primary bg-sky" data-action="call" data-ri="'+ri+'">📞 Call</button>';
     }
-    var altBtns='';
-    if(!(nsm.indexOf('call')>-1||nsm.indexOf('phone')>-1))altBtns+='<button class="btn-sm" style="flex:1;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)" onclick="dialHCG(\''+l.phone+'\')">📞</button>';
-    if(!(nsm.indexOf('sms')>-1||nsm.indexOf('text')>-1))altBtns+='<button class="btn-sm" style="flex:1;background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)" onclick="openSMS('+ri+')">💬</button>';
-    if(!(nsm.indexOf('email')>-1))altBtns+='<button class="btn-sm" style="flex:1;background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)" onclick="openEmail('+ri+')">✉</button>';
-    altBtns+='<button class="btn-sm" style="flex:1;background:var(--cream);color:var(--mid);border:1px solid var(--border)" onclick="openScript('+ri+')">📋</button>';
+    var alts='';
+    if(!(nsm.indexOf('call')>-1||nsm.indexOf('phone')>-1))alts+='<button class="btn-sm bg-sky-l" data-action="call" data-ri="'+ri+'">📞</button>';
+    if(!(nsm.indexOf('sms')>-1||nsm.indexOf('text')>-1))alts+='<button class="btn-sm bg-grn-l" data-action="open-sms" data-ri="'+ri+'">💬</button>';
+    if(!(nsm.indexOf('email')>-1))alts+='<button class="btn-sm bg-gold-l" data-action="open-email" data-ri="'+ri+'">✉</button>';
+    alts+='<button class="btn-sm bg-cream" data-action="open-script" data-ri="'+ri+'">📋</button>';
     return '<div class="bwrap">'
-      +'<div class="brow">'+mainBtn+'<button class="btn-sec" style="flex:0 0 auto;background:var(--gold-pale);color:var(--gold);border:1.5px solid var(--gold-mid)" onclick="openEp('+ri+',\'update\')">✏</button></div>'
-      +'<div class="brow">'+altBtns+'</div>'
-      +'</div>';
-  }else{
-    // No-answer lead: primary action, then done+responded, then alts+script
-    var na=l.na;
-    var primaryBtn='';
-    if(!na||na.type==='call'){
-      primaryBtn='<button class="btn-primary" style="background:var(--sky-deep);color:#fff;border:none" onclick="dialHCG(\''+l.phone+'\')">📞 Call Now</button>';
-    }else if(na.type==='sms'){
-      primaryBtn='<button class="btn-primary" style="background:var(--grn);color:#fff;border:none" onclick="openSMS('+ri+')">💬 Send Text</button>';
-    }else{
-      primaryBtn='<button class="btn-primary" style="background:var(--gold);color:#fff;border:none" onclick="openEmail('+ri+')">✉ Send Email</button>';
-    }
-    var alts2='';
-    if(!na||na.type!=='call')alts2+='<button class="btn-sm" style="flex:1;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid)" onclick="dialHCG(\''+l.phone+'\')">📞</button>';
-    if(!na||na.type!=='sms')alts2+='<button class="btn-sm" style="flex:1;background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid)" onclick="openSMS('+ri+')">💬</button>';
-    if(!na||na.type!=='email')alts2+='<button class="btn-sm" style="flex:1;background:var(--gold-pale);color:var(--gold);border:1px solid var(--gold-mid)" onclick="openEmail('+ri+')">✉</button>';
-    alts2+='<button class="btn-sm" style="flex:1;background:var(--cream);color:var(--mid);border:1px solid var(--border)" onclick="openScript('+ri+')">📋</button>';
-    return '<div class="bwrap">'
-      +primaryBtn
-      +'<div class="brow">'
-      +'<button class="btn-sec" style="flex:1;background:var(--grn-pale);color:var(--grn);border:1.5px solid var(--grn-mid)" onclick="openEp('+ri+',\'done\')">✓ Done</button>'
-      +'<button class="btn-sec" style="flex:1;background:var(--sky-pale);color:var(--sky-deep);border:1.5px solid var(--sky-mid)" onclick="openEp('+ri+',\'responded\')">🤝 Responded</button>'
-      +'</div>'
-      +'<div class="brow">'+alts2+'</div>'
+      +'<div class="brow" style="flex:1">'+primary+'<button class="btn-sec bg-gold-l" style="flex:0 0 auto" data-action="open-ep" data-ri="'+ri+'" data-mode="update">✏</button></div>'
+      +'<div class="brow">'+alts+'</div>'
       +'</div>';
   }
+  // No-answer lead
+  var a=l.action;
+  var primaryBtn='';
+  if(!a||a.type==='call'){
+    primaryBtn='<button class="btn-primary bg-sky" data-action="call" data-ri="'+ri+'">📞 Call Now</button>';
+  }else if(a.type==='sms'){
+    primaryBtn='<button class="btn-primary bg-grn" data-action="open-sms" data-ri="'+ri+'">💬 Send Text</button>';
+  }else{
+    primaryBtn='<button class="btn-primary bg-gold" data-action="open-email" data-ri="'+ri+'">✉ Send Email</button>';
+  }
+  var alts2='';
+  if(!a||a.type!=='call')alts2+='<button class="btn-sm bg-sky-l" data-action="call" data-ri="'+ri+'">📞</button>';
+  if(!a||a.type!=='sms')alts2+='<button class="btn-sm bg-grn-l" data-action="open-sms" data-ri="'+ri+'">💬</button>';
+  if(!a||a.type!=='email')alts2+='<button class="btn-sm bg-gold-l" data-action="open-email" data-ri="'+ri+'">✉</button>';
+  alts2+='<button class="btn-sm bg-cream" data-action="open-script" data-ri="'+ri+'">📋</button>';
+  return '<div class="bwrap">'
+    +primaryBtn
+    +'<div class="brow">'
+    +'<button class="btn-sec bg-grn-l" style="flex:1" data-action="open-ep" data-ri="'+ri+'" data-mode="done">✓ Done</button>'
+    +'<button class="btn-sec bg-sky-l" style="flex:1" data-action="open-ep" data-ri="'+ri+'" data-mode="responded">🤝 Responded</button>'
+    +'</div>'
+    +'<div class="brow">'+alts2+'</div>'
+    +'</div>';
 }
 
-// ── Expand Panels ─────────────────────────────────────────────────────────────
+/* ─── §10 Action handlers ────────────────────────────────────────────────  */
+
+// MOPS = method-of-contact options (col M)
 var MOPS=['','Phone call','SMS','Email','In person','Left voicemail','No answer'];
 var STATUS_OPTS=['New','No answer','Contacted','Active Conversation','Assessment Scheduled','Assessment Completed','Proposal Sent','Signed','On Service','Hold','Closed','Not Interested','Lost','Wrong Number','Deceased','Duplicate'];
 
+function recommendedMethod(action){
+  if(!action)return '';
+  if(action.type==='call')return 'Phone call';
+  if(action.type==='sms')return 'SMS';
+  if(action.type==='email')return 'Email';
+  return '';
+}
+
 function openEp(ri,mode){
-  // Close any other open panels
-  document.querySelectorAll('.ep-wrap.open').forEach(function(el){
-    if(el.id!=='ep-'+ri+'-wrap')el.classList.remove('open');
-  });
+  // Close other panels
+  $$('.ep-wrap.open').forEach(function(w){if(w.id!=='ep-'+ri+'-wrap')w.classList.remove('open');});
   var wrap=el('ep-'+ri+'-wrap');
   var epEl=el('ep-'+ri);
   if(!wrap||!epEl)return;
-  // Toggle if same mode already open
   if(wrap.classList.contains('open')&&epEl.dataset.mode===mode){wrap.classList.remove('open');return;}
   wrap.classList.add('open');
   epEl.dataset.mode=mode;
   epEl.dataset.ri=ri;
 
   var r=rows[ri]||[];
-  var na=isActive(r[C.ST]||'')?null:getNextAction(String(r[C.SL]||''),0,pd(r[C.NF]));
+  var action=currentAction(ri);
   var today=localToday();
-  var def3=new Date(today.getFullYear(),today.getMonth(),today.getDate()+3);
-
-  // Recommended method for done panel
-  var recMethod=na?(na.type==='call'?'Phone call':na.type==='sms'?'SMS':na.type==='email'?'Email':''):'';
+  var def3=addDays(today,3);
+  var recMethod=recommendedMethod(action);
   var curNSM=String(r[C.NSM]||'').trim();
-  var moptsSel=MOPS.map(function(s){var sel=(s&&(mode==='done'?s===recMethod:s===curNSM))?'selected':'';return'<option value="'+s+'" '+sel+'>'+(s||'— select —')+'</option>';}).join('');
-  var soptsSel=STATUS_OPTS.map(function(s){return'<option value="'+s+'"'+(s===(r[C.ST]||'')?'selected':'')+'>'+s+'</option>';}).join('');
 
-  // Services dropdown
-  var svSet=new Set();
-  for(var i=DATA_START;i<rows.length;i++){var sv=String(rows[i][C.SV]||'').trim();if(sv)svSet.add(sv);}
-  var svOpts='<option value="">— select —</option>'+Array.from(svSet).sort().map(function(s){return'<option>'+s+'</option>';}).join('');
+  var moptsForDone=MOPS.map(function(s){
+    var sel=(s&&s===recMethod)?'selected':'';
+    return '<option value="'+escapeHtml(s)+'" '+sel+'>'+escapeHtml(s||'— select —')+'</option>';
+  }).join('');
+  var moptsForUpdate=MOPS.map(function(s){
+    var sel=(s&&s===curNSM)?'selected':'';
+    return '<option value="'+escapeHtml(s)+'" '+sel+'>'+escapeHtml(s||'— select —')+'</option>';
+  }).join('');
+  var statusOpts=STATUS_OPTS.map(function(s){
+    return '<option value="'+escapeHtml(s)+'"'+(s===(r[C.ST]||'')?' selected':'')+'>'+escapeHtml(s)+'</option>';
+  }).join('');
+
+  // Services dropdown — unique values from sheet
+  var svSet={};
+  for(var i=DATA_START;i<rows.length;i++){var sv=String((rows[i]||[])[C.SV]||'').trim();if(sv)svSet[sv]=1;}
+  var svOpts='<option value="">— select —</option>'+Object.keys(svSet).sort().map(function(s){return '<option>'+escapeHtml(s)+'</option>';}).join('');
 
   var html='';
   if(mode==='done'){
     html='<div class="ebanner eb-grn">✓ Log Completed Action</div>'
       +'<div class="egrid g2">'
-      +'<div class="ef"><label>Method Used</label><select class="ep-mt">'+moptsSel+'</select></div>'
-      +'<div class="ef"><label>Action Completed</label><input type="text" class="ep-act" value="'+(na?na.text.replace(/"/g,'&quot;'):'')+'" readonly></div>'
+      +'<div class="ef"><label>Method Used</label><select class="ep-mt">'+moptsForDone+'</select></div>'
+      +'<div class="ef"><label>Action</label><input type="text" value="'+escapeHtml(action?action.text:'')+'" readonly></div>'
       +'</div>';
   }else if(mode==='responded'){
     html='<div class="ebanner eb-sky">🤝 First Contact — Log Conversation</div>'
       +'<div class="egrid g4">'
-      +'<div class="ef"><label>Response Method</label><select class="ep-mt">'+moptsSel+'</select></div>'
-      +'<div class="ef"><label>Update Status</label><select class="ep-st">'+soptsSel+'</select></div>'
-      +'<div class="ef"><label>Date & Time</label><input type="text" disabled value="'+new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'"></div>'
-      +'<div class="ef"><label>Decision Maker</label><input type="text" class="ep-dm" placeholder="Who did you speak with?"></div>'
+      +'<div class="ef"><label>Response Method</label><select class="ep-mt">'+moptsForDone+'</select></div>'
+      +'<div class="ef"><label>Update Status</label><select class="ep-st">'+statusOpts+'</select></div>'
+      +'<div class="ef"><label>Date & Time</label><input type="text" disabled value="'+escapeHtml(new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))+'"></div>'
+      +'<div class="ef"><label>Decision Maker</label><input type="text" class="ep-dm" value="'+escapeHtml(r[C.DM]||'')+'" placeholder="Who did you speak with?"></div>'
       +'<div class="ef"><label>Relationship</label><input type="text" class="ep-rel" placeholder="Son, daughter, spouse…"></div>'
       +'</div>'
       +'<div class="egrid g4">'
@@ -1220,23 +1529,24 @@ function openEp(ri,mode){
       +'<div class="ef"><label>Pay Type</label><select class="ep-pay"><option value="">— select —</option><option>Private Pay</option><option>Medicaid / PASSPORT</option><option>Long-Term Care Insurance</option><option>VA Benefits</option><option>Unknown</option></select></div>'
       +'</div>'
       +'<div class="egrid g2">'
-      +'<div class="ef"><label>Next Follow-Up</label><input type="date" class="ep-fu" value="'+ds(def3)+'"></div>'
-      +'<div class="ef"><label>Next Method</label><select class="ep-nsm"><option value="">— select —</option>'+MOPS.slice(1).map(function(s){return'<option>'+s+'</option>';}).join('')+'</select></div>'
+      +'<div class="ef"><label>Next Follow-Up</label><input type="date" class="ep-fu" value="'+escapeHtml(ds(def3))+'"></div>'
+      +'<div class="ef"><label>Next Method</label><select class="ep-nsm"><option value="">— select —</option>'+MOPS.slice(1).map(function(s){return '<option>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
       +'</div>'
       +'<div class="ef" style="margin-bottom:12px"><label>Conversation Notes</label><textarea class="ep-notes" placeholder="Key details, concerns, next steps…"></textarea></div>';
   }else if(mode==='update'){
+    var curFu=pd(r[C.NF]);
     html='<div class="ebanner eb-gold">✏ Update Follow-Up</div>'
       +'<div class="egrid g4">'
-      +'<div class="ef"><label>Status</label><select class="ep-st">'+soptsSel+'</select></div>'
-      +'<div class="ef"><label>Next Follow-Up</label><input type="date" class="ep-fu" value="'+(r[C.NF]?ds(pd(r[C.NF])):'')+'"></div>'
-      +'<div class="ef"><label>Method Used</label><select class="ep-mt">'+moptsSel+'</select></div>'
-      +'<div class="ef"><label>Next Suggested Method</label><select class="ep-nsm"><option value="">— select —</option>'+MOPS.slice(1).map(function(s){return'<option value="'+s+'"'+(s===curNSM?'selected':'')+'>'+s+'</option>';}).join('')+'</select></div>'
+      +'<div class="ef"><label>Status</label><select class="ep-st">'+statusOpts+'</select></div>'
+      +'<div class="ef"><label>Next Follow-Up</label><input type="date" class="ep-fu" value="'+escapeHtml(curFu?ds(curFu):'')+'"></div>'
+      +'<div class="ef"><label>Method Used</label><select class="ep-mt">'+moptsForDone+'</select></div>'
+      +'<div class="ef"><label>Next Suggested Method</label><select class="ep-nsm"><option value="">— select —</option>'+MOPS.slice(1).map(function(s){return '<option value="'+escapeHtml(s)+'"'+(s===curNSM?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
       +'</div>'
-      +'<div class="ef" style="margin-bottom:12px"><label>Notes</label><textarea class="ep-notes">'+String(r[C.NT]||'')+'</textarea></div>';
+      +'<div class="ef" style="margin-bottom:12px"><label>Notes</label><textarea class="ep-notes">'+escapeHtml(r[C.NT]||'')+'</textarea></div>';
   }
   html+='<div style="display:flex;gap:8px;align-items:center">'
-    +'<button class="esave" onclick="saveEp(\''+ri+'\',\''+mode+'\')">Save to Sheet</button>'
-    +'<button class="ecancel" onclick="closeEp(\''+ri+'\')">Cancel</button>'
+    +'<button class="esave" data-action="save-ep" data-ri="'+ri+'" data-mode="'+mode+'">Save to Sheet</button>'
+    +'<button class="ecancel" data-action="close-ep" data-ri="'+ri+'">Cancel</button>'
     +'<div class="esaving" id="spin-'+ri+'"><div class="mspin"></div> Saving…</div>'
     +'</div>';
   epEl.innerHTML=html;
@@ -1247,39 +1557,24 @@ function closeEp(ri){var w=el('ep-'+ri+'-wrap');if(w)w.classList.remove('open');
 async function saveEp(ri,mode){
   var epEl=el('ep-'+ri);if(!epEl)return;
   var spin=el('spin-'+ri);if(spin)spin.style.display='flex';
-  var r=rows[parseInt(ri)]||[];
-  var today=fd(localToday());
-  var u={};
+  var saveBtn=epEl.querySelector('.esave');if(saveBtn)saveBtn.disabled=true;
   try{
+    var r=rows[ri]||[];
     var q=function(sel){var e=epEl.querySelector(sel);return e?e.value:'';};
+    var u={};
+    var todayStr=fd(localToday());
+
     if(mode==='done'){
-      var mt=q('.ep-mt'),act=q('.ep-act');
+      var mt=q('.ep-mt');
       if(mt)u[C.MT]=mt;
-      // Use current na text if act field is empty
-      var actText=act&&act.trim()?act.trim():(function(){var curNa=getNextAction(String(r[C.SL]||''),0,null);return curNa?curNa.text:'Done';}());
-      var newLog=appendLog(String(r[C.SL]||''),actText,mt);
-      u[C.SL]=newLog;
-      u[C.LC]=today;u[C.SD]=today;
-      // Set NF based on what was just logged.
-      // justLogged = the action that the *un-updated* SL would have returned next,
-      // which is exactly the action we're completing now.
-      var justLogged=getNextAction(String(r[C.SL]||''),0,null);
-      var tmrwDate=new Date(localToday());tmrwDate.setDate(tmrwDate.getDate()+1);
-      if(actText.indexOf('Missed you text')>-1){
-        // Phase 1 complete — NF tomorrow for Phase 2 AM
-        u[C.NF]=fd(tmrwDate);
-      }else if(justLogged&&justLogged.ph===2&&justLogged.slot==='am'){
-        // Just logged Phase 2 AM — keep NF today so PM slot shows later today
-        u[C.NF]=fd(localToday());
-      }else if(justLogged&&justLogged.ph===2&&justLogged.slot==='pm'){
-        // Just logged Phase 2 PM — NF tomorrow for next day's AM
-        u[C.NF]=fd(tmrwDate);
-      }
+      // Use advanceLead to compute new step + NF
+      var adv=advanceLead(ri,mt);
+      if(adv)Object.keys(adv).forEach(function(k){u[k]=adv[k];});
     }else if(mode==='responded'){
       var mt2=q('.ep-mt'),fu=q('.ep-fu'),dm=q('.ep-dm'),rel=q('.ep-rel');
       var budget=q('.ep-budget'),hrs=q('.ep-hrs'),urg=q('.ep-urgency'),start=q('.ep-start');
       var care=q('.ep-care'),safety=q('.ep-safety'),pay=q('.ep-pay'),nsm=q('.ep-nsm');
-      var notes=q('.ep-notes');
+      var notes=q('.ep-notes'),respSt=q('.ep-st');
       if(mt2)u[C.MT]=mt2;
       if(fu)u[C.NF]=fu;
       if(dm)u[C.DM]=dm;
@@ -1295,52 +1590,100 @@ async function saveEp(ri,mode){
       if(budget)np.push('Budget: '+budget);
       if(urg)np.push('Urgency: '+urg);
       if(np.length)u[C.NT]=np.filter(Boolean).join(' | ');
-      u[C.SL]=appendLog(String(r[C.SL]||''),'Lead responded — first contact',mt2);
-      var respSt=q('.ep-st');u[C.ST]=(respSt&&respSt.trim())||'Active Conversation';u[C.LC]=today;u[C.SD]=today;
+      u[C.ST]=(respSt&&respSt.trim())||'Active Conversation';
+      u[C.LC]=todayStr;
+      u[C.STEP]=STEP_OFF_SEQUENCE;
+      u[C.STEP_AT]=new Date().toISOString();
+      u[C.SL]=appendLogStr(String(r[C.SL]||''),'Lead responded — first contact',mt2);
     }else if(mode==='update'){
       var st=q('.ep-st'),fu2=q('.ep-fu'),mt3=q('.ep-mt'),nsm2=q('.ep-nsm'),notes2=q('.ep-notes');
       if(st)u[C.ST]=st;
       if(fu2)u[C.NF]=fu2;
       if(mt3)u[C.MT]=mt3;
       if(nsm2)u[C.NSM]=nsm2;
-      if(notes2)u[C.NT]=notes2;
-      u[C.LC]=today;
+      if(notes2!=null)u[C.NT]=notes2;
+      u[C.LC]=todayStr;
+      // If status moves to active and we're not already off-sequence, flip
+      if(st&&isActive(st)&&!isOffSequence(ri)){
+        u[C.STEP]=STEP_OFF_SEQUENCE;
+        u[C.STEP_AT]=new Date().toISOString();
+      }
     }
     if(!Object.keys(u).length){closeEp(ri);return;}
-    await writeRow(parseInt(ri),u);
-    // Update local rows cache
-    Object.entries(u).forEach(function(kv){rows[parseInt(ri)][parseInt(kv[0])]=kv[1];});
+    await writeRow(ri,u);
     closeEp(ri);
     toast('✓ Saved');
-    setTimeout(loadData,600);
+    await buildUI();
   }catch(e){
     showErr(e.message);
   }finally{
     if(spin)spin.style.display='none';
+    if(saveBtn)saveBtn.disabled=false;
   }
 }
 
-// ── Actions ───────────────────────────────────────────────────────────────────
-async function dialHCG(phone){
-  if(!phone)return;
+/* ─── Templates → messages ──────────────────────────────────────────────  */
+
+// Get cold SMS template appropriate to lead's current phase
+function getColdSMS(ri){
+  var names=getNames(ri);
+  var apfm=isAPFM(ri);
+  var set=apfm?COLD.apfm:COLD.gen;
+  var action=currentAction(ri);
+  var ph=action?action.ph:5;
+  var step=getStep(ri);
+  var arr;
+  if(ph===1){
+    // Step 0 = intro, step 3 = missed you text
+    arr=step===0?set.p1_intro:set.p1_missed;
+  }else if(ph===2)arr=set.p2;
+  else if(ph===3)arr=set.p3;
+  else if(ph===4)arr=set.p4;
+  else arr=set.p5;
+  return fillNames(getTpl(arr,ri),names);
+}
+function getWarmSMS(ri){
+  var names=getNames(ri);
+  return fillNames(getTpl(WARM.sms,ri),names);
+}
+function getSMSText(ri){
+  var r=rows[ri]||[];
+  return (isActive(r[C.ST])||isOffSequence(ri))?getWarmSMS(ri):getColdSMS(ri);
+}
+function getEmailContent(ri){
+  var r=rows[ri]||[];
+  var names=getNames(ri);
+  if(isActive(r[C.ST])||isOffSequence(ri)){
+    var idx=ri%WARM.email.subj.length;
+    return {subject:fillNames(WARM.email.subj[idx],names),body:fillNames(WARM.email.body[idx],names)};
+  }
+  var apfm=isAPFM(ri);
+  var set=apfm?COLD_EMAIL.apfm:COLD_EMAIL.gen;
+  var idx2=ri%set.subj.length;
+  return {subject:fillNames(set.subj[idx2],names),body:fillNames(set.body[idx2],names)};
+}
+
+/* ─── Call / SMS / Email actions ─────────────────────────────────────────  */
+function dialHCG(ri){
+  var phone=String((rows[ri]||[])[C.PH]||'').trim();
+  if(!phone){toast('No phone number');return;}
   var clean=phone.replace(/\D/g,'');
   if(clean.length===10)clean='1'+clean;
   window.open('https://voice.google.com/u/0/calls?a=nc,%2B'+clean,'gv','width=400,height=600,noopener');
 }
 
 function openSMS(ri){
-  var r=rows[ri]||[];
-  var phone=String(r[C.PH]||'').trim();
+  var phone=String((rows[ri]||[])[C.PH]||'').trim();
   if(!phone){toast('No phone number');return;}
   el('sms-text').value=getSMSText(ri);
   var clean=phone.replace(/\D/g,'');if(clean.length===10)clean='1'+clean;
   el('sms-hcg-link').href='https://app.homecaregrow.io/v2/location/'+GHL_LOC+'/contacts?search='+encodeURIComponent('+'+clean);
   el('modal-sms').dataset.ri=ri;
-  openModal('modal-sms');
+  el('modal-sms').classList.add('open');
 }
 
 async function sendSMS(){
-  var ri=parseInt(el('modal-sms').dataset.ri);
+  var ri=parseInt(el('modal-sms').dataset.ri,10);
   var phone=String((rows[ri]||[])[C.PH]||'').trim();
   var msg=el('sms-text').value;
   if(!phone||!msg)return;
@@ -1350,80 +1693,64 @@ async function sendSMS(){
     var clean=phone.replace(/\D/g,'');if(clean.length===10)clean='1'+clean;
     var cid=null;
     var ghlHeaders={Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Accept':'application/json'};
-    function fetchWithTimeout(url,opts,ms){
+    function fetchTO(url,opts,ms){
       var ctrl=new AbortController();
-      var tid=setTimeout(function(){ctrl.abort();},ms||8000);
+      var tid=setTimeout(function(){ctrl.abort();},ms||6000);
       return fetch(url,Object.assign({},opts,{signal:ctrl.signal})).finally(function(){clearTimeout(tid);});
     }
     try{
-      var sr=await fetchWithTimeout(GHL_BASE+'/contacts/search/duplicate?locationId='+GHL_LOC+'&number='+encodeURIComponent('+'+clean),{headers:ghlHeaders},6000);
+      var sr=await fetchTO(GHL_BASE+'/contacts/search/duplicate?locationId='+GHL_LOC+'&number='+encodeURIComponent('+'+clean),{headers:ghlHeaders});
       if(sr.ok){var sj=await sr.json();if(sj.contact)cid=sj.contact.id;}
-    }catch(te){console.log('GHL search timeout, trying query...');}
+    }catch(e){}
     if(!cid){
       try{
-        var r2=await fetchWithTimeout(GHL_BASE+'/contacts/?locationId='+GHL_LOC+'&query='+encodeURIComponent('+'+clean),{headers:ghlHeaders},6000);
+        var r2=await fetchTO(GHL_BASE+'/contacts/?locationId='+GHL_LOC+'&query='+encodeURIComponent('+'+clean),{headers:ghlHeaders});
         if(r2.ok){var j2=await r2.json();if(j2.contacts&&j2.contacts.length>0)cid=j2.contacts[0].id;}
-      }catch(te2){console.log('GHL query timeout, will create contact...');}
+      }catch(e){}
     }
     if(!cid){
       var r3=rows[ri]||[];
-      var cr=await fetch(GHL_BASE+'/contacts/',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Content-Type':'application/json'},
-        body:JSON.stringify({locationId:GHL_LOC,firstName:String(r3[C.NM]||'').split(' ')[0],phone:'+'+clean,email:String(r3[C.EM]||'')})});
-      if(cr.ok){var cj=await cr.json();cid=cj.contact?cj.contact.id:null;}
+      try{
+        var cr=await fetchTO(GHL_BASE+'/contacts/',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({locationId:GHL_LOC,firstName:String(r3[C.NM]||'').split(' ')[0],phone:'+'+clean,email:String(r3[C.EM]||'')})});
+        if(cr.ok){var cj=await cr.json();cid=cj.contact?cj.contact.id:null;}
+      }catch(e){}
     }
     if(!cid){
-      // CORS may be blocking GHL API - open HCG directly as fallback
-      toast('Opening HCG to send manually...');
-      var fallClean=phone.replace(/\D/g,'');if(fallClean.length===10)fallClean='1'+fallClean;
-      window.open('https://app.homecaregrow.io/v2/location/'+GHL_LOC+'/contacts?search='+encodeURIComponent('+'+fallClean),'hcg','width=1200,height=800,noopener');
-      closeModal('modal-sms');
+      toast('Opening HCG to send manually…');
+      window.open('https://app.homecaregrow.io/v2/location/'+GHL_LOC+'/contacts?search='+encodeURIComponent('+'+clean),'hcg','width=1200,height=800,noopener');
+      el('modal-sms').classList.remove('open');
       return;
     }
-    var smsr=await fetch(GHL_BASE+'/conversations/messages',{method:'POST',
-      headers:{Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Content-Type':'application/json'},
-      body:JSON.stringify({type:'SMS',contactId:cid,locationId:GHL_LOC,message:msg})});
+    var smsr=await fetch(GHL_BASE+'/conversations/messages',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({type:'SMS',contactId:cid,locationId:GHL_LOC,message:msg})});
     if(!smsr.ok){var se=await smsr.json().catch(function(){return{};});throw new Error('SMS failed: '+(se.message||smsr.status));}
-    closeModal('modal-sms');toast('✓ SMS sent');
-    var smsR=rows[ri]||[];
-    var smsNa=getNextAction(String(smsR[C.SL]||''),0,null);
-    var smsActText=smsNa?smsNa.text:'SMS sent';
-    var smsNewLog=appendLog(String(smsR[C.SL]||''),smsActText,'SMS');
-    var smsExtra={[C.MT]:'SMS',[C.LC]:fd(localToday()),[C.SL]:smsNewLog};
-    // Set NF based on what was just logged (mutually exclusive — same shape as saveEp 'done')
-    var smsTmrw=new Date(localToday());smsTmrw.setDate(smsTmrw.getDate()+1);
-    if(smsActText.indexOf('Missed you text')>-1){
-      // Phase 1 complete — NF tomorrow for Phase 2 AM
-      smsExtra[C.NF]=fd(smsTmrw);
-    }else if(smsNa&&smsNa.ph===2&&smsNa.slot==='am'){
-      // Phase 2 AM done — keep today so PM shows later
-      smsExtra[C.NF]=fd(localToday());
-    }else if(smsNa&&smsNa.ph===2&&smsNa.slot==='pm'){
-      // Phase 2 PM done — NF tomorrow
-      smsExtra[C.NF]=fd(smsTmrw);
+    el('modal-sms').classList.remove('open');
+    toast('✓ SMS sent');
+    // Auto-advance the sequence
+    var u=advanceLead(ri,'SMS');
+    if(u){
+      try{await writeRow(ri,u);}catch(e){showErr('SMS sent but log failed: '+e.message);}
     }
-    await writeRow(ri,smsExtra);
-    setTimeout(loadData,600);
-  }catch(e){showErr('SMS error: '+e.message);}
-  finally{btn.disabled=false;spin.style.display='none';}
+    await buildUI();
+  }catch(e){showErr('SMS error: '+e.message);
+  }finally{btn.disabled=false;spin.style.display='none';}
 }
 
 function openEmail(ri){
-  var r=rows[ri]||[];
-  var email=String(r[C.EM]||'').trim();
+  var email=String((rows[ri]||[])[C.EM]||'').trim();
   if(!email){toast('No email address');return;}
   var c=getEmailContent(ri);
-  var names3=getNames(ri);
-  var dm=names3.dm||String(r[C.NM]||'').trim().split(' ')[0];
+  var names=getNames(ri);
+  var dm=names.dm||String((rows[ri]||[])[C.NM]||'').trim().split(' ')[0];
   el('email-to').textContent=(dm||'Contact')+' <'+email+'>';
   el('email-subj').value=c.subject;
   el('email-body').value=c.body;
   el('modal-email').dataset.ri=ri;
-  curEmailRi=ri;
-  openModal('modal-email');
+  el('modal-email').classList.add('open');
 }
 
 async function sendEmail(){
-  var ri=curEmailRi;if(ri===null)return;
+  var ri=parseInt(el('modal-email').dataset.ri,10);
+  if(isNaN(ri))return;
   var toTxt=el('email-to').textContent;
   var m=toTxt.match(/<([^>]+)>/);
   var toAddr=m?m[1]:'';if(!toAddr){toast('No email');return;}
@@ -1431,28 +1758,26 @@ async function sendEmail(){
   var btn=el('email-send-btn'),spin=el('email-spin');
   btn.disabled=true;spin.style.display='flex';
   try{
-    var res=await fetch(GR+'/me/sendMail',{method:'POST',
-      headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
-      body:JSON.stringify({message:{subject:subj,body:{contentType:'Text',content:body},toRecipients:[{emailAddress:{address:toAddr}}]},saveToSentItems:true})});
+    var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:{subject:subj,body:{contentType:'Text',content:body},toRecipients:[{emailAddress:{address:toAddr}}]},saveToSentItems:true})});
     if(res.ok||res.status===202){
-      closeModal('modal-email');toast('✓ Email sent');
-      var emR=rows[ri]||[];
-      var emNa=getNextAction(String(emR[C.SL]||''),0,null);
-      var emActText=emNa?emNa.text:'Email sent';
-      var emNewLog=appendLog(String(emR[C.SL]||''),emActText,'Email');
-      await writeRow(ri,{[C.MT]:'Email',[C.LC]:fd(localToday()),[C.SL]:emNewLog});
-      setTimeout(loadData,600);
-    }else{var e=await res.json().catch(function(){return{};});throw new Error(e.error?e.error.message:'Send failed: '+res.status);}
-  }catch(e){showErr('Email error: '+e.message);}
-  finally{btn.disabled=false;spin.style.display='none';}
+      el('modal-email').classList.remove('open');
+      toast('✓ Email sent');
+      var u=advanceLead(ri,'Email');
+      if(u){try{await writeRow(ri,u);}catch(e){showErr('Email sent but log failed: '+e.message);}}
+      await buildUI();
+    }else{
+      var e=await res.json().catch(function(){return{};});
+      throw new Error(e.error?e.error.message:'Send failed: '+res.status);
+    }
+  }catch(e){showErr('Email error: '+e.message);
+  }finally{btn.disabled=false;spin.style.display='none';}
 }
 
 function openScript(ri){
   var r=rows[ri]||[];
-  var names2=getNames(ri);var dm=names2.dm||'them';
+  var names=getNames(ri);var dm=names.dm||'them';
   var apfm=isAPFM(ri);
-  var st=String(r[C.ST]||'').toLowerCase();
-  var isActv=isActive(r[C.ST]||'');
+  var isActv=isActive(r[C.ST])||isOffSequence(ri);
   var s;
   if(isActv){
     s={title:'Active Conversation Follow-Up',sections:[
@@ -1483,43 +1808,114 @@ function openScript(ri){
   }
   el('script-title').textContent=s.title;
   el('script-body').innerHTML=s.sections.map(function(sec){
-    return'<div class="ssec"><div class="ssec-h">'+sec.h+'</div><div class="ssec-t">'+sec.t+'</div></div>';
+    return '<div class="ssec"><div class="ssec-h">'+escapeHtml(sec.h)+'</div><div class="ssec-t">'+escapeHtml(sec.t)+'</div></div>';
   }).join('');
-  openModal('modal-script');
+  el('modal-script').classList.add('open');
 }
 
-// ── Drawer ────────────────────────────────────────────────────────────────────
+/* ─── Drawer ─────────────────────────────────────────────────────────────  */
 function openDrawer(ri){
   var r=rows[ri]||[];
   drawerRi=ri;
-  var name=String(r[C.NM]||'').trim();
+  var name=String(r[C.NM]||r[C.DM]||'').trim();
   el('d-name').textContent=name;
-  var log=String(r[C.SL]||'').trim();
-  var na=isActive(r[C.ST]||'')?null:getNextAction(log,0,pd(r[C.NF]));
-  var dO2=daysAgo(r[C.DA]);
-  var dO2Str=dO2<14?dO2+' day'+(dO2!==1?'s':''):dO2<60?Math.floor(dO2/7)+' week'+(Math.floor(dO2/7)!==1?'s':''):Math.floor(dO2/30)+' month'+(Math.floor(dO2/30)!==1?'s':'');
+  var added=pd(r[C.DA]);
+  var today=localToday();
+  var dO=added?Math.max(0,daysBetween(today,added)):0;
+  var addedStr=added?added.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'unknown';
+  var ageStr=dO<14?dO+' day'+(dO!==1?'s':''):dO<60?Math.floor(dO/7)+' week'+(Math.floor(dO/7)!==1?'s':''):Math.floor(dO/30)+' month'+(Math.floor(dO/30)!==1?'s':'');
+  var action=currentAction(ri);
+  var step=getStep(ri);
+  var stepDesc='—';
+  if(step===STEP_OFF_SEQUENCE)stepDesc='Off-sequence (responded)';
+  else if(action)stepDesc=(action.lbl||('Phase '+action.ph))+' — '+action.text;
+
   var fields=[
-    ['In Pipeline',dO2Str+' (added '+( pd(r[C.DA])?pd(r[C.DA]).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'unknown')+')'],
-    ['Phone',String(r[C.PH]||'')],['Email',String(r[C.EM]||'')],
-    ['Status',String(r[C.ST]||'')],['Decision Maker',String(r[C.DM]||'')],
-    ['Source',String(r[C.SO]||'')],['Services',String(r[C.SV]||'')],
-    ['Area',String(r[C.AR]||'')],['Pay Type',String(r[C.PT]||'')],
-    ['Est. Start',String(r[C.ES]||'')],['Hrs/Wk',String(r[C.HR]||'')],
-    ['Mo. Value',String(r[C.MV]||'')],['Next Follow-Up',String(r[C.NF]||'')],
-    ['Last Contact',String(r[C.LC]||'')],['Method',String(r[C.MT]||'')],
-    ['Safety',String(r[C.SAFETY]||'')],['Relationship',String(r[C.REL]||'')],
+    ['In Pipeline',ageStr+' (added '+addedStr+')'],
+    ['Phone',String(r[C.PH]||'')],
+    ['Email',String(r[C.EM]||'')],
+    ['Status',String(r[C.ST]||'')],
+    ['Decision Maker',String(r[C.DM]||'')],
+    ['Source',String(r[C.SO]||'')],
+    ['Services',String(r[C.SV]||'')],
+    ['Area',String(r[C.AR]||'')],
+    ['Pay Type',String(r[C.PT]||'')],
+    ['Est. Start',String(r[C.ES]||'')],
+    ['Hrs/Wk',String(r[C.HR]||'')],
+    ['Mo. Value',String(r[C.MV]||'')],
+    ['Next Follow-Up',String(r[C.NF]||'')],
+    ['Last Contact',String(r[C.LC]||'')],
+    ['Method',String(r[C.MT]||'')],
+    ['Safety',String(r[C.SAFETY]||'')],
+    ['Relationship',String(r[C.REL]||'')],
     ['Notes',String(r[C.NT]||'')],
-    ['Sequence',na?(na.lbl+' — '+na.text):'—'],
+    ['Sequence',stepDesc],
+    ['Step Index',String(step)]
   ];
-  el('d-body').innerHTML=fields.filter(function(f){return f[1].trim();}).map(function(f){
-    return'<div class="drow"><div class="dlabel">'+f[0]+'</div><div class="dval">'+f[1]+'</div></div>';
+  el('d-body').innerHTML=fields.filter(function(f){return String(f[1]).trim();}).map(function(f){
+    return '<div class="drow"><div class="dlabel">'+escapeHtml(f[0])+'</div><div class="dval">'+escapeHtml(f[1])+'</div></div>';
   }).join('');
   el('drawer').classList.add('open');
   el('doverlay').classList.add('open');
 }
 function closeDrawer(){el('drawer').classList.remove('open');el('doverlay').classList.remove('open');drawerRi=-1;}
-
-// ── Modals ────────────────────────────────────────────────────────────────────
-function openModal(id){var m=el(id);if(m)m.classList.add('open');}
 function closeModal(id){var m=el(id);if(m)m.classList.remove('open');}
+
+/* ─── §11 Event delegation + boot ────────────────────────────────────────  */
+function onClick(ev){
+  var t=ev.target;
+  // Walk up to find data-action element
+  while(t&&t!==document.body){
+    if(t.dataset&&t.dataset.action)break;
+    t=t.parentElement;
+  }
+  if(!t||t===document.body)return;
+  var action=t.dataset.action;
+  if(action==='ignore-cell'){ev.stopPropagation();return;}
+
+  var ri=t.dataset.ri!=null?parseInt(t.dataset.ri,10):null;
+  var mode=t.dataset.mode||null;
+  var mid=t.dataset.mid||null;
+
+  // Prevent default navigation for # links
+  if(t.tagName==='A'&&t.getAttribute('href')==='#'){ev.preventDefault();}
+
+  // Stop propagation for action buttons inside rows so they don't trigger row open
+  if(['call','open-sms','open-email','open-script','open-ep','save-ep','close-ep'].indexOf(action)>-1){
+    ev.stopPropagation();
+  }
+
+  switch(action){
+    case 'signin': signIn(); break;
+    case 'signout': signOut(); break;
+    case 'refresh': loadData(); break;
+    case 'open-drawer': if(ri!=null)openDrawer(ri); break;
+    case 'close-drawer': closeDrawer(); break;
+    case 'close-modal': if(mid)closeModal(mid); break;
+    case 'call': if(ri!=null)dialHCG(ri); break;
+    case 'open-sms': if(ri!=null)openSMS(ri); break;
+    case 'open-email': if(ri!=null)openEmail(ri); break;
+    case 'open-script': if(ri!=null)openScript(ri); break;
+    case 'send-sms': sendSMS(); break;
+    case 'send-email': sendEmail(); break;
+    case 'open-ep': if(ri!=null&&mode)openEp(ri,mode); break;
+    case 'close-ep': if(ri!=null)closeEp(ri); break;
+    case 'save-ep': if(ri!=null&&mode)saveEp(ri,mode); break;
+  }
+}
+
+window.addEventListener('load',async function(){
+  document.body.addEventListener('click',onClick);
+
+  // Restore session token if any
+  tok=sessionStorage.getItem('st')||'';
+  if(tok){onSignedIn();return;}
+  // OAuth callback?
+  if(await handleAuthCallback())return;
+  // Try refresh token
+  var refreshed=await refreshToken();
+  if(refreshed){onSignedIn();return;}
+});
 </script>
+</body>
+</html>
