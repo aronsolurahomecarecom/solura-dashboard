@@ -1050,21 +1050,16 @@ function buildUI(){
     if(!fuLocal)continue;
     var actionDue=active||(na!==null);
     if(!actionDue)continue;
-    // Phase 2: ignore follow-up date, use time windows only
+    // Phase 2: use NF date for bucketing, time windows only affect visibility within Due Today
     if(na&&na.ph===2&&na.trigger==='time'){
-      var inWindow=isActionAvailableNow(na);
-      if(inWindow){
-        td2.push(lead); // window open right now = Due Today
-      } else {
-        // Window not open — check if it's later today or a future day
+      if(fuDs<ts)od.push(lead);
+      else if(fuDs===ts){
+        // Only show in Due Today if time window is open or hasn't started yet
         var h2=getNow().getHours()+(getNow().getMinutes()/60);
         var w2=getP2Window(na);
-        if(h2<w2.start){
-          // Window hasn't opened yet today
-          td2.push(lead); // still due today (window opens later)
-        }
-        // else: window already closed today — don't show
-      }
+        if(h2<w2.end) td2.push(lead); // window open or not started
+        // else window closed — don't show at all
+      }else if(fuLocal>today&&fuLocal<=weekEnd)wk.push(lead);
       continue;
     }
     // All other phases: bucket by follow-up date
