@@ -913,17 +913,22 @@ async function maybeRunMigration(){
       mt.textContent='Migrating '+(k+1)+' of '+needsMig.length+'…';
       var u={};
       u[C.STEP]=m.step;
-      // Set step_done_at so the migrated step lands on today.
-      // - Phase 2 AM step → p2DateFor returns doneAt+1, so we want doneAt = yesterday
-      // - Phase 2 PM step → p2DateFor returns doneAt-as-date, so we want doneAt = today
-      // - Anything else → use today noon as a neutral anchor
+      // Set step_done_at so the migrated step lands on its target date.
+      // Target = existing NF if set, else today.
+      // - Phase 2 AM step → p2DateFor returns doneAt+1, so doneAt = target - 1
+      // - Phase 2 PM step → p2DateFor returns doneAt-as-date, so doneAt = target
+      // - Other phases → use today noon as a neutral anchor
+      var rowM=rows[m.ri]||[];
+      var migNf=pd(rowM[C.NF]);
+      var migTarget=migNf||localToday();
       var anchorDate;
       if(m.step>=STEP_P2_FIRST&&m.step<=STEP_P2_LAST){
         var sAction=SEQ[m.step];
         if(sAction&&sAction.slot==='am'){
-          anchorDate=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate()-1,12,0,0);
+          var prevM=addDays(migTarget,-1);
+          anchorDate=new Date(prevM.getFullYear(),prevM.getMonth(),prevM.getDate(),12,0,0);
         }else{
-          anchorDate=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate(),12,0,0);
+          anchorDate=new Date(migTarget.getFullYear(),migTarget.getMonth(),migTarget.getDate(),12,0,0);
         }
       }else{
         anchorDate=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate(),12,0,0);
@@ -933,16 +938,26 @@ async function maybeRunMigration(){
     }
     // Re-anchor pass: fix Phase 2 leads that were migrated under v8.0 with
     // step_done_at set to load-time instead of the proper offset anchor.
+    // Use each lead's existing NF as the source of truth for when their
+    // current step should be due, and back-derive step_done_at from that.
     for(var k2=0;k2<needsReanchor.length;k2++){
       var ra=needsReanchor[k2];
       mt.textContent='Re-anchoring '+(needsMig.length+k2+1)+' of '+totalCount+'…';
       var u2={};
       var raAction=SEQ[ra.step];
+      var rRow=rows[ra.ri]||[];
+      // Read existing NF — that's what the user thinks "this step is due"
+      var raNf=pd(rRow[C.NF]);
+      // Fall back to today if no NF set
+      var raTarget=raNf||localToday();
       var raAnchor;
       if(raAction&&raAction.slot==='am'){
-        raAnchor=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate()-1,12,0,0);
+        // AM: p2DateFor = doneAt + 1 day. Want it = raTarget → doneAt = raTarget - 1.
+        var prev=addDays(raTarget,-1);
+        raAnchor=new Date(prev.getFullYear(),prev.getMonth(),prev.getDate(),12,0,0);
       }else{
-        raAnchor=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate(),12,0,0);
+        // PM: p2DateFor = doneAt-as-date. Want it = raTarget → doneAt = raTarget.
+        raAnchor=new Date(raTarget.getFullYear(),raTarget.getMonth(),raTarget.getDate(),12,0,0);
       }
       u2[C.STEP_AT]=raAnchor.toISOString();
       await writeRow(ra.ri,u2);
@@ -1075,15 +1090,16 @@ function whenToShow(ri){
     return {bucket:'future',at:nf2};
   }
 
-  // Phase 2 — time-window-gated
+  // Phase 2 — NF drives bucket; time window only refines "today"
   if(action.ph===2){
-    var p2Date=p2DateFor(ri);
-    if(!p2Date)return {bucket:'now'};
-    var dayDiff=daysBetween(p2Date,today);
-    if(dayDiff<0)return {bucket:'overdue',at:p2Date};
+    var nfP2=pd(r[C.NF]);
+    // If no NF set, fall back to p2DateFor as a best-effort guess
+    var targetDate=nfP2||p2DateFor(ri)||today;
+    var dayDiff=daysBetween(targetDate,today);
+    if(dayDiff<0)return {bucket:'overdue',at:targetDate};
     if(dayDiff>0){
-      if(dayDiff<=7)return {bucket:'week',at:p2Date};
-      return {bucket:'future',at:p2Date};
+      if(dayDiff<=7)return {bucket:'week',at:targetDate};
+      return {bucket:'future',at:targetDate};
     }
     // It's today — check time window
     var w=p2Window(action);
@@ -1094,14 +1110,8 @@ function whenToShow(ri){
       return {bucket:'later',at:openAt};
     }
     if(h>=w.end){
-      // Window closed. The action is gone — advance to next slot.
-      // We don't auto-advance the column here (engine stays read-only during render);
-      // instead we just treat it as overdue so it shows up. The next save fires
-      // a recompute. But for cleanliness: if AM window closed today AND PM exists
-      // today (same step+1 if same day), the PM might still be open. The renderer
-      // shouldn't show the stale AM — so we return hidden, and rely on action
-      // auto-skip elsewhere. Actually: simplest is to expire silently.
-      return {bucket:'hidden'};
+      // Window closed — show as overdue so user knows they missed it today
+      return {bucket:'overdue',at:targetDate};
     }
     return {bucket:'now',at:today};
   }
@@ -1210,102 +1220,10 @@ function appendLogStr(existing,actionText,method){
   return parts.join(' | ');
 }
 
-// Auto-advance expired Phase 2 windows.
-// Runs once per loadData, AFTER migration, BEFORE bucketing. For each
-// no-answer lead in Phase 2 whose current step's time window has fully
-// closed for the day, advance step_idx to the next slot WITHOUT updating
-// step_done_at (so the calendar anchor doesn't shift). Writes batched.
-//
-// IMPORTANT: this is the ONLY place the engine silently advances state.
-// Everywhere else, state changes only on explicit user action.
-async function autoExpirePhase2(){
-  var today=localToday();
-  var todayStr=ds(today);
-  var h=nowDecimalHour();
-  var updates=[]; // [{ri, newStep}]
-
-  for(var i=DATA_START;i<rows.length;i++){
-    var r=rows[i];
-    if(!r)continue;
-    var nm=String(r[C.NM]||r[C.DM]||'').trim();
-    if(!nm)continue;
-    if(isExcluded(r[C.ST])||isActive(r[C.ST])||isOffSequence(i))continue;
-    var step=getStep(i);
-    if(step<STEP_P2_FIRST||step>STEP_P2_LAST)continue;
-
-    var p2Date=p2DateFor(i);
-    if(!p2Date)continue;
-    // Only expire steps anchored to today or earlier
-    if(ds(p2Date)>todayStr)continue;
-
-    var action=SEQ[step];
-    var w=p2Window(action);
-    // Window status for today: if p2Date < today, all today's slots are
-    // implicitly past. We push to today's AM (= advance by however many
-    // day-slots have passed). For simplicity, only handle the "today's
-    // window has fully ended" case here — past-day rollover is handled
-    // by the next-day's check the next time the dashboard opens.
-    if(ds(p2Date)<todayStr){
-      // Step is on a past day. Each missed day = 2 slots gone.
-      // Advance step by 2 * (days late), capped at STEP_P3_FIRST.
-      var daysLate=daysBetween(today,p2Date); // positive
-      var jump=daysLate*2;
-      var newStepPast=step+jump;
-      if(newStepPast>STEP_P2_LAST)newStepPast=STEP_P3_FIRST;
-      var uPast={};
-      uPast[C.STEP]=newStepPast;
-      // Anchor done_at so the new step's p2DateFor lands on today (AM) or yesterday (PM same day).
-      // SEQ[newStepPast] tells us which slot.
-      var newAction=SEQ[newStepPast];
-      if(newAction&&newAction.slot==='am'){
-        // For AM, p2DateFor returns doneAt+1, so we want doneAt = yesterday
-        uPast[C.STEP_AT]=addDays(today,-1).toISOString();
-      }else{
-        // For PM, p2DateFor returns doneAt-as-date, so we want doneAt = today
-        uPast[C.STEP_AT]=today.toISOString();
-      }
-      var lgP=String(r[C.SL]||'');
-      uPast[C.SL]=appendLogStr(lgP,'Phase 2 skipped '+daysLate+' day(s)','');
-      updates.push({ri:i,u:uPast});
-      continue;
-    }
-    // p2Date is today. Has today's window for this step ended?
-    if(h>=w.end){
-      // Step expired today. Advance to next step.
-      // If this was the AM slot, next step is same-day PM (step+1).
-      // If this was PM slot, next step is tomorrow AM (step+1) — but its
-      // p2DateFor will compute relative to step_done_at, which DIDN'T
-      // change. So we need to update step_done_at too, to anchor it.
-      var newStep=step+1;
-      if(newStep>STEP_P2_LAST){
-        // Past Phase 2 entirely → move to Phase 3
-        newStep=STEP_P3_FIRST;
-      }
-      var u={};
-      u[C.STEP]=newStep;
-      if(action.slot==='pm'){
-        // PM expired → anchor for next day's AM is today (so AM lands tomorrow)
-        u[C.STEP_AT]=new Date(today.getFullYear(),today.getMonth(),today.getDate(),23,59).toISOString();
-        // Also log the skip in the human log
-        var lg=String(r[C.SL]||'');
-        u[C.SL]=appendLogStr(lg,action.text+' (window expired)','');
-      }else{
-        // AM expired → PM is same day, step_done_at can stay unchanged
-        // But we still want a record. Append to log.
-        var lg2=String(r[C.SL]||'');
-        u[C.SL]=appendLogStr(lg2,action.text+' (window expired)','');
-      }
-      updates.push({ri:i,u:u});
-    }
-  }
-
-  // Apply updates
-  for(var k=0;k<updates.length;k++){
-    try{await writeRow(updates[k].ri,updates[k].u);}catch(e){
-      console.warn('Auto-expire failed for row',updates[k].ri,e.message);
-    }
-  }
-}
+// Auto-advance disabled — Phase 2 buckets are now driven by NF (which the
+// user owns). If an action's time window closes today, it shows as overdue.
+// The user can click Done to advance, or Update to change NF.
+async function autoExpirePhase2(){return;}
 
 /* ─── §9 Bucket + render ─────────────────────────────────────────────────  */
 async function buildUI(){
