@@ -1044,11 +1044,16 @@ function buildUI(){
     if(na&&na.ph===2&&na.trigger==='time'){
       if(fuDs<ts)od.push(lead);
       else if(fuDs===ts){
-        // Only show in Due Today if time window is open or hasn't started yet
         var h2=getNow().getHours()+(getNow().getMinutes()/60);
         var w2=getP2Window(na);
-        if(h2<w2.end) td2.push(lead); // window open or not started
-        // else window closed — don't show at all
+        if(h2>=w2.start&&h2<w2.end){
+          td2.push(lead); // window is open right now
+        } else if(h2<w2.start){
+          // Window hasn't opened yet — show as coming up today
+          td2.push(lead);
+        }
+        // Window already closed — don't show, even if NF is today
+        // (lead will reappear tomorrow with next day's action)
       }else if(fuLocal>today&&fuLocal<=weekEnd)wk.push(lead);
       continue;
     }
@@ -1277,6 +1282,9 @@ async function saveEp(ri,mode){
           u[C.NF]=(tomorrow.getMonth()+1)+'/'+tomorrow.getDate()+'/'+tomorrow.getFullYear();
         }
       }
+      // If logging Phase 2 AM action, keep NF as today so PM slot shows later
+      var doneNa=getNextAction(String(r[C.SL]||''),0,null);
+      if(doneNa&&doneNa.ph===2&&doneNa.slot==='am'){u[C.NF]=fd(localToday());}
       // If completing Phase 1 final action (Missed you text), set NF to tomorrow
       if(actText.indexOf('Missed you text')>-1){
         var tmrw=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate()+1);
@@ -1397,6 +1405,8 @@ async function sendSMS(){
     var smsNewLog=appendLog(String(smsR[C.SL]||''),smsActText,'SMS');
     var smsExtra={[C.MT]:'SMS',[C.LC]:fd(localToday()),[C.SL]:smsNewLog};
     if(smsActText.indexOf('Missed you text')>-1){var curNF2=pd(smsR[C.NF]);var curNF2Str=curNF2?ds(curNF2):'';if(!curNF2Str||curNF2Str<=ts){var t2=new Date(localToday().getFullYear(),localToday().getMonth(),localToday().getDate()+1);smsExtra[C.NF]=fd(t2);}}
+    // If logging a Phase 2 AM action, keep NF as today so PM slot shows later today
+    if(smsNa&&smsNa.ph===2&&smsNa.slot==='am'){smsExtra[C.NF]=fd(localToday());}
     await writeRow(ri,smsExtra);
     setTimeout(loadData,600);
   }catch(e){showErr('SMS error: '+e.message);}
