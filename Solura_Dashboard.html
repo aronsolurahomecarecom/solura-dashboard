@@ -840,25 +840,30 @@ function inferStepFromLog(rowArr){
       return STEP_P3_FIRST+(w-2)+1;
     }
   }
-  // Phase 2 — derive day from NF + date_added, force AM slot.
-  // Any P2 log entry signals the lead is in P2; the specific day/slot
-  // logged is unreliable because v7.0 sometimes auto-logged actions
-  // when days rolled rather than when the user actually completed them.
+  // Phase 2 — derive the day, force AM slot.
+  // Priority: read the day straight from column T (Sequence Phase text), which
+  // holds the authoritative value like "Phase 2 — Daily Follow-Up (Day 5)".
+  // Only fall back to NF − date_added math if T has no parseable day.
   var inP2 = false;
   for(var dCheck=1;dCheck<=10;dCheck++){
     if(log.indexOf('Day '+dCheck)>-1){ inP2 = true; break; }
   }
+  var seqText = String(rowArr[C.SQ]||'');
+  if(/phase\s*2/i.test(seqText)) inP2 = true;
   if(log.indexOf('Missed you text')>-1) inP2 = true;
   if(inP2){
-    var nfD=pd(rowArr[C.NF]);
-    var addedD=pd(rowArr[C.DA]);
-    // Phase 2 Day 1 typically starts ~day after Phase 1 completes (~4 days after lead added)
-    // So Phase 2 Day N falls on (date_added + 4 + N - 1) = date_added + 3 + N
-    // → N = (NF − date_added) − 3
     var dayN=null;
-    if(nfD&&addedD){
-      var gap=daysBetween(nfD,addedD); // NF − dateAdded in days
-      dayN=gap-3;
+    // 1) Authoritative: "(Day N)" or "Day N" in column T
+    var mDay = seqText.match(/day\s*(\d+)/i);
+    if(mDay) dayN = parseInt(mDay[1],10);
+    // 2) Fallback: NF − date_added − 3
+    if(!dayN){
+      var nfD=pd(rowArr[C.NF]);
+      var addedD=pd(rowArr[C.DA]);
+      if(nfD&&addedD){
+        var gap=daysBetween(nfD,addedD);
+        dayN=gap-3;
+      }
     }
     if(!dayN||dayN<1)dayN=1;
     if(dayN>10)dayN=10;
@@ -956,9 +961,12 @@ async function maybeRunMigration(){
       var rRow=rows[ra.ri]||[];
       var raNf=pd(rRow[C.NF]);
       var raAdded=pd(rRow[C.DA]);
-      // Recompute Phase 2 day from NF and date_added
+      // Day from column T (authoritative), fall back to NF − date_added − 3
       var raDay=null;
-      if(raNf&&raAdded){
+      var raSeq=String(rRow[C.SQ]||'');
+      var raM=raSeq.match(/day\s*(\d+)/i);
+      if(raM)raDay=parseInt(raM[1],10);
+      if(!raDay&&raNf&&raAdded){
         raDay=daysBetween(raNf,raAdded)-3;
       }
       if(!raDay||raDay<1)raDay=1;
@@ -1170,6 +1178,24 @@ function whenToShow(ri){
   return {bucket:'now'};
 }
 
+// Human-readable column-T label for a given step index. Mirrors what the
+// engine tracks in step_idx, so the sheet stays a true reflection of state.
+function stepLabel(step){
+  if(step===STEP_OFF_SEQUENCE)return 'Responded — active conversation';
+  if(step<0||step>=SEQ.length)return '';
+  var a=SEQ[step];
+  if(!a)return '';
+  if(a.ph===1)return 'Phase 1 — Initial Contact';
+  if(a.ph===2){
+    var slot=a.slot==='am'?'AM':'PM';
+    return 'Phase 2 — Daily Follow-Up (Day '+a.day+' '+slot+')';
+  }
+  if(a.ph===3)return 'Phase 3 — Weekly Check-In (Week '+a.week+')';
+  if(a.ph===4)return 'Phase 4 — Re-Engagement';
+  if(a.ph===5)return 'Phase 5 — Long-Term Nurture';
+  return '';
+}
+
 // Advance the lead's step_idx after an action completes, computing new NF and step_done_at.
 // Returns an updates object suitable for writeRow.
 function advanceLead(ri,methodUsed){
@@ -1190,6 +1216,7 @@ function advanceLead(ri,methodUsed){
     u[C.STEP]=STEP_P5;
     u[C.STEP_AT]=noonToday;
     u[C.LC]=todayStr;
+    u[C.SQ]=stepLabel(STEP_P5);
     if(methodUsed)u[C.MT]=methodUsed;
     // Append to human-readable log
     var logHist=String((rows[ri]||[])[C.SL]||'');
@@ -1203,6 +1230,7 @@ function advanceLead(ri,methodUsed){
   u[C.STEP]=nextStep;
   u[C.STEP_AT]=noonToday;
   u[C.LC]=todayStr;
+  u[C.SQ]=stepLabel(nextStep);
   if(methodUsed)u[C.MT]=methodUsed;
 
   var prevAction=SEQ[step];
@@ -1230,11 +1258,22 @@ function appendLogStr(existing,actionText,method){
   return parts.join(' | ');
 }
 
-// Standing invariant (runs every load): no-answer Phase 2 leads should sit on
-// the AM slot of their day, not PM. v7.0 logs sometimes pushed leads to PM
-// prematurely. Normalizing to AM means the user always owes the morning action
-// first; completing it advances to the same-day PM naturally. This does NOT
-// touch step_done_at (so the day anchor / NF stays put) and only flips PM→AM.
+// Standing invariant (runs every load, no migration marker needed):
+// step_idx (col Z) and the column-T label must describe the same step. Since
+// advanceLead writes BOTH together on every Done, they only diverge when a
+// migration set Z without a matching T (or vice-versa). When they disagree,
+// column T is the source of truth, so we sync Z to match T's day, on the AM
+// slot. When they already agree, we leave the lead alone — so the dashboard's
+// own advances (which keep them in sync) are never disturbed.
+//
+// Exception: a lead legitimately on a PM slot that completed today's AM
+// (step_done_at = today) is left alone regardless.
+function p2DayFromSheet(ri){
+  var seq=String((rows[ri]||[])[C.SQ]||'');
+  var m=seq.match(/day\s*(\d+)/i);
+  if(m){var d=parseInt(m[1],10);if(d>=1&&d<=10)return d;}
+  return null;
+}
 async function autoExpirePhase2(){
   var fixes=[];
   for(var i=DATA_START;i<rows.length;i++){
@@ -1246,21 +1285,31 @@ async function autoExpirePhase2(){
     var step=getStep(i);
     if(step<STEP_P2_FIRST||step>STEP_P2_LAST)continue;
     var action=SEQ[step];
+
+    var sheetDay=p2DayFromSheet(i);
+    if(!sheetDay)continue; // no authoritative day in T → trust step_idx, leave alone
+
+    // What day does the current step_idx represent?
+    var stepDay=action?action.day:null;
+
+    // Already agree on the day? Leave the lead exactly as-is (dashboard owns it).
+    if(stepDay===sheetDay)continue;
+
+    // Disagree → column T wins. But don't clobber a legitimate same-day PM advance.
     if(action&&action.slot==='pm'){
-      // Only flip to AM if the PM wasn't reached by completing today's AM.
-      // If step_done_at is today, the user just did the AM and legitimately
-      // advanced to PM — leave it alone. Otherwise it's a migration artifact.
       var doneAt=getStepDoneAt(i);
-      var doneToday=doneAt&&ds(doneAt)===ds(localToday());
-      if(doneToday)continue;
-      var amStep=step-1;
-      var u={};
-      u[C.STEP]=amStep;
-      fixes.push({ri:i,u:u});
+      if(doneAt&&ds(doneAt)===ds(localToday()))continue;
     }
+
+    // Sync step_idx to AM slot of T's day, and rewrite T's label cleanly to match.
+    var desiredStep=STEP_P2_FIRST+(sheetDay-1)*2; // AM slot
+    var u={};
+    u[C.STEP]=desiredStep;
+    u[C.SQ]=stepLabel(desiredStep);
+    fixes.push({ri:i,u:u});
   }
   for(var k=0;k<fixes.length;k++){
-    try{await writeRow(fixes[k].ri,fixes[k].u);}catch(e){console.warn('P2 normalize failed row',fixes[k].ri,e.message);}
+    try{await writeRow(fixes[k].ri,fixes[k].u);}catch(e){console.warn('P2 sync failed row',fixes[k].ri,e.message);}
   }
 }
 
@@ -1601,6 +1650,7 @@ async function saveEp(ri,mode){
       u[C.LC]=todayStr;
       u[C.STEP]=STEP_OFF_SEQUENCE;
       u[C.STEP_AT]=new Date().toISOString();
+      u[C.SQ]=stepLabel(STEP_OFF_SEQUENCE);
       u[C.SL]=appendLogStr(String(r[C.SL]||''),'Lead responded — first contact',mt2);
     }else if(mode==='update'){
       var st=q('.ep-st'),fu2=q('.ep-fu'),mt3=q('.ep-mt'),nsm2=q('.ep-nsm'),notes2=q('.ep-notes');
@@ -1614,6 +1664,7 @@ async function saveEp(ri,mode){
       if(st&&isActive(st)&&!isOffSequence(ri)){
         u[C.STEP]=STEP_OFF_SEQUENCE;
         u[C.STEP_AT]=new Date().toISOString();
+        u[C.SQ]=stepLabel(STEP_OFF_SEQUENCE);
       }
     }
     if(!Object.keys(u).length){closeEp(ri);return;}
