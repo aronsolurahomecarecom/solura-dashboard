@@ -1287,7 +1287,7 @@ async function saveEp(ri,mode){
       u[C.SL]=newLog;
       u[C.LC]=today;u[C.SD]=today;
       // Set NF based on what was just logged
-      var prevNa=getNextAction(String(r[C.SL]||''),0,null); // action before this log
+      var prevNa=getNextAction(String(r[C.SL]||''),0,pd(r[C.NF])); // action before this log
       if(actText.indexOf('Missed you text')>-1){
         // Phase 1 complete — set NF to tomorrow for Phase 2 AM
         var tmrw2=new Date(localToday());tmrw2.setDate(tmrw2.getDate()+1);
@@ -1415,7 +1415,7 @@ async function sendSMS(){
     if(!smsr.ok){var se=await smsr.json().catch(function(){return{};});throw new Error('SMS failed: '+(se.message||smsr.status));}
     closeModal('modal-sms');toast('✓ SMS sent');
     var smsR=rows[ri]||[];
-    var smsNa=getNextAction(String(smsR[C.SL]||''),0,null);
+    var smsNa=getNextAction(String(smsR[C.SL]||''),0,pd(smsR[C.NF]));
     var smsActText=smsNa?smsNa.text:'SMS sent';
     var smsNewLog=appendLog(String(smsR[C.SL]||''),smsActText,'SMS');
     var smsExtra={[C.MT]:'SMS',[C.LC]:fd(localToday()),[C.SL]:smsNewLog};
