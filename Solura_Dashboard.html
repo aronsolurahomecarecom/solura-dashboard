@@ -1182,45 +1182,59 @@ function whenToShow(ri){
     return {bucket:'now',at:today};
   }
 
-  // Phase 3 — weekly check-in
+  // Phase 3 — weekly check-in on nurtureWeekday
   if(action.ph===3){
     var weekday=nurtureWeekday(ri);
     var todayDay=today.getDay();
     var doneAt=getStepDoneAt(ri);
-    // If step_done_at is in the current ISO week, this week's check-in is done
-    // (since completing step N moves us to step N+1 with this exact done_at).
-    // The "current week" window for the next step starts the day after.
-    // Simplest model: the week's window is Monday-Sunday of the current week.
-    // Available if today is in the window AND step_done_at is not in this week.
     var monday=addDays(today,-((todayDay+6)%7)); // Monday of this week
     var sunday=addDays(monday,6);
+    // If this week's check-in is already done, look at next week's nurture day
     var doneThisWeek=doneAt&&doneAt>=monday&&doneAt<=addDays(sunday,1);
     if(doneThisWeek){
-      // Wait for next week
+      // Next week's nurture day
       var nextMonday=addDays(monday,7);
-      var dayDiff3=daysBetween(nextMonday,today);
-      if(dayDiff3<=7)return {bucket:'week',at:nextMonday};
-      return {bucket:'future',at:nextMonday};
+      var offset=((weekday-1)%7+7)%7; // days from Monday to weekday
+      var nextDue=addDays(nextMonday,offset);
+      var dd=daysBetween(nextDue,today);
+      if(dd<=7)return {bucket:'week',at:nextDue};
+      return {bucket:'future',at:nextDue};
     }
-    // Open this week — show as "now" if we're in the window, "week" if future
-    return {bucket:'now',at:today};
+    // Not yet done this week. Where is the nurture day relative to today?
+    var thisWeekOffset=((weekday-1)%7+7)%7;
+    var thisWeekDue=addDays(monday,thisWeekOffset);
+    var diffToDue=daysBetween(thisWeekDue,today);
+    if(diffToDue<0){
+      // The day passed this week without action → overdue
+      return {bucket:'overdue',at:thisWeekDue};
+    }
+    if(diffToDue===0)return {bucket:'now',at:today};
+    // It's earlier in the week — coming up
+    return {bucket:'week',at:thisWeekDue};
   }
 
-  // Phase 5 — perpetual weekly nurture, same as Phase 3 logic
+  // Phase 5 — perpetual weekly nurture, same shape as Phase 3
   if(action.ph===5){
-    var doneAt5=getStepDoneAt(ri);
     var weekday5=nurtureWeekday(ri);
     var todayDay5=today.getDay();
+    var doneAt5=getStepDoneAt(ri);
     var monday5=addDays(today,-((todayDay5+6)%7));
     var sunday5=addDays(monday5,6);
     var doneThisWeek5=doneAt5&&doneAt5>=monday5&&doneAt5<=addDays(sunday5,1);
     if(doneThisWeek5){
       var nextMonday5=addDays(monday5,7);
-      var dd5=daysBetween(nextMonday5,today);
-      if(dd5<=7)return {bucket:'week',at:nextMonday5};
-      return {bucket:'future',at:nextMonday5};
+      var off5=((weekday5-1)%7+7)%7;
+      var nextDue5=addDays(nextMonday5,off5);
+      var dd5=daysBetween(nextDue5,today);
+      if(dd5<=7)return {bucket:'week',at:nextDue5};
+      return {bucket:'future',at:nextDue5};
     }
-    return {bucket:'now',at:today};
+    var off5b=((weekday5-1)%7+7)%7;
+    var thisWeekDue5=addDays(monday5,off5b);
+    var diff5=daysBetween(thisWeekDue5,today);
+    if(diff5<0)return {bucket:'overdue',at:thisWeekDue5};
+    if(diff5===0)return {bucket:'now',at:today};
+    return {bucket:'week',at:thisWeekDue5};
   }
 
   return {bucket:'now'};
@@ -1435,13 +1449,29 @@ async function buildUI(){
 
 function buildLeadView(ri){
   var r=rows[ri]||[];
-  var fu=pd(r[C.NF]);
-  var fuLocal=fu?new Date(fu.getFullYear(),fu.getMonth(),fu.getDate()):null;
-  var fuStr=fuLocal?fuLocal.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
   var st=String(r[C.ST]||'').trim();
   var active=isActive(st)||isOffSequence(ri);
   var step=getStep(ri);
   var action=currentAction(ri);
+
+  // Pill date source:
+  // - Active/responded leads → NF (user-owned)
+  // - Phase 1 / 4 (action-triggered) → NF (user-owned)
+  // - Phase 2 / 3 / 5 (time-triggered) → engine's whenToShow().at,
+  //   so the pill matches the bucket
+  var fuLocal=null;
+  if(active||(action&&action.trigger==='action')){
+    var fu=pd(r[C.NF]);
+    fuLocal=fu?new Date(fu.getFullYear(),fu.getMonth(),fu.getDate()):null;
+  }else{
+    var when=whenToShow(ri);
+    if(when&&when.at){
+      var at=when.at;
+      fuLocal=new Date(at.getFullYear(),at.getMonth(),at.getDate());
+    }
+  }
+  var fuStr=fuLocal?fuLocal.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
+
   return {
     ri:ri,
     name:String(r[C.NM]||r[C.DM]||'').trim(),
