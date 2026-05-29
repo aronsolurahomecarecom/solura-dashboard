@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<!-- Solura Templates — one-time populate of the Templates tab.
+     Open this page once, sign in, hit Populate, close. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solura — Populate Templates Tab</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --gold:#C8870A;--sky:#3A7DC9;--sky-deep:#1E4E8C;--grn:#3D7A34;
+  --warm:#FAFAF8;--cream:#F2EDE4;--border:#E0D5C8;--border-soft:#EDE7DE;
+  --dark:#111827;--mid:#374151;--soft:#9CA3AF;
+  --red:#B03025;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--cream);color:var(--dark);min-height:100vh;padding:40px 20px;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:680px;margin:0 auto;}
+.card{background:#fff;border-radius:18px;padding:36px 32px;box-shadow:0 12px 32px rgba(0,0,0,.08);border:1px solid var(--border-soft);}
+h1{font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:500;margin-bottom:6px;}
+.sub{font-size:13px;color:var(--soft);margin-bottom:24px;}
+.step{padding:12px 14px;background:var(--cream);border-radius:10px;margin-bottom:10px;font-size:13px;line-height:1.55;}
+.step b{color:var(--sky-deep);}
+.btn{padding:12px 22px;background:linear-gradient(135deg,var(--sky),var(--sky-deep));color:#fff;border:none;border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(58,125,201,.3);margin-top:16px;}
+.btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(58,125,201,.45);}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+.btn-gold{background:linear-gradient(135deg,var(--gold),#D4920F);box-shadow:0 4px 14px rgba(200,135,10,.3);}
+.log{margin-top:20px;font-family:'SF Mono',Monaco,monospace;font-size:11.5px;background:#0F172A;color:#E2E8F0;padding:14px 16px;border-radius:10px;max-height:300px;overflow-y:auto;line-height:1.65;display:none;}
+.log.on{display:block;}
+.log .ok{color:#86EFAC;}
+.log .err{color:#FCA5A5;}
+.log .info{color:#93C5FD;}
+.status{font-size:13px;margin-top:14px;padding:10px 14px;border-radius:9px;display:none;}
+.status.on{display:block;}
+.status.ok{background:#ECFDF5;color:#065F46;border:1px solid #6EE7B7;}
+.status.err{background:#FEF2F2;color:var(--red);border:1px solid #FCA5A5;}
+.status.info{background:#EBF3FB;color:var(--sky-deep);border:1px solid #9DC4E8;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Populate Templates Tab</h1>
+    <div class="sub">One-time script. Writes all current templates into the <b>Templates</b> tab of Solura_Lead_Tracker.xlsx.</div>
+
+    <div class="step"><b>Step 1.</b> In Excel, create a new sheet tab named exactly <b>Templates</b> (case-sensitive, no spaces). Leave it empty — this script writes both the headers and the rows.</div>
+    <div class="step"><b>Step 2.</b> Sign in with the same Microsoft account you use for the dashboard.</div>
+    <div class="step"><b>Step 3.</b> Hit Populate. It writes ~110 rows, taking 30-90 seconds. Watch the log for progress.</div>
+    <div class="step" style="background:#FEF3DC;color:#8B6500;border:1px solid #F5D98A;"><b>Warning:</b> If the Templates tab already has data, this script will overwrite it. Run only once.</div>
+
+    <button class="btn" id="signin-btn">Sign in with Microsoft</button>
+    <button class="btn btn-gold" id="populate-btn" style="display:none;margin-left:8px">Populate Templates Tab</button>
+
+    <div class="status" id="status"></div>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+/* Same auth/config as dashboard */
+var CLIENT_ID='1cb530f8-6c5f-4605-9590-068dd55e0b81';
+var TENANT='1b2cdbea-de19-47d2-9512-ea102905e3eb';
+var REDIRECT=location.href.split('?')[0].split('#')[0];
+var GR='https://graph.microsoft.com/v1.0';
+var FN='Solura_Lead_Tracker.xlsx';
+var tok='', fid='';
+
+function el(id){return document.getElementById(id);}
+function setStatus(msg,kind){var s=el('status');s.className='status on '+(kind||'info');s.textContent=msg;}
+function logLine(msg,kind){var l=el('log');l.classList.add('on');var d=document.createElement('div');if(kind)d.className=kind;d.textContent=msg;l.appendChild(d);l.scrollTop=l.scrollHeight;}
+
+async function genPKCE(){
+  var v=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
+  var hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));
+  var b64=btoa(String.fromCharCode.apply(null,new Uint8Array(hash))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+  return {verifier:v,challenge:b64};
+}
+async function signIn(){
+  var pkce=await genPKCE();
+  sessionStorage.setItem('pkce_v_tmpl',pkce.verifier);
+  var url='https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/authorize?'
+    +'client_id='+CLIENT_ID+'&response_type=code&redirect_uri='+encodeURIComponent(REDIRECT)
+    +'&scope='+encodeURIComponent('openid profile email Files.ReadWrite offline_access')
+    +'&code_challenge='+pkce.challenge+'&code_challenge_method=S256&prompt=select_account';
+  location.href=url;
+}
+async function handleAuthCallback(){
+  var params=new URLSearchParams(location.search);
+  var code=params.get('code');
+  if(!code)return false;
+  history.replaceState({},'',REDIRECT);
+  var ver=sessionStorage.getItem('pkce_v_tmpl');
+  if(!ver){setStatus('PKCE verifier missing — try signing in again','err');return true;}
+  try{
+    var body=new URLSearchParams({client_id:CLIENT_ID,code:code,redirect_uri:REDIRECT,grant_type:'authorization_code',code_verifier:ver});
+    var r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
+    var j=await r.json();
+    if(j.access_token){
+      tok=j.access_token;
+      sessionStorage.setItem('st_tmpl',tok);
+      onSignedIn();
+    }else{setStatus('Token error: '+(j.error_description||j.error||'unknown'),'err');}
+  }catch(e){setStatus('Auth error: '+e.message,'err');}
+  return true;
+}
+function onSignedIn(){
+  el('signin-btn').style.display='none';
+  el('populate-btn').style.display='inline-block';
+  setStatus('Signed in. Click Populate when ready.','ok');
+}
+async function gfetch(url,opts){
+  opts=opts||{};
+  opts.headers=opts.headers||{};
+  opts.headers['Authorization']='Bearer '+tok;
+  if(opts.body&&!opts.headers['Content-Type'])opts.headers['Content-Type']='application/json';
+  return fetch(url,opts);
+}
+
+/* ── Templates source data (verbatim from dashboard) ────────────────── */
+
+var COLD={
+  apfm:{
+    p1_intro:[
+      "Hi {dm}, this is Meir with Solura Home Care. We received your information from A Place for Mom regarding care for {pt}. We'd love to help and one of our team members will be calling you in the next 5 minutes. — Meir, (216) 770-4886",
+      "Hi {dm}, Meir here from Solura Home Care. A Place for Mom connected us about care for {pt}. We're excited to help — expect a call from us shortly! — (216) 770-4886",
+      "Hi {dm}, this is Meir with Solura Home Care. We got your referral from A Place for Mom for {pt} and we're calling you in just a few minutes. — Meir"
+    ],
+    p1_missed:[
+      "Hi {dm}, Meir from Solura Home Care. We tried reaching you today — A Place for Mom connected us about care for {pt}. Call us at (216) 770-4886 or we'll follow up soon.",
+      "Hi {dm}, we called but missed you. Following up on your A Place for Mom inquiry for {pt}. Reach us anytime at (216) 770-4886. — Meir, Solura Home Care",
+      "Hi {dm}, Meir with Solura Home Care. Sorry we missed you — we received your A Place for Mom referral for {pt}. Call us at (216) 770-4886."
+    ],
+    p2:[
+      "Hi {dm}, Meir with Solura Home Care checking in. We'd love to connect about care for {pt}. Give us a call at (216) 770-4886 or reply anytime.",
+      "Hello {dm}, Meir from Solura Home Care. Just following up about care for {pt} — we're here to help. (216) 770-4886.",
+      "Hi {dm}, Meir here with Solura Home Care. Still thinking of you and {pt} — we're here when you're ready. (216) 770-4886"
+    ],
+    p3:[
+      "Hi {dm}, Meir with Solura Home Care. Just checking in about care for {pt}. We're here whenever the time is right — (216) 770-4886.",
+      "Hello {dm}, Meir from Solura Home Care. Thinking of you and {pt} this week. We're just a call away: (216) 770-4886.",
+      "Hi {dm}, Meir with Solura Home Care. Hope {pt} is doing well. Still here if you need support — (216) 770-4886."
+    ],
+    p4:[
+      "Hi {dm}, Meir with Solura Home Care. Reaching out one more time about care for {pt}. Happy to answer any questions — (216) 770-4886.",
+      "Hello {dm}, Meir from Solura Home Care. Checking in on {pt} — we'd still love to help. No pressure. (216) 770-4886.",
+      "Hi {dm}, Meir here from Solura Home Care. Just wanted to make sure you know we're here for {pt} whenever you're ready. (216) 770-4886."
+    ],
+    p5:[
+      "Hi {dm}, Meir with Solura Home Care. Thinking of you and {pt} — we're still here whenever you need us. (216) 770-4886.",
+      "Hello {dm}, Meir from Solura Home Care. Just a friendly check-in for {pt}. Call or text anytime. (216) 770-4886.",
+      "Hi {dm}, Meir with Solura Home Care. Hope all is well with {pt}. We're here whenever the time is right. (216) 770-4886."
+    ]
+  },
+  gen:{
+    p1_intro:[
+      "Hi {dm}, this is Meir with Solura Home Care. We received your inquiry and wanted to reach out personally. One of our team members will be calling you in the next 5 minutes. — (216) 770-4886",
+      "Hi {dm}, Meir here from Solura Home Care. We received your request and we'd love to help. Expect a call from us shortly! — (216) 770-4886",
+      "Hi {dm}, this is Meir with Solura Home Care. We got your inquiry and we're calling you in just a few minutes. — (216) 770-4886"
+    ],
+    p1_missed:[
+      "Hi {dm}, Meir from Solura Home Care. We tried reaching you today and would love to connect. Call us at (216) 770-4886 or we'll follow up soon.",
+      "Hi {dm}, we called but missed you. We'd love to learn more about how we can help. Reach us anytime at (216) 770-4886. — Meir, Solura Home Care",
+      "Hi {dm}, Meir with Solura Home Care. Sorry we missed you today. Call us at (216) 770-4886 — we're here to help."
+    ],
+    p2:[
+      "Hi {dm}, Meir with Solura Home Care checking in. We'd love to connect about care support. Call us at (216) 770-4886 or reply here.",
+      "Hello {dm}, Meir from Solura Home Care. Just following up on your inquiry — we're here whenever you're ready. (216) 770-4886.",
+      "Hi {dm}, Meir here with Solura Home Care. Still thinking of you — available to help whenever the time is right. (216) 770-4886"
+    ],
+    p3:[
+      "Hi {dm}, Meir with Solura Home Care. Just checking in to see if you're still exploring care options. We're here when you need us. (216) 770-4886.",
+      "Hello {dm}, Meir from Solura Home Care. Thinking of you this week. Just a call away if anything has changed. (216) 770-4886.",
+      "Hi {dm}, Meir with Solura Home Care. Hope all is well. Still here if you need care support — (216) 770-4886."
+    ],
+    p4:[
+      "Hi {dm}, Meir with Solura Home Care. Reaching out one more time to see if you're still exploring care options. (216) 770-4886.",
+      "Hello {dm}, Meir from Solura Home Care. Just checking in to see how things are going and if we can still help. (216) 770-4886.",
+      "Hi {dm}, Meir here from Solura Home Care. No pressure at all — just want you to know we're here whenever you're ready. (216) 770-4886."
+    ],
+    p5:[
+      "Hi {dm}, Meir with Solura Home Care. Just a quick check-in — we're still here if you ever need care support. (216) 770-4886.",
+      "Hello {dm}, Meir from Solura Home Care. Thinking of you. Call or text anytime — we're here. (216) 770-4886.",
+      "Hi {dm}, Meir with Solura Home Care. Hope you're doing well. Still here whenever the time is right. (216) 770-4886."
+    ]
+  }
+};
+
+var WARM={
+  sms:[
+    "Hi {dm}, it's Meir from Solura Home Care. Just following up from our last conversation — how are things going? We're here whenever you're ready to take the next step. (216) 770-4886.",
+    "Hello {dm}, Meir here from Solura Home Care. Wanted to check in and see if you have any questions or updates. Feel free to call or text anytime. (216) 770-4886.",
+    "Hi {dm}, Meir with Solura Home Care. Just thinking of you and wanted to reach out. We're still here and ready to help whenever you need us. (216) 770-4886."
+  ],
+  email:{
+    subj:[
+      "Following up — Solura Home Care",
+      "Checking in — Solura Home Care",
+      "A note from Meir at Solura Home Care"
+    ],
+    body:[
+      "Hi {dm},\n\nI wanted to follow up from our last conversation and see how things are progressing. We're still here and ready to help whenever you're ready to move forward.\n\nIf you have any questions or would like to schedule that in-home assessment, just give me a call or reply to this email.\n\nWarm regards,\nMeir Schwimer\nSolura Home Care\n(216) 770-4886\nwww.solurahomecare.com",
+      "Hi {dm},\n\nJust a quick note to check in and see if there's anything I can help with. We're here whenever you're ready.\n\nA free in-home assessment is always available — no commitment required. Just a conversation to help you make the best decision.\n\nAlways here for you,\nMeir Schwimer\nSolura Home Care\n(216) 770-4886",
+      "Hi {dm},\n\nHope you're doing well. I'm reaching out to let you know Solura Home Care is still here and ready to support you whenever the time is right.\n\nDon't hesitate to reach out with any questions.\n\nBest,\nMeir\nSolura Home Care | (216) 770-4886"
+    ]
+  }
+};
+
+var COLD_EMAIL={
+  apfm:{
+    subj:["Checking in — care support for {pt}","Still here for you and {pt}","A note from Solura Home Care"],
+    body:[
+      "Hi {dm},\n\nI wanted to check in and see how {pt} is doing. Finding the right care takes time, and we're here whenever you're ready.\n\nAt Solura Home Care, we specialize in compassionate non-medical support tailored to {pt}'s needs. A free in-home assessment is always available.\n\nWarm regards,\nMeir Schwimer\nSolura Home Care\n(216) 770-4886\nwww.solurahomecare.com",
+      "Hi {dm},\n\nJust a quick note — we're still thinking of you and {pt}. No rush, no pressure.\n\nWhenever you're ready, we'd love to schedule a free in-home assessment to create a personalized care plan.\n\nAlways here,\nMeir Schwimer\nSolura Home Care\n(216) 770-4886",
+      "Hi {dm},\n\nHope you and {pt} are doing well. Solura Home Care is still available and ready to help whenever the time is right.\n\nOur caregivers are trained, background-checked, and matched based on both skills and personality.\n\nBest,\nMeir\nSolura Home Care | (216) 770-4886"
+    ]
+  },
+  gen:{
+    subj:["Following up on your care inquiry","We're still here to help","A note from Solura Home Care"],
+    body:[
+      "Hi {dm},\n\nI wanted to follow up on your inquiry and see if you're still exploring home care options. We know these decisions take time, and we're here whenever you're ready.\n\nA free in-home assessment is always available — no commitment required.\n\nWarm regards,\nMeir Schwimer\nSolura Home Care\n(216) 770-4886\nwww.solurahomecare.com",
+      "Hi {dm},\n\nJust a quick note to let you know we're still here if you need home care support. No rush at all.\n\nWhenever you're ready, we'd love to have a conversation.\n\nAlways here,\nMeir Schwimer\nSolura Home Care\n(216) 770-4886",
+      "Hi {dm},\n\nHope all is well. Solura Home Care is still available and ready to help whenever the time is right.\n\nDon't hesitate to reach out with any questions.\n\nBest,\nMeir\nSolura Home Care | (216) 770-4886"
+    ]
+  }
+};
+
+/* Scripts — three independent multi-section scripts */
+var SCRIPTS={
+  apfm:{
+    title:'A Place for Mom — Call Script',
+    sections:[
+      {section:'opening',title:'1. Opening',text:"Hi, is this {dm}? Great, this is Meir with Solura Home Care. I'm calling because we received your information from A Place for Mom. How are you doing today?"},
+      {section:'frame',title:'2. Frame the Call',text:"I'd love to learn more about what's going on so we can recommend the right type of care. I'll ask a few questions, then we'll schedule your in-home assessment."},
+      {section:'emotional_discovery',title:'3. Emotional Discovery',text:"Before we go into details — how are you holding up with everything going on? What made today the day you reached out through A Place for Mom?"},
+      {section:'care_needs',title:'4. Care Needs',text:"Tell me about the situation — what's been happening recently? (Bathing, dressing, fall risk, mobility, dementia, meals, medication, overnight, companionship)"},
+      {section:'safety_urgency',title:'5. Safety & Urgency',text:"Have there been any recent falls or close calls? How soon are you hoping to have care start?"},
+      {section:'schedule',title:'6. Schedule Assessment',text:"The next step is simple — we schedule your free in-home assessment. We're doing them this week — I can do today at 4 PM or tomorrow morning at 10 AM. Which works best?"},
+      {section:'objections',title:'7. Objections',text:"Need to talk to family → The assessment is the easiest way to get everyone on the same page. Comparing agencies → Meeting our care manager gives a much clearer picture. Not ready → The assessment doesn't commit you to anything — it gives you clarity."},
+      {section:'close',title:'8. Close',text:"Perfect — I have you down for [day & time]. We'll send a confirmation shortly. We look forward to supporting your family."}
+    ]
+  },
+  generic:{
+    title:'General Follow-Up Script',
+    sections:[
+      {section:'opening',title:'Opening',text:"Hi, is this {dm}? This is Meir with Solura Home Care. How are you today?"},
+      {section:'purpose',title:'Purpose',text:"I'm calling to follow up on your inquiry and see if you're still exploring care options, and to answer any questions."},
+      {section:'discovery',title:'Discovery',text:"Tell me about what's going on — what kind of support are you looking for?"},
+      {section:'close',title:'Close',text:"The easiest next step is a free in-home assessment — no commitment, just a conversation. Can we find a time this week?"}
+    ]
+  },
+  active:{
+    title:'Active Conversation Follow-Up',
+    sections:[
+      {section:'opening',title:'Opening',text:"Hi {dm}, it's Meir from Solura Home Care. How are you doing?"},
+      {section:'check_in',title:'Check In',text:"I wanted to follow up from our last conversation and see how things are going with the care search."},
+      {section:'progress',title:'Progress',text:"Have you had a chance to think more about moving forward? Any questions I can answer for you?"},
+      {section:'next_step',title:'Next Step',text:"I'd love to set up that in-home assessment when you're ready. It's completely free, no commitment, and gives us a chance to put together a personalized plan. Does this week or next work better?"},
+      {section:'close',title:'Close',text:"Perfect — let's get that scheduled. I'll send you a confirmation shortly."}
+    ]
+  }
+};
+
+/* ── Build rows ───────────────────────────────────────────────────── */
+
+var HEADERS=['id','category','audience','source','phase','slot','variant','section','section_title','text','enabled','notes'];
+
+function buildRows(){
+  var rows=[];
+  // SMS templates — COLD by APFM / gen × p1_intro, p1_missed, p2, p3, p4, p5 × 3 variants
+  var slotMap={p1_intro:{phase:1,slot:'intro'},p1_missed:{phase:1,slot:'missed'},p2:{phase:2,slot:''},p3:{phase:3,slot:''},p4:{phase:4,slot:''},p5:{phase:5,slot:''}};
+  ['apfm','gen'].forEach(function(src){
+    var srcLabel=src==='apfm'?'apfm':'generic';
+    Object.keys(slotMap).forEach(function(key){
+      var meta=slotMap[key];
+      COLD[src][key].forEach(function(text,i){
+        var v=i+1;
+        var id='cold_'+srcLabel+'_p'+meta.phase+(meta.slot?'_'+meta.slot:'')+'_v'+v;
+        rows.push([id,'sms','cold',srcLabel,meta.phase,meta.slot,v,'','',text,'yes','']);
+      });
+    });
+  });
+
+  // WARM SMS (no source distinction, applies to all active leads)
+  WARM.sms.forEach(function(text,i){
+    var v=i+1;
+    rows.push(['warm_sms_v'+v,'sms','warm','',  'active','',v,'','',text,'yes','']);
+  });
+
+  // WARM email — subj + body, 3 variants each
+  WARM.email.subj.forEach(function(text,i){
+    var v=i+1;
+    rows.push(['warm_email_subj_v'+v,'email_subject','warm','','active','',v,'','',text,'yes','']);
+  });
+  WARM.email.body.forEach(function(text,i){
+    var v=i+1;
+    rows.push(['warm_email_body_v'+v,'email_body','warm','','active','',v,'','',text,'yes','']);
+  });
+
+  // COLD emails — APFM and generic, subj + body, 3 variants each
+  ['apfm','gen'].forEach(function(src){
+    var srcLabel=src==='apfm'?'apfm':'generic';
+    COLD_EMAIL[src].subj.forEach(function(text,i){
+      var v=i+1;
+      rows.push(['cold_email_subj_'+srcLabel+'_v'+v,'email_subject','cold',srcLabel,'','',v,'','',text,'yes','']);
+    });
+    COLD_EMAIL[src].body.forEach(function(text,i){
+      var v=i+1;
+      rows.push(['cold_email_body_'+srcLabel+'_v'+v,'email_body','cold',srcLabel,'','',v,'','',text,'yes','']);
+    });
+  });
+
+  // Scripts — apfm, generic, active, each as a series of sections
+  Object.keys(SCRIPTS).forEach(function(scriptKey){
+    var aud=scriptKey==='active'?'warm':'cold';
+    var src=scriptKey==='active'?'':(scriptKey==='apfm'?'apfm':'generic');
+    SCRIPTS[scriptKey].sections.forEach(function(sec,i){
+      var id='script_'+scriptKey+'_'+sec.section;
+      rows.push([id,'script',aud,src,'','',i+1,sec.section,sec.title,sec.text,'yes','']);
+    });
+  });
+
+  return rows;
+}
+
+/* ── Workbook + sheet writers ─────────────────────────────────────── */
+
+async function findWorkbook(){
+  var r=await gfetch(GR+"/me/drive/root/search(q='"+encodeURIComponent(FN)+"')");
+  if(!r.ok)throw new Error('Drive search failed: '+r.status);
+  var j=await r.json();
+  var f=(j.value||[]).find(function(x){return x.name===FN;});
+  if(!f)throw new Error(FN+' not found in OneDrive');
+  return f.id;
+}
+
+async function ensureTemplatesSheet(){
+  // Check sheet exists
+  var r=await gfetch(GR+'/me/drive/items/'+fid+'/workbook/worksheets');
+  if(!r.ok)throw new Error('List sheets failed: '+r.status);
+  var j=await r.json();
+  var sheet=(j.value||[]).find(function(s){return s.name==='Templates';});
+  if(!sheet){
+    logLine('Templates tab not found. Please create it manually in Excel first.','err');
+    throw new Error('Templates tab does not exist. Create an empty sheet named "Templates" in Excel, then re-run.');
+  }
+  logLine('Found Templates tab.','ok');
+  return sheet;
+}
+
+async function clearTemplatesTab(){
+  // Clear range A1:Z1000 to wipe any prior data
+  var r=await gfetch(GR+"/me/drive/items/"+fid+"/workbook/worksheets/Templates/range(address='A1:L2000')/clear",{
+    method:'POST',body:JSON.stringify({applyTo:'All'})
+  });
+  if(!r.ok){
+    var t=await r.text();
+    throw new Error('Clear failed: '+r.status+' '+t);
+  }
+  logLine('Cleared old data in Templates tab.','info');
+}
+
+async function writeHeadersAndRows(rows){
+  // Write headers first
+  var headerR=await gfetch(GR+"/me/drive/items/"+fid+"/workbook/worksheets/Templates/range(address='A1:L1')",{
+    method:'PATCH',body:JSON.stringify({values:[HEADERS]})
+  });
+  if(!headerR.ok){
+    var e=await headerR.text();
+    throw new Error('Header write failed: '+headerR.status+' '+e);
+  }
+  logLine('Wrote 12 column headers.','ok');
+
+  // Write data rows in chunks of 25 to avoid hitting payload limits
+  var chunkSize=25;
+  for(var i=0;i<rows.length;i+=chunkSize){
+    var chunk=rows.slice(i,i+chunkSize);
+    var startRow=i+2; // header is row 1, data from row 2
+    var endRow=startRow+chunk.length-1;
+    var addr='A'+startRow+':L'+endRow;
+    var res=await gfetch(GR+"/me/drive/items/"+fid+"/workbook/worksheets/Templates/range(address='"+addr+"')",{
+      method:'PATCH',body:JSON.stringify({values:chunk})
+    });
+    if(!res.ok){
+      var et=await res.text();
+      throw new Error('Row write failed at chunk '+i+': '+res.status+' '+et);
+    }
+    logLine('Wrote rows '+startRow+'-'+endRow+' ('+chunk.length+' templates).','info');
+  }
+}
+
+async function populate(){
+  el('populate-btn').disabled=true;
+  setStatus('Running…','info');
+  try{
+    logLine('Finding workbook…','info');
+    fid=await findWorkbook();
+    logLine('Workbook found.','ok');
+    await ensureTemplatesSheet();
+    await clearTemplatesTab();
+    var rows=buildRows();
+    logLine('Built '+rows.length+' template rows. Writing to sheet…','info');
+    await writeHeadersAndRows(rows);
+    logLine('Done! '+rows.length+' templates written.','ok');
+    setStatus('✓ Done. '+rows.length+' templates written to the Templates tab.','ok');
+  }catch(e){
+    logLine('FAILED: '+e.message,'err');
+    setStatus('Error: '+e.message,'err');
+    el('populate-btn').disabled=false;
+  }
+}
+
+/* Boot */
+window.addEventListener('load',async function(){
+  el('signin-btn').addEventListener('click',signIn);
+  el('populate-btn').addEventListener('click',populate);
+  tok=sessionStorage.getItem('st_tmpl')||'';
+  if(tok){onSignedIn();return;}
+  await handleAuthCallback();
+});
+</script>
+</body>
+</html>
