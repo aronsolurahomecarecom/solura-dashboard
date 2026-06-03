@@ -514,7 +514,7 @@ function renderCard(t){
     +'<div class="row-body">'
     +'<div class="row-edit">'
     +(isScript?'<label>Section title</label><input type="text" data-action="edit-section-title" data-idx="'+idx+'" value="'+escapeHtml(c.section_title)+'" style="margin-bottom:8px">':'')
-    +(isEmailSubj?'<label>Subject</label><input type="text" data-action="edit-text" data-idx="'+idx+'" value="'+escapeHtml(c.text)+'">':'<label>Template text</label><textarea data-action="edit-text" data-idx="'+idx+'">'+escapeHtml(c.text)+'</textarea>')
+    +(isEmailSubj?'<label>Subject</label><input type="text" data-action="edit-text" data-idx="'+idx+'" value="'+escapeHtml(c.text)+'">':'<label>Template text</label><textarea data-action="edit-text" data-idx="'+idx+'"></textarea>')
     +'</div>'
     +'<div class="row-preview">'
     +'<label>Preview (names filled)</label>'
@@ -591,8 +591,15 @@ function bindCardEvents(){
     });
   });
 
-  // Edit text/subject (textareas and inputs)
+  // Edit text/subject (textareas and inputs).
+  // For textareas, set .value via JS rather than HTML innerText so newlines
+  // are guaranteed to survive (innerHTML collapses some whitespace in textareas).
   $$('[data-action="edit-text"]').forEach(function(inp){
+    if(inp.tagName==='TEXTAREA'){
+      var idx0=parseInt(inp.dataset.idx,10);
+      var t0=templates[idx0];
+      if(t0)inp.value=t0.current.text;
+    }
     inp.addEventListener('input',function(e){
       var idx=parseInt(e.target.dataset.idx,10);
       var t=templates[idx];if(!t)return;
