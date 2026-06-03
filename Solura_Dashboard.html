@@ -590,6 +590,15 @@ function toast(m){var t=el('toast');if(!t)return;t.textContent=m;t.classList.add
 function showErr(m){var e=el('err');if(e){e.textContent='⚠ '+m;e.classList.add('on');}}
 function clearErr(){var e=el('err');if(e)e.classList.remove('on');}
 function escapeHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+// Normalize all newline forms (\r\n, \r, literal "\n" escapes) to actual
+// \n characters so multi-line email bodies render with proper paragraphs.
+function normalizeNewlines(s){
+  if(s==null)return '';
+  s=String(s);
+  s=s.replace(/\\r\\n/g,'\n').replace(/\\n/g,'\n').replace(/\\r/g,'\n');
+  s=s.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  return s;
+}
 
 // Date helpers — all timezone-safe local-time
 function localToday(){var n=new Date();return new Date(n.getFullYear(),n.getMonth(),n.getDate());}
@@ -878,7 +887,7 @@ async function loadTemplates(){
     var variant=parseInt(row[6],10)||1;
     var section=String(row[7]||'');
     var sectionTitle=String(row[8]||'');
-    var text=String(row[9]||'');
+    var text=normalizeNewlines(String(row[9]||''));
 
     if(category==='sms'){
       var key;

@@ -242,6 +242,18 @@ function clearErr(){el('err').classList.remove('on');}
 function showInfo(m){el('info').textContent=m;el('info').classList.add('on');}
 function clearInfo(){el('info').classList.remove('on');}
 function escapeHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+// Normalize all newline forms (\r\n, \r, literal "\n" escapes from JSON
+// round-trips) into actual \n characters so textareas render line breaks.
+function normalizeNewlines(s){
+  if(s==null)return '';
+  s=String(s);
+  // Convert literal backslash-n sequences (e.g. if the cell ended up holding
+  // an escaped "\\n" string) into real newlines
+  s=s.replace(/\\r\\n/g,'\n').replace(/\\n/g,'\n').replace(/\\r/g,'\n');
+  // Normalize Windows and old-Mac line endings to plain \n
+  s=s.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  return s;
+}
 
 async function genPKCE(){
   var v=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
@@ -372,7 +384,7 @@ function rowToObj(row){
     variant:row[COL.VARIANT],
     section:String(row[COL.SECTION]||''),
     section_title:String(row[COL.SECTION_TITLE]||''),
-    text:String(row[COL.TEXT]||''),
+    text:normalizeNewlines(String(row[COL.TEXT]||'')),
     enabled:String(row[COL.ENABLED]||'').toLowerCase()==='yes',
     notes:String(row[COL.NOTES]||'')
   };
