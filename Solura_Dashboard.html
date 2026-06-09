@@ -56,8 +56,11 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--cream);color:va
 
 /* KPI bar */
 .kbar{display:none;grid-template-columns:repeat(5,1fr);border-bottom:1px solid var(--border);background:#fff;box-shadow:var(--shadow-sm);}
-.kv{padding:16px 24px;border-right:1px solid var(--border-soft);position:relative;overflow:hidden;}
+.kv{padding:16px 24px;border-right:1px solid var(--border-soft);position:relative;overflow:hidden;transition:background .2s ease;}
+.kv:hover{background:#FAF6EE;}
 .kv:last-child{border-right:none;}
+.kv-num{font-size:32px;font-weight:700;line-height:1;letter-spacing:-.02em;transition:transform .25s cubic-bezier(.4,0,.2,1);}
+.kv:hover .kv-num{transform:scale(1.05);}
 .kv::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
 .kv:nth-child(1)::before{background:var(--red);}
 .kv:nth-child(2)::before{background:var(--gold);}
@@ -65,7 +68,6 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--cream);color:va
 .kv:nth-child(4)::before{background:var(--grn);}
 .kv:nth-child(5)::before{background:var(--softer);}
 .kv-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--soft);margin-bottom:6px;}
-.kv-num{font-size:32px;font-weight:700;line-height:1;letter-spacing:-.02em;}
 .kv-num.red{color:var(--red);}.kv-num.gold{color:var(--gold);}.kv-num.sky{color:var(--sky);}.kv-num.grn{color:var(--grn);}.kv-num.soft{color:var(--soft);}
 .kv-sub{font-size:10px;color:var(--soft);margin-top:3px;}
 
@@ -100,8 +102,9 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--cream);color:va
 table{width:100%;border-collapse:collapse;}
 thead{background:linear-gradient(to right,var(--sky-deep),#1E5FA8);}
 th{padding:9px 16px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--gold);white-space:nowrap;}
-.dr{border-bottom:1px solid var(--border-soft);cursor:pointer;transition:background .12s;position:relative;}
-.dr:hover{background:#F8F4EE;}
+.dr{border-bottom:1px solid var(--border-soft);cursor:pointer;transition:background .18s ease,box-shadow .18s ease;position:relative;animation:drFadeIn .25s ease;}
+@keyframes drFadeIn{from{opacity:0;transform:translateY(-2px);}to{opacity:1;transform:translateY(0);}}
+.dr:hover{background:#F8F4EE;box-shadow:inset 0 0 0 1px rgba(200,135,10,.12);}
 .dr.sel{background:var(--sky-pale);}
 td{padding:13px 16px;vertical-align:top;}
 .dr td:first-child{padding-left:20px;}
@@ -159,7 +162,8 @@ td{padding:13px 16px;vertical-align:top;}
 /* Expand panel */
 .ep-wrap{display:none;}
 .ep-wrap.open{display:table-row;}
-.ep{padding:20px 24px;background:linear-gradient(135deg,#F0F6FF 0%,#EBF3FB 100%);border-top:2px solid var(--sky-mid);}
+.ep{padding:20px 24px;background:linear-gradient(135deg,#F0F6FF 0%,#EBF3FB 100%);border-top:2px solid var(--sky-mid);animation:epSlideIn .28s ease;}
+@keyframes epSlideIn{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
 .ebanner{font-size:12px;font-weight:700;padding:9px 14px;border-radius:9px;margin-bottom:16px;display:flex;align-items:center;gap:7px;}
 .eb-grn{background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid);}
 .eb-sky{background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);}
@@ -185,9 +189,9 @@ td{padding:13px 16px;vertical-align:top;}
 @keyframes spin{to{transform:rotate(360deg);}}
 
 /* Drawer */
-.doverlay{display:none;position:fixed;inset:0;background:rgba(10,20,40,.45);z-index:200;backdrop-filter:blur(2px);}
-.doverlay.open{display:block;}
-.drawer{position:fixed;right:-440px;top:0;bottom:0;width:440px;background:#fff;z-index:201;overflow-y:auto;transition:right .28s cubic-bezier(.4,0,.2,1);box-shadow:-8px 0 40px rgba(0,0,0,.16);}
+.doverlay{position:fixed;inset:0;background:rgba(10,20,40,.45);z-index:200;backdrop-filter:blur(2px);opacity:0;visibility:hidden;transition:opacity .25s ease,visibility 0s linear .25s;}
+.doverlay.open{opacity:1;visibility:visible;transition:opacity .25s ease,visibility 0s linear 0s;}
+.drawer{position:fixed;right:-440px;top:0;bottom:0;width:440px;background:#fff;z-index:201;overflow-y:auto;transition:right .32s cubic-bezier(.4,0,.2,1);box-shadow:-8px 0 40px rgba(0,0,0,.16);}
 .drawer.open{right:0;}
 .dhead{background:linear-gradient(135deg,#1A3F72,var(--sky-deep));padding:18px 22px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--gold);}
 .dname{font-family:'Cormorant Garamond',serif;font-size:24px;color:var(--gold);font-weight:500;}
@@ -199,10 +203,11 @@ td{padding:13px 16px;vertical-align:top;}
 .dlabel{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);min-width:110px;padding-top:2px;flex-shrink:0;}
 .dval{font-size:13px;color:var(--dark);flex:1;line-height:1.5;word-break:break-word;}
 
-/* Modals */
-.modal{display:none;position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:300;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px);}
-.modal.open{display:flex;}
-.mbox{background:var(--warm);border-radius:var(--radius-xl);max-width:620px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:var(--shadow-xl);border:1px solid var(--border-soft);animation:modalIn .2s ease;}
+/* Modals — fade overlay + scale-in box, both directions */
+.modal{position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px);opacity:0;visibility:hidden;transition:opacity .22s ease,visibility 0s linear .22s;}
+.modal.open{opacity:1;visibility:visible;transition:opacity .22s ease,visibility 0s linear 0s;}
+.mbox{background:var(--warm);border-radius:var(--radius-xl);max-width:620px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:var(--shadow-xl);border:1px solid var(--border-soft);transform:scale(.94) translateY(12px);opacity:0;transition:opacity .25s ease,transform .28s cubic-bezier(.4,0,.2,1);}
+.modal.open .mbox{transform:scale(1) translateY(0);opacity:1;}
 @keyframes modalIn{from{opacity:0;transform:scale(.96) translateY(8px);}to{opacity:1;transform:scale(1) translateY(0);}}
 .mhead{background:linear-gradient(135deg,#1A3F72,var(--sky-deep));padding:18px 24px;border-radius:var(--radius-xl) var(--radius-xl) 0 0;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--gold);}
 .mtitle{font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:500;color:var(--gold);}
@@ -293,9 +298,10 @@ td{padding:13px 16px;vertical-align:top;}
 
 /* Condition picker */
 .asmt-cond-search{position:relative;margin-bottom:14px;}
-.asmt-cond-search input{width:100%;padding:11px 14px 11px 44px;border:1.5px solid var(--border);border-radius:24px;font-family:inherit;font-size:13px;outline:none;background:#fff;transition:border-color .15s,box-shadow .15s;}
+.asmt-cond-search input{width:100%;padding:11px 16px 11px 42px;border:1.5px solid var(--border);border-radius:24px;font-family:inherit;font-size:13px;outline:none;background:#fff;transition:border-color .15s,box-shadow .15s;display:block;}
 .asmt-cond-search input:focus{border-color:var(--asmt-indigo);box-shadow:0 0 0 3px var(--asmt-indigo-pale);}
-.asmt-cond-search .icon{position:absolute;left:0;top:0;bottom:0;width:44px;display:flex;align-items:center;justify-content:center;color:var(--soft);font-size:14px;pointer-events:none;}
+.asmt-cond-search .icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--soft);font-size:14px;pointer-events:none;line-height:1;display:flex;align-items:center;justify-content:center;width:16px;height:16px;}
+.asmt-cond-search .icon svg{width:16px;height:16px;display:block;}
 .asmt-cond-grid{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;}
 .asmt-cond{background:#fff;border:1.5px solid var(--border);border-radius:24px;padding:8px 16px 8px 12px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--mid);transition:all .18s ease;display:inline-flex;align-items:center;gap:7px;text-align:left;line-height:1.2;}
 .asmt-cond:hover{border-color:var(--asmt-indigo);background:var(--asmt-indigo-pale);transform:translateY(-1px);}
@@ -451,6 +457,28 @@ td{padding:13px 16px;vertical-align:top;}
   </div>
 </div>
 
+<!-- Conditions picker modal (fires when status flips to Responded; also editable from edit panel) -->
+<div class="modal" id="modal-conditions">
+  <div class="mbox" style="max-width:680px">
+    <div class="mhead"><div class="mtitle" id="cond-modal-title">Conditions mentioned</div><button class="mclose" data-action="close-modal" data-mid="modal-conditions">✕</button></div>
+    <div class="mbody">
+      <p id="cond-modal-sub" style="font-size:12.5px;color:var(--mid);margin-bottom:14px;line-height:1.5">Which medical conditions did the lead or family mention? Pick all that apply — these pre-fill the in-home assessment.</p>
+      <div class="asmt-cond-search" style="margin-bottom:12px">
+        <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><line x1="11" y1="11" x2="14" y2="14"/></svg></span>
+        <input type="text" id="resp-cond-search" placeholder="Search conditions">
+      </div>
+      <div class="asmt-cond-grid" id="resp-cond-grid-common"></div>
+      <div class="asmt-cond-other" data-action="resp-toggle-other"><span>Other / less common conditions</span><span class="arrow">▶</span></div>
+      <div class="asmt-cond-other-list" id="resp-cond-grid-other"></div>
+      <div class="asmt-cond-empty-search" id="resp-cond-empty">No conditions match.</div>
+      <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+        <button data-action="close-modal" data-mid="modal-conditions" style="padding:9px 16px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>
+        <button data-action="resp-save-conditions" style="padding:9px 18px;background:linear-gradient(135deg,var(--asmt-indigo),var(--asmt-indigo-deep));color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 8px rgba(91,75,170,.3)">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Assessment modal (additive) -->
 <div class="asmt-overlay" id="asmt-overlay" data-action="asmt-close"></div>
 <div class="asmt-modal" id="modal-assessment">
@@ -556,7 +584,8 @@ var C={
   NSM:24,    // Y  Next Suggested Method
   STEP:25,   // Z  step_idx  (NEW — engine state)
   STEP_AT:26,// AA step_done_at  (NEW — when current step was completed)
-  NUR_OV:27  // AB nurture_weekday_override  (NEW — blank or 0-6)
+  NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
+  MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
@@ -716,7 +745,7 @@ function getNames(ri){
       ptFirst=clientFirst;
     }
   }
-  return {dm:dmFirst,pt:ptFirst,hasDM:!!dmFirst};
+  return {dm:dmFirst,pt:ptFirst,hasDM:!!dmFirst,apfm:isAPFM(ri)};
 }
 function fillNames(s,names){
   var dm=names.dm||'there';
@@ -730,6 +759,24 @@ function fillNames(s,names){
     s=s.replace(/[ \t]+and[ \t]+\{pt\}/gi,'');
     s=s.replace(/[ \t]+\{pt\}/g,'');
     s=s.replace(/\{pt\}/g,'');
+  }
+  // {src} resolves to "from A Place for Mom" for APFM leads,
+  // and to nothing (with adjacent "from"/"through" stripped) for everyone else.
+  // This lets one script work for all sources without sounding APFM-specific.
+  if(names.apfm){
+    s=s.replace(/\{src\}/g,'from A Place for Mom');
+  }else{
+    s=s.replace(/[ \t]+from[ \t]+\{src\}/gi,'');
+    s=s.replace(/[ \t]+through[ \t]+\{src\}/gi,'');
+    s=s.replace(/[ \t]+\{src\}/g,'');
+    s=s.replace(/\{src\}/g,'');
+  }
+  // Also handle the explicit literal "A Place for Mom" / "from A Place for Mom"
+  // that may appear in scripts written before {src} was introduced.
+  if(!names.apfm){
+    s=s.replace(/\bfrom\s+A\s*Place\s*for\s*Mom\b/gi,'');
+    s=s.replace(/\bthrough\s+A\s*Place\s*for\s*Mom\b/gi,'');
+    s=s.replace(/\bA\s*Place\s*for\s*Mom\b/gi,'');
   }
   // Collapse only horizontal whitespace runs (spaces + tabs). Preserve newlines
   // so multi-paragraph email bodies don't get steamrolled into one block.
@@ -1856,6 +1903,13 @@ function openEp(ri,mode){
       +'<div class="ef" style="margin-bottom:12px"><label>Conversation Notes</label><textarea class="ep-notes" placeholder="Key details, concerns, next steps…"></textarea></div>';
   }else if(mode==='update'){
     var curFu=pd(r[C.NF]);
+    var existingConds=parseConditionList(r[C.MC]);
+    var condSummary=existingConds.length
+      ? existingConds.map(function(k){
+          var match=ASMT_COMMON_CONDITIONS.concat(ASMT_OTHER_CONDITIONS).find(function(c){return c.k===k;});
+          return match?match.label:k;
+        }).join(', ')
+      : '(none)';
     html='<div class="ebanner eb-gold">✏ Update Follow-Up</div>'
       +'<div class="egrid g4">'
       +'<div class="ef"><label>Status</label><select class="ep-st">'+statusOpts+'</select></div>'
@@ -1863,7 +1917,14 @@ function openEp(ri,mode){
       +'<div class="ef"><label>Method Used</label><select class="ep-mt">'+moptsForDone+'</select></div>'
       +'<div class="ef"><label>Next Suggested Method</label><select class="ep-nsm"><option value="">— select —</option>'+MOPS.slice(1).map(function(s){return '<option value="'+escapeHtml(s)+'"'+(s===curNSM?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
       +'</div>'
-      +'<div class="ef" style="margin-bottom:12px"><label>Notes</label><textarea class="ep-notes">'+escapeHtml(r[C.NT]||'')+'</textarea></div>';
+      +'<div class="ef" style="margin-bottom:12px"><label>Notes</label><textarea class="ep-notes">'+escapeHtml(r[C.NT]||'')+'</textarea></div>'
+      +'<div class="ef" style="margin-bottom:12px">'
+      +'<label>Conditions mentioned</label>'
+      +'<div style="display:flex;gap:8px;align-items:center;background:var(--cream);padding:8px 12px;border-radius:8px;border:1px solid var(--border-soft)">'
+      +'<div style="flex:1;font-size:12px;color:var(--mid)">'+escapeHtml(condSummary)+'</div>'
+      +'<button type="button" data-action="open-conditions" data-ri="'+ri+'" style="padding:6px 14px;background:var(--asmt-indigo);color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">Edit</button>'
+      +'</div>'
+      +'</div>';
   }
   html+='<div style="display:flex;gap:8px;align-items:center">'
     +'<button class="esave" data-action="save-ep" data-ri="'+ri+'" data-mode="'+mode+'">Save to Sheet</button>'
@@ -1937,6 +1998,16 @@ async function saveEp(ri,mode){
     closeEp(ri);
     toast('✓ Saved');
     await buildUI();
+    // After a "Responded" save, pop the conditions picker so user can flag
+    // what the lead mentioned. Fires every time (per spec) even if previously set.
+    if(mode==='responded'){
+      openConditionsPicker(ri,{fromResponded:true});
+    }
+    // Also: if the "update" mode pushed status to "Responded" explicitly,
+    // do the same.
+    if(mode==='update'&&u[C.ST]&&/responded/i.test(u[C.ST])){
+      openConditionsPicker(ri,{fromResponded:true});
+    }
   }catch(e){
     showErr(e.message);
   }finally{
@@ -2111,10 +2182,17 @@ async function sendEmail(){
 function openScript(ri){
   var r=rows[ri]||[];
   var names=getNames(ri);
-  var apfm=isAPFM(ri);
   var isActv=isActive(r[C.ST])||isOffSequence(ri);
-  var key=isActv?'active':(apfm?'apfm':'generic');
+  // Unified script: same APFM script used for all cold leads.
+  // fillNames strips/keeps "{src}" + "A Place for Mom" mentions based on names.apfm.
+  var key=isActv?'active':'apfm';
   var s=SCRIPTS[key];
+  // Fallback: if active script is missing, use apfm. If apfm itself is missing,
+  // try generic (legacy). If all empty, show unavailable banner.
+  if(!s||!s.sections||!s.sections.length){
+    if(key==='active'&&SCRIPTS.apfm&&SCRIPTS.apfm.sections.length)s=SCRIPTS.apfm;
+    else if(SCRIPTS.generic&&SCRIPTS.generic.sections.length)s=SCRIPTS.generic;
+  }
   if(!s||!s.sections||!s.sections.length){
     el('script-title').textContent='Script Unavailable';
     el('script-body').innerHTML='<div style="font-size:13px;color:var(--soft);padding:10px">No script templates loaded. Check the Templates tab in your spreadsheet.</div>';
@@ -2535,8 +2613,144 @@ var ASMT_SCHEMA=[
 // Module state
 var asmtState={ri:-1,section:0,data:{},pain:[{loc:'',level:'',type:'',freq:'',helps:''}],files:{}};
 
+/* ─── §10b Conditions picker modal ──────────────────────────────────────
+ * Pops when status flips to "Responded" (also openable from edit panel).
+ * State lives in a transient module variable; on Save, writes a
+ * comma-separated list of condition keys to column AC (C.MC).
+ * The same keys are read back by openAssessment to pre-select pills in
+ * Section 3 of the assessment.
+ * ─────────────────────────────────────────────────────────────────────── */
+var respState={ri:-1,selected:[]};
+
+function parseConditionList(s){
+  if(!s)return [];
+  return String(s).split(',').map(function(x){return x.trim();}).filter(Boolean);
+}
+function serializeConditionList(arr){
+  return (arr||[]).filter(Boolean).join(', ');
+}
+
+function renderRespModal(){
+  // Common conditions
+  var commonHtml=ASMT_COMMON_CONDITIONS.map(function(c){
+    var on=respState.selected.indexOf(c.k)>-1;
+    return '<button type="button" class="asmt-cond'+(on?' on':'')+'" data-resp-cond-k="'+c.k+'" data-resp-cond-label="'+escapeHtml(c.label)+'" data-resp-cond-kw="'+escapeHtml(c.kw||'')+'">'
+      +'<span class="chk">'+(on?'\u2713':'')+'</span>'
+      +'<span>'+escapeHtml(c.label)+'</span>'
+      +'</button>';
+  }).join('');
+  el('resp-cond-grid-common').innerHTML=commonHtml;
+  // Long-tail
+  var otherHtml=ASMT_OTHER_CONDITIONS.map(function(c){
+    var on=respState.selected.indexOf(c.k)>-1;
+    return '<button type="button" class="asmt-cond'+(on?' on':'')+'" data-resp-cond-k="'+c.k+'" data-resp-cond-label="'+escapeHtml(c.label)+'" data-resp-cond-kw="'+escapeHtml(c.kw||'')+'">'
+      +'<span class="chk">'+(on?'\u2713':'')+'</span>'
+      +'<span>'+escapeHtml(c.label)+'</span>'
+      +'</button>';
+  }).join('');
+  el('resp-cond-grid-other').innerHTML=otherHtml;
+  // Wire click handlers on each pill
+  $$('[data-resp-cond-k]').forEach(function(b){
+    b.addEventListener('click',function(e){
+      var btn=e.currentTarget;
+      var k=btn.dataset.respCondK;
+      var i=respState.selected.indexOf(k);
+      if(i>-1)respState.selected.splice(i,1);
+      else respState.selected.push(k);
+      var on=respState.selected.indexOf(k)>-1;
+      $$('[data-resp-cond-k="'+k+'"]').forEach(function(b2){
+        b2.classList.toggle('on',on);
+        var c=b2.querySelector('.chk');
+        if(c)c.textContent=on?'\u2713':'';
+      });
+    });
+  });
+  // Search
+  var searchInput=el('resp-cond-search');
+  if(searchInput){
+    searchInput.value='';
+    searchInput.oninput=function(e){
+      var q=String(e.target.value||'').toLowerCase().trim();
+      var anyShown=false;
+      var anyOtherShown=false;
+      $$('[data-resp-cond-k]').forEach(function(b){
+        var label=String(b.dataset.respCondLabel||'').toLowerCase();
+        var kw=String(b.dataset.respCondKw||'').toLowerCase();
+        var match=!q||label.indexOf(q)>-1||kw.indexOf(q)>-1;
+        b.classList.toggle('hidden',!match);
+        if(match){
+          anyShown=true;
+          var parent=b.parentElement;
+          if(parent&&parent.id==='resp-cond-grid-other'&&q)anyOtherShown=true;
+        }
+      });
+      if(q&&anyOtherShown){
+        var arrowEl=document.querySelector('[data-action="resp-toggle-other"]');
+        if(arrowEl)arrowEl.classList.add('expanded');
+        var list=el('resp-cond-grid-other');
+        if(list)list.classList.add('expanded');
+      }
+      var empty=el('resp-cond-empty');
+      if(empty)empty.classList.toggle('on',!anyShown&&q.length>0);
+    };
+  }
+}
+
+function openConditionsPicker(ri,opts){
+  opts=opts||{};
+  var r=rows[ri]||[];
+  respState={
+    ri:ri,
+    selected:parseConditionList(r[C.MC])
+  };
+  var leadName=String(r[C.NM]||r[C.DM]||'').trim()||'Lead';
+  var titleEl=el('cond-modal-title');
+  var subEl=el('cond-modal-sub');
+  if(titleEl)titleEl.textContent='Conditions mentioned \u2014 '+leadName;
+  if(subEl){
+    subEl.textContent=opts.fromResponded
+      ? 'Lead marked Responded \u2014 which conditions did they mention? These pre-fill the in-home assessment.'
+      : 'Which conditions did the lead or family mention? These pre-fill the in-home assessment.';
+  }
+  el('modal-conditions').classList.add('open');
+  // Reset other-list expansion
+  var arrowEl=document.querySelector('[data-action="resp-toggle-other"]');
+  if(arrowEl)arrowEl.classList.remove('expanded');
+  var listEl=el('resp-cond-grid-other');
+  if(listEl)listEl.classList.remove('expanded');
+  var emptyEl=el('resp-cond-empty');
+  if(emptyEl)emptyEl.classList.remove('on');
+  renderRespModal();
+}
+
+async function saveConditionsPicker(){
+  if(respState.ri<0)return;
+  var payload=serializeConditionList(respState.selected);
+  try{
+    var u={};
+    u[C.MC]=payload;
+    await writeRow(respState.ri,u);
+    toast('\u2713 Conditions saved');
+    closeModal('modal-conditions');
+    // Re-render so any edit panel showing conditions reflects the change
+    buildUI();
+  }catch(e){
+    toast('\u26A0 Save failed: '+e.message);
+  }
+}
+
+function respToggleOther(){
+  var arrowEl=document.querySelector('[data-action="resp-toggle-other"]');
+  var list=el('resp-cond-grid-other');
+  if(arrowEl)arrowEl.classList.toggle('expanded');
+  if(list)list.classList.toggle('expanded');
+}
+
 function openAssessment(ri){
   var r=rows[ri]||[];
+  // Read previously-noted conditions (from Responded picker or edit panel)
+  // and pre-select them in Section 3.
+  var preConds=parseConditionList(r[C.MC]);
   // Pre-fill what we know from the lead row
   asmtState={
     ri:ri,
@@ -2549,7 +2763,8 @@ function openAssessment(ri){
       phone_cell:String(r[C.PH]||'').trim(),
       assessor:'Meir Schwimer',
       assessor_signed_name:'Meir Schwimer',
-      assessor_agency:'Solura Home Care'
+      assessor_agency:'Solura Home Care',
+      conditions_selected:preConds.slice()
     }
   };
   el('modal-assessment').classList.add('open');
@@ -2753,7 +2968,7 @@ function renderAsmtField(f){
     var freeOn=asmtIsChecked('conditions_selected','__other_free__');
     return '<div class="asmt-field asmt-wide"><label>'+escapeHtml(f.label||'Conditions \u2014 select all that apply')+'</label>'
       +'<div class="asmt-cond-search">'
-      +'<span class="icon">\ud83d\udd0d</span>'
+      +'<span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><line x1="11" y1="11" x2="14" y2="14"/></svg></span>'
       +'<input type="text" id="asmt-cond-search-input" placeholder="Search conditions (e.g. dementia, diabetes, memory)">'
       +'</div>'
       +'<div class="asmt-cond-grid" id="asmt-cond-grid-common">'+commonHtml+'</div>'
@@ -3328,7 +3543,7 @@ function onClick(ev){
   if(t.tagName==='A'&&t.getAttribute('href')==='#'){ev.preventDefault();}
 
   // Stop propagation for action buttons inside rows so they don't trigger row open
-  if(['call','open-sms','open-email','open-script','open-ep','save-ep','close-ep','open-assessment'].indexOf(action)>-1){
+  if(['call','open-sms','open-email','open-script','open-ep','save-ep','close-ep','open-assessment','open-conditions'].indexOf(action)>-1){
     ev.stopPropagation();
   }
 
@@ -3358,6 +3573,9 @@ function onClick(ev){
     case 'asmt-back': asmtBack(); break;
     case 'asmt-next': asmtNext(); break;
     case 'asmt-finish': asmtFinish(); break;
+    case 'open-conditions': if(ri!=null)openConditionsPicker(ri,{fromResponded:false}); break;
+    case 'resp-save-conditions': saveConditionsPicker(); break;
+    case 'resp-toggle-other': respToggleOther(); break;
   }
 }
 
