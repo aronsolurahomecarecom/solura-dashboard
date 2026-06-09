@@ -79,7 +79,13 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--cream);color:va
 /* Sections */
 .sw{background:#fff;border-radius:var(--radius-lg);border:1px solid var(--border);overflow:hidden;margin-bottom:16px;box-shadow:var(--shadow-sm);transition:box-shadow .2s;}
 .sw:hover{box-shadow:var(--shadow-md);}
-.shdr{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border-soft);background:linear-gradient(to right,#FAFAF8,#fff);}
+.shdr{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border-soft);background:linear-gradient(to right,#FAFAF8,#fff);cursor:pointer;user-select:none;transition:background .15s;}
+.shdr:hover{background:linear-gradient(to right,#F4EFE5,#FAFAF8);}
+.sw.collapsed .shdr{border-bottom-color:transparent;}
+.bucket-arrow{font-size:12px;color:var(--soft);transition:transform .25s ease;flex-shrink:0;}
+.sw.collapsed .bucket-arrow{transform:rotate(-90deg);}
+.sw .tc{max-height:5000px;overflow-x:auto;overflow-y:hidden;transition:max-height .35s cubic-bezier(.4,0,.2,1);}
+.sw.collapsed .tc{max-height:0;}
 .sdot2{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
 .sdot2.red{background:var(--red);box-shadow:0 0 0 3px rgba(176,48,37,.12);}
 .sdot2.gold{background:var(--gold);box-shadow:0 0 0 3px rgba(200,135,10,.12);}
@@ -229,10 +235,10 @@ td{padding:13px 16px;vertical-align:top;}
 :root{--asmt-indigo:#5B4BAA;--asmt-indigo-deep:#3E2F8C;--asmt-indigo-pale:#EFEAFC;}
 .asmt-primary-btn{background:linear-gradient(135deg,var(--asmt-indigo),var(--asmt-indigo-deep));color:#fff;border:none;box-shadow:0 2px 8px rgba(91,75,170,.35);font-weight:700;}
 .asmt-primary-btn:hover{box-shadow:0 4px 12px rgba(91,75,170,.5);transform:translateY(-1px);}
-.asmt-overlay{display:none;position:fixed;inset:0;background:rgba(10,20,40,.5);z-index:500;backdrop-filter:blur(4px);}
-.asmt-overlay.open{display:block;}
-.asmt-modal{display:none;position:fixed;top:60px;left:96px;right:96px;bottom:60px;background:var(--warm);border-radius:18px;z-index:501;box-shadow:0 30px 80px rgba(0,0,0,.4);overflow:hidden;flex-direction:column;border:2px solid var(--gold-mid);}
-.asmt-modal.open{display:flex;}
+.asmt-overlay{position:fixed;inset:0;background:rgba(10,20,40,.5);z-index:500;backdrop-filter:blur(4px);opacity:0;visibility:hidden;transition:opacity .25s ease,visibility 0s linear .25s;}
+.asmt-overlay.open{opacity:1;visibility:visible;transition:opacity .25s ease,visibility 0s linear 0s;}
+.asmt-modal{position:fixed;top:60px;left:96px;right:96px;bottom:60px;background:var(--warm);border-radius:18px;z-index:501;box-shadow:0 30px 80px rgba(0,0,0,.4);overflow:hidden;display:flex;flex-direction:column;border:2px solid var(--gold-mid);opacity:0;visibility:hidden;transform:scale(.97) translateY(10px);transition:opacity .28s ease,transform .28s cubic-bezier(.4,0,.2,1),visibility 0s linear .28s;}
+.asmt-modal.open{opacity:1;visibility:visible;transform:scale(1) translateY(0);transition:opacity .28s ease,transform .28s cubic-bezier(.4,0,.2,1),visibility 0s linear 0s;}
 @media (max-width:900px){.asmt-modal{left:24px;right:24px;top:40px;bottom:40px;}}
 .asmt-head{background:linear-gradient(135deg,#1A3F72,var(--sky-deep));padding:18px 28px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--gold);flex-shrink:0;}
 .asmt-head-l{display:flex;flex-direction:column;gap:2px;}
@@ -281,36 +287,47 @@ td{padding:13px 16px;vertical-align:top;}
 .asmt-concern.on{background:var(--asmt-indigo);color:#fff;border-color:var(--asmt-indigo-deep);}
 .asmt-concern .chk{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--border);background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;}
 .asmt-concern.on .chk{background:#fff;color:var(--asmt-indigo-deep);border-color:#fff;}
-.asmt-concern-panel{display:none;background:#fff;border:1.5px solid var(--asmt-indigo);border-radius:10px;padding:14px 18px;margin:6px 0 14px;}
+.asmt-concern-panel{display:none;background:#fff;border:1.5px solid var(--asmt-indigo);border-radius:10px;padding:14px 18px;margin:6px 0 14px;animation:asmtFadeIn .28s ease;}
 .asmt-concern-panel.on{display:block;}
 .asmt-concern-panel-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--asmt-indigo-deep);margin-bottom:10px;}
 
 /* Condition picker */
 .asmt-cond-search{position:relative;margin-bottom:14px;}
-.asmt-cond-search input{width:100%;padding:10px 14px 10px 38px;border:1.5px solid var(--border);border-radius:10px;font-family:inherit;font-size:13px;outline:none;background:#fff;transition:border-color .15s;}
+.asmt-cond-search input{width:100%;padding:11px 14px 11px 44px;border:1.5px solid var(--border);border-radius:24px;font-family:inherit;font-size:13px;outline:none;background:#fff;transition:border-color .15s,box-shadow .15s;}
 .asmt-cond-search input:focus{border-color:var(--asmt-indigo);box-shadow:0 0 0 3px var(--asmt-indigo-pale);}
-.asmt-cond-search .icon{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--soft);font-size:14px;}
-.asmt-cond-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-bottom:8px;}
-.asmt-cond{background:#fff;border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--mid);transition:all .15s;display:flex;align-items:center;gap:8px;text-align:left;line-height:1.35;}
-.asmt-cond:hover{border-color:var(--asmt-indigo);background:var(--asmt-indigo-pale);}
-.asmt-cond.on{background:linear-gradient(135deg,var(--asmt-indigo),var(--asmt-indigo-deep));color:#fff;border-color:var(--asmt-indigo-deep);box-shadow:0 3px 10px rgba(91,75,170,.25);}
-.asmt-cond .chk{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--border);background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;}
+.asmt-cond-search .icon{position:absolute;left:0;top:0;bottom:0;width:44px;display:flex;align-items:center;justify-content:center;color:var(--soft);font-size:14px;pointer-events:none;}
+.asmt-cond-grid{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;}
+.asmt-cond{background:#fff;border:1.5px solid var(--border);border-radius:24px;padding:8px 16px 8px 12px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--mid);transition:all .18s ease;display:inline-flex;align-items:center;gap:7px;text-align:left;line-height:1.2;}
+.asmt-cond:hover{border-color:var(--asmt-indigo);background:var(--asmt-indigo-pale);transform:translateY(-1px);}
+.asmt-cond.on{background:linear-gradient(135deg,var(--asmt-indigo),var(--asmt-indigo-deep));color:#fff;border-color:var(--asmt-indigo-deep);box-shadow:0 3px 10px rgba(91,75,170,.28);}
+.asmt-cond .chk{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--border);background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;font-weight:700;transition:all .15s;}
 .asmt-cond.on .chk{background:#fff;color:var(--asmt-indigo-deep);border-color:#fff;}
 .asmt-cond.hidden{display:none;}
-.asmt-cond-other{cursor:pointer;background:var(--cream);border:1.5px dashed var(--border);border-radius:10px;padding:9px 14px;margin-bottom:8px;font-size:12px;color:var(--mid);font-weight:600;transition:all .15s;display:flex;align-items:center;justify-content:space-between;}
-.asmt-cond-other:hover{border-color:var(--asmt-indigo);color:var(--asmt-indigo-deep);}
-.asmt-cond-other .arrow{font-size:10px;transition:transform .2s;}
+.asmt-cond-other{cursor:pointer;background:var(--cream);border:1.5px dashed var(--border);border-radius:24px;padding:9px 18px;margin-bottom:8px;font-size:12px;color:var(--mid);font-weight:600;transition:all .18s ease;display:flex;align-items:center;justify-content:space-between;}
+.asmt-cond-other:hover{border-color:var(--asmt-indigo);color:var(--asmt-indigo-deep);background:var(--asmt-indigo-pale);}
+.asmt-cond-other .arrow{font-size:10px;transition:transform .25s ease;}
 .asmt-cond-other.expanded .arrow{transform:rotate(90deg);}
 .asmt-cond-other-list{display:none;}
-.asmt-cond-other-list.expanded{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-bottom:8px;}
+.asmt-cond-other-list.expanded{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;animation:asmtFadeIn .25s ease;}
 .asmt-cond-free{margin-top:8px;padding:12px 14px;background:var(--gold-pale);border:1.5px dashed var(--gold-mid);border-radius:10px;}
 .asmt-cond-free label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#8B6500;margin-bottom:5px;}
 .asmt-cond-free input{width:100%;padding:8px 10px;border:1.5px solid var(--gold-mid);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;outline:none;}
-.asmt-cond-panel{display:none;background:#fff;border:1.5px solid var(--asmt-indigo);border-radius:10px;padding:14px 18px;margin:6px 0 12px;}
+.asmt-cond-panel{display:none;background:#fff;border:1.5px solid var(--asmt-indigo);border-radius:10px;padding:14px 18px;margin:6px 0 12px;animation:asmtFadeIn .28s ease;}
 .asmt-cond-panel.on{display:block;}
 .asmt-cond-panel-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--asmt-indigo-deep);margin-bottom:10px;}
 .asmt-cond-empty-search{padding:20px;text-align:center;color:var(--soft);font-style:italic;font-size:12.5px;display:none;}
 .asmt-cond-empty-search.on{display:block;}
+@keyframes asmtFadeIn{
+  from{opacity:0;transform:translateY(-4px);max-height:0;}
+  to{opacity:1;transform:translateY(0);max-height:2000px;}
+}
+
+/* File attach (textarea sidekick) */
+.asmt-attach-row{display:flex;align-items:center;gap:8px;margin-top:8px;}
+.asmt-attach-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--gold-pale);color:#8B6500;border:1.5px dashed var(--gold-mid);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;transition:all .15s;font-family:inherit;}
+.asmt-attach-btn:hover{background:#FFEDC8;border-color:var(--gold);border-style:solid;}
+.asmt-attach-clear{background:#FDECEA;color:var(--red);border:1px solid #F0C0BB;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:14px;line-height:1;}
+.asmt-attach-clear:hover{background:var(--red);color:#fff;}
 
 /* Signature pad */
 .asmt-sig-wrap{margin-bottom:14px;}
@@ -382,11 +399,11 @@ td{padding:13px 16px;vertical-align:top;}
     <div class="sync-file"><div class="sync-dot"></div><span>Solura_Lead_Tracker.xlsx — OneDrive</span></div>
     <div class="sync-time" id="sync-time"></div>
   </div>
-  <div class="sw"><div class="shdr"><div class="sdot2 red"></div><div class="stitle">Overdue</div><div class="scnt" id="c0">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t0"></tbody></table></div></div>
-  <div class="sw"><div class="shdr"><div class="sdot2 gold"></div><div class="stitle">Due Now</div><div class="scnt" id="c1">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t1"></tbody></table></div></div>
-  <div class="sw"><div class="shdr"><div class="sdot2 sky"></div><div class="stitle">Later Today</div><div class="scnt" id="c2">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t2"></tbody></table></div></div>
-  <div class="sw"><div class="shdr"><div class="sdot2 grn"></div><div class="stitle">This Week</div><div class="scnt" id="c3">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t3"></tbody></table></div></div>
-  <div class="sw sw-all" style="margin-top:8px"><div class="shdr"><div class="sdot2 soft"></div><div class="stitle">All Active Leads</div><div class="scnt" id="c4">0 leads</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t4"></tbody></table></div></div>
+  <div class="sw" id="sw-0"><div class="shdr" data-action="toggle-bucket" data-bucket="0"><div class="sdot2 red"></div><div class="stitle">Overdue</div><div class="scnt" id="c0">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t0"></tbody></table></div></div>
+  <div class="sw" id="sw-1"><div class="shdr" data-action="toggle-bucket" data-bucket="1"><div class="sdot2 gold"></div><div class="stitle">Due Now</div><div class="scnt" id="c1">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t1"></tbody></table></div></div>
+  <div class="sw" id="sw-2"><div class="shdr" data-action="toggle-bucket" data-bucket="2"><div class="sdot2 sky"></div><div class="stitle">Later Today</div><div class="scnt" id="c2">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t2"></tbody></table></div></div>
+  <div class="sw" id="sw-3"><div class="shdr" data-action="toggle-bucket" data-bucket="3"><div class="sdot2 grn"></div><div class="stitle">This Week</div><div class="scnt" id="c3">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t3"></tbody></table></div></div>
+  <div class="sw sw-all" id="sw-4" style="margin-top:8px"><div class="shdr" data-action="toggle-bucket" data-bucket="4"><div class="sdot2 soft"></div><div class="stitle">All Active Leads</div><div class="scnt" id="c4">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t4"></tbody></table></div></div>
 </div>
 
 <!-- Script Modal -->
@@ -1590,6 +1607,16 @@ async function buildUI(){
   el('t3').innerHTML=renderRows(buckets.week);
   el('t4').innerHTML=renderRows(buckets.active);
 
+  // Auto-collapse buckets that have no leads. Buckets that DO have leads
+  // get explicitly un-collapsed so a returning lead pops the section open.
+  var counts=[buckets.overdue.length,buckets.now.length,buckets.later.length,buckets.week.length,buckets.active.length];
+  counts.forEach(function(n,i){
+    var sw=el('sw-'+i);
+    if(!sw)return;
+    if(n===0)sw.classList.add('collapsed');
+    else sw.classList.remove('collapsed');
+  });
+
   el('kbar').style.display='grid';
   el('main').style.display='block';
 }
@@ -2184,6 +2211,7 @@ var ASMT_CONCERNS=[
     {t:'textarea',k:'incont_notes',label:'Notes & care preferences'}
   ]},
   {k:'swallowing',label:'Swallowing difficulty (dysphagia)',followups:[
+    {t:'note',label:'If client has stroke or Parkinson\u2019s, this often overlaps with those conditions \u2014 capture stroke/PD-specific swallowing detail in the condition pack.'},
     {t:'check',k:'swallow_signs',label:'Signs observed',opts:['Coughs/chokes when eating','Avoids certain textures','Pocketing food','Wet voice after drinking','Slow eating']},
     {t:'text',k:'swallow_diet',label:'Diet modifications (e.g. pureed, soft, thickened liquids)'},
     {t:'choice',k:'swallow_slp',label:'Formal swallowing eval done?',opts:['Yes','No','Unknown']},
@@ -2208,10 +2236,9 @@ var ASMT_CONCERNS=[
     {t:'textarea',k:'mood_notes',label:'Coping strategies that help & to avoid'}
   ]},
   {k:'pain',label:'Pain (chronic or recurring)',followups:[
-    {t:'text',k:'pain_locations',label:'Locations'},
+    {t:'note',label:'Section 4 (Pain Assessment) has the detailed pain table. Use this block for triage only.'},
     {t:'choice',k:'pain_level_typ',label:'Typical pain level (0-10)',opts:['0-2 mild','3-5 moderate','6-8 severe','9-10 worst']},
-    {t:'check',k:'pain_helps',label:'What helps',opts:['Medication','Heat/cold','Repositioning','Rest','Distraction','Nothing reliable']},
-    {t:'textarea',k:'pain_notes',label:'Notes (also see dedicated Pain section for detail)'}
+    {t:'textarea',k:'pain_notes',label:'Quick notes (locations, what helps) \u2014 full detail goes in Section 4'}
   ]}
 ];
 
@@ -2391,7 +2418,7 @@ var ASMT_SCHEMA=[
     {t:'text',k:'pcp_phone',label:'PCP Phone'},
     {t:'textarea',k:'specialists',label:'Specialists involved (name, specialty, phone)',wide:true},
     {t:'text',k:'next_appt',label:'Next upcoming appointment'},
-    {t:'textarea',k:'meds',label:'Current medications (list or attach sheet)',wide:true,rows:5},
+    {t:'textarea',k:'meds',label:'Current medications (type list or attach file)',wide:true,rows:5,attach:'meds_file'},
     {t:'check',k:'med_mgmt',label:'Medication management',opts:['Manages independently','Needs reminders only','Needs full assistance','Pill organizer in use']},
     {t:'textarea',k:'allergies',label:'Allergies (medications, food, environmental)',wide:true},
     {t:'textarea',k:'last_hosp',label:'Hospitalizations or ER visits in last 6 months',wide:true},
@@ -2506,7 +2533,7 @@ var ASMT_SCHEMA=[
 ];
 
 // Module state
-var asmtState={ri:-1,section:0,data:{},pain:[{loc:'',level:'',type:'',freq:'',helps:''}]};
+var asmtState={ri:-1,section:0,data:{},pain:[{loc:'',level:'',type:'',freq:'',helps:''}],files:{}};
 
 function openAssessment(ri){
   var r=rows[ri]||[];
@@ -2515,6 +2542,7 @@ function openAssessment(ri){
     ri:ri,
     section:0,
     pain:[{loc:'',level:'',type:'',freq:'',helps:''}],
+    files:{},
     data:{
       visit_date_label:ds(localToday()),
       client_full_legal:String(r[C.NM]||'').trim(),
@@ -2531,10 +2559,22 @@ function openAssessment(ri){
 function closeAssessment(){
   el('modal-assessment').classList.remove('open');
   el('asmt-overlay').classList.remove('open');
-  asmtState={ri:-1,section:0,data:{},pain:[{loc:'',level:'',type:'',freq:'',helps:''}]};
+  asmtState={ri:-1,section:0,data:{},pain:[{loc:'',level:'',type:'',freq:'',helps:''}],files:{}};
 }
 function asmtSet(k,v){asmtState.data[k]=v;}
 function asmtGet(k){return asmtState.data[k]||'';}
+function asmtPendingFile(k){return (asmtState.files||{})[k]||null;}
+function asmtSetFile(k,file){
+  if(!asmtState.files)asmtState.files={};
+  if(file)asmtState.files[k]=file;
+  else delete asmtState.files[k];
+}
+function asmtFmtSize(b){
+  if(!b&&b!==0)return '';
+  if(b<1024)return b+'B';
+  if(b<1024*1024)return Math.round(b/1024)+'KB';
+  return (b/1024/1024).toFixed(1)+'MB';
+}
 function asmtToggleCheck(k,opt){
   var cur=asmtState.data[k]||[];
   if(!Array.isArray(cur))cur=[];
@@ -2598,8 +2638,22 @@ function renderAsmtField(f){
   }
   if(f.t==='textarea'){
     var rows=f.rows||3;
+    var attachHtml='';
+    if(f.attach){
+      var pending=asmtPendingFile(f.attach);
+      var label=pending?(' \u2014 '+escapeHtml(pending.name)+' ('+asmtFmtSize(pending.size)+')'):'';
+      attachHtml='<div class="asmt-attach-row">'
+        +'<label class="asmt-attach-btn" data-asmt-attach-k="'+f.attach+'">'
+        +'<input type="file" data-asmt-attach-input="'+f.attach+'" style="display:none">'
+        +'\ud83d\udcce '+(pending?'Replace file':'Attach file')+label
+        +'</label>'
+        +(pending?'<button type="button" class="asmt-attach-clear" data-asmt-attach-clear="'+f.attach+'" title="Remove file">\u00D7</button>':'')
+        +'</div>';
+    }
     return '<div class="asmt-field asmt-wide"><label>'+escapeHtml(f.label)+'</label>'
-      +'<textarea data-asmt-k="'+f.k+'" rows="'+rows+'">'+escapeHtml(asmtGet(f.k))+'</textarea></div>';
+      +'<textarea data-asmt-k="'+f.k+'" rows="'+rows+'">'+escapeHtml(asmtGet(f.k))+'</textarea>'
+      +attachHtml
+      +'</div>';
   }
   if(f.t==='choice'){
     var opts=f.opts.map(function(o){
@@ -2705,7 +2759,7 @@ function renderAsmtField(f){
       +'<div class="asmt-cond-grid" id="asmt-cond-grid-common">'+commonHtml+'</div>'
       +'<div class="asmt-cond-other" data-asmt-cond-other-toggle="1"><span>Other / less common conditions</span><span class="arrow">\u25B6</span></div>'
       +'<div class="asmt-cond-other-list" id="asmt-cond-grid-other">'+otherListHtml+'</div>'
-      +'<button type="button" class="asmt-cond'+(freeOn?' on':'')+'" data-asmt-cond-k="__other_free__" data-asmt-cond-label="Other condition (specify)" style="width:100%;margin-bottom:8px;justify-content:flex-start">'
+      +'<button type="button" class="asmt-cond'+(freeOn?' on':'')+'" data-asmt-cond-k="__other_free__" data-asmt-cond-label="Other condition (specify)" style="margin-bottom:8px">'
       +'<span class="chk">'+(freeOn?'\u2713':'')+'</span>'
       +'<span>Other condition (not listed)</span>'
       +'</button>'
@@ -2883,6 +2937,31 @@ function bindAsmtFieldHandlers(){
       }
     });
   });
+
+  // File attach inputs
+  $$('[data-asmt-attach-input]',el('asmt-body-inner')).forEach(function(inp){
+    inp.addEventListener('change',function(e){
+      var k=e.target.dataset.asmtAttachInput;
+      var f=e.target.files&&e.target.files[0];
+      if(f){
+        // 20MB safety cap — keeps OneDrive upload as single PUT
+        if(f.size>20*1024*1024){
+          toast('\u26A0 File too large \u2014 max 20MB');
+          e.target.value='';
+          return;
+        }
+        asmtSetFile(k,f);
+        renderAsmt();
+      }
+    });
+  });
+  $$('[data-asmt-attach-clear]',el('asmt-body-inner')).forEach(function(b){
+    b.addEventListener('click',function(e){
+      var k=e.currentTarget.dataset.asmtAttachClear;
+      asmtSetFile(k,null);
+      renderAsmt();
+    });
+  });
 }
 
 // Signature canvas — captures touch + mouse input, stores PNG data URL into asmtState.data[k]
@@ -2965,6 +3044,12 @@ function asmtBuildDoc(){
       if(f.t==='note'){html+='<p style="font-style:italic;color:#555">'+escapeHtml(f.label)+'</p>';return;}
       if(f.t==='text'||f.t==='textarea'){
         html+='<p><b>'+escapeHtml(f.label)+':</b> '+val(f.k)+'</p>';
+        if(f.attach){
+          var attached=asmtPendingFile(f.attach);
+          if(attached){
+            html+='<p style="margin-left:14px;color:#5B4BAA;font-size:10pt"><i>\u{1F4CE} Attached file: '+escapeHtml(attached.name)+' ('+asmtFmtSize(attached.size)+')</i></p>';
+          }
+        }
         return;
       }
       if(f.t==='choice'){
@@ -3122,19 +3207,21 @@ function asmtHtmlToBlob(html){
 // Upload the assessment to OneDrive at /Patients/{ClientName}/{filename}.
 // Graph auto-creates the folder tree from the path. Returns the uploaded file's webUrl.
 async function asmtUploadToOneDrive(blob,filename,leadName){
-  // Encode each path segment so spaces, accents, etc. don't break the URL
+  // Encode each path segment so spaces, accents, etc. don't break the URL.
+  // Structure: /Patients/{Client Name}/Onboarding/{filename}.
+  // Graph auto-creates any missing folders along the path.
   var safeFolder=encodeURIComponent(leadName);
   var safeFile=encodeURIComponent(filename);
-  var url=GR+"/me/drive/root:/Patients/"+safeFolder+"/"+safeFile+":/content";
+  var url=GR+"/me/drive/root:/Patients/"+safeFolder+"/Onboarding/"+safeFile+":/content";
   var res=await fetch(url,{
     method:'PUT',
-    headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/msword'},
+    headers:{'Authorization':'Bearer '+tok,'Content-Type':blob.type||'application/octet-stream'},
     body:blob
   });
   if(res.status===401){
     var refreshed=await refreshToken();
     if(refreshed){
-      res=await fetch(url,{method:'PUT',headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/msword'},body:blob});
+      res=await fetch(url,{method:'PUT',headers:{'Authorization':'Bearer '+tok,'Content-Type':blob.type||'application/octet-stream'},body:blob});
     }
   }
   if(!res.ok){
@@ -3180,6 +3267,26 @@ async function asmtFinish(){
 
     if(btn)btn.textContent='Uploading to OneDrive…';
     var docUrl=await asmtUploadToOneDrive(blob,fname,safeName);
+
+    // Upload any pending file attachments to the same Onboarding folder
+    var pendingFiles=asmtState.files||{};
+    var fileKeys=Object.keys(pendingFiles);
+    for(var fi=0;fi<fileKeys.length;fi++){
+      var fk=fileKeys[fi];
+      var fileObj=pendingFiles[fk];
+      if(!fileObj)continue;
+      if(btn)btn.textContent='Uploading attachment '+(fi+1)+'/'+fileKeys.length+'…';
+      // Filename: prefix the attach-key category so it's identifiable in the folder
+      var origExt=(fileObj.name.match(/\.[a-zA-Z0-9]+$/)||[''])[0];
+      var attachFname=fk.replace(/[^a-zA-Z0-9_-]+/g,'_')+'_'+safeName.replace(/\s+/g,'_')+'_'+stamp+origExt;
+      try{
+        await asmtUploadToOneDrive(fileObj,attachFname,safeName);
+      }catch(e){
+        // Don't abort the whole flow on attachment failure — surface and continue
+        console.warn('Attachment upload failed for '+fk+':',e.message);
+        toast('\u26A0 Attachment '+fileObj.name+' failed to upload');
+      }
+    }
 
     if(btn)btn.textContent='Sending intake email…';
     var summary=asmtBuildEmailSummary();
@@ -3229,6 +3336,11 @@ function onClick(ev){
     case 'signin': signIn(); break;
     case 'signout': signOut(); break;
     case 'refresh': loadData(); break;
+    case 'toggle-bucket':
+      var bi=t.dataset.bucket;
+      var sw=el('sw-'+bi);
+      if(sw)sw.classList.toggle('collapsed');
+      break;
     case 'open-drawer': if(ri!=null)openDrawer(ri); break;
     case 'close-drawer': closeDrawer(); break;
     case 'close-modal': if(mid)closeModal(mid); break;
@@ -3249,17 +3361,65 @@ function onClick(ev){
   }
 }
 
+// Auto-refresh — every 15 minutes while idle, and immediately on focus if
+// the page has been hidden for more than 5 minutes. Skips refresh when any
+// modal is open (assessment, SMS, email, drawer, edit panel) to avoid
+// disturbing active work.
+var AUTO_REFRESH_INTERVAL_MS=15*60*1000;
+var IDLE_REFRESH_THRESHOLD_MS=5*60*1000;
+var autoRefreshTimer=null;
+var lastHiddenAt=null;
+
+function isModalOpen(){
+  var ids=['modal-assessment','modal-sms','modal-email','modal-script'];
+  for(var i=0;i<ids.length;i++){
+    var m=el(ids[i]);
+    if(m&&m.classList.contains('open'))return true;
+  }
+  if(el('drawer')&&el('drawer').classList.contains('open'))return true;
+  if(document.querySelector('.ep-wrap.open'))return true;
+  return false;
+}
+
+async function autoRefresh(reason){
+  if(!tok)return;
+  if(isModalOpen()){
+    // Try again later; don't interrupt the user
+    return;
+  }
+  try{await loadData();}catch(e){console.warn('Auto-refresh ('+reason+') failed:',e.message);}
+}
+
+function startAutoRefresh(){
+  if(autoRefreshTimer)return;
+  autoRefreshTimer=setInterval(function(){autoRefresh('interval');},AUTO_REFRESH_INTERVAL_MS);
+}
+function stopAutoRefresh(){
+  if(autoRefreshTimer){clearInterval(autoRefreshTimer);autoRefreshTimer=null;}
+}
+
+document.addEventListener('visibilitychange',function(){
+  if(document.hidden){
+    lastHiddenAt=Date.now();
+  }else{
+    if(lastHiddenAt&&(Date.now()-lastHiddenAt)>IDLE_REFRESH_THRESHOLD_MS){
+      autoRefresh('focus-after-idle');
+    }
+    lastHiddenAt=null;
+  }
+});
+
 window.addEventListener('load',async function(){
   document.body.addEventListener('click',onClick);
 
   // Restore session token if any
   tok=sessionStorage.getItem('st')||'';
-  if(tok){onSignedIn();return;}
+  if(tok){onSignedIn();startAutoRefresh();return;}
   // OAuth callback?
-  if(await handleAuthCallback())return;
+  if(await handleAuthCallback()){startAutoRefresh();return;}
   // Try refresh token
   var refreshed=await refreshToken();
-  if(refreshed){onSignedIn();return;}
+  if(refreshed){onSignedIn();startAutoRefresh();return;}
 });
 </script>
 </body>
