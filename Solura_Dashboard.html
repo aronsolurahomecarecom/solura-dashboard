@@ -286,6 +286,8 @@ td{padding:13px 16px;vertical-align:top;}
 /* Rich email composer */
 .email-toolbar{display:flex;align-items:center;gap:4px;padding:6px 8px;background:var(--cream);border:1.5px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;flex-wrap:wrap;}
 .email-toolbar button{min-width:30px;height:28px;padding:0 8px;background:transparent;color:var(--mid);border:1px solid transparent;border-radius:5px;font-family:inherit;font-size:13px;cursor:pointer;transition:all .12s ease;display:inline-flex;align-items:center;justify-content:center;}
+.email-tb-imgbtn{min-width:30px;height:28px;padding:0 8px;background:transparent;color:var(--mid);border:1px solid transparent;border-radius:5px;font-family:inherit;font-size:13px;cursor:pointer;transition:all .12s ease;display:inline-flex;align-items:center;justify-content:center;}
+.email-tb-imgbtn:hover{background:#fff;border-color:var(--border);color:var(--dark);}
 .email-toolbar button:hover{background:#fff;border-color:var(--border);color:var(--dark);}
 .email-toolbar button:active{transform:scale(.92);}
 .email-tb-sep{width:1px;height:18px;background:var(--border);margin:0 4px;}
@@ -295,6 +297,7 @@ td{padding:13px 16px;vertical-align:top;}
 .email-body p:last-child{margin-bottom:0;}
 .email-body ul,.email-body ol{margin:6px 0 8px 24px;padding:0;}
 .email-body a{color:var(--sky-deep);text-decoration:underline;}
+.email-body img{max-width:100%;height:auto;display:inline-block;border-radius:4px;margin:4px 0;}
 .email-body[contenteditable=true]:empty:before{content:attr(data-placeholder);color:var(--softer);font-style:italic;pointer-events:none;}
 .email-attach-row{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap;}
 .email-attach-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--gold-pale);color:#8B6500;border:1.5px dashed var(--gold-mid);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s ease;}
@@ -548,11 +551,16 @@ td{padding:13px 16px;vertical-align:top;}
         <button type="button" data-action="email-fmt" data-fmt="insertOrderedList" title="Numbered list">1.</button>
         <div class="email-tb-sep"></div>
         <button type="button" data-action="email-link" title="Insert link">🔗</button>
+        <label class="email-tb-imgbtn" title="Insert inline image">
+          <input type="file" id="email-image-input" accept="image/*" style="display:none">
+          🖼
+        </label>
+        <button type="button" data-action="email-paste-html" title="Paste HTML template (e.g. from a designer or another email)">&lt;/&gt;</button>
         <button type="button" data-action="email-fmt" data-fmt="removeFormat" title="Clear formatting" style="margin-left:auto;color:var(--soft)">Tx</button>
       </div>
       <div id="email-body" class="email-body" contenteditable="true" spellcheck="true"></div>
       <div class="email-attach-row">
-        <label class="email-attach-btn" title="Attach a file (max 3MB)">
+        <label class="email-attach-btn" title="Attach a file (max 150MB per file)">
           <input type="file" id="email-attach-input" multiple style="display:none">
           📎 Attach file
         </label>
@@ -2435,9 +2443,13 @@ async function sendSMS(){
 }
 
 // Rich email composer state — attachments queued for the next send
-var emailAttachments=[]; // {name, size, type, dataBase64}
-var EMAIL_TOTAL_BUDGET=3*1024*1024; // 3MB Graph sendMail single-PUT limit
-var EMAIL_PER_FILE_LIMIT=3*1024*1024;
+// Attachments can be {name, size, type, dataBase64} OR {name, size, type, file} where file is the raw File
+// (For files larger than the single-PUT ceiling we keep the File around and stream it via upload session)
+var emailAttachments=[];
+var EMAIL_INLINE_PUT_CEILING=3*1024*1024;   // 3MB — Graph sendMail single-PUT cap for total payload (incl. base64 inflation)
+var EMAIL_TOTAL_BUDGET=150*1024*1024;        // 150MB — hard ceiling Microsoft enforces via upload-session
+var EMAIL_PER_FILE_LIMIT=150*1024*1024;      // 150MB — per individual attachment
+var EMAIL_CHUNK_SIZE=3276800;                // ~3.1MB (10 x 320KB) — must be a multiple of 320KB per Graph spec
 
 // Convert a plain-text template body to HTML for the contenteditable.
 // Double newlines become paragraph breaks, single newlines become <br>.
@@ -2477,19 +2489,24 @@ function emailRenderAttachList(){
   var list=el('email-attach-list');
   var info=el('email-attach-info');
   if(!list||!info)return;
-  if(!emailAttachments.length){
+  // Inline images live in the body as <img src="cid:...">; don't show them
+  // in the attachment list (would confuse the user who sees them in the body).
+  var visible=emailAttachments.filter(function(a){return !a.isInline;});
+  if(!visible.length){
     list.innerHTML='';
     info.textContent='';
     return;
   }
-  var total=emailAttachments.reduce(function(s,a){return s+a.size;},0);
-  info.textContent=emailAttachments.length+' file'+(emailAttachments.length!==1?'s':'')+' \u2014 '+asmtFmtSize(total)+' / '+asmtFmtSize(EMAIL_TOTAL_BUDGET);
+  var total=visible.reduce(function(s,a){return s+a.size;},0);
+  info.textContent=visible.length+' file'+(visible.length!==1?'s':'')+' \u2014 '+asmtFmtSize(total)+' / '+asmtFmtSize(EMAIL_TOTAL_BUDGET);
   if(total>EMAIL_TOTAL_BUDGET)info.style.color='var(--red)';else info.style.color='';
-  list.innerHTML=emailAttachments.map(function(a,i){
+  list.innerHTML=visible.map(function(a){
+    // Find the actual index in the master array
+    var i=emailAttachments.indexOf(a);
     return '<div class="email-attach-item">'
       +'<span style="font-size:14px">'+(a.type&&a.type.indexOf('image')>-1?'\ud83d\uddbc':'\ud83d\udcc4')+'</span>'
       +'<span class="email-attach-name" title="'+escapeHtml(a.name)+'">'+escapeHtml(a.name)+'</span>'
-      +'<span class="email-attach-size">'+asmtFmtSize(a.size)+'</span>'
+      +'<span class="email-attach-size">'+asmtFmtSize(a.size)+(a.large?' \u2014 chunked':'')+'</span>'
       +'<button type="button" class="email-attach-x" data-email-attach-remove="'+i+'" title="Remove">\u00D7</button>'
       +'</div>';
   }).join('');
@@ -2557,21 +2574,132 @@ function emailInsertLink(){
   }catch(e){}
 }
 
+// Paste HTML template — accepts raw HTML (designer hand-off, exported email,
+// branded template) and renders it WYSIWYG in the body. Images referenced via
+// http(s) URLs are preserved as-is and will be hot-linked when sent. Images
+// referenced via cid: are assumed to need accompanying inline attachments,
+// which the user can add separately (or paste with the image via the image
+// button). data: URLs are detected and offered to be converted into inline
+// attachments automatically.
+async function emailPasteHtml(){
+  var html=prompt('Paste your HTML template here:','');
+  if(!html||!html.trim())return;
+  var bodyEl=el('email-body');
+  if(!bodyEl)return;
+  // Detect data: URLs in <img> tags. These need to be converted to inline
+  // attachments so the email size doesn't balloon (data URLs are base64
+  // inside the HTML, which then gets ANOTHER base64 wrap when Graph sends).
+  // Pull each data: URL out, register it as an inline attachment with a
+  // generated contentId, and replace the src with cid:contentId.
+  var dataUrlRe=/<img([^>]*?)src=["']data:([^;]+);base64,([^"']+)["']([^>]*)>/gi;
+  var convertedCount=0;
+  html=html.replace(dataUrlRe,function(full,pre,mime,b64,post){
+    var cid='inline-'+Date.now()+'-'+Math.floor(Math.random()*10000)+'-'+convertedCount;
+    // Estimate raw byte size: base64 has ~4 chars per 3 bytes
+    var rawSize=Math.floor(b64.length*3/4);
+    emailAttachments.push({
+      name:'image-'+(convertedCount+1)+'.'+(mime.split('/')[1]||'png'),
+      size:rawSize,
+      type:mime,
+      dataBase64:b64,
+      large:rawSize>EMAIL_INLINE_PUT_CEILING-(500*1024),
+      isInline:true,
+      contentId:cid
+    });
+    // If the registered attachment is "large", we'd need its raw bytes to
+    // chunk-upload it, which we don't have (only the base64). Convert back
+    // to a Blob → File for that case.
+    var lastAtt=emailAttachments[emailAttachments.length-1];
+    if(lastAtt.large){
+      try{
+        var byteChars=atob(b64);
+        var byteNums=new Array(byteChars.length);
+        for(var j=0;j<byteChars.length;j++)byteNums[j]=byteChars.charCodeAt(j);
+        var blob=new Blob([new Uint8Array(byteNums)],{type:mime});
+        lastAtt.file=new File([blob],lastAtt.name,{type:mime});
+        delete lastAtt.dataBase64;
+      }catch(e){
+        // Fallback: keep as inline base64; sendEmail will reject if total too big
+        lastAtt.large=false;
+      }
+    }
+    convertedCount++;
+    return '<img'+pre+'src="cid:'+cid+'"'+post+'>';
+  });
+  bodyEl.innerHTML=html;
+  emailRenderAttachList();
+  if(convertedCount){
+    toast('\u2713 Pasted HTML \u2014 '+convertedCount+' inline image'+(convertedCount!==1?'s':'')+' attached');
+  }else{
+    toast('\u2713 Pasted HTML template');
+  }
+}
+
+// Insert an inline image at the cursor — picked via the toolbar image input.
+async function emailInsertInlineImage(file){
+  if(!file)return;
+  if(file.size>EMAIL_PER_FILE_LIMIT){
+    toast('\u26A0 Image too large \u2014 max '+asmtFmtSize(EMAIL_PER_FILE_LIMIT));
+    return;
+  }
+  var cid='inline-'+Date.now()+'-'+Math.floor(Math.random()*10000);
+  var bodyEl=el('email-body');
+  if(!bodyEl)return;
+  bodyEl.focus();
+  // Decide whether to inline-store (base64) or keep as File for chunk upload
+  var att={
+    name:file.name||('image-'+Date.now()+'.png'),
+    size:file.size,
+    type:file.type||'image/png',
+    isInline:true,
+    contentId:cid
+  };
+  try{
+    if(file.size<=EMAIL_INLINE_PUT_CEILING-(500*1024)){
+      att.dataBase64=await emailReadAsBase64(file);
+      att.large=false;
+    }else{
+      att.file=file;
+      att.large=true;
+    }
+    emailAttachments.push(att);
+    // For the contenteditable preview we use a temporary blob URL so the user
+    // sees the image immediately. The actual send swaps cid: into the HTML.
+    var previewUrl=URL.createObjectURL(file);
+    var imgHtml='<img src="'+previewUrl+'" data-cid="'+cid+'" alt="'+escapeHtml(att.name)+'" style="max-width:100%;height:auto">';
+    try{document.execCommand('insertHTML',false,imgHtml);}catch(e){}
+    emailRenderAttachList();
+    toast('\u2713 Image inserted');
+  }catch(e){
+    toast('\u26A0 Could not read image: '+e.message);
+  }
+}
+
 async function emailAddFiles(fileList){
   for(var i=0;i<fileList.length;i++){
     var f=fileList[i];
     if(f.size>EMAIL_PER_FILE_LIMIT){
-      toast('\u26A0 '+f.name+' is too large \u2014 max 3MB');
+      toast('\u26A0 '+f.name+' is too large \u2014 max '+asmtFmtSize(EMAIL_PER_FILE_LIMIT));
       continue;
     }
     var totalNow=emailAttachments.reduce(function(s,a){return s+a.size;},0);
     if(totalNow+f.size>EMAIL_TOTAL_BUDGET){
-      toast('\u26A0 Total attachments over 3MB limit');
+      toast('\u26A0 Total attachments over '+asmtFmtSize(EMAIL_TOTAL_BUDGET)+' limit');
       break;
     }
+    // Strategy: for files small enough to inline in the JSON payload, base64
+    // them up-front so the existing single-PUT send path keeps working.
+    // For larger files, keep the raw File object — we'll stream it via the
+    // upload-session API at send time. Avoids loading 100MB into memory as
+    // a 130MB base64 string for no reason.
     try{
-      var b64=await emailReadAsBase64(f);
-      emailAttachments.push({name:f.name,size:f.size,type:f.type||'application/octet-stream',dataBase64:b64});
+      if(f.size<=EMAIL_INLINE_PUT_CEILING-(500*1024)){
+        // Leave headroom for JSON envelope (subject, body, headers) inside the 3MB single-PUT ceiling.
+        var b64=await emailReadAsBase64(f);
+        emailAttachments.push({name:f.name,size:f.size,type:f.type||'application/octet-stream',dataBase64:b64,large:false});
+      }else{
+        emailAttachments.push({name:f.name,size:f.size,type:f.type||'application/octet-stream',file:f,large:true});
+      }
     }catch(e){
       toast('\u26A0 Could not read '+f.name);
     }
@@ -2584,6 +2712,85 @@ function emailRemoveAttachment(idx){
   emailRenderAttachList();
 }
 
+/* ─── §11b Large-attachment sending via upload-session ───────────────────
+ * Microsoft Graph's POST /me/sendMail accepts a single JSON payload up to
+ * about 4MB total (after base64 inflation). For anything larger, you must:
+ *   1. Create a draft message: POST /me/messages
+ *   2. For each attachment > inline limit, create an upload session:
+ *      POST /me/messages/{id}/attachments/createUploadSession
+ *   3. Upload bytes in 3MB chunks via PUT to the upload URL, with
+ *      Content-Range headers indicating which slice of the file is being
+ *      sent. Last chunk completes the attachment.
+ *   4. Send the draft: POST /me/messages/{id}/send
+ * For inline (small) attachments mixed in, those go on the draft create call.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+// Read a slice of a File as raw ArrayBuffer (for chunk upload).
+function emailReadSliceAsArrayBuffer(file,start,end){
+  return new Promise(function(resolve,reject){
+    var slice=file.slice(start,end);
+    var fr=new FileReader();
+    fr.onload=function(){resolve(fr.result);};
+    fr.onerror=function(){reject(new Error('Slice read failed'));};
+    fr.readAsArrayBuffer(slice);
+  });
+}
+
+// Upload a single large attachment via session.
+// Returns when the final chunk completes successfully (HTTP 201).
+async function emailUploadLargeAttachment(messageId,att,progressCb){
+  // Create the upload session
+  var sessReq={
+    AttachmentItem:{
+      attachmentType:'file',
+      name:att.name,
+      size:att.size,
+      contentType:att.type
+    }
+  };
+  if(att.isInline){
+    sessReq.AttachmentItem.isInline=true;
+    sessReq.AttachmentItem.contentId=att.contentId;
+  }
+  var sessRes=await gfetch(GR+'/me/messages/'+messageId+'/attachments/createUploadSession',{
+    method:'POST',
+    body:JSON.stringify(sessReq)
+  });
+  if(!sessRes.ok){
+    var err=await sessRes.json().catch(function(){return{};});
+    throw new Error('Upload session create failed: '+(err.error&&err.error.message?err.error.message:sessRes.status));
+  }
+  var sess=await sessRes.json();
+  var uploadUrl=sess.uploadUrl;
+  if(!uploadUrl)throw new Error('No uploadUrl returned from session create');
+
+  // Upload in chunks. Each PUT goes to uploadUrl with a Content-Range header.
+  // Note: these PUTs go to a session URL (microsoft-owned, presigned) — do not
+  // use gfetch which adds auth headers. Use raw fetch.
+  var fileSize=att.size;
+  var sent=0;
+  while(sent<fileSize){
+    var end=Math.min(sent+EMAIL_CHUNK_SIZE,fileSize);
+    var chunkBuf=await emailReadSliceAsArrayBuffer(att.file,sent,end);
+    var contentRange='bytes '+sent+'-'+(end-1)+'/'+fileSize;
+    var putRes=await fetch(uploadUrl,{
+      method:'PUT',
+      headers:{
+        'Content-Range':contentRange,
+        'Content-Length':String(chunkBuf.byteLength)
+        // No Authorization header — uploadUrl is pre-signed
+      },
+      body:chunkBuf
+    });
+    if(!putRes.ok&&putRes.status!==202&&putRes.status!==201){
+      var t=await putRes.text().catch(function(){return'';});
+      throw new Error('Chunk upload failed at byte '+sent+': '+putRes.status+' '+t);
+    }
+    sent=end;
+    if(progressCb)progressCb(sent,fileSize);
+  }
+}
+
 async function sendEmail(){
   var ri=parseInt(el('modal-email').dataset.ri,10);
   if(isNaN(ri))return;
@@ -2593,44 +2800,133 @@ async function sendEmail(){
   var subj=el('email-subj').value;
   var bodyEl=el('email-body');
   var bodyHtml=bodyEl?bodyEl.innerHTML:'';
-  // Strip the placeholder edge-case if body is empty
   if(!bodyEl.textContent.trim()){toast('Message body is empty');return;}
-  // Validate total attachment size
+
+  // Before sending, swap blob: preview URLs back to cid: references. The
+  // contenteditable shows inline images via blob URLs (cheap previews) but
+  // those mean nothing to the recipient — must become cid: refs that the
+  // email client resolves against the inline attachments we're sending.
+  bodyHtml=bodyHtml.replace(/<img([^>]*?)src=["']blob:[^"']+["']([^>]*?)>/gi,function(full,pre,post){
+    // Extract the data-cid attribute to know which attachment this corresponds to
+    var cidMatch=(pre+post).match(/data-cid=["']([^"']+)["']/);
+    if(cidMatch){
+      return '<img'+pre+'src="cid:'+cidMatch[1]+'"'+post+'>';
+    }
+    // Couldn't find a cid — strip the broken image
+    return '';
+  });
+
+  // Total size for budget check
   var total=emailAttachments.reduce(function(s,a){return s+a.size;},0);
   if(total>EMAIL_TOTAL_BUDGET){
-    toast('\u26A0 Attachments exceed 3MB \u2014 remove some');
+    toast('\u26A0 Attachments exceed '+asmtFmtSize(EMAIL_TOTAL_BUDGET)+' \u2014 remove some');
     return;
   }
+
+  // Decide path: any "large" attachment forces upload-session path.
+  // The inline 3MB cap also limits the COMBINED small payload, so we use the
+  // upload-session path whenever a single attachment is large OR when total
+  // small payload + envelope would exceed the inline ceiling.
+  var hasLarge=emailAttachments.some(function(a){return a.large;});
+  var smallTotal=emailAttachments.filter(function(a){return !a.large;}).reduce(function(s,a){return s+a.size;},0);
+  var bodyApproxSize=bodyHtml.length+subj.length+toAddr.length+512;
+  var useUploadSession=hasLarge||(smallTotal+bodyApproxSize>EMAIL_INLINE_PUT_CEILING);
+
   var btn=el('email-send-btn'),spin=el('email-spin');
   btn.disabled=true;spin.style.display='flex';
+  // Update spin label so the user knows large uploads take time
+  if(spin){
+    var spinText=hasLarge?'Uploading attachments\u2026':'Sending\u2026';
+    spin.innerHTML='<div class="mspin"></div>'+spinText;
+    spin.style.display='flex';
+  }
+
   try{
-    var message={
-      subject:subj,
-      body:{contentType:'HTML',content:bodyHtml},
-      toRecipients:[{emailAddress:{address:toAddr}}]
-    };
-    if(emailAttachments.length){
-      message.attachments=emailAttachments.map(function(a){
-        return {
+    if(!useUploadSession){
+      // === Fast path: single sendMail call ===
+      var message={
+        subject:subj,
+        body:{contentType:'HTML',content:bodyHtml},
+        toRecipients:[{emailAddress:{address:toAddr}}]
+      };
+      if(emailAttachments.length){
+        message.attachments=emailAttachments.map(function(a){
+          var att={
+            '@odata.type':'#microsoft.graph.fileAttachment',
+            name:a.name,
+            contentType:a.type,
+            contentBytes:a.dataBase64
+          };
+          if(a.isInline){
+            att.isInline=true;
+            att.contentId=a.contentId;
+          }
+          return att;
+        });
+      }
+      var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:message,saveToSentItems:true})});
+      if(!(res.ok||res.status===202)){
+        var ee=await res.json().catch(function(){return{};});
+        throw new Error(ee.error?ee.error.message:'Send failed: '+res.status);
+      }
+    }else{
+      // === Slow path: create draft → upload each large attachment in chunks → send ===
+      // 1. Create the draft message (with small attachments inlined)
+      var smallAttsArr=emailAttachments.filter(function(a){return !a.large;}).map(function(a){
+        var att={
           '@odata.type':'#microsoft.graph.fileAttachment',
           name:a.name,
           contentType:a.type,
           contentBytes:a.dataBase64
         };
+        if(a.isInline){att.isInline=true;att.contentId=a.contentId;}
+        return att;
       });
+      var draftBody={
+        subject:subj,
+        body:{contentType:'HTML',content:bodyHtml},
+        toRecipients:[{emailAddress:{address:toAddr}}]
+      };
+      if(smallAttsArr.length)draftBody.attachments=smallAttsArr;
+      var draftRes=await gfetch(GR+'/me/messages',{method:'POST',body:JSON.stringify(draftBody)});
+      if(!draftRes.ok){
+        var de=await draftRes.json().catch(function(){return{};});
+        throw new Error('Draft create failed: '+(de.error&&de.error.message?de.error.message:draftRes.status));
+      }
+      var draft=await draftRes.json();
+      var messageId=draft.id;
+      if(!messageId)throw new Error('Draft has no id');
+
+      // 2. Upload each large attachment via session
+      var largeAtts=emailAttachments.filter(function(a){return a.large;});
+      for(var i=0;i<largeAtts.length;i++){
+        var a=largeAtts[i];
+        if(spin){
+          spin.innerHTML='<div class="mspin"></div>Uploading '+escapeHtml(a.name)+' ('+(i+1)+'/'+largeAtts.length+')\u2026';
+        }
+        await emailUploadLargeAttachment(messageId,a,function(sent,total){
+          if(spin){
+            var pct=Math.round(sent/total*100);
+            spin.innerHTML='<div class="mspin"></div>Uploading '+escapeHtml(a.name)+' \u2014 '+pct+'%';
+          }
+        });
+      }
+
+      // 3. Send the draft
+      if(spin)spin.innerHTML='<div class="mspin"></div>Sending\u2026';
+      var sendRes=await gfetch(GR+'/me/messages/'+messageId+'/send',{method:'POST'});
+      if(!(sendRes.ok||sendRes.status===202)){
+        var se=await sendRes.json().catch(function(){return{};});
+        throw new Error('Send draft failed: '+(se.error&&se.error.message?se.error.message:sendRes.status));
+      }
     }
-    var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:message,saveToSentItems:true})});
-    if(res.ok||res.status===202){
-      el('modal-email').classList.remove('open');
-      emailAttachments=[];
-      toast('\u2713 Email sent');
-      var u=advanceLead(ri,'Email');
-      if(u){try{await writeRow(ri,u);}catch(e){showErr('Email sent but log failed: '+e.message);}}
-      await buildUI();
-    }else{
-      var e=await res.json().catch(function(){return{};});
-      throw new Error(e.error?e.error.message:'Send failed: '+res.status);
-    }
+
+    el('modal-email').classList.remove('open');
+    emailAttachments=[];
+    toast('\u2713 Email sent');
+    var u=advanceLead(ri,'Email');
+    if(u){try{await writeRow(ri,u);}catch(e){showErr('Email sent but log failed: '+e.message);}}
+    await buildUI();
   }catch(e){showErr('Email error: '+e.message);
   }finally{btn.disabled=false;spin.style.display='none';}
 }
@@ -4029,6 +4325,7 @@ function onClick(ev){
       if(cmd)emailFormat(cmd);
       break;
     case 'email-link': emailInsertLink(); break;
+    case 'email-paste-html': emailPasteHtml(); break;
     case 'open-ep':
       if(ri!=null&&mode){
         // For Done, animate the button (bubble) and pass it as anchor for popover positioning
@@ -4159,6 +4456,46 @@ window.addEventListener('load',async function(){
         ev.target.value='';
       }
     }
+    // Inline image input — pick a single image, insert it at the cursor
+    if(ev.target&&ev.target.id==='email-image-input'){
+      var imgs=ev.target.files;
+      if(imgs&&imgs.length){
+        emailInsertInlineImage(imgs[0]);
+        ev.target.value='';
+      }
+    }
+  });
+
+  // Paste handler on email body — when user pastes HTML (from another email,
+  // a designer's mockup, an exported template), preserve the HTML structure
+  // instead of letting the browser flatten it to plain text. Also handles
+  // pasted images by extracting them as inline attachments.
+  document.body.addEventListener('paste',function(ev){
+    var bodyEl=el('email-body');
+    if(!bodyEl||document.activeElement!==bodyEl)return;
+    var cd=ev.clipboardData||window.clipboardData;
+    if(!cd)return;
+    // Check for pasted images first (e.g. screenshot from clipboard)
+    var items=cd.items||[];
+    var imageItem=null;
+    for(var i=0;i<items.length;i++){
+      if(items[i].type&&items[i].type.indexOf('image/')===0){
+        imageItem=items[i];break;
+      }
+    }
+    if(imageItem){
+      ev.preventDefault();
+      var f=imageItem.getAsFile();
+      if(f)emailInsertInlineImage(f);
+      return;
+    }
+    // Otherwise: prefer HTML paste over plain-text
+    var html=cd.getData('text/html');
+    if(html&&html.trim()){
+      ev.preventDefault();
+      try{document.execCommand('insertHTML',false,html);}catch(e){}
+    }
+    // If no HTML available, let the browser handle plain-text paste normally
   });
 
   // Attachment-remove (delegated since list is rendered dynamically)
