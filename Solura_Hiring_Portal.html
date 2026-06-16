@@ -38,17 +38,26 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;fl
 .filters{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
 .filters button{font-family:inherit;font-size:13px;font-weight:600;border:1px solid var(--softer);background:#fff;color:var(--mid);border-radius:999px;padding:6px 14px;cursor:pointer}
 .filters button.on{background:var(--navy);border-color:var(--navy);color:#fff}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(262px,1fr));gap:13px}
-.cc{background:#fff;border:1px solid var(--line);border-left-width:4px;border-radius:var(--r-md);padding:14px 16px;box-shadow:var(--sh-sm)}
+.cards{display:flex;flex-direction:column;gap:10px}
+.cc{background:#fff;border:1px solid var(--line);border-left-width:4px;border-radius:var(--r-md);padding:13px 16px;box-shadow:var(--sh-sm);display:flex;align-items:center;gap:16px;cursor:pointer;transition:box-shadow .12s,transform .08s}
+.cc:hover{box-shadow:var(--sh-md);transform:translateY(-1px)}
+.cc-id{flex:1;min-width:0}
 .cc .nm{font-weight:700;font-size:15.5px}
-.cc .meta{font-size:12px;color:var(--soft);margin:2px 0 9px}
+.cc .meta{font-size:12px;color:var(--soft);margin-top:2px}
 .cc .ph{color:var(--sky-deep);font-weight:600;text-decoration:none}
-.cc .qr{display:flex;gap:16px;margin:8px 0}
-.cc .qr div{font-size:11.5px;color:var(--mid)}
-.cc .qr b{font-family:'Cormorant Garamond',serif;font-size:20px;color:var(--navy);display:block;line-height:1}
-.cc .bd{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px}
-.cc .ns{font-size:12.5px;color:var(--mid);margin-top:10px;padding-top:9px;border-top:1px dashed var(--line)}
-.empty{grid-column:1/-1;text-align:center;color:var(--soft);font-size:14px;padding:48px 20px;border:1px dashed var(--softer);border-radius:var(--r-md)}
+.cc-sc{display:flex;gap:14px;flex:none}
+.cc-sc div{font-size:10.5px;color:var(--soft);text-align:center;text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+.cc-sc b{font-family:'Cormorant Garamond',serif;font-size:21px;color:var(--navy);display:block;line-height:1;font-weight:700}
+.cc .bd{display:inline-block;font-size:10.5px;font-weight:700;padding:3px 10px;border-radius:999px;flex:none}
+.cc-act{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:5px;min-width:172px;text-align:right}
+.cc-act .desc{font-size:11.5px;color:var(--mid);line-height:1.3}
+.btn-next{font-family:inherit;font-size:13px;font-weight:700;color:#fff;background:var(--navy);border:none;border-radius:8px;padding:8px 14px;cursor:pointer;white-space:nowrap;box-shadow:var(--sh-sm);transition:background .12s}
+.btn-next:hover{background:var(--sky-deep)}
+.btn-next.warn{background:var(--gold-deep)}.btn-next.warn:hover{background:#7a5900}
+.btn-next.bad{background:var(--red)}.btn-next.bad:hover{background:#8f261d}
+.btn-next.good{background:var(--grn)}.btn-next.good:hover{background:#31621b}
+@media(max-width:680px){.cc{flex-wrap:wrap}.cc-act{min-width:0;width:100%;align-items:stretch;text-align:left;border-top:1px dashed var(--line);padding-top:9px;margin-top:3px}.btn-next{width:100%}}
+.empty{text-align:center;color:var(--soft);font-size:14px;padding:48px 20px;border:1px dashed var(--softer);border-radius:var(--r-md)}
 .empty b{display:block;font-family:'Cormorant Garamond',serif;font-size:21px;color:var(--mid);margin-bottom:6px}
 /* drawer */
 .scrim{position:fixed;inset:0;background:rgba(26,40,60,.34);opacity:0;pointer-events:none;transition:.25s;z-index:40;backdrop-filter:blur(2px)}
@@ -212,8 +221,8 @@ let nextRow=3;
 
 /* ===== Microsoft Graph wiring — mirrors the lead dashboard's PKCE sign-in ===== */
 /* ▼▼ FILL THESE TWO IN after registering the "Solura Hiring Portal" app ▼▼ */
-const CLIENT_ID = 'bf86d4a3-f6bb-4ad7-991e-098d632b2c0b';                 // Application (client) ID of the new app
-const FILE_URL  = 'https://solurahomecare.sharepoint.com/:x:/s/careers9/IQCLjIDe38W4SbS2p7XrEVi7ARw5Swud_Tm7rES6x7yfvaw?e=MOfpi2';              // "Copy link" URL of Solura_Hiring_Engine.xlsx in the Team
+const CLIENT_ID = 'bf86d4a3-f6bb-4ad7-991e-098d632b2c0b';
+const FILE_URL  = 'https://solurahomecare.sharepoint.com/:x:/s/careers9/IQCLjIDe38W4SbS2p7XrEVi7ARw5Swud_Tm7rES6x7yfvaw?e=gMrkph';
 /* ▲▲ that's all you change ▲▲ */
 const TENANT    = '1b2cdbea-de19-47d2-9512-ea102905e3eb';    // same tenant as your lead dashboard
 const SHEET     = 'Pipeline';
@@ -331,8 +340,8 @@ function progressive(store,weights){let n=0,w=0;for(const k in weights){if(store
 function gatesState(){const set=GATES.filter(([k])=>state.gates[k]).length;if(set<5)return"partial";return GATES.every(([k])=>state.gates[k]==="Y")?"PASS":"FAIL";}
 function qComplete(q){return ['rel','com','jud','doc','ref','cmp','phn'].every(k=>q[k]);}
 function rComplete(r){return ['ten','prx','ava','exp'].every(k=>r[k]);}
-function decide(Q,R,q,r){
-  const g=gatesState();
+function decide(Q,R,q,r,gs){
+  const g=gs||gatesState();
   if(g==="FAIL")return{band:"DECLINE (gate)",cls:"red"};
   if(g!=="PASS"||!qComplete(q)||!rComplete(r))return{band:"In progress",cls:"grey"};
   if(Q>=70&&R>=70)return{band:"HIRE TRACK",cls:"grn"};
@@ -340,15 +349,15 @@ function decide(Q,R,q,r){
   if(Q>=55&&R>=70)return{band:"HOLD / DEVELOP",cls:"gold"};
   return{band:"DECLINE",cls:"red"};
 }
-function nextStep(Q,R,q,r){
-  const g=gatesState();
+function nextStep(Q,R,q,r,gs){
+  const g=gs||gatesState();
   if(g==="partial")return"① Confirm the 5 gates";
   if(g==="FAIL")return"✗ Decline — failed a gate";
   if(!r.cmp||!r.ten||!r.prx) return"② Résumé pre-score (Competence · Tenure · Proximity)";
   if(R!==null&&R<55) return"✗ Likely decline — weak retention fit";
   if(!q.ref) return"③ Reference / employer cross-check";
   if(!q.rel||!q.com||!q.jud||!q.doc||!q.phn) return"④ Phone screen + structured interview";
-  const b=decide(Q,R,q,r).band;
+  const b=decide(Q,R,q,r,g).band;
   return b==="HIRE TRACK"?"✓ Make offer":b==="CONDITIONAL"?"✓ Offer + retention plan":b==="HOLD / DEVELOP"?"◐ Hold / lower-complexity client":"✗ Decline";
 }
 const BANDCSS={grn:["#EBF5EA","#3D7A34","#bfe0ba"],sky:["#EBF3FB","#1E4E8C","#bcd8f3"],gold:["#FEF3DC","#8B6500","#f0d9a8"],red:["#FDECEA","#B03025","#f3c4bd"],grey:["#FAFAF8","#9CA3AF","#E7E2D8"]};
@@ -426,50 +435,89 @@ function render(){
   const list=pipeline.filter(p=>matchFilter(p)&&matchSearch(p)), el=document.getElementById('cards');
   if(!pipeline.length){el.innerHTML='<div class="empty"><b>No candidates yet</b>Tap “+ Add candidate” to score your first applicant.</div>';return;}
   if(!list.length){el.innerHTML='<div class="empty">No candidates in this view.</div>';return;}
-  el.innerHTML=list.map(p=>{const c=BANDCSS[p.band.cls];return `<div class="cc" style="border-left-color:${c[1]};cursor:pointer" onclick="openHub(${p.excelRow})"><div class="nm">${p.name}</div><div class="meta">${p.source}${p.zip?' · '+p.zip:''}${p.phone?' · <a class="ph" href="tel:'+p.phone.replace(/[^\d+]/g,'')+'" onclick="event.stopPropagation()">'+p.phone+'</a>':''}</div><div class="qr"><div>Quality<b>${p.Q==null?'—':p.Q}</b></div><div>Retention<b>${p.R==null?'—':p.R}</b></div></div><span class="bd" style="background:${c[0]};color:${c[1]}">${p.band.band}</span><div class="ns">${p.next}</div></div>`;}).join('');
+  el.innerHTML=list.map(p=>{const c=BANDCSS[p.band.cls];const a=nextAction(p);return `<div class="cc" style="border-left-color:${c[1]}" onclick="openHub(${p.excelRow})"><div class="cc-id"><div class="nm">${p.name}</div><div class="meta">${p.stage||'Applied'}${p.source?' · '+p.source:''}${p.phone?' · <a class="ph" href="tel:'+p.phone.replace(/[^\d+]/g,'')+'" onclick="event.stopPropagation()">'+p.phone+'</a>':''}</div></div><div class="cc-sc"><div>Q<b>${p.Q==null?'—':p.Q}</b></div><div>R<b>${p.R==null?'—':p.R}</b></div></div><span class="bd" style="background:${c[0]};color:${c[1]}">${p.band.band}</span><div class="cc-act"><span class="desc">${a.desc}</span><button class="btn-next ${a.cls}" onclick="event.stopPropagation();openHub(${p.excelRow})">${a.label} →</button></div></div>`;}).join('');
 }
 function matchSearch(p){if(!search)return true;const s=search;return p.name.toLowerCase().includes(s)||(p.zip||'').includes(s);}
 function setSearch(v){search=v.trim().toLowerCase();render();}
 function setFilter(f){filter=f;render();}
 
-/* ---- candidate hub ---- */
+/* ---- specific next-action for the worklist row ---- */
+function nextAction(p){
+  const n=(p.next||'').toLowerCase();
+  if(n.indexOf('confirm')>=0) return {label:'Confirm gates',desc:'Set work-auth, credential, background, transport & availability',cls:''};
+  if(n.indexOf('failed a gate')>=0) return {label:'Decline (gate)',desc:'Failed a hard gate — decline & notify',cls:'bad'};
+  if(n.indexOf('pre-score')>=0) return {label:'Pre-score résumé',desc:'Rate competence, tenure & proximity from the résumé',cls:''};
+  if(n.indexOf('weak retention')>=0) return {label:'Review',desc:'Weak retention fit — review before investing more time',cls:'warn'};
+  if(n.indexOf('reference')>=0) return {label:'Log reference',desc:'Call last employer — would they rehire? — then rate it',cls:''};
+  if(n.indexOf('interview')>=0) return {label:'Score interview',desc:'Run the structured interview & rate the 5 dimensions',cls:''};
+  if(n.indexOf('make offer')>=0) return {label:'Make offer',desc:'Clears both bars — extend an offer',cls:'good'};
+  if(n.indexOf('retention plan')>=0) return {label:'Offer + plan',desc:'Hire with a retention plan (commute / locked schedule)',cls:'good'};
+  if(n.indexOf('hold')>=0) return {label:'Hold',desc:'Lower-complexity clients; coach the weak area',cls:'warn'};
+  if(n.indexOf('decline')>=0) return {label:'Decline',desc:'Below bar — decline & notify',cls:'bad'};
+  return {label:'Open',desc:p.next||'Review candidate',cls:''};
+}
+
+/* ---- candidate hub (view + edit) ---- */
 const HUB_STAGES=['Applied','Screening','Interview','References','Offer','Hired','Declined','No-Show'];
-const QLABELS=[['Reliability',13],['Compassion',14],['Judgment',15],['Documentation',16],['Reference',17],['Competence',18],['Phone',19]];
-const RLABELS=[['Tenure',21],['Proximity',22],['Avail overlap',23],['Expectations',24]];
-function hubChip(label,val){return `<span style="display:inline-block;font-size:11px;background:var(--warm);border:1px solid var(--line);border-radius:999px;padding:3px 9px;margin:2px 3px 2px 0">${label}: <b>${(val===''||val==null)?'—':val}</b></span>`;}
+const HUB_Q=[['rel','Reliability'],['com','Compassion'],['jud','Judgment / safety'],['doc','Documentation'],['ref','Reference check'],['cmp','Competence'],['phn','Phone reliability']];
+const HUB_R=[['ten','Tenure stability'],['prx','Proximity'],['ava','Avail overlap'],['exp','Expectations fit']];
+let hubState=null;
+function hnum(x){return (x===''||x==null)?undefined:Number(x);}
 function openHub(excelRow){
-  const p=pipeline.find(x=>x.excelRow===excelRow); if(!p)return;
-  const c=BANDCSS[p.band.cls], row=p.row;
-  const stageOpts=HUB_STAGES.map(s=>`<option ${s===p.stage?'selected':''}>${s}</option>`).join('');
-  const qchips=QLABELS.map(([l,i])=>hubChip(l,row[i])).join('');
-  const rchips=RLABELS.map(([l,i])=>hubChip(l,row[i])).join('');
+  const p=pipeline.find(x=>x.excelRow===excelRow); if(!p)return; const row=p.row;
+  hubState={excelRow:excelRow,stage:p.stage||'Applied',
+    gates:{wa:row[7]||'',cr:row[8]||'',bg:row[9]||'',tr:row[10]||'',av:row[11]||''},
+    q:{rel:hnum(row[13]),com:hnum(row[14]),jud:hnum(row[15]),doc:hnum(row[16]),ref:hnum(row[17]),cmp:hnum(row[18]),phn:hnum(row[19])},
+    r:{ten:hnum(row[21]),prx:hnum(row[22]),ava:hnum(row[23]),exp:hnum(row[24])}};
   document.getElementById('hubTitle').textContent=p.name;
   document.getElementById('hubBody').innerHTML=`
-    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-      <span class="bd" style="background:${c[0]};color:${c[1]};font-size:12px;font-weight:700;padding:4px 11px;border-radius:999px">${p.band.band}</span>
-      <span style="font-size:13px;color:var(--mid)">Quality <b style="font-family:'Cormorant Garamond',serif;font-size:18px;color:var(--navy)">${p.Q==null?'—':p.Q}</b></span>
-      <span style="font-size:13px;color:var(--mid)">Retention <b style="font-family:'Cormorant Garamond',serif;font-size:18px;color:var(--navy)">${p.R==null?'—':p.R}</b></span>
-    </div>
-    <div style="margin-bottom:14px;font-size:13px;color:var(--mid)">${p.source}${p.phone?' · <a style="color:var(--sky-deep);font-weight:600" href="tel:'+p.phone.replace(/[^\d+]/g,'')+'">'+p.phone+'</a>':''}${p.email?' · <a style="color:var(--sky-deep);font-weight:600" href="mailto:'+p.email+'">'+p.email+'</a>':''}</div>
-    <label class="fl">Stage</label>
-    <select id="hubStage" onchange="setStage(${excelRow},this.value)">${stageOpts}</select>
-    <div style="margin:14px 0;background:var(--gold-pale);border:1px solid #f0d9a8;border-radius:var(--r-md);padding:12px 14px"><div style="font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gold-deep);margin-bottom:4px">Next step</div><div style="font-size:14px;font-weight:600">${p.next||'—'}</div></div>
-    <div class="divider">Scores</div><div style="margin-bottom:6px">${qchips}</div><div>${rchips}</div>
-    <div class="divider">Documents</div>
-    <div class="note">Files in <b>caregivers › ${p.name} › onboarding</b> will list here once the auto-filing flow is set up.</div>
-    <div class="divider">Emails</div>
-    <div class="note">Replies from <b>${p.email||'their email'}</b> to careers@ / hr@ will thread here once the inbox flow is set up.</div>
+    <div style="font-size:13px;color:var(--mid);margin-bottom:4px">${p.source}${p.phone?' · <a style="color:var(--sky-deep);font-weight:600" href="tel:'+p.phone.replace(/[^\d+]/g,'')+'">'+p.phone+'</a>':''}${p.email?' · <a style="color:var(--sky-deep);font-weight:600" href="mailto:'+p.email+'">'+p.email+'</a>':''}</div>
+    <div id="hubEdit"></div>
+    <div class="divider">Documents</div><div class="note">Files in <b>caregivers › ${p.name} › onboarding</b> will list here once the auto-filing flow is set up.</div>
+    <div class="divider">Emails</div><div class="note">Replies from <b>${p.email||'their email'}</b> to careers@ / hr@ will thread here once the inbox flow is set up.</div>
     <div class="divider">Notes &amp; activity</div>
     <div style="font-size:13px;color:var(--mid);white-space:pre-wrap;margin-bottom:10px">${p.notes?p.notes.replace(/</g,'&lt;'):'<span style="color:var(--soft)">No notes yet.</span>'}</div>
-    <textarea id="hubNote" placeholder="Add a note…" style="width:100%;min-height:64px;font-family:inherit;font-size:14px;border:1px solid var(--softer);border-radius:var(--r-sm);padding:9px 11px"></textarea>
+    <textarea id="hubNote" placeholder="Add a note…" style="width:100%;min-height:60px;font-family:inherit;font-size:14px;border:1px solid var(--softer);border-radius:var(--r-sm);padding:9px 11px"></textarea>
     <button class="btn btn-g" style="margin-top:8px" onclick="addNote(${excelRow})">Add note</button>`;
+  renderHubEdit();
   document.getElementById('hub').classList.add('show');
   document.getElementById('hubscrim').classList.add('show');
 }
-function closeHub(){document.getElementById('hub').classList.remove('show');document.getElementById('hubscrim').classList.remove('show');}
-async function setStage(excelRow,val){
+function hubGatesState(g){const set=GATES.filter(([k])=>g[k]).length;if(set<5)return'partial';return GATES.every(([k])=>g[k]==='Y')?'PASS':'FAIL';}
+function renderHubEdit(){
+  const Q=progressive(hubState.q,QW),R=progressive(hubState.r,RW),gs=hubGatesState(hubState.gates);
+  const dec=decide(Q,R,hubState.q,hubState.r,gs),c=BANDCSS[dec.cls],nx=nextStep(Q,R,hubState.q,hubState.r,gs);
+  const gatesHTML=GATES.map(([k,l])=>`<div class="gate">${l}<span class="yn"><button class="y${hubState.gates[k]==='Y'?' on':''}" onclick="hubGate('${k}','Y')">Y</button><button class="n${hubState.gates[k]==='N'?' on':''}" onclick="hubGate('${k}','N')">N</button></span></div>`).join('');
+  const rate=(grp,dims)=>dims.map(([k,l])=>`<div class="rate"><div class="lab">${l}</div><div class="seg">${[1,2,3,4,5].map(v=>`<button class="${hubState[grp][k]===v?'on':''}" onclick="hubRate('${grp}','${k}',${v})">${v}</button>`).join('')}</div></div>`).join('');
+  const stageOpts=HUB_STAGES.map(s=>`<option ${s===hubState.stage?'selected':''}>${s}</option>`).join('');
+  document.getElementById('hubEdit').innerHTML=`
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:8px 0 12px">
+      <span class="bd" style="background:${c[0]};color:${c[1]};font-size:12px;font-weight:700;padding:4px 11px;border-radius:999px">${dec.band}</span>
+      <span style="font-size:13px;color:var(--mid)">Quality <b style="font-family:'Cormorant Garamond',serif;font-size:18px;color:var(--navy)">${Q==null?'—':Q}</b></span>
+      <span style="font-size:13px;color:var(--mid)">Retention <b style="font-family:'Cormorant Garamond',serif;font-size:18px;color:var(--navy)">${R==null?'—':R}</b></span>
+    </div>
+    <div style="margin:0 0 14px;background:var(--gold-pale);border:1px solid #f0d9a8;border-radius:var(--r-md);padding:12px 14px"><div style="font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gold-deep);margin-bottom:4px">Next step</div><div style="font-size:14px;font-weight:600">${nx}</div></div>
+    <label class="fl">Stage</label><select onchange="hubStage(this.value)">${stageOpts}</select>
+    <div class="divider">Gates — all must pass</div><div class="gates">${gatesHTML}</div>
+    <div class="divider">Quality · rate 1-5</div>${rate('q',HUB_Q)}
+    <div class="divider">Retention · rate 1-5</div>${rate('r',HUB_R)}
+    <button class="btn btn-p" style="margin-top:16px;width:100%" onclick="saveHub()">Save changes</button>`;
+}
+function hubGate(k,v){hubState.gates[k]=hubState.gates[k]===v?'':v;renderHubEdit();}
+function hubRate(grp,k,v){hubState[grp][k]=hubState[grp][k]===v?undefined:v;renderHubEdit();}
+function hubStage(v){hubState.stage=v;}
+function closeHub(){document.getElementById('hub').classList.remove('show');document.getElementById('hubscrim').classList.remove('show');hubState=null;}
+async function saveHub(){
+  const row=hubState.excelRow,g=hubState.gates,q=hubState.q,r=hubState.r,bl=v=>(v==null?'':v);
   const base=GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET;
-  try{await patchRange(base,'G'+excelRow,[[val]]);toast('Stage → '+val);await loadData();openHub(excelRow);}catch(e){toast('Save failed: '+e.message);}
+  toast('Saving…');
+  try{
+    await patchRange(base,'G'+row,[[hubState.stage]]);
+    await patchRange(base,'H'+row+':L'+row,[[bl(g.wa),bl(g.cr),bl(g.bg),bl(g.tr),bl(g.av)]]);
+    await patchRange(base,'N'+row+':T'+row,[[bl(q.rel),bl(q.com),bl(q.jud),bl(q.doc),bl(q.ref),bl(q.cmp),bl(q.phn)]]);
+    await patchRange(base,'V'+row+':Y'+row,[[bl(r.ten),bl(r.prx),bl(r.ava),bl(r.exp)]]);
+    await loadData();toast('Saved');openHub(row);
+  }catch(e){toast('Save failed: '+e.message);}
 }
 async function addNote(excelRow){
   const t=document.getElementById('hubNote').value.trim();if(!t){toast('Type a note first');return;}
