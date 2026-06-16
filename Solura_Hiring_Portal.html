@@ -191,6 +191,11 @@ details.stage[open]>summary::before{transform:rotate(90deg)}
     <div class="note">Saved candidates write into your <b>Solura Hiring Engine</b> sheet on OneDrive in the live version, and every candidate email (screen invite, scheduling, shortlist, rejection) sends from <b>careers@solurahomecare.com</b> — same connection your lead dashboard uses.</div>
   </div>
 </aside>
+<div class="scrim" id="hubscrim" onclick="closeHub()"></div>
+<aside class="drawer" id="hub">
+  <div class="drawer-h"><h2 id="hubTitle">Candidate</h2><button class="x" onclick="closeHub()">×</button></div>
+  <div class="drawer-b" id="hubBody"></div>
+</aside>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -207,8 +212,8 @@ let nextRow=3;
 
 /* ===== Microsoft Graph wiring — mirrors the lead dashboard's PKCE sign-in ===== */
 /* ▼▼ FILL THESE TWO IN after registering the "Solura Hiring Portal" app ▼▼ */
-const CLIENT_ID = 'bf86d4a3-f6bb-4ad7-991e-098d632b2c0b';                 // Application (client) ID of the new app
-const FILE_URL  = 'https://solurahomecare.sharepoint.com/:x:/s/careers9/IQCLjIDe38W4SbS2p7XrEVi7ARw5Swud_Tm7rES6x7yfvaw?e=XfqYZY';              // "Copy link" URL of Solura_Hiring_Engine.xlsx in the Team
+const CLIENT_ID = 'PASTE_NEW_APP_CLIENT_ID';                 // Application (client) ID of the new app
+const FILE_URL  = 'PASTE_SHAREPOINT_FILE_LINK';              // "Copy link" URL of Solura_Hiring_Engine.xlsx in the Team
 /* ▲▲ that's all you change ▲▲ */
 const TENANT    = '1b2cdbea-de19-47d2-9512-ea102905e3eb';    // same tenant as your lead dashboard
 const SHEET     = 'Pipeline';
@@ -286,7 +291,8 @@ async function loadData(){
     const row=vals[i];
     if(!row||row[2]===''||row[2]==null){ if(nextRow===null)nextRow=i+1; continue; }
     const bandStr=String(row[26]||'In progress');
-    pipeline.push({name:row[2],phone:String(row[3]||''),source:String(row[5]||''),
+    pipeline.push({excelRow:i+1,row:row,name:row[2],phone:String(row[3]||''),email:String(row[4]||''),
+      source:String(row[5]||''),stage:String(row[6]||'Applied'),notes:String(row[33]||''),
       Q:(row[20]===''||row[20]==null)?null:row[20],R:(row[25]===''||row[25]==null)?null:row[25],
       band:{band:bandStr,cls:bandCls(bandStr)},next:String(row[27]||''),zip:''});
   }
@@ -420,11 +426,58 @@ function render(){
   const list=pipeline.filter(p=>matchFilter(p)&&matchSearch(p)), el=document.getElementById('cards');
   if(!pipeline.length){el.innerHTML='<div class="empty"><b>No candidates yet</b>Tap “+ Add candidate” to score your first applicant.</div>';return;}
   if(!list.length){el.innerHTML='<div class="empty">No candidates in this view.</div>';return;}
-  el.innerHTML=list.map(p=>{const c=BANDCSS[p.band.cls];return `<div class="cc" style="border-left-color:${c[1]}"><div class="nm">${p.name}</div><div class="meta">${p.source}${p.zip?' · '+p.zip:''}${p.phone?' · <a class="ph" href="tel:'+p.phone.replace(/[^\d+]/g,'')+'">'+p.phone+'</a>':''}</div><div class="qr"><div>Quality<b>${p.Q==null?'—':p.Q}</b></div><div>Retention<b>${p.R==null?'—':p.R}</b></div></div><span class="bd" style="background:${c[0]};color:${c[1]}">${p.band.band}</span><div class="ns">${p.next}</div></div>`;}).join('');
+  el.innerHTML=list.map(p=>{const c=BANDCSS[p.band.cls];return `<div class="cc" style="border-left-color:${c[1]};cursor:pointer" onclick="openHub(${p.excelRow})"><div class="nm">${p.name}</div><div class="meta">${p.source}${p.zip?' · '+p.zip:''}${p.phone?' · <a class="ph" href="tel:'+p.phone.replace(/[^\d+]/g,'')+'" onclick="event.stopPropagation()">'+p.phone+'</a>':''}</div><div class="qr"><div>Quality<b>${p.Q==null?'—':p.Q}</b></div><div>Retention<b>${p.R==null?'—':p.R}</b></div></div><span class="bd" style="background:${c[0]};color:${c[1]}">${p.band.band}</span><div class="ns">${p.next}</div></div>`;}).join('');
 }
 function matchSearch(p){if(!search)return true;const s=search;return p.name.toLowerCase().includes(s)||(p.zip||'').includes(s);}
 function setSearch(v){search=v.trim().toLowerCase();render();}
 function setFilter(f){filter=f;render();}
+
+/* ---- candidate hub ---- */
+const HUB_STAGES=['Applied','Screening','Interview','References','Offer','Hired','Declined','No-Show'];
+const QLABELS=[['Reliability',13],['Compassion',14],['Judgment',15],['Documentation',16],['Reference',17],['Competence',18],['Phone',19]];
+const RLABELS=[['Tenure',21],['Proximity',22],['Avail overlap',23],['Expectations',24]];
+function hubChip(label,val){return `<span style="display:inline-block;font-size:11px;background:var(--warm);border:1px solid var(--line);border-radius:999px;padding:3px 9px;margin:2px 3px 2px 0">${label}: <b>${(val===''||val==null)?'—':val}</b></span>`;}
+function openHub(excelRow){
+  const p=pipeline.find(x=>x.excelRow===excelRow); if(!p)return;
+  const c=BANDCSS[p.band.cls], row=p.row;
+  const stageOpts=HUB_STAGES.map(s=>`<option ${s===p.stage?'selected':''}>${s}</option>`).join('');
+  const qchips=QLABELS.map(([l,i])=>hubChip(l,row[i])).join('');
+  const rchips=RLABELS.map(([l,i])=>hubChip(l,row[i])).join('');
+  document.getElementById('hubTitle').textContent=p.name;
+  document.getElementById('hubBody').innerHTML=`
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <span class="bd" style="background:${c[0]};color:${c[1]};font-size:12px;font-weight:700;padding:4px 11px;border-radius:999px">${p.band.band}</span>
+      <span style="font-size:13px;color:var(--mid)">Quality <b style="font-family:'Cormorant Garamond',serif;font-size:18px;color:var(--navy)">${p.Q==null?'—':p.Q}</b></span>
+      <span style="font-size:13px;color:var(--mid)">Retention <b style="font-family:'Cormorant Garamond',serif;font-size:18px;color:var(--navy)">${p.R==null?'—':p.R}</b></span>
+    </div>
+    <div style="margin-bottom:14px;font-size:13px;color:var(--mid)">${p.source}${p.phone?' · <a style="color:var(--sky-deep);font-weight:600" href="tel:'+p.phone.replace(/[^\d+]/g,'')+'">'+p.phone+'</a>':''}${p.email?' · <a style="color:var(--sky-deep);font-weight:600" href="mailto:'+p.email+'">'+p.email+'</a>':''}</div>
+    <label class="fl">Stage</label>
+    <select id="hubStage" onchange="setStage(${excelRow},this.value)">${stageOpts}</select>
+    <div style="margin:14px 0;background:var(--gold-pale);border:1px solid #f0d9a8;border-radius:var(--r-md);padding:12px 14px"><div style="font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gold-deep);margin-bottom:4px">Next step</div><div style="font-size:14px;font-weight:600">${p.next||'—'}</div></div>
+    <div class="divider">Scores</div><div style="margin-bottom:6px">${qchips}</div><div>${rchips}</div>
+    <div class="divider">Documents</div>
+    <div class="note">Files in <b>caregivers › ${p.name} › onboarding</b> will list here once the auto-filing flow is set up.</div>
+    <div class="divider">Emails</div>
+    <div class="note">Replies from <b>${p.email||'their email'}</b> to careers@ / hr@ will thread here once the inbox flow is set up.</div>
+    <div class="divider">Notes &amp; activity</div>
+    <div style="font-size:13px;color:var(--mid);white-space:pre-wrap;margin-bottom:10px">${p.notes?p.notes.replace(/</g,'&lt;'):'<span style="color:var(--soft)">No notes yet.</span>'}</div>
+    <textarea id="hubNote" placeholder="Add a note…" style="width:100%;min-height:64px;font-family:inherit;font-size:14px;border:1px solid var(--softer);border-radius:var(--r-sm);padding:9px 11px"></textarea>
+    <button class="btn btn-g" style="margin-top:8px" onclick="addNote(${excelRow})">Add note</button>`;
+  document.getElementById('hub').classList.add('show');
+  document.getElementById('hubscrim').classList.add('show');
+}
+function closeHub(){document.getElementById('hub').classList.remove('show');document.getElementById('hubscrim').classList.remove('show');}
+async function setStage(excelRow,val){
+  const base=GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET;
+  try{await patchRange(base,'G'+excelRow,[[val]]);toast('Stage → '+val);await loadData();openHub(excelRow);}catch(e){toast('Save failed: '+e.message);}
+}
+async function addNote(excelRow){
+  const t=document.getElementById('hubNote').value.trim();if(!t){toast('Type a note first');return;}
+  const p=pipeline.find(x=>x.excelRow===excelRow);const stamp=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  const merged=(p&&p.notes?p.notes+'  |  ':'')+'['+stamp+'] '+t;
+  const base=GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET;
+  try{await patchRange(base,'AH'+excelRow,[[merged]]);toast('Note added');await loadData();openHub(excelRow);}catch(e){toast('Save failed: '+e.message);}
+}
 
 function openDrawer(){document.getElementById('drawer').classList.add('show');document.getElementById('scrim').classList.add('show');}
 function closeDrawer(){document.getElementById('drawer').classList.remove('show');document.getElementById('scrim').classList.remove('show');resetForm();}
