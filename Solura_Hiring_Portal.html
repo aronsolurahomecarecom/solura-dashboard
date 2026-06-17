@@ -816,6 +816,44 @@ async function sendMailViaGraph(to,subject,bodyText){
   if(!(r.ok||r.status===202)){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||('Send failed '+r.status));}
 }
 
+/* delivery watcher — checks Inbox 60s after send for bounce/undeliverable notifications */
+function watchForBounce(recipient,candidateRow){
+  if(!recipient)return;
+  const since=new Date(Date.now()-10000).toISOString(); /* 10s back to allow clock skew */
+  setTimeout(async()=>{
+    try{
+      const r=await gfetch(GR+"/me/mailFolders/Inbox/messages?$filter=receivedDateTime ge "+since+"&$top=25&$orderby=receivedDateTime desc&$select=from,subject,bodyPreview,receivedDateTime");
+      if(!r.ok)return;
+      const msgs=((await r.json()).value)||[];
+      const lc=recipient.toLowerCase();
+      const bounce=msgs.find(m=>{
+        const from=((m.from&&m.from.emailAddress&&m.from.emailAddress.address)||'').toLowerCase();
+        const subj=(m.subject||'').toLowerCase();
+        const body=(m.bodyPreview||'').toLowerCase();
+        const fromSays=/postmaster|mailer-daemon|mail.{0,12}delivery|delivery.{0,3}status/.test(from);
+        const subjSays=/undeliverable|delivery (status|failure)|returned mail|failure notice|did not reach|address (rejected|not found)|recipient (not found|unknown)/.test(subj);
+        const mentions=body.indexOf(lc)>-1||subj.indexOf(lc)>-1;
+        return (fromSays||subjSays)&&mentions;
+      });
+      if(bounce){
+        toast('⚠ Email may not have reached '+recipient);
+        /* log on the candidate */
+        const c=pipeline.find(x=>x.excelRow===candidateRow);
+        if(c){
+          try{
+            const row=c.excelRow;
+            const st=Object.assign({},c.st);st.log=st.log||[];
+            st.log.push({t:stamp(),x:'⚠ BOUNCE: '+(bounce.subject||'Delivery failure')+' from '+(bounce.from&&bounce.from.emailAddress&&bounce.from.emailAddress.address||'postmaster')});
+            await patchRange('AJ'+row,[[JSON.stringify(st)]]);
+            await refreshRow(row);render();
+            if(wsRow===row){loadW(row);renderWorkspace();}
+          }catch(e){}
+        }
+      }
+    }catch(e){}
+  },60000);
+}
+
 /* ===================== availability storage (cell AK1) ===================== */
 async function loadAvailability(){
   try{const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AK1')?$select=values");
@@ -1157,7 +1195,8 @@ async function reallySend(tpl,advanceTo){
     W.st.sent=W.st.sent||{};W.st.sent[tpl]=today();
     logW('Sent: '+tpl.replace(/_/g,' ')+' → '+W.email);
     if(advanceTo){W.stage=advanceTo;if(advanceTo==='Screen invite'||advanceTo==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();logW('Advanced to '+advanceTo);}
-    await saveW(true);closeModal();toast('Email sent');
+    await saveW(true);closeModal();toast('Email sent — watching for delivery');
+    watchForBounce(W.email,W.row);
     if(wsRow===W.row)renderWorkspace();
   }catch(e){toast('Send failed: '+e.message);b.disabled=false;b.innerHTML='✉ Send via Outlook';}
 }
@@ -1392,12 +1431,17 @@ async function uploadFiles(files){
 
 /* ===================== calendar — availability editor ===================== */
 function startOfWeek(d){const x=new Date(d);const day=x.getDay();const diff=x.getDate()-day+(day===0?-6:1);x.setDate(diff);x.setHours(0,0,0,0);return x;}
-function shiftToTimes(shift){return {Morning:['09:00','10:00','11:00'],Afternoon:['13:00','14:00','15:00'],Evening:['17:00','18:00','19:00'],Overnight:['20:00','21:00']}[shift]||[];}
+function shiftToRange(shift){return {Morning:{s:'09:00',e:'12:00'},Afternoon:{s:'13:00',e:'17:00'},Evening:{s:'17:00',e:'20:00'},Overnight:{s:'20:00',e:'06:00'}}[shift];}
 function slotsForDay(iso){
   const dn=dayName(iso);const off=AVAIL.offs.includes(iso);
-  const pat=off?[]:(AVAIL.pattern[dn]||[]).flatMap(sh=>shiftToTimes(sh).map(t=>iso+'T'+t));
-  const oneOff=(AVAIL.slots||[]).filter(s=>s.slice(0,10)===iso);
-  return Array.from(new Set([...pat,...oneOff])).sort();
+  const pat=off?[]:(AVAIL.pattern[dn]||[]).map(sh=>{const r=shiftToRange(sh);if(!r)return null;return {s:iso+'T'+r.s,e:iso+'T'+r.e,src:'pattern',label:sh};}).filter(Boolean);
+  const oneOff=(AVAIL.slots||[]).map(x=>{
+    /* backward compat: if string, treat as 1-hr block starting at that time */
+    if(typeof x==='string'){if(x.slice(0,10)!==iso)return null;const t=x.slice(11,16);const [h,m]=t.split(':').map(Number);const eh=String((h+1)%24).padStart(2,'0');return {s:x,e:iso+'T'+eh+':'+String(m).padStart(2,'0'),src:'oneoff'};}
+    if(!x||!x.s||x.s.slice(0,10)!==iso)return null;
+    return Object.assign({src:'oneoff'},x);
+  }).filter(Boolean);
+  return [...pat,...oneOff].sort((a,b)=>a.s<b.s?-1:1);
 }
 function renderCalendar(){
   const base=startOfWeek(new Date());base.setDate(base.getDate()+calOffset*7);
@@ -1411,18 +1455,19 @@ function renderCalendar(){
         <button onclick="calNav(1)">next ›</button>
       </div>
       <div class="cal-title">${fmt.format(base)} – ${fmt.format(end)}</div>
-      <button class="cal-btn" onclick="avPatternOpen=!avPatternOpen;renderCalendar()">${avPatternOpen?'Hide':'Set'} weekly pattern</button>
+      <button class="cal-btn" onclick="avPatternOpen=!avPatternOpen;renderCalendar()">${avPatternOpen?'Hide':'⚙'} permanent schedule</button>
     </div>
     ${avPatternOpen?patternEditor():''}
     ${[0,1,2,3,4,5,6].map(off=>renderCalDay(base,off)).join('')}`;
 }
 function patternEditor(){
+  const shiftLabel=sh=>{const r=shiftToRange(sh);return sh+' <span style="font-weight:400;color:var(--soft);font-size:10px">'+r.s+'–'+r.e+'</span>';};
   return `<div class="pattern-card">
-    <h4>Weekly availability pattern</h4>
-    <div class="sub">Pick which shifts you're typically available — these become the open slots candidates can book on the public link. Specific dates can override this below.</div>
+    <h4>Permanent weekly schedule</h4>
+    <div class="sub">Pick the shifts you're typically available — these become recurring open blocks candidates can book against. Specific days can be overridden below.</div>
     ${DAYS.map(d=>{const on=(AVAIL.pattern[d]||[]).length>0;
-      return `<div class="day-row ${on?'':'off'}"><div class="day-lbl">${d}</div><div class="shifts">${SHIFTS.map(sh=>`<button class="${(AVAIL.pattern[d]||[]).includes(sh)?'on':''}" onclick="togPatternShift('${d}','${sh}')">${sh}</button>`).join('')}</div></div>`;}).join('')}
-    <div style="margin-top:12px;font-size:11.5px;color:var(--soft)">Shifts roughly map to: Morning 9-11am · Afternoon 1-3pm · Evening 5-7pm · Overnight 8-9pm. Booked candidates show in gold below.</div>
+      return `<div class="day-row ${on?'':'off'}"><div class="day-lbl">${d}</div><div class="shifts">${SHIFTS.map(sh=>`<button class="${(AVAIL.pattern[d]||[]).includes(sh)?'on':''}" onclick="togPatternShift('${d}','${sh}')">${shiftLabel(sh)}</button>`).join('')}</div></div>`;}).join('')}
+    <div style="margin-top:12px;font-size:11.5px;color:var(--soft)">Shift hours: Morning 9–12 · Afternoon 1–5 · Evening 5–8 · Overnight 8pm–6am. Changes save instantly.</div>
   </div>`;
 }
 async function togPatternShift(day,sh){AVAIL.pattern[day]=AVAIL.pattern[day]||[];const i=AVAIL.pattern[day].indexOf(sh);if(i<0)AVAIL.pattern[day].push(sh);else AVAIL.pattern[day].splice(i,1);
@@ -1434,25 +1479,29 @@ function renderCalDay(base,off){
   const booked=[];
   pipeline.forEach(c=>{if(c.stage==='Declined')return;if(c.st.booking&&c.st.booking.slice(0,10)===iso)booked.push({c,t:c.st.booking.slice(11,16)});});
   booked.sort((a,b)=>a.t<b.t?-1:1);
-  const openRows=opens.map(s=>{const t=s.slice(11,16);const t12=new Date('2000-01-01T'+t).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
-    return `<div class="cal-slot open"><div class="t">${t12}</div><div class="who">Available — open for booking</div><div class="act"><button class="close-btn" onclick="closeSlotAt('${iso}','${t}')">Close</button></div></div>`;}).join('');
-  const bookRows=booked.map(({c,t})=>{const t12=new Date('2000-01-01T'+t).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
-    return `<div class="cal-slot booked"><div class="t">${t12}</div><div class="who"><span class="nm">${esc(c.name)}</span> <span class="pill pa" style="font-size:9px">${esc(c.stage)}</span><span class="ph">${esc(c.phone||'')}</span></div><div class="act"><button class="open-btn" onclick="openWorkspace(${c.excelRow})">Open</button></div></div>`;}).join('');
-  const addForm=`<div class="addslot-form"><input type="time" id="atime_${iso}" placeholder="HH:MM"><button onclick="addOneOffSlot('${iso}')">+ add slot</button></div>`;
+  const fmt12=t=>new Date('2000-01-01T'+t).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+  const openRows=opens.map(slot=>{const ts=slot.s.slice(11,16),te=slot.e.slice(11,16);
+    const src=slot.src==='pattern'?'<span style="font-size:10px;color:var(--soft);font-style:normal;margin-left:6px">• from schedule</span>':'';
+    return `<div class="cal-slot open"><div class="t" style="width:auto;min-width:140px">${fmt12(ts)} – ${fmt12(te)}</div><div class="who">Available — open for booking${src}</div><div class="act"><button class="close-btn" onclick="closeSlotAt('${iso}','${ts}')">Close</button></div></div>`;}).join('');
+  const bookRows=booked.map(({c,t})=>{return `<div class="cal-slot booked"><div class="t" style="width:auto;min-width:80px">${fmt12(t)}</div><div class="who"><span class="nm">${esc(c.name)}</span> <span class="pill pa" style="font-size:9px">${esc(c.stage)}</span><span class="ph">${esc(c.phone||'')}</span></div><div class="act"><button class="open-btn" onclick="openWorkspace(${c.excelRow})">Open</button></div></div>`;}).join('');
+  const addForm=`<div class="addslot-form"><label style="font-size:10.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.08em">from</label><input type="time" id="atimes_${iso}" style="max-width:120px"><label style="font-size:10.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.08em">to</label><input type="time" id="atimee_${iso}" style="max-width:120px"><button onclick="addOneOffSlot('${iso}')">+ add block</button></div>`;
   return `<div class="cal-day ${isToday?'today':''}"><h3>${fmtDayLong(iso)} ${isToday?'<span class="today-tag">TODAY</span>':''}</h3>
-    ${(openRows+bookRows)||'<div class="cal-empty">No slots open. Add one below or use the weekly pattern.</div>'}
+    ${(openRows+bookRows)||'<div class="cal-empty">No availability. Add a time block below or set your permanent schedule.</div>'}
     ${addForm}</div>`;
 }
 function calNav(n){if(n===0)calOffset=0;else calOffset+=n;renderCalendar();}
-async function addOneOffSlot(iso){const t=document.getElementById('atime_'+iso).value;if(!t){toast('Pick a time');return;}
-  const dt=iso+'T'+t;AVAIL.slots=AVAIL.slots||[];if(AVAIL.slots.indexOf(dt)<0)AVAIL.slots.push(dt);
+async function addOneOffSlot(iso){const s=document.getElementById('atimes_'+iso).value;const e=document.getElementById('atimee_'+iso).value;
+  if(!s||!e){toast('Pick start and end times');return;}
+  if(e<=s){toast('End must be after start');return;}
+  AVAIL.slots=AVAIL.slots||[];AVAIL.slots.push({s:iso+'T'+s,e:iso+'T'+e});
   if(AVAIL.offs.indexOf(iso)>=0)AVAIL.offs=AVAIL.offs.filter(x=>x!==iso);
   await saveAvailability();renderCalendar();}
-async function closeSlotAt(iso,time){
-  /* if it's a one-off slot, remove from slots; if it's from pattern, mark day off (closing the specific time isn't possible) */
-  const dt=iso+'T'+time;
-  if((AVAIL.slots||[]).includes(dt)){AVAIL.slots=AVAIL.slots.filter(x=>x!==dt);}
-  else{if(!confirm('That slot comes from your weekly pattern. Close the whole day?'))return;AVAIL.offs=AVAIL.offs||[];if(!AVAIL.offs.includes(iso))AVAIL.offs.push(iso);}
+async function closeSlotAt(iso,startTime){
+  const dt=iso+'T'+startTime;const before=(AVAIL.slots||[]).length;
+  AVAIL.slots=(AVAIL.slots||[]).filter(x=>{if(typeof x==='string')return x!==dt;return x.s!==dt;});
+  if(AVAIL.slots.length<before){await saveAvailability();renderCalendar();return;}
+  if(!confirm('That block comes from your permanent schedule. Close the whole day?'))return;
+  AVAIL.offs=AVAIL.offs||[];if(!AVAIL.offs.includes(iso))AVAIL.offs.push(iso);
   await saveAvailability();renderCalendar();}
 
 /* ===================== add candidate ===================== */
