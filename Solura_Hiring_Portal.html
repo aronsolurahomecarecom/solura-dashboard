@@ -445,33 +445,138 @@ td{padding:13px 16px;vertical-align:top;}
 </style>
 <body>
 <style>
-/* hiring-specific additions on top of the lead-dashboard design system */
-#filterbar{display:none;padding:0 20px 4px;}
-.fgroup{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:7px;}
-.fglabel{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--soft);margin-right:2px;min-width:54px;}
-.fchip{font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:600;padding:4px 11px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--mid);cursor:pointer;transition:all .12s;}
+/* hiring-specific additions */
+.tabs-bar{display:none;align-items:center;gap:4px;}
+.tab-btn{font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;color:rgba(255,255,255,.7);background:transparent;border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:7px 14px;cursor:pointer;transition:all .15s;}
+.tab-btn:hover{background:rgba(255,255,255,.1);color:#fff;}
+.tab-btn.on{background:rgba(255,255,255,.15);color:#fff;border-color:var(--gold-mid);}
+.filterbtn{font-family:inherit;font-size:12px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:7px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .15s;}
+.filterbtn:hover{background:rgba(255,255,255,.18);color:#fff;}
+.filterbtn.on{background:var(--gold);color:#fff;border-color:var(--gold);}
+.filterbtn .ct{font-size:10px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:8px;font-weight:700;}
+#filterpanel{display:none;background:#fff;border-bottom:1px solid var(--border);box-shadow:var(--shadow-sm);padding:14px 20px;}
+#filterpanel.open{display:block;}
+.fpgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px 22px;}
+.fpgroup label{display:block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--soft);margin-bottom:6px;}
+.fchip{font-family:inherit;font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--mid);cursor:pointer;transition:all .12s;margin:0 4px 4px 0;}
 .fchip:hover{border-color:var(--sky-mid);}
 .fchip.on{background:var(--sky-deep);color:#fff;border-color:var(--sky-deep);}
-.fchip.clear{color:var(--red);border-color:#EFC4C0;background:var(--red-pale);}
+.fpfoot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);}
+.fpfoot .clr{font-family:inherit;font-size:11px;font-weight:600;color:var(--red);background:none;border:none;cursor:pointer;}
+.fpinput{font-family:inherit;font-size:12px;padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;outline:none;width:100%;background:#fff;}
+.fpinput:focus{border-color:var(--sky-mid);}
+
 .bandpill{font-size:11px;font-weight:800;letter-spacing:.02em;padding:4px 11px;border-radius:999px;display:inline-block;}
 .cbadge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:7px;display:inline-block;background:var(--gold-pale);color:#9A6100;border:1px solid var(--gold-mid);}
 .dlbadge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:7px;display:inline-block;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);}
 .xpill{font-size:10px;font-weight:600;padding:3px 8px;border-radius:999px;display:inline-block;background:#EFEAFC;color:#5B4BAA;border:1px solid #D9D2F3;}
-.srctag{font-size:10px;color:var(--soft);font-weight:600;}
 .matchbadge{font-size:10px;font-weight:800;padding:3px 9px;border-radius:7px;display:inline-block;margin-top:5px;}
 .match-ok{background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid);}
 .match-no{background:var(--red-pale);color:var(--red);border:1px solid #EFC4C0;}
-.mbox.wide{max-width:880px;}
-.work-grid{display:grid;grid-template-columns:1fr 300px;gap:18px;}
-@media(max-width:760px){.work-grid{grid-template-columns:1fr;}}
+
+/* full-page workspace (cloned from assessment pattern) */
+.wsoverlay{position:fixed;inset:0;background:rgba(10,20,40,.5);z-index:500;backdrop-filter:blur(4px);opacity:0;visibility:hidden;transition:opacity .25s ease,visibility 0s linear .25s;}
+.wsoverlay.open{opacity:1;visibility:visible;transition:opacity .25s ease,visibility 0s linear 0s;}
+.workspace{position:fixed;top:40px;left:60px;right:60px;bottom:40px;background:var(--warm);border-radius:18px;z-index:501;box-shadow:0 30px 80px rgba(0,0,0,.4);overflow:hidden;display:flex;flex-direction:column;border:2px solid var(--gold-mid);opacity:0;visibility:hidden;transform:scale(.97) translateY(10px);transition:opacity .28s ease,transform .28s cubic-bezier(.4,0,.2,1),visibility 0s linear .28s;}
+.workspace.open{opacity:1;visibility:visible;transform:scale(1) translateY(0);transition:opacity .28s ease,transform .28s cubic-bezier(.4,0,.2,1),visibility 0s linear 0s;}
+@media (max-width:900px){.workspace{left:16px;right:16px;top:20px;bottom:20px;}}
+.wshead{background:linear-gradient(135deg,#1A3F72,var(--sky-deep));padding:16px 28px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--gold);flex-shrink:0;gap:14px;flex-wrap:wrap;}
+.wshead-l{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.wshead-t{font-family:'Cormorant Garamond',serif;font-size:24px;font-weight:500;color:var(--gold);line-height:1.05;}
+.wshead-s{font-size:11.5px;color:rgba(255,255,255,.75);}
+.wshead-s a{color:rgba(255,255,255,.9);text-decoration:none;}
+.wshead-s a:hover{color:var(--gold-mid);}
+.wshead-r{display:flex;align-items:center;gap:8px;}
+.wsclose{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.2);color:#fff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;}
+.wsclose:hover{background:rgba(255,255,255,.28);}
+.wsbody{flex:1;overflow-y:auto;padding:24px 32px 80px;background:#fff;}
+@media (max-width:900px){.wsbody{padding:18px 18px 60px;}}
+.wsgrid{display:grid;grid-template-columns:1.7fr 1fr;gap:22px;}
+@media (max-width:900px){.wsgrid{grid-template-columns:1fr;}}
+.wscard{background:#fff;border:1px solid var(--border-soft);border-radius:14px;padding:18px 20px;margin-bottom:18px;box-shadow:var(--shadow-sm);}
+.wscard.warm{background:var(--cream);}
+.wscard h3{font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600;color:var(--sky-deep);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.wscard h4{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--soft);margin-bottom:10px;}
+.kvrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-soft);font-size:13px;}
+.kvrow:last-child{border-bottom:none;}
+.kvrow .lbl{color:var(--soft);font-size:11.5px;font-weight:600;}
+.kvrow .val{color:var(--dark);font-weight:600;text-align:right;}
+.scorebig{display:flex;gap:22px;align-items:baseline;margin:6px 0 10px;}
+.scorebig .blk{flex:1;}
+.scorebig .lab{font-size:10px;color:var(--soft);text-transform:uppercase;letter-spacing:.08em;font-weight:700;}
+.scorebig .num{font-family:'Cormorant Garamond',serif;font-size:40px;color:var(--sky-deep);line-height:1;font-weight:600;}
+.stepper-ws{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
+.stepper-ws .step{font-size:10px;font-weight:600;color:var(--soft);background:#fff;border:1px solid var(--border);border-radius:999px;padding:3px 9px;}
+.stepper-ws .step.done{color:var(--grn);border-color:var(--grn-mid);background:var(--grn-pale);}
+.stepper-ws .step.cur{color:#fff;background:var(--sky-deep);border-color:var(--sky-deep);}
+.ws-this{background:linear-gradient(135deg,#FAF6EE,#FEF7E8);border:1px solid var(--gold-mid);border-radius:14px;padding:18px 20px;margin-bottom:18px;}
+.ws-this h3{color:var(--sky-deep);margin-bottom:6px;}
+.ws-this .why{font-size:12.5px;color:var(--mid);margin-bottom:14px;line-height:1.4;}
+.ws-actrow{display:flex;flex-direction:column;gap:8px;}
+.ws-pri{padding:13px 18px;background:linear-gradient(135deg,var(--sky-deep),#1A3F72);color:#fff;border:none;border-radius:10px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 10px rgba(30,78,140,.3);transition:all .15s;}
+.ws-pri:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(30,78,140,.4);}
+.ws-pri.gold{background:linear-gradient(135deg,var(--gold),#D4920F);box-shadow:0 2px 10px rgba(200,135,10,.35);}
+.ws-pri.grn{background:linear-gradient(135deg,var(--grn),#2D5C25);box-shadow:0 2px 10px rgba(61,122,52,.35);}
+.ws-pri.lock{background:var(--softer);color:#fff;cursor:not-allowed;box-shadow:none;}
+.ws-pri.lock:hover{transform:none;box-shadow:none;}
+.ws-sec-row{display:flex;gap:8px;}
+.ws-sec{flex:1;padding:9px 12px;background:#fff;color:var(--mid);border:1px solid var(--border);border-radius:9px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;text-align:center;}
+.ws-sec:hover{border-color:var(--sky-mid);color:var(--sky-deep);}
+.ws-sec.danger{color:var(--red);border-color:#EFC4C0;}
+.ws-sec.danger:hover{background:var(--red-pale);}
+
+.gatesrow{display:flex;flex-wrap:wrap;gap:7px;}
+.gateitem{display:flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--border);border-radius:999px;padding:4px 6px 4px 12px;font-size:12px;}
+.gateitem .yn{display:flex;gap:4px;}
+.gateitem .yn button{width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:#fff;color:var(--soft);font-size:10px;font-weight:700;cursor:pointer;}
+.gateitem .yn button.y.on{background:var(--grn);color:#fff;border-color:var(--grn);}
+.gateitem .yn button.n.on{background:var(--red);color:#fff;border-color:var(--red);}
+
 .qrow{padding:10px 0;border-bottom:1px solid var(--border-soft);}
 .qrow .qq{font-size:13px;font-weight:500;margin-bottom:8px;color:var(--dark);}
 .qopts{display:flex;flex-wrap:wrap;gap:6px;}
 .qopts button{font-family:inherit;font-size:11.5px;font-weight:600;padding:6px 11px;border-radius:8px;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--mid);}
 .qopts button:hover{border-color:var(--sky-mid);}
 .qopts button.on{background:var(--sky-deep);color:#fff;border-color:var(--sky-deep);}
-.wpanel{background:var(--cream);border:1px solid var(--border-soft);border-radius:12px;padding:14px;}
-.wpanel h4{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);margin-bottom:8px;}
+.lrow{display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border-soft);}
+.lrow input{flex:1;font-family:inherit;font-size:12.5px;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;outline:none;}
+.lrow input:focus{border-color:var(--sky-mid);}
+.lrow .vbtns{display:flex;gap:4px;flex:none;}
+.lrow .vbtns button{font-family:inherit;font-size:10.5px;font-weight:600;padding:5px 9px;border-radius:6px;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--mid);}
+.lrow .vbtns button.ok.on{background:var(--grn);color:#fff;border-color:var(--grn);}
+.lrow .vbtns button.no.on{background:var(--soft);color:#fff;border-color:var(--soft);}
+
+.docrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-soft);font-size:13px;}
+.docrow a{color:var(--sky-deep);text-decoration:none;font-weight:600;flex:1;}
+.docrow a:hover{color:var(--gold);}
+.docrow .sz{font-size:11px;color:var(--soft);}
+.uploadbtn{display:inline-flex;align-items:center;gap:6px;font-family:inherit;font-size:12px;font-weight:600;color:var(--sky-deep);background:var(--sky-pale);border:1px dashed var(--sky-mid);border-radius:8px;padding:8px 14px;cursor:pointer;transition:all .15s;}
+.uploadbtn:hover{background:var(--sky-mid);color:#fff;}
+.logentry{font-size:12px;color:var(--mid);padding:6px 0;border-bottom:1px solid var(--border-soft);line-height:1.5;}
+.logentry:last-child{border:none;}
+.logentry .when{color:var(--soft);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-right:6px;}
+
+/* calendar */
+.cal-head{display:flex;align-items:center;gap:12px;padding:12px 18px;background:#fff;border:1px solid var(--border-soft);border-radius:12px;box-shadow:var(--shadow-sm);margin-bottom:14px;flex-wrap:wrap;}
+.cal-nav{display:flex;align-items:center;gap:8px;}
+.cal-nav button{font-family:inherit;font-size:13px;font-weight:600;color:var(--mid);background:#fff;border:1px solid var(--border);border-radius:7px;padding:5px 10px;cursor:pointer;}
+.cal-nav button:hover{border-color:var(--sky-mid);}
+.cal-title{font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep);font-weight:600;flex:1;}
+.cal-day{background:#fff;border:1px solid var(--border-soft);border-radius:12px;padding:14px 18px;margin-bottom:10px;box-shadow:var(--shadow-sm);}
+.cal-day h3{font-size:13px;color:var(--sky-deep);margin-bottom:8px;font-weight:700;display:flex;justify-content:space-between;align-items:center;}
+.cal-day h3 .dadd{font-size:11px;font-weight:600;color:var(--gold);background:var(--gold-pale);border:1px solid var(--gold-mid);border-radius:7px;padding:3px 9px;cursor:pointer;}
+.cal-slot{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--border-soft);font-size:13px;}
+.cal-slot .t{font-size:13px;font-weight:700;color:var(--sky-deep);width:74px;flex:none;}
+.cal-slot .who{flex:1;}
+.cal-slot .who .nm{font-weight:700;color:var(--dark);}
+.cal-slot .who .ph{font-size:11.5px;color:var(--soft);}
+.cal-slot .act{display:flex;gap:4px;}
+.cal-slot .act button{font-family:inherit;font-size:10.5px;font-weight:600;padding:4px 9px;border-radius:6px;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--mid);}
+.cal-slot .act .open{background:var(--sky-deep);color:#fff;border-color:var(--sky-deep);}
+.cal-slot .act .close{color:var(--red);border-color:#EFC4C0;}
+.cal-empty{font-size:12px;color:var(--soft);padding:8px 0 4px;}
+
+.spin{display:inline-block;width:13px;height:13px;border:2px solid var(--border);border-top-color:var(--sky);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px;}
 </style>
 
 <div class="hdr">
@@ -481,16 +586,19 @@ td{padding:13px 16px;vertical-align:top;}
   </div>
   <div class="hdr-search" id="hdr-search-wrap" style="display:none">
     <span class="hdr-search-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><line x1="11" y1="11" x2="14" y2="14"/></svg></span>
-    <input type="text" id="search" placeholder="Search candidates — name, email, expertise…" autocomplete="off" oninput="render()">
+    <input type="text" id="search" placeholder="Search candidates…" autocomplete="off" oninput="render()">
   </div>
   <div class="hdr-r">
+    <div class="tabs-bar" id="tabsbar">
+      <button class="tab-btn on" id="tab-pipe" onclick="setView('pipeline')">Pipeline</button>
+      <button class="tab-btn" id="tab-cal" onclick="setView('calendar')">Calendar</button>
+    </div>
+    <button class="filterbtn" id="btn-filter" style="display:none" onclick="toggleFilterPanel()">⚙ Filter <span class="ct" id="filterct" style="display:none">0</span></button>
     <div class="sync-pill"><div class="sdot" id="sdot"></div><span id="slabel">Not connected</span></div>
-    <button class="hbtn hbtn-gold" id="btn-add" style="display:none" onclick="openAdd()">+ Add candidate</button>
+    <button class="hbtn hbtn-gold" id="btn-add" style="display:none" onclick="openAdd()">+ Add</button>
     <button class="hbtn hbtn-ghost" id="btn-out" style="display:none" onclick="signOut()">Sign out</button>
   </div>
 </div>
-
-<div class="err" id="err" style="display:none"></div>
 
 <div id="ls">
   <div class="lcard">
@@ -512,28 +620,39 @@ td{padding:13px 16px;vertical-align:top;}
   <div class="kv"><div class="kv-label">In Pipeline</div><div class="kv-num soft" id="kv4">0</div><div class="kv-sub">active total</div></div>
 </div>
 
-<div id="filterbar"></div>
+<div id="filterpanel"></div>
 
 <div id="main">
-  <div class="sync-bar">
+  <div class="sync-bar" id="sync-bar">
     <div class="sync-file"><div class="sync-dot"></div><span>Solura_Hiring_Engine.xlsx — SharePoint</span></div>
     <div class="sync-time" id="sync-time"></div>
   </div>
-  <div class="sw" id="sw-0"><div class="shdr" onclick="toggleBucket(0)"><div class="sdot2 red"></div><div class="stitle">Action needed — your move</div><div class="scnt" id="c0">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t0"></tbody></table></div></div>
-  <div class="sw" id="sw-1"><div class="shdr" onclick="toggleBucket(1)"><div class="sdot2 gold"></div><div class="stitle">Awaiting candidate</div><div class="scnt" id="c1">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t1"></tbody></table></div></div>
-  <div class="sw" id="sw-2"><div class="shdr" onclick="toggleBucket(2)"><div class="sdot2 sky"></div><div class="stitle">Checks running</div><div class="scnt" id="c2">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t2"></tbody></table></div></div>
-  <div class="sw collapsed" id="sw-3"><div class="shdr" onclick="toggleBucket(3)"><div class="sdot2 grn"></div><div class="stitle">Hired</div><div class="scnt" id="c3">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Match status</th><th>Sequence</th><th></th></tr></thead><tbody id="t3"></tbody></table></div></div>
-  <div class="sw sw-all collapsed" id="sw-4" style="margin-top:8px"><div class="shdr" onclick="toggleBucket(4)"><div class="sdot2 soft"></div><div class="stitle">All candidates in pipeline</div><div class="scnt" id="c4">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t4"></tbody></table></div></div>
+  <div id="pipeline-view">
+    <div class="sw" id="sw-0"><div class="shdr" onclick="toggleBucket(0)"><div class="sdot2 red"></div><div class="stitle">Action needed — your move</div><div class="scnt" id="c0">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t0"></tbody></table></div></div>
+    <div class="sw" id="sw-1"><div class="shdr" onclick="toggleBucket(1)"><div class="sdot2 gold"></div><div class="stitle">Awaiting candidate</div><div class="scnt" id="c1">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t1"></tbody></table></div></div>
+    <div class="sw" id="sw-2"><div class="shdr" onclick="toggleBucket(2)"><div class="sdot2 sky"></div><div class="stitle">Checks running</div><div class="scnt" id="c2">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t2"></tbody></table></div></div>
+    <div class="sw collapsed" id="sw-3"><div class="shdr" onclick="toggleBucket(3)"><div class="sdot2 grn"></div><div class="stitle">Hired</div><div class="scnt" id="c3">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Match status</th><th>Sequence</th><th></th></tr></thead><tbody id="t3"></tbody></table></div></div>
+    <div class="sw sw-all collapsed" id="sw-4" style="margin-top:8px"><div class="shdr" onclick="toggleBucket(4)"><div class="sdot2 soft"></div><div class="stitle">All candidates in pipeline</div><div class="scnt" id="c4">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t4"></tbody></table></div></div>
+  </div>
+  <div id="calendar-view" style="display:none"></div>
 </div>
 
-<!-- generic modal -->
-<div class="modal" id="modal"><div class="mbox" id="mbox"><div class="mhead"><div class="mtitle" id="m-title">—</div><button class="mclose" onclick="closeModal()">✕</button></div><div class="mbody" id="m-body"></div></div></div>
+<!-- generic modal (email / quick prompts) -->
+<div class="modal" id="modal"><div class="mbox" id="mbox" style="max-width:640px"><div class="mhead"><div class="mtitle" id="m-title">—</div><button class="mclose" onclick="closeModal()">✕</button></div><div class="mbody" id="m-body"></div></div></div>
 
-<!-- candidate drawer -->
-<div class="doverlay" id="doverlay" onclick="closeDrawer()"></div>
-<aside class="drawer" id="drawer">
-  <div class="dhead"><div class="dname" id="d-name">—</div><button class="dclose" onclick="closeDrawer()">✕</button></div>
-  <div class="dbody" id="d-body"></div>
+<!-- full-page candidate workspace -->
+<div class="wsoverlay" id="wsoverlay" onclick="closeWorkspace()"></div>
+<aside class="workspace" id="workspace">
+  <div class="wshead">
+    <div class="wshead-l">
+      <div class="wshead-t" id="ws-name">—</div>
+      <div class="wshead-s" id="ws-sub"></div>
+    </div>
+    <div class="wshead-r">
+      <button class="wsclose" onclick="closeWorkspace()">✕</button>
+    </div>
+  </div>
+  <div class="wsbody" id="ws-body"></div>
 </aside>
 
 <!-- add candidate drawer -->
@@ -543,17 +662,19 @@ td{padding:13px 16px;vertical-align:top;}
   <div class="dbody" id="a-body"></div>
 </aside>
 
-<div class="toast" id="toast" style="position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--dark);color:#fff;font-size:13px;font-weight:600;padding:11px 20px;border-radius:999px;box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;transition:all .25s;z-index:400"></div>
+<div class="toast" id="toast" style="position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--dark);color:#fff;font-size:13px;font-weight:600;padding:11px 20px;border-radius:999px;box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;transition:all .25s;z-index:600"></div>
 
 <script>
-/* ===================== Microsoft Graph wiring ===================== */
+/* ===================== Graph wiring (Mail.Send + Mail.ReadWrite added) ===================== */
 const CLIENT_ID='bf86d4a3-f6bb-4ad7-991e-098d632b2c0b';
 const FILE_URL='https://solurahomecare.sharepoint.com/:x:/s/careers9/IQCLjIDe38W4SbS2p7XrEVi7ARw5Swud_Tm7rES6x7yfvaw?e=gMrkph';
 const TENANT='1b2cdbea-de19-47d2-9512-ea102905e3eb',SHEET='Pipeline';
-const SCOPES='openid profile email Files.ReadWrite.All offline_access';
+const SCOPES='openid profile email Files.ReadWrite.All Sites.ReadWrite.All Mail.Send Mail.ReadWrite offline_access';
 const GR='https://graph.microsoft.com/v1.0',REDIRECT=location.href.split('?')[0].split('#')[0];
-let tok='',driveId='',itemId='',pipeline=[],nextRow=null,collapsed={0:false,1:false,2:false,3:true,4:true};
-let F={stage:new Set(),band:new Set(),source:new Set(),cert:new Set()};
+let tok='',driveId='',itemId='',pipeline=[],nextRow=null;
+let collapsed={0:false,1:false,2:false,3:true,4:true};
+let F={stage:new Set(),band:new Set(),source:new Set(),cert:new Set(),expertise:new Set(),zip:''};
+let view='pipeline',calOffset=0,wsRow=null;
 
 async function genPKCE(){const v=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b=>b.toString(16).padStart(2,'0')).join('');
   const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));
@@ -569,7 +690,7 @@ async function handleAuthCallback(){const code=new URLSearchParams(location.sear
   try{const r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:CLIENT_ID,code:code,redirect_uri:REDIRECT,grant_type:'authorization_code',code_verifier:ver})});
     const j=await r.json();if(j.access_token){tok=j.access_token;sessionStorage.setItem('ht',tok);if(j.refresh_token)localStorage.setItem('hr',j.refresh_token);await onSignedIn();}else toast('Sign-in error: '+(j.error_description||j.error||'unknown'));}catch(e){toast('Sign-in error: '+e.message);}return true;}
 async function gfetch(url,opts){opts=opts||{};opts.headers=opts.headers||{};opts.headers['Authorization']='Bearer '+tok;
-  if(opts.body&&!opts.headers['Content-Type'])opts.headers['Content-Type']='application/json';
+  if(opts.body&&!opts.headers['Content-Type']&&!(opts.body instanceof Blob||opts.body instanceof ArrayBuffer))opts.headers['Content-Type']='application/json';
   let r=await fetch(url,opts);if(r.status===401&&await refreshToken()){opts.headers['Authorization']='Bearer '+tok;r=await fetch(url,opts);}return r;}
 function encodeShareUrl(u){return 'u!'+btoa(unescape(encodeURIComponent(u))).replace(/=+$/,'').replace(/\//g,'_').replace(/\+/g,'-');}
 function setConn(on){
@@ -578,10 +699,11 @@ function setConn(on){
   document.getElementById('ls').style.display=on?'none':'flex';
   document.getElementById('kbar').style.display=on?'grid':'none';
   document.getElementById('main').style.display=on?'block':'none';
-  document.getElementById('filterbar').style.display=on?'block':'none';
   document.getElementById('btn-out').style.display=on?'inline-block':'none';
   document.getElementById('btn-add').style.display=on?'inline-block':'none';
+  document.getElementById('btn-filter').style.display=on?'flex':'none';
   document.getElementById('hdr-search-wrap').style.display=on?'flex':'none';
+  document.getElementById('tabsbar').style.display=on?'flex':'none';
 }
 async function onSignedIn(){setConn(true);
   try{const r=await gfetch(GR+'/shares/'+encodeShareUrl(FILE_URL)+'/driveItem?$select=id,parentReference,name');
@@ -591,14 +713,23 @@ async function patchRange(addr,values){const base=GR+'/drives/'+driveId+'/items/
   const r=await gfetch(base+"/range(address='"+addr+"')",{method:'PATCH',body:JSON.stringify({values:values})});
   if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||r.status);}}
 
+/* Graph sendMail — no Power Automate needed */
+async function sendMailViaGraph(to,subject,bodyText){
+  const html='<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#111;white-space:pre-wrap">'+esc(bodyText)+'</div>';
+  const msg={subject:subject,body:{contentType:'HTML',content:html},toRecipients:[{emailAddress:{address:to}}]};
+  const r=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:msg,saveToSentItems:true})});
+  if(!(r.ok||r.status===202)){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||('Send failed '+r.status));}
+}
+
 /* ===================== scoring engine ===================== */
 const QW={rel:15,com:12,jud:12,doc:11,ref:20,cmp:20,phn:10},RW={ten:40,prx:20,ava:15,exp:25};
-const GATES=[["wa","Work auth"],["cr","Credential"],["bg","Bkgd clearable"],["tr","Transport"],["av","Availability"]];
+const GATES=[["wa","Work authorization"],["cr","Credential"],["bg","Background clearable"],["tr","Transport"],["av","Availability"]];
 const BANDCSS={grn:["#EBF5EA","#3D7A34"],sky:["#EBF3FB","#1E4E8C"],gold:["#FEF7E8","#9A6100"],red:["#FDECEA","#B03025"],grey:["#F2EDE4","#9CA3AF"]};
 function progressive(s,w){let n=0,t=0;for(const k in w){if(s[k]){n+=s[k]/5*w[k];t+=w[k];}}return t===0?null:Math.round(n/t*100);}
 function qComplete(q){return ['rel','com','jud','doc','ref','cmp','phn'].every(k=>q[k]);}
 function rComplete(r){return ['ten','prx','ava','exp'].every(k=>r[k]);}
 function gateState(g){const set=GATES.filter(([k])=>g[k]).length;if(set<5)return'partial';return GATES.every(([k])=>g[k]==='Y')?'PASS':'FAIL';}
+function missingGateLabels(g){return GATES.filter(([k])=>!g[k]).map(([,l])=>l);}
 function decide(Q,R,q,r,gs){if(gs==='FAIL')return{band:'DECLINE (gate)',cls:'red'};
   if(gs!=='PASS'||!qComplete(q)||!rComplete(r))return{band:'In progress',cls:'grey'};
   if(Q>=70&&R>=70)return{band:'HIRE TRACK',cls:'grn'};if(Q>=70&&R>=55)return{band:'CONDITIONAL',cls:'sky'};
@@ -606,7 +737,7 @@ function decide(Q,R,q,r,gs){if(gs==='FAIL')return{band:'DECLINE (gate)',cls:'red
 function n(x){return(x===''||x==null)?undefined:Number(x);}
 function scoreRow(c){const row=c.row,q={rel:n(row[13]),com:n(row[14]),jud:n(row[15]),doc:n(row[16]),ref:n(row[17]),cmp:n(row[18]),phn:n(row[19])};
   const r={ten:n(row[21]),prx:n(row[22]),ava:n(row[23]),exp:n(row[24])},g={wa:row[7],cr:row[8],bg:row[9],tr:row[10],av:row[11]};
-  const Q=progressive(q,QW),R=progressive(r,RW);return{Q,R,q,r,g,dec:decide(Q,R,q,r,gateState(g))};}
+  const Q=progressive(q,QW),R=progressive(r,RW);return{Q,R,q,r,g,dec:decide(Q,R,q,r,gateState(g)),gateStatus:gateState(g),missingGates:missingGateLabels(g)};}
 
 /* ===================== question bank ===================== */
 const QBANK=[
@@ -637,112 +768,155 @@ const QBANK=[
  {id:"q25",st:"Reference",dim:"ten",q:"How long there, why leave?",o:[["Long, well",5],["Moderate",3],["Short/badly",1]]}
 ];
 
-/* ===================== sequence definition ===================== */
+/* ===================== sequence + stage info ===================== */
 const FLOW=['Applied','Screen invite','Screen booked','Verify employers','References','Background','Interview invite','Interview booked','Offer','Onboarding','Hired'];
+const FLOW_SHORT={'Applied':'Apply','Screen invite':'Invite','Screen booked':'Screen','Verify employers':'Verify','References':'Refs','Background':'Checks','Interview invite':'Invite','Interview booked':'Interview','Offer':'Offer','Onboarding':'Onboard','Hired':'Hired'};
 const STAGEINFO={
- 'Applied':{phase:'New',next:'Review & decide',icon:'🔍',method:'review',color:['#EBF3FB','#1E4E8C']},
- 'Screen invite':{phase:'Screening',next:'Send screen invite',icon:'✉',method:'email',tpl:'screen_invite',color:['#FEF7E8','#9A6100']},
- 'Screen booked':{phase:'Screening',next:'Run 15-min screen',icon:'📞',method:'screen',color:['#FEF7E8','#9A6100']},
- 'Verify employers':{phase:'Verify',next:'Verify past employers',icon:'✓',method:'verify',color:['#EFEAFC','#5B4BAA']},
- 'References':{phase:'References',next:'Call references',icon:'📞',method:'refs',color:['#EFEAFC','#5B4BAA']},
- 'Background':{phase:'Background',next:'Certs & checks',icon:'🛡',method:'checks',color:['#EFEAFC','#5B4BAA']},
- 'Interview invite':{phase:'Interview',next:'Send interview invite',icon:'✉',method:'email',tpl:'interview_invite',color:['#EBF3FB','#1E4E8C']},
- 'Interview booked':{phase:'Interview',next:'Run interview',icon:'📋',method:'interview',color:['#EBF3FB','#1E4E8C']},
- 'Offer':{phase:'Offer',next:'Send offer',icon:'✉',method:'offer',color:['#EBF5EA','#3D7A34']},
- 'Onboarding':{phase:'Onboarding',next:'Send onboarding',icon:'✉',method:'onboarding',color:['#EBF5EA','#3D7A34']},
- 'Hired':{phase:'Hired',next:'Retention check-in',icon:'✓',method:'checkin',color:['#EBF5EA','#3D7A34']},
- 'Declined':{phase:'Closed',next:'',icon:'',method:'',color:['#FDECEA','#B03025']}
+ 'Applied':{phase:'New',next:'Review',color:['#EBF3FB','#1E4E8C']},
+ 'Screen invite':{phase:'Screening',next:'Send screen invite',color:['#FEF7E8','#9A6100']},
+ 'Screen booked':{phase:'Screening',next:'Run phone screen',color:['#FEF7E8','#9A6100']},
+ 'Verify employers':{phase:'Verify',next:'Verify past employers',color:['#EFEAFC','#5B4BAA']},
+ 'References':{phase:'References',next:'Call references',color:['#EFEAFC','#5B4BAA']},
+ 'Background':{phase:'Background',next:'Send certs & checks',color:['#EFEAFC','#5B4BAA']},
+ 'Interview invite':{phase:'Interview',next:'Send interview invite',color:['#EBF3FB','#1E4E8C']},
+ 'Interview booked':{phase:'Interview',next:'Run interview',color:['#EBF3FB','#1E4E8C']},
+ 'Offer':{phase:'Offer',next:'Send offer',color:['#EBF5EA','#3D7A34']},
+ 'Onboarding':{phase:'Onboarding',next:'Send onboarding',color:['#EBF5EA','#3D7A34']},
+ 'Hired':{phase:'Hired',next:'Retention check-in',color:['#EBF5EA','#3D7A34']},
+ 'Declined':{phase:'Closed',next:'',color:['#FDECEA','#B03025']}
 };
 
 /* ===================== load ===================== */
-function pState(row){let s={};try{if(row[35])s=JSON.parse(row[35]);}catch(e){}return Object.assign({due:null,booking:null,pills:[],cert:'',license:'',reqCheck:'',tpCheck:'',employers:[],refs:[],log:[],sent:{}},s);}
+function pState(row){let s={};try{if(row[35])s=JSON.parse(row[35]);}catch(e){}return Object.assign({due:null,booking:null,zip:'',pills:[],cert:'',license:'',reqCheck:'',tpCheck:'',employers:[],refs:[],log:[],sent:{},slots:[]},s);}
 function pAns(row){let a={};try{if(row[34])a=JSON.parse(row[34]);}catch(e){}return a;}
+function cardOf(i,row){return {excelRow:i+1,row:row,name:String(row[2]),phone:String(row[3]||''),email:String(row[4]||''),
+  source:String(row[5]||''),stage:String(row[6]||'Applied'),notes:String(row[33]||''),st:pState(row),answers:pAns(row)};}
 async function loadData(){
   const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+'/usedRange?$select=values');
   if(!r.ok){toast('Load failed: '+r.status);return;}
   const vals=(await r.json()).values||[];pipeline=[];nextRow=null;
   for(let i=2;i<vals.length;i++){const row=vals[i];
     if(!row||row[2]===''||row[2]==null){if(nextRow===null)nextRow=i+1;continue;}
-    pipeline.push({excelRow:i+1,row:row,name:String(row[2]),phone:String(row[3]||''),email:String(row[4]||''),
-      source:String(row[5]||''),stage:String(row[6]||'Applied'),notes:String(row[33]||''),st:pState(row),answers:pAns(row)});}
+    pipeline.push(cardOf(i,row));}
   if(nextRow===null)nextRow=vals.length+1;pipeline.reverse();
   document.getElementById('sync-time').textContent='Synced '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
   render();
+}
+/* speed: refresh just one row in place rather than reloading the whole sheet */
+async function refreshRow(excelRow){
+  const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+"/range(address='A"+excelRow+":AJ"+excelRow+"')?$select=values");
+  if(!r.ok)return;
+  const vals=(await r.json()).values||[[]];const row=vals[0];
+  const idx=pipeline.findIndex(c=>c.excelRow===excelRow);
+  if(idx<0)return;pipeline[idx]=cardOf(excelRow-1,row);
 }
 
 /* ===================== date helpers ===================== */
 function today(){return new Date().toISOString().slice(0,10);}
 function fmtDay(d){if(!d)return'';const x=new Date(d.length<=10?d+'T00:00':d);return x.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});}
 function fmtTime(dt){if(!dt)return'';return new Date(dt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}
+function fmtDayLong(d){const x=new Date(d+'T00:00');return x.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});}
 function minsUntil(dt){return (new Date(dt)-new Date())/60000;}
-function within7(d){const diff=(new Date(d+'T00:00')-new Date(today()+'T00:00'))/86400000;return diff>=0&&diff<=7;}
+function plusDays(d){const x=new Date();x.setDate(x.getDate()+d);return x.toISOString().slice(0,10);}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
 function telify(p){return p.replace(/[^\d+]/g,'');}
+function stamp(){return new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'});}
 
-/* ===================== sequence: bucket + timing per candidate ===================== */
+/* ===================== action engine ===================== */
 function action(c){
   const s=c.stage,st=c.st,info=STAGEINFO[s]||STAGEINFO['Applied'];
   if(s==='Declined')return{bucket:'closed',info};
+  const sc=scoreRow(c),gatesIncomplete=sc.gateStatus==='partial';
   const m=st.booking?minsUntil(st.booking):null;
   const dn=(txt,pill,date)=>({txt:txt,pill:pill||'pnew',date:date||''});
-  let bucket,timing,matchable;
-  if(s==='Hired'){bucket='hired';matchable=st.reqCheck==='clear';
-    timing=dn(matchable?'Patient-matchable':'Required check pending',matchable?'pg':'pa',st.due?('check-in '+fmtDay(st.due)):'');}
-  else if(s==='Applied'){bucket='action';timing=dn('Review application','pnew');}
+  /* if gates incomplete, the actual next action is to collect the missing info — overrides everything else for active stages */
+  if(gatesIncomplete&&s!=='Hired'&&s!=='Onboarding'){
+    return{bucket:'action',timing:dn('Request missing info','pnew'),info,primary:{kind:'email-info',label:'Request missing info',cls:'gold'},missing:sc.missingGates};
+  }
+  let bucket,timing,primary,matchable;
+  if(s==='Hired'){matchable=st.reqCheck==='clear';bucket='hired';
+    timing=dn(matchable?'Patient-matchable':'Required check pending',matchable?'pg':'pa',st.due?('check-in '+fmtDay(st.due)):'');
+    primary={kind:'checkin',label:'Log check-in',cls:'grn'};}
+  else if(s==='Applied'){/* gates pass: auto-advance to invite stage */
+    if(sc.dec.cls==='red'){bucket='action';timing=dn('Score below bar','pr2');primary={kind:'decline',label:'Decline & email',cls:'red'};}
+    else{bucket='action';timing=dn('Send screen invite','pnew');primary={kind:'email-tpl',tpl:'screen_invite',advanceTo:'Screen invite',label:'Send screen invite',cls:'gold'};}}
   else if(s==='Screen invite'||s==='Interview invite'){
-    const sent=st.sent&&(st.sent.screen_invite||st.sent.interview_invite);
-    if(!sent){bucket='action';timing=dn('Send invite','pnew');}
-    else{bucket='awaiting';timing=dn('Awaiting booking','psoft',st.due?('nudge '+fmtDay(st.due)):'');}}
+    const sent=s==='Screen invite'?(st.sent&&st.sent.screen_invite):(st.sent&&st.sent.interview_invite);
+    const tpl=s==='Screen invite'?'screen_invite':'interview_invite';
+    if(!sent){bucket='action';timing=dn('Send invite','pnew');primary={kind:'email-tpl',tpl:tpl,label:'Send invite',cls:'gold'};}
+    else{bucket='awaiting';timing=dn('Awaiting booking','psoft',st.due?('nudge '+fmtDay(st.due)):'');primary={kind:'email-tpl',tpl:s==='Screen invite'?'screen_nudge':'interview_invite',label:'Send nudge',cls:'gold'};}}
   else if(s==='Screen booked'||s==='Interview booked'){
     const d=st.booking?st.booking.slice(0,10):null;
-    if(m!=null&&m<=60&&m>-150){bucket='action';timing=dn('Call now','pa',fmtTime(st.booking));}
-    else if(d===today()){bucket='action';timing=dn('Call today','pa',fmtTime(st.booking));}
-    else if(d&&d>today()){bucket='awaiting';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));}
-    else{bucket='action';timing=dn('Overdue call','pr2','');}}
-  else if(s==='Verify employers'){bucket='action';timing=dn('Verify employers','pnew');}
-  else if(s==='References'){bucket='action';timing=dn('Call references','pnew');}
+    const isScreen=s==='Screen booked';
+    if(m!=null&&m<=60&&m>-150){bucket='action';timing=dn('Call now','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
+    else if(d===today()){bucket='action';timing=dn('Call today','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
+    else if(d&&d>today()){bucket='awaiting';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Offer',label:'Open call workspace',cls:'sky'};}
+    else{bucket='action';timing=dn('Overdue call','pr2','');primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}}
+  else if(s==='Verify employers'){bucket='action';timing=dn('Verify past employers','pnew');primary={kind:'verify',label:'Open verify hub',cls:'sky'};}
+  else if(s==='References'){bucket='action';timing=dn('Call references','pnew');primary={kind:'refs',label:'Open reference hub',cls:'sky'};}
   else if(s==='Background'){
-    if(st.reqCheck==='pending'||st.tpCheck==='pending'){bucket='checks';timing=dn('Checks running','psoft');}
-    else if(st.sent&&st.sent.bg_request&&!st.reqCheck&&!st.tpCheck){bucket='awaiting';timing=dn('Certs requested','psoft');}
-    else{bucket='action';timing=dn('Send certs & checks','pnew');}}
+    if(st.reqCheck==='pending'||st.tpCheck==='pending'){bucket='checks';timing=dn('Checks running','psoft');primary={kind:'checks',label:'Open checks hub',cls:'sky'};}
+    else if(st.sent&&st.sent.bg_request&&!st.reqCheck&&!st.tpCheck){bucket='awaiting';timing=dn('Certs requested','psoft');primary={kind:'checks',label:'Open checks hub',cls:'sky'};}
+    else{bucket='action';timing=dn('Send certs & checks','pnew');primary={kind:'email-tpl',tpl:'bg_request',label:'Send cert & check request',cls:'gold'};}}
   else if(s==='Offer'){
-    if(st.tpCheck==='clear'){bucket='action';timing=dn('Send offer','pa');}
-    else{bucket='checks';timing=dn('3rd-party check pending','psoft');}}
-  else if(s==='Onboarding'){bucket='action';timing=dn('Send onboarding','pa');}
-  else{bucket='action';timing=dn(info.next,'pnew');}
-  return{bucket,timing,info,matchable,locked:s==='Offer'&&st.tpCheck!=='clear'};
+    if(st.tpCheck==='clear'){bucket='action';timing=dn('Send offer','pa');primary={kind:'email-tpl',tpl:'offer',advanceTo:'Onboarding',label:'Send offer',cls:'grn'};}
+    else{bucket='checks';timing=dn('3rd-party check pending','psoft');primary={kind:'lock',label:'🔒 Awaiting check',cls:'lock'};}}
+  else if(s==='Onboarding'){bucket='action';timing=dn('Send onboarding','pa');primary={kind:'email-tpl',tpl:'onboarding',advanceTo:'Hired',label:'Send onboarding',cls:'grn'};}
+  else{bucket='action';timing=dn(info.next,'pnew');primary={kind:'open',label:'Open',cls:'sky'};}
+  return{bucket,timing,info,primary,matchable};
 }
 
-/* ===================== render ===================== */
-function matchSearch(c){const t=(document.getElementById('search').value||'').toLowerCase();if(!t)return true;
-  return (c.name+' '+c.email+' '+(c.st.pills||[]).join(' ')+' '+c.st.cert+' '+c.stage).toLowerCase().indexOf(t)>-1;}
+/* ===================== filter ===================== */
 function matchFilters(c){
-  if(!matchSearch(c))return false;
+  const t=(document.getElementById('search').value||'').toLowerCase();
+  if(t&&(c.name+' '+c.email+' '+(c.st.pills||[]).join(' ')+' '+c.st.cert+' '+c.stage).toLowerCase().indexOf(t)<0)return false;
   if(F.stage.size&&!F.stage.has(c.stage))return false;
   if(F.band.size){const b=scoreRow(c).dec.band;let ok=false;F.band.forEach(x=>{if(b===x||b.indexOf(x)===0)ok=true;});if(!ok)return false;}
   if(F.source.size&&!F.source.has(c.source||'—'))return false;
   if(F.cert.size){const cert=(c.st.cert||'').toUpperCase();let ok=false;F.cert.forEach(x=>{if(cert.indexOf(x)>-1)ok=true;});if(!ok)return false;}
+  if(F.expertise.size){const px=(c.st.pills||[]).map(x=>x.toLowerCase());let ok=false;F.expertise.forEach(x=>{if(px.indexOf(x.toLowerCase())>-1)ok=true;});if(!ok)return false;}
+  if(F.zip){if(!(c.st.zip||'').startsWith(F.zip))return false;}
   return true;
 }
-function toggleFilter(cat,val){if(F[cat].has(val))F[cat].delete(val);else F[cat].add(val);render();}
-function clearFilters(){F={stage:new Set(),band:new Set(),source:new Set(),cert:new Set()};document.getElementById('search').value='';render();}
+function filterCount(){let c=F.stage.size+F.band.size+F.source.size+F.cert.size+F.expertise.size;if(F.zip)c++;return c;}
+function toggleFilter(cat,val){F[cat].has(val)?F[cat].delete(val):F[cat].add(val);render();renderFilterPanel();}
+function setZip(v){F.zip=v.trim();render();updateFilterCount();}
+function clearFilters(){F={stage:new Set(),band:new Set(),source:new Set(),cert:new Set(),expertise:new Set(),zip:''};document.getElementById('search').value='';render();renderFilterPanel();}
+function updateFilterCount(){const ct=filterCount();const el=document.getElementById('filterct');el.textContent=ct;el.style.display=ct?'inline-block':'none';document.getElementById('btn-filter').classList.toggle('on',ct>0);}
+function toggleFilterPanel(){const p=document.getElementById('filterpanel');p.classList.toggle('open');if(p.classList.contains('open'))renderFilterPanel();}
 function chip(cat,val,label){return '<button class="fchip'+(F[cat].has(val)?' on':'')+'" onclick="toggleFilter(\''+cat+'\',\''+val.replace(/'/g,"\\'")+'\')">'+esc(label||val)+'</button>';}
-function renderFilters(){
-  const sources=Array.from(new Set(pipeline.map(c=>c.source||'—').filter(x=>x&&x!=='—')));
+function renderFilterPanel(){
+  const sources=Array.from(new Set(pipeline.map(c=>c.source||'').filter(x=>x))).sort();
+  const expertises=Array.from(new Set(pipeline.flatMap(c=>(c.st.pills||[])))).sort();
   const certs=['CNA','HHA','STNA'];
   const stages=FLOW;
   const bands=['HIRE TRACK','CONDITIONAL','HOLD / DEVELOP','DECLINE','In progress'];
-  const anyOn=F.stage.size+F.band.size+F.source.size+F.cert.size>0;
-  let h='';
-  h+='<div class="fgroup"><span class="fglabel">Stage</span>'+stages.map(s=>chip('stage',s)).join('')+'</div>';
-  h+='<div class="fgroup"><span class="fglabel">Band</span>'+bands.map(b=>chip('band',b)).join('')+'</div>';
-  if(sources.length)h+='<div class="fgroup"><span class="fglabel">Source</span>'+sources.map(s=>chip('source',s)).join('')+'</div>';
-  h+='<div class="fgroup"><span class="fglabel">Cert</span>'+certs.map(c=>chip('cert',c)).join('')+(anyOn?'<button class="fchip clear" onclick="clearFilters()">✕ clear all</button>':'')+'</div>';
-  document.getElementById('filterbar').innerHTML=h;
+  document.getElementById('filterpanel').innerHTML=`
+    <div class="fpgrid">
+      <div class="fpgroup"><label>Stage</label><div>${stages.map(s=>chip('stage',s)).join('')}</div></div>
+      <div class="fpgroup"><label>Score band</label><div>${bands.map(b=>chip('band',b)).join('')}</div></div>
+      <div class="fpgroup"><label>Certificate</label><div>${certs.map(c=>chip('cert',c)).join('')}</div></div>
+      <div class="fpgroup"><label>Source</label><div>${sources.length?sources.map(s=>chip('source',s)).join(''):'<span style="font-size:11px;color:var(--soft)">—</span>'}</div></div>
+      <div class="fpgroup"><label>Expertise</label><div>${expertises.length?expertises.map(e=>chip('expertise',e)).join(''):'<span style="font-size:11px;color:var(--soft)">—</span>'}</div></div>
+      <div class="fpgroup"><label>ZIP starts with</label><input class="fpinput" placeholder="44118" value="${esc(F.zip)}" oninput="setZip(this.value)"></div>
+    </div>
+    <div class="fpfoot">
+      <span style="font-size:11px;color:var(--soft)">${filterCount()} filter${filterCount()===1?'':'s'} active</span>
+      <button class="clr" onclick="clearFilters()">✕ Clear all</button>
+    </div>`;
+  updateFilterCount();
 }
-function render(){
-  if(!tok)return;
-  renderFilters();
+
+/* ===================== render ===================== */
+function setView(v){view=v;
+  document.getElementById('tab-pipe').classList.toggle('on',v==='pipeline');
+  document.getElementById('tab-cal').classList.toggle('on',v==='calendar');
+  document.getElementById('pipeline-view').style.display=v==='pipeline'?'block':'none';
+  document.getElementById('calendar-view').style.display=v==='calendar'?'block':'none';
+  document.getElementById('sync-bar').style.display=v==='pipeline'?'flex':'none';
+  render();
+}
+function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return renderCalendar();
   const B={action:[],awaiting:[],checks:[],hired:[]},all=[];
   pipeline.forEach(c=>{if(!matchFilters(c))return;const a=action(c);if(a.bucket==='closed')return;all.push(c);(B[a.bucket]||B.action).push(c);});
   document.getElementById('kv0').textContent=B.action.length;
@@ -763,7 +937,7 @@ function render(){
 function fillBucket(i,list){
   document.getElementById('c'+i).textContent=list.length;
   document.getElementById('t'+i).innerHTML=list.length?list.map(rowHtml).join(''):
-    '<tr><td colspan="6" class="empty" style="padding:26px;text-align:center;color:var(--soft)"><div style="font-size:13px">Nothing here.</div></td></tr>';
+    '<tr><td colspan="6" class="empty" style="padding:22px;text-align:center;color:var(--soft);font-size:12px">Nothing here.</td></tr>';
 }
 function toggleBucket(i){collapsed[i]=!collapsed[i];document.getElementById('sw-'+i).classList.toggle('collapsed',collapsed[i]);}
 function rowHtml(c){
@@ -782,40 +956,39 @@ function rowHtml(c){
   let stageCell=stageBadge;
   if(c.stage==='Hired')stageCell+='<div class="matchbadge '+(a.matchable?'match-ok':'match-no')+'">'+(a.matchable?'✓ Matchable':'⚑ Not matchable')+'</div>';
   const timing='<span class="pill '+a.timing.pill+'">'+esc(a.timing.txt)+'</span>'+(a.timing.date?'<div style="font-size:11px;color:var(--soft);margin-top:3px">'+esc(a.timing.date)+'</div>':'');
-  const seq='<div class="sbadge">'+esc(a.info.phase)+'</div><div class="snxt">'+a.info.icon+' '+esc(a.info.next)+'</div>';
-  return '<tr class="dr '+bd+'" onclick="openCand('+c.excelRow+')">'
+  const seq='<div class="sbadge">'+esc(a.info.phase)+'</div><div class="snxt">⮕ '+esc(a.info.next)+'</div>';
+  /* row action buttons: one primary + decline + open */
+  const r=c.excelRow,p=a.primary||{kind:'open',label:'Open',cls:'sky'};
+  const primCls=p.cls==='gold'?'bg-gold':p.cls==='grn'?'bg-grn':p.cls==='red'?'bg-cream':p.cls==='lock'?'bg-cream':'bg-sky';
+  const primBtn=p.kind==='lock'?'<button class="btn-primary bg-cream" disabled style="opacity:.6">'+esc(p.label)+'</button>':'<button class="btn-primary '+primCls+'" onclick="event.stopPropagation();doPrimary('+r+')">'+esc(p.label)+'</button>';
+  const btns='<div class="bwrap"><div class="brow" style="flex:1">'+primBtn+'</div><div class="brow"><button class="btn-sm bg-cream" style="color:var(--red)" onclick="event.stopPropagation();quickDecline('+r+')">Decline</button><button class="btn-sm bg-sky-l" onclick="event.stopPropagation();openWorkspace('+r+')">Open</button></div></div>';
+  return '<tr class="dr '+bd+'" onclick="openWorkspace('+r+')">'
     +'<td><div class="tn">'+esc(c.name)+'</div>'+idline+sub+'</td>'
     +'<td>'+phone+email+'</td>'
     +'<td>'+stageCell+'</td>'
     +'<td>'+timing+'</td>'
     +'<td>'+seq+'</td>'
-    +'<td onclick="event.stopPropagation()" style="width:200px;padding:8px">'+buildButtons(c,a)+'</td>'
+    +'<td onclick="event.stopPropagation()" style="width:215px;padding:8px">'+btns+'</td>'
     +'</tr>';
 }
-function buildButtons(c,a){
-  const r=c.excelRow,m=a.info.method;let prim;
-  const P=(cls,lbl,act)=>'<button class="btn-primary '+cls+'" onclick="event.stopPropagation();'+act+'">'+lbl+'</button>';
-  if(m==='review')prim=P('bg-gold-l','🔍 Review','openCand('+r+')');
-  else if(m==='email')prim=P('bg-gold','✉ Send invite','doEmail('+r+',\''+a.info.tpl+'\')');
-  else if(m==='screen')prim=P('bg-sky','📞 Run screen','doQuestions('+r+',\'Phone Screen\',\'Verify employers\')');
-  else if(m==='interview')prim=P('bg-sky','📋 Run interview','doQuestions('+r+',\'Interview\',\'Offer\')');
-  else if(m==='refs')prim=P('bg-sky','📞 Call refs','doRefs('+r+')');
-  else if(m==='verify')prim=P('bg-cream','✓ Verify','doVerify('+r+')');
-  else if(m==='checks')prim=P('bg-cream','🛡 Checks','doChecks('+r+')');
-  else if(m==='offer')prim=a.locked?'<button class="btn-primary bg-cream" disabled>🔒 Locked</button>':P('bg-grn','✉ Send offer','doEmail('+r+',\'offer\')');
-  else if(m==='onboarding')prim=P('bg-grn','✉ Onboard','doEmail('+r+',\'onboarding\')');
-  else if(m==='checkin')prim=P('bg-grn','✓ Check-in','doCheckin('+r+')');
-  else prim=P('bg-sky-l','Open','openCand('+r+')');
-  let alts='';
-  if(c.phone)alts+='<a class="btn-sm bg-sky-l" style="text-decoration:none;line-height:1.9" href="tel:'+telify(c.phone)+'" onclick="event.stopPropagation()">📞</a>';
-  alts+='<button class="btn-sm bg-gold-l" onclick="event.stopPropagation();doEmail('+r+',\'\')">✉</button>';
-  alts+='<button class="btn-sm bg-cream" onclick="event.stopPropagation();openCand('+r+')">📋</button>';
-  return '<div class="bwrap"><div class="brow" style="flex:1">'+prim+'</div><div class="brow">'+alts+'</div></div>';
-}
 
-/* ===================== working copy + persistence ===================== */
+/* ===================== primary action dispatch ===================== */
+function doPrimary(r){const c=pipeline.find(x=>x.excelRow===r);if(!c)return;const a=action(c),p=a.primary;loadW(r);
+  if(p.kind==='email-info'){return doEmailMissing();}
+  if(p.kind==='email-tpl'){return doEmail(p.tpl,p.advanceTo);}
+  if(p.kind==='questions'){return openWorkspace(r,'questions');}
+  if(p.kind==='verify'){return openWorkspace(r,'verify');}
+  if(p.kind==='refs'){return openWorkspace(r,'refs');}
+  if(p.kind==='checks'){return openWorkspace(r,'checks');}
+  if(p.kind==='checkin'){return doCheckin();}
+  if(p.kind==='decline'){return doEmail('reject','Declined');}
+  return openWorkspace(r);
+}
+function quickDecline(r){if(!confirm('Decline this candidate? They\'ll get the rejection email.'))return;loadW(r);doEmail('reject','Declined');}
+
+/* ===================== working copy + save ===================== */
 let W=null;
-function loadW(r){const p=pipeline.find(x=>x.excelRow===r);if(!p)return null;const row=p.row;
+function loadW(r){const p=pipeline.find(x=>x.excelRow===r);if(!p)return;const row=p.row;
   W={row:r,name:p.name,email:p.email,phone:p.phone,source:p.source,stage:p.stage,notes:p.notes,
     gates:{wa:row[7]||'',cr:row[8]||'',bg:row[9]||'',tr:row[10]||'',av:row[11]||''},
     q:{rel:n(row[13]),com:n(row[14]),jud:n(row[15]),doc:n(row[16]),ref:n(row[17]),cmp:n(row[18]),phn:n(row[19])},
@@ -823,191 +996,325 @@ function loadW(r){const p=pipeline.find(x=>x.excelRow===r);if(!p)return null;con
     answers:Object.assign({},p.answers),st:JSON.parse(JSON.stringify(p.st))};return W;}
 function applyAnswers(){const by={};QBANK.forEach(it=>{const v=W.answers[it.id];if(v)(by[it.dim]=by[it.dim]||[]).push(v);});
   Object.keys(by).forEach(d=>{const a=by[d],avg=Math.round(a.reduce((x,y)=>x+y)/a.length);if(['ten','exp','prx','ava'].includes(d))W.r[d]=avg;else W.q[d]=avg;});}
-function scoreW(){const Q=progressive(W.q,QW),R=progressive(W.r,RW),gs=gateState(W.gates);return{Q,R,gs,dec:decide(Q,R,W.q,W.r,gs)};}
-function stamp(){return new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'});}
+function scoreW(){const Q=progressive(W.q,QW),R=progressive(W.r,RW),gs=gateState(W.gates);return{Q,R,gs,dec:decide(Q,R,W.q,W.r,gs),missingGates:missingGateLabels(W.gates)};}
 function logW(x){W.st.log=W.st.log||[];W.st.log.push({t:stamp(),x:x});}
-function plusDays(d){const x=new Date();x.setDate(x.getDate()+d);return x.toISOString().slice(0,10);}
 async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
   try{
-    await patchRange('G'+row,[[W.stage]]);
-    await patchRange('H'+row+':L'+row,[[bl(W.gates.wa),bl(W.gates.cr),bl(W.gates.bg),bl(W.gates.tr),bl(W.gates.av)]]);
-    await patchRange('N'+row+':T'+row,[[bl(W.q.rel),bl(W.q.com),bl(W.q.jud),bl(W.q.doc),bl(W.q.ref),bl(W.q.cmp),bl(W.q.phn)]]);
-    await patchRange('V'+row+':Y'+row,[[bl(W.r.ten),bl(W.r.prx),bl(W.r.ava),bl(W.r.exp)]]);
-    await patchRange('AI'+row,[[JSON.stringify(W.answers||{})]]);
-    await patchRange('AJ'+row,[[JSON.stringify(W.st||{})]]);
-    await loadData();if(!silent)toast('Saved');
+    /* speed: one combined PATCH per contiguous range, no full reload */
+    await patchRange('G'+row+':L'+row,[[W.stage,bl(W.gates.wa),bl(W.gates.cr),bl(W.gates.bg),bl(W.gates.tr),bl(W.gates.av)]]);
+    await patchRange('N'+row+':Y'+row,[[bl(W.q.rel),bl(W.q.com),bl(W.q.jud),bl(W.q.doc),bl(W.q.ref),bl(W.q.cmp),bl(W.q.phn),'',bl(W.r.ten),bl(W.r.prx),bl(W.r.ava),bl(W.r.exp)]]);
+    await patchRange('AI'+row+':AJ'+row,[[JSON.stringify(W.answers||{}),JSON.stringify(W.st||{})]]);
+    await refreshRow(row);render();if(!silent)toast('Saved');
   }catch(e){toast('Save failed: '+e.message);}}
 
-/* ===================== modal helpers ===================== */
-function openModal(title,html,wide){document.getElementById('m-title').textContent=title;document.getElementById('m-body').innerHTML=html;document.getElementById('mbox').classList.toggle('wide',!!wide);document.getElementById('modal').classList.add('open');}
-function closeModal(){document.getElementById('modal').classList.remove('open');}
-
-/* ----- email ----- */
+/* ===================== email (real Graph send + advance) ===================== */
 const BOOK_LINK='https://outlook.office365.com/book/careers@solurahomecare.com/';
 const TEMPLATES={
  screen_invite:c=>({s:'Next step with Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying. Let's set up a quick 15-minute call — pick a time here:\n${BOOK_LINK}\n\nSolura Home Care Hiring`}),
+ screen_nudge:c=>({s:'Still interested? — Solura Home Care',b:`Hi ${first(c)},\n\nJust following up — pick a 15-minute slot whenever it's convenient:\n${BOOK_LINK}\n\nSolura Home Care`}),
  interview_invite:c=>({s:'Interview with Solura Home Care',b:`Hi ${first(c)},\n\nGreat speaking with you. Let's schedule a longer interview — book here:\n${BOOK_LINK}\n\nSolura Home Care`}),
  bg_request:c=>({s:'Certificates & background check',b:`Hi ${first(c)},\n\nYou're moving forward. Please reply with copies of your certifications, and we'll send a secure link to consent to a background check.\n\nSolura Home Care`}),
  offer:c=>({s:'Your offer — Solura Home Care',b:`Hi ${first(c)},\n\nWe're delighted to offer you a caregiver position at ${payRange()}. Your formal offer follows via DocuSign.\n\nWelcome aboard,\nSolura Home Care`}),
  onboarding:c=>({s:'Onboarding — Solura Home Care',b:`Hi ${first(c)},\n\nWelcome! Complete onboarding and book orientation here:\n[onboarding link]\n\nSolura Home Care`}),
  reject:c=>({s:'Update on your application',b:`Hi ${first(c)},\n\nThank you for your interest in Solura Home Care. After careful review we won't be moving forward at this time. We appreciate the time you invested and wish you the very best.\n\nSolura Home Care`}),
- '':c=>({s:'Solura Home Care',b:`Hi ${first(c)},\n\n`})
+ missing:c=>({s:'A few details to complete your application',b:`Hi ${first(c)},\n\nThanks for your interest in Solura Home Care. To move forward we still need a few details:\n\n${(c.__missing||[]).map(x=>'• '+x).join('\n')}\n\nPlease reply with these and we'll get back to you quickly.\n\nSolura Home Care`})
 };
 function first(c){return (c.name||'there').split(' ')[0];}
-function doEmail(r,tpl){loadW(r);const t=(TEMPLATES[tpl]||TEMPLATES[''])(W);
-  const html=`<div style="font-size:12px;color:var(--soft);margin-bottom:10px">To: ${esc(W.email||'(no email on file)')}</div>
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Subject</div>
-    <input id="e-sub" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none;margin-bottom:12px" value="${esc(t.s)}">
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Message</div>
-    <textarea id="e-body" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;min-height:170px;resize:vertical;outline:none">${esc(t.b)}</textarea>
-    <div class="brow" style="margin-top:14px;gap:8px">
-      <button class="btn-sec bg-cream" onclick="copyEmail()">Copy</button>
-      <a class="btn-sec bg-sky-l" style="text-decoration:none;line-height:2" href="mailto:${esc(W.email||'')}?subject=${encodeURIComponent(t.s)}&body=${encodeURIComponent(t.b)}">Open in mail</a>
-      <button class="btn-sec bg-grn-l" onclick="markSent('${tpl}')">Mark sent</button>
-    </div>
-    <div style="font-size:11px;color:var(--soft);margin-top:10px">Auto-send from careers@ comes via Power Automate; for now copy or open in mail.</div>`;
-  openModal(tpl==='reject'?'Rejection email':'Email',html);}
-function copyEmail(){const b=document.getElementById('e-sub').value+'\n\n'+document.getElementById('e-body').value;if(navigator.clipboard)navigator.clipboard.writeText(b);toast('Copied');}
-function markSent(tpl){W.st.sent=W.st.sent||{};W.st.sent[tpl||'note']=today();logW('Sent: '+((tpl||'email').replace(/_/g,' ')));
-  if(tpl==='screen_invite'||tpl==='interview_invite')W.st.due=plusDays(3);
-  if(tpl==='offer'){W.stage='Onboarding';logW('Offer sent → onboarding');}
-  saveW(true).then(()=>{closeModal();toast('Marked sent');});}
-
-/* ----- questions (screen / interview) ----- */
-function doQuestions(r,stage,nextStage){loadW(r);openModal(stage==='Interview'?'Structured interview':'15-minute phone screen','',true);renderQuestions(stage,nextStage);}
-function renderQuestions(stage,nextStage){
-  applyAnswers();const sc=scoreW(),col=BANDCSS[sc.dec.cls],qs=QBANK.filter(x=>x.st===stage);
-  const script=stage==='Interview'
-    ?['Welcome & set them at ease','Walk the role honestly — hours, pay, personal care','Ask each question; note what you hear','Invite their questions','Explain next steps & timeline']
-    :['Confirm it is a good time','Confirm interest, availability, pay','Run the screen questions','Tell them references will be needed','Set up the booking link'];
-  const main=qs.map(it=>`<div class="qrow"><div class="qq">${it.q}</div><div class="qopts">${it.o.map(o=>`<button class="${W.answers[it.id]===o[1]?'on':''}" onclick="qans('${it.id}',${o[1]},'${stage}','${nextStage}')">${o[0]}</button>`).join('')}</div></div>`).join('');
-  const side=`<div class="wpanel" style="margin-bottom:12px"><h4>Live score</h4>
-      <div style="display:flex;gap:16px;align-items:baseline"><div><div style="font-size:9px;color:var(--soft);text-transform:uppercase;font-weight:700">Quality</div><div style="font-family:'Cormorant Garamond',serif;font-size:30px;color:var(--sky-deep);line-height:1">${sc.Q==null?'—':sc.Q}</div></div>
-      <div><div style="font-size:9px;color:var(--soft);text-transform:uppercase;font-weight:700">Retention</div><div style="font-family:'Cormorant Garamond',serif;font-size:30px;color:var(--sky-deep);line-height:1">${sc.R==null?'—':sc.R}</div></div></div>
-      <div style="margin-top:10px"><span class="bandpill" style="background:${col[0]};color:${col[1]}">${sc.dec.band}</span></div></div>
-      <div class="wpanel"><h4>Call structure</h4><ol style="padding-left:16px;font-size:12px;line-height:1.8;color:var(--mid);margin:0">${script.map(l=>'<li>'+esc(l)+'</li>').join('')}</ol></div>`;
-  document.getElementById('m-body').innerHTML=`
-    <div style="font-size:12px;color:var(--soft);margin-bottom:12px">Pick the answer that matches what you heard — the score updates itself. Nothing here asks you for a number.</div>
-    <div class="work-grid"><div>${main}</div><div>${side}</div></div>
-    <div class="brow" style="margin-top:18px;gap:8px"><button class="btn-primary bg-grn" onclick="completeQuestions('${nextStage}')">Complete &amp; advance →</button><button class="btn-primary bg-cream" style="flex:0 0 auto;width:auto;color:var(--red)" onclick="declineW()">Decline</button></div>`;
-}
-function qans(id,v,stage,nextStage){W.answers[id]=W.answers[id]===v?undefined:v;renderQuestions(stage,nextStage);}
-function completeQuestions(nextStage){applyAnswers();const sc=scoreW();
-  if(sc.dec.cls==='red'){if(!confirm('Score lands at DECLINE. Decline this candidate?'))return;return declineW();}
-  W.stage=nextStage;W.st.due=today();logW('Completed step → '+nextStage+' (Q'+sc.Q+'/R'+sc.R+')');
-  saveW(true).then(()=>{closeModal();toast('→ '+nextStage);});}
-function declineW(){W.stage='Declined';logW('Declined');const c={name:W.name,email:W.email};saveW(true).then(()=>{doEmail(W.row,'reject');});}
-function showScript(stage){const lines=stage==='Interview'
-  ?['Welcome, set them at ease (2 min).','Walk through the role honestly — hours, pay, personal care.','Ask each interview question; note what you hear.','Invite their questions.','Explain next steps & timeline.']
-  :['Confirm it is a good time (1 min).','Confirm interest, availability, pay range.','Run the screen questions.','Confirm references will be needed.','Set expectation for the booking link.'];
-  openModal('Call script',('<ol style="padding-left:18px;font-size:13px;line-height:1.9;color:var(--mid)">'+lines.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ol>'));}
-
-/* ----- references ----- */
-function doRefs(r){loadW(r);openModal('Reference checks','',true);renderRefs();}
-function renderRefs(){applyAnswers();const sc=scoreW(),col=BANDCSS[sc.dec.cls];
-  const refs=W.st.refs||[];
-  const list=refs.map((rf,i)=>`<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border-soft)"><input value="${esc(rf.name||'')}" placeholder="Reference name & number" oninput="W.st.refs[${i}].name=this.value" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none">${rf.name?'<a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" href="tel:">📞</a>':''}</div>`).join('');
-  const qs=QBANK.filter(x=>x.st==='Reference').map(it=>`<div style="padding:8px 0;border-bottom:1px solid var(--border-soft)"><div style="font-size:12.5px;font-weight:500;margin-bottom:6px">${it.q}</div><div style="display:flex;flex-wrap:wrap;gap:6px">${it.o.map(o=>`<button class="btn-sm ${W.answers[it.id]===o[1]?'bg-sky':'bg-cream'}" style="flex:0 0 auto" onclick="qans('${it.id}',${o[1]},'Reference','Background')">${o[0]}</button>`).join('')}</div></div>`).join('');
-  document.getElementById('m-body').innerHTML=`<div style="font-size:12px;color:var(--soft);margin-bottom:8px">Load the references they sent, then call them with these questions.</div>
-    ${list}<button class="btn-sec bg-cream" style="margin:8px 0" onclick="W.st.refs=W.st.refs||[];W.st.refs.push({name:''});renderRefs()">+ add reference</button>
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin:10px 0 6px">Reference questions</div>${qs}
-    <div class="brow" style="margin-top:14px;gap:8px"><button class="btn-primary bg-grn" onclick="completeQuestions('Background')">Complete &amp; advance</button><button class="btn-primary bg-cream" style="flex:0 0 auto;width:auto;color:var(--red)" onclick="declineW()">Decline</button></div>`;}
-
-/* ----- verify employers ----- */
-function doVerify(r){loadW(r);renderVerify();openModal('Verify past employers',document.getElementById('m-body').innerHTML);}
-function renderVerify(){const emp=W.st.employers||[];
-  const list=emp.map((e,i)=>`<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border-soft)"><input value="${esc(e.name||'')}" placeholder="Employer / supervisor" oninput="W.st.employers[${i}].name=this.value" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none"><button class="btn-sm ${e.v==='ok'?'bg-grn':'bg-cream'}" style="flex:0 0 auto" onclick="vset(${i},'ok')">verified</button><button class="btn-sm ${e.v==='no'?'bg-gold-l':'bg-cream'}" style="flex:0 0 auto" onclick="vset(${i},'no')">unable</button></div>`).join('');
-  document.getElementById('m-body').innerHTML=`<div style="font-size:12px;color:var(--soft);margin-bottom:8px">Call each prior employer and mark verified or unable. This builds a confidence flag; it doesn't gate.</div>
-    ${list}<button class="btn-sec bg-cream" style="margin:8px 0" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',v:''});renderVerify()">+ add employer</button>
-    <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceW('References','Employers verified')">Done → references</button></div>`;}
-function vset(i,v){W.st.employers[i].v=W.st.employers[i].v===v?'':v;renderVerify();}
-
-/* ----- background & checks ----- */
-function doChecks(r){loadW(r);openModal('Background & certificates','',true);renderChecks();}
-function flagPill(v){const map={clear:['Clear','pg'],flag:['Flag','pr2'],pending:['Pending','pa']};const m=map[v]||['—','psoft'];return '<span class="pill '+m[1]+'">'+m[0]+'</span>';}
-function chk(which){return ['','pending','clear','flag'].map(o=>`<option value="${o}" ${o===W.st[which]?'selected':''}>${o||'set status'}</option>`).join('');}
-function renderChecks(){
-  document.getElementById('m-body').innerHTML=`<div style="font-size:12px;color:var(--soft);margin-bottom:10px">Send the request for certs + background consent, run the free registries now, and track both checks.</div>
-    <button class="btn-sec bg-gold-l" onclick="doEmail(${W.row},'bg_request')">${W.st.sent.bg_request?'Resend request':'Send cert + check request'}</button>
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin:14px 0 6px">Free registries — run now</div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px">
-      <a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" target="_blank" href="https://exclusions.oig.hhs.gov/">OIG ↗</a>
-      <a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" target="_blank" href="https://www.odh.ohio.gov/know-our-programs/nurse-aide-registry/nurse-aide-registry">OH Nurse Aide ↗</a>
-      <a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" target="_blank" href="https://oh.db2.alliantenroll.com/">OH BCI / Webcheck ↗</a></div>
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin:14px 0 6px">Status</div>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-soft);font-size:13px">Required state check ${flagPill(W.st.reqCheck)}<select onchange="W.st.reqCheck=this.value;renderChecks()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chk('reqCheck')}</select></div>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;font-size:13px">3rd-party check (API) ${flagPill(W.st.tpCheck)}<select onchange="W.st.tpCheck=this.value;renderChecks()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chk('tpCheck')}</select></div>
-    <div style="font-size:11px;color:var(--soft);margin-top:8px">When the provider's API is connected, the 3rd-party status flips automatically and unlocks the offer. The required check can stay pending — the candidate just can't be matched to a patient until it clears.</div>
-    <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceW('Interview invite','Checks underway → interview invite')">Done → invite to interview</button></div>`;}
-
-/* ----- transitions ----- */
-function advanceW(toStage,msg){W.stage=toStage;if(msg)logW(msg);if(toStage==='Screen invite'||toStage==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();
-  saveW(true).then(()=>{closeModal();closeDrawer();toast('→ '+toStage);});}
-function doCheckin(r){loadW(r);const t=prompt('Check-in note (e.g. "30-day — going well")');if(t==null)return;logW('Check-in: '+t);W.st.due=plusDays(60);saveW(false);}
-
-/* ===================== candidate drawer ===================== */
-function openCand(r){loadW(r);renderDrawer();document.getElementById('doverlay').classList.add('open');document.getElementById('drawer').classList.add('open');}
-function closeDrawer(){document.getElementById('doverlay').classList.remove('open');document.getElementById('drawer').classList.remove('open');}
 function payRange(){const floor=14,ceil=18;let base=15.5;if(W&&W.st.cert&&/CNA|STNA/i.test(W.st.cert))base+=1.25;const sc=W?scoreW():{Q:null};if(W&&(W.q.cmp>=4||(sc.Q&&sc.Q>=85)))base+=1;
   let lo=Math.max(floor,Math.round((base-0.5)*2)/2),hi=Math.min(ceil,Math.round((base+1)*2)/2);if(hi<lo)hi=lo;
   return '$'+(''+lo).replace(/\.0$/,'')+'–$'+(''+hi).replace(/\.0$/,'')+'/hr';}
-function renderDrawer(){
-  applyAnswers();const sc=scoreW(),col=BANDCSS[sc.dec.cls],info=STAGEINFO[W.stage]||STAGEINFO['Applied'];
-  document.getElementById('d-name').textContent=W.name;
-  const pills=(W.st.pills||[]).map(p=>'<span class="pill pnew" style="margin:0 4px 4px 0">'+esc(p)+'</span>').join('');
-  const gateHTML=GATES.map(([k,l])=>`<div style="display:flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--border);border-radius:999px;padding:3px 6px 3px 11px;font-size:12px">${l}<span style="display:flex;gap:4px"><button onclick="W.gates['${k}']=W.gates['${k}']==='Y'?'':'Y';renderDrawer()" style="width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:${W.gates[k]==='Y'?'var(--grn)':'#fff'};color:${W.gates[k]==='Y'?'#fff':'var(--soft)'};font-size:10px;font-weight:700;cursor:pointer">Y</button><button onclick="W.gates['${k}']=W.gates['${k}']==='N'?'':'N';renderDrawer()" style="width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:${W.gates[k]==='N'?'var(--red)':'#fff'};color:${W.gates[k]==='N'?'#fff':'var(--soft)'};font-size:10px;font-weight:700;cursor:pointer">N</button></span></div>`).join('');
-  // stage-specific control
-  let ctl='';
-  if(W.stage==='Applied'){ctl=`<button class="btn-primary bg-grn" style="margin-bottom:8px" onclick="advanceToScreen()">Advance → invite to screen</button><button class="btn-primary bg-cream" style="color:var(--red)" onclick="declineW()">Decline</button>`;}
-  else if(W.stage==='Screen invite'||W.stage==='Interview invite'){const nx=W.stage==='Screen invite'?'Screen booked':'Interview booked';
-    ctl=`<label style="display:block;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:5px">Booked time</label><input type="datetime-local" id="d-bk" style="width:100%;padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;margin-bottom:8px"><button class="btn-primary bg-sky" onclick="markBooked('${nx}')">Mark booked</button>`;}
-  else if(W.stage==='Onboarding'){ctl=`<button class="btn-primary bg-grn" onclick="markHired()">Mark hired ✓</button>`;}
-  const logs=(W.st.log||[]).slice().reverse().map(l=>`<div style="font-size:12px;color:var(--mid);padding:5px 0;border-bottom:1px solid var(--border-soft)"><span style="color:var(--soft);font-size:11px">${l.t}</span> — ${esc(l.x)}</div>`).join('')||'<div style="font-size:12px;color:var(--soft)">No activity yet.</div>';
-  document.getElementById('d-body').innerHTML=`
-    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
-      <span class="pill" style="background:${col[0]};color:${col[1]};font-size:11px;padding:4px 11px">${sc.dec.band}</span>
-      <span style="font-size:12px;color:var(--soft)">Quality <b style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep)">${sc.Q==null?'—':sc.Q}</b></span>
-      <span style="font-size:12px;color:var(--soft)">Retention <b style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep)">${sc.R==null?'—':sc.R}</b></span>
+function doEmail(tpl,advanceTo){const t=(TEMPLATES[tpl]||TEMPLATES.screen_invite)(W);emailModal(tpl,t.s,t.b,advanceTo);}
+function doEmailMissing(){const sc=scoreW();W.__missing=sc.missingGates;const t=TEMPLATES.missing(W);emailModal('missing',t.s,t.b);}
+function emailModal(tpl,subj,body,advanceTo){
+  document.getElementById('m-title').textContent=tpl==='reject'?'Send rejection email':'Send email';
+  const html=`<div style="font-size:12px;color:var(--soft);margin-bottom:10px">To: ${esc(W.email||'(no email on file)')}</div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Subject</div>
+    <input id="e-sub" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none;margin-bottom:12px" value="${esc(subj)}">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Message</div>
+    <textarea id="e-body" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;min-height:200px;resize:vertical;outline:none">${esc(body)}</textarea>
+    <div class="brow" style="margin-top:14px;gap:8px">
+      <button class="btn-primary bg-grn" id="sendbtn" onclick="reallySend('${tpl}','${advanceTo||''}')">✉ Send via Outlook</button>
+      <button class="btn-sec bg-cream" style="flex:0 0 auto" onclick="closeModal()">Cancel</button>
     </div>
-    <div style="margin-bottom:14px"><span class="sbadge" style="background:${info.color[0]};color:${info.color[1]}">${esc(W.stage)}</span> ${W.st.cert?'<span class="pill pa" style="margin-left:6px">'+esc(W.st.cert)+'</span>':''} ${W.st.license?'<span class="pill pnew" style="margin-left:4px">DL: '+esc(W.st.license)+'</span>':''}</div>
-    ${pills?'<div style="margin-bottom:12px">'+pills+'</div>':''}
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);margin:6px 0 8px">This step</div>
-    ${ctl}
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);margin:18px 0 8px">Gates</div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px">${gateHTML}</div>
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);margin:18px 0 6px">Documents — caregivers › ${esc(W.name)} › onboarding</div>
-    <div id="d-docs"><div style="font-size:12px;color:var(--soft)">Loading documents…</div></div>
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);margin:18px 0 6px">Activity</div>
-    ${logs}
-    <textarea id="d-note" placeholder="Add a note…" style="width:100%;margin-top:10px;padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;min-height:54px;outline:none"></textarea>
-    <button class="btn-sec bg-cream" style="margin-top:7px" onclick="addNote()">Add note</button>
-    <button class="esave" style="margin-top:14px;width:100%" onclick="saveW(false).then(closeDrawer)">Save</button>`;
-  loadDocs(W.name);
+    <div style="font-size:11px;color:var(--soft);margin-top:8px">Sent from your signed-in mailbox via Microsoft Graph. Saved to your Sent folder.</div>`;
+  document.getElementById('m-body').innerHTML=html;document.getElementById('mbox').style.maxWidth='640px';document.getElementById('modal').classList.add('open');
 }
+async function reallySend(tpl,advanceTo){
+  if(!W.email){toast('No email on file');return;}
+  const subj=document.getElementById('e-sub').value,body=document.getElementById('e-body').value;
+  const b=document.getElementById('sendbtn');b.disabled=true;b.innerHTML='<span class="spin"></span> Sending…';
+  try{
+    await sendMailViaGraph(W.email,subj,body);
+    W.st.sent=W.st.sent||{};W.st.sent[tpl]=today();
+    logW('Sent: '+tpl.replace(/_/g,' ')+' → '+W.email);
+    if(advanceTo){W.stage=advanceTo;if(advanceTo==='Screen invite'||advanceTo==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();logW('Advanced to '+advanceTo);}
+    await saveW(true);closeModal();toast('Email sent');
+    if(wsRow===W.row)renderWorkspace();
+  }catch(e){toast('Send failed: '+e.message);b.disabled=false;b.innerHTML='✉ Send via Outlook';}
+}
+function closeModal(){document.getElementById('modal').classList.remove('open');}
+
+/* ===================== full-page candidate workspace ===================== */
+function openWorkspace(r,jump){wsRow=r;loadW(r);renderWorkspace(jump);
+  document.getElementById('wsoverlay').classList.add('open');document.getElementById('workspace').classList.add('open');
+  if(jump){setTimeout(()=>{const el=document.getElementById('ws-'+jump);if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},250);}
+}
+function closeWorkspace(){document.getElementById('wsoverlay').classList.remove('open');document.getElementById('workspace').classList.remove('open');wsRow=null;}
+function renderWorkspace(){
+  if(!W)return;
+  applyAnswers();
+  const sc=scoreW(),col=BANDCSS[sc.dec.cls],info=STAGEINFO[W.stage]||STAGEINFO['Applied'];
+  const c=pipeline.find(x=>x.excelRow===W.row);const a=action(c);
+  /* header */
+  document.getElementById('ws-name').textContent=W.name;
+  document.getElementById('ws-sub').innerHTML=
+    '<span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-right:8px">'+esc(W.stage)+'</span>'
+    +'<span class="bandpill" style="background:'+col[0]+';color:'+col[1]+';margin-right:10px">'+sc.dec.band+'</span>'
+    +(W.phone?'<a href="tel:'+telify(W.phone)+'">📞 '+esc(W.phone)+'</a>  ':'')
+    +(W.email?'<a href="mailto:'+esc(W.email)+'">✉ '+esc(W.email)+'</a>':'');
+  /* this-step card */
+  const why=stepWhy(a,sc);
+  const p=a.primary||{kind:'open',label:'Open',cls:'sky'};
+  const cls=p.cls==='gold'?'gold':p.cls==='grn'?'grn':p.cls==='lock'?'lock':'';
+  const primBtn=p.kind==='lock'?'<button class="ws-pri lock" disabled>'+esc(p.label)+'</button>':'<button class="ws-pri '+cls+'" onclick="doPrimary('+W.row+')">'+esc(p.label)+' →</button>';
+  const thisStep=`<div class="ws-this">
+    <h3>This step</h3>
+    <div class="why">${esc(why)}</div>
+    <div class="ws-actrow">
+      ${primBtn}
+      <div class="ws-sec-row">
+        <button class="ws-sec danger" onclick="declineFromWS()">Decline candidate</button>
+      </div>
+    </div></div>`;
+  /* stepper */
+  const stepper=FLOW.map(s=>{const cur=s===W.stage,done=FLOW.indexOf(s)<FLOW.indexOf(W.stage);return `<span class="step ${cur?'cur':done?'done':''}">${FLOW_SHORT[s]||s}</span>`;}).join('');
+  /* identity card */
+  const pills=(W.st.pills||[]).map(p=>'<span class="xpill" style="margin:0 4px 4px 0">'+esc(p)+'</span>').join('');
+  const identity=`<div class="wscard"><h3>Identity</h3>
+    <div class="kvrow"><span class="lbl">Source</span><span class="val">${esc(W.source||'—')}</span></div>
+    <div class="kvrow"><span class="lbl">ZIP</span><span class="val">${esc(W.st.zip||'—')}</span></div>
+    <div class="kvrow"><span class="lbl">Highest certificate</span><span class="val">${esc(W.st.cert||'—')}</span></div>
+    <div class="kvrow"><span class="lbl">Driver's license</span><span class="val">${esc(W.st.license||'—')}</span></div>
+    <div class="kvrow"><span class="lbl">Pay range</span><span class="val">${payRange()}</span></div>
+    ${pills?'<div style="margin-top:10px"><h4>Expertise</h4>'+pills+'</div>':''}
+    </div>`;
+  /* live score card */
+  const scoreCard=`<div class="wscard warm"><h3>Score</h3>
+    <div class="scorebig">
+      <div class="blk"><div class="lab">Quality</div><div class="num">${sc.Q==null?'—':sc.Q}</div></div>
+      <div class="blk"><div class="lab">Retention</div><div class="num">${sc.R==null?'—':sc.R}</div></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="bandpill" style="background:${col[0]};color:${col[1]}">${sc.dec.band}</span></div>
+    <h4 style="margin-top:14px">Pipeline progress</h4>
+    <div class="stepper-ws">${stepper}</div></div>`;
+  /* gates */
+  const gh=GATES.map(([k,l])=>`<div class="gateitem">${l}<span class="yn"><button class="y${W.gates[k]==='Y'?' on':''}" onclick="hgate('${k}','Y')">Y</button><button class="n${W.gates[k]==='N'?' on':''}" onclick="hgate('${k}','N')">N</button></span></div>`).join('');
+  const gatesCard=`<div class="wscard" id="ws-gates"><h3>Gates ${sc.gateStatus==='partial'?'<span class="pill psoft" style="font-size:9px">incomplete</span>':sc.gateStatus==='PASS'?'<span class="pill pg" style="font-size:9px">all pass</span>':'<span class="pill pr2" style="font-size:9px">fail</span>'}</h3>
+    <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Hard pass/fail. Any "N" disqualifies; gaps mean you owe the candidate a request for info.</div>
+    <div class="gatesrow">${gh}</div></div>`;
+  /* stage-specific work block */
+  const work=workBlock(a);
+  /* documents */
+  const docs=`<div class="wscard" id="ws-docs"><h3>Documents <input type="file" id="ws-file" style="display:none" onchange="uploadFiles(this.files)"><label for="ws-file" class="uploadbtn">📎 Upload</label></h3>
+    <div style="font-size:12px;color:var(--soft);margin-bottom:8px">caregivers › ${esc(W.name)} › onboarding</div>
+    <div id="ws-doclist"><div style="font-size:12px;color:var(--soft)"><span class="spin"></span> Loading…</div></div></div>`;
+  /* activity */
+  const logs=(W.st.log||[]).slice().reverse().map(l=>`<div class="logentry"><span class="when">${esc(l.t)}</span>${esc(l.x)}</div>`).join('')||'<div style="font-size:12px;color:var(--soft)">No activity yet.</div>';
+  const activity=`<div class="wscard"><h3>Activity</h3>${logs}
+    <textarea id="ws-note" placeholder="Add a note…" style="width:100%;margin-top:12px;padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;min-height:54px;outline:none"></textarea>
+    <button class="btn-sec bg-cream" style="margin-top:7px;width:auto;padding:7px 13px" onclick="addNote()">Add note</button></div>`;
+  document.getElementById('ws-body').innerHTML=`
+    ${thisStep}
+    <div class="wsgrid">
+      <div>${gatesCard}${work}${docs}${activity}</div>
+      <div>${identity}${scoreCard}</div>
+    </div>`;
+  loadDocs();
+}
+function stepWhy(a,sc){
+  if(a.missing&&a.missing.length)return 'Missing gate info: '+a.missing.join(', ')+'. Email them to fill this in before moving forward.';
+  if(a.primary&&a.primary.kind==='questions'){const s=a.primary.stage;return 'Open the '+(s==='Interview'?'interview':'phone screen')+' workspace, ask each anchored question, and pick what you hear. The score updates itself.';}
+  if(a.primary&&a.primary.kind==='verify')return 'Call each prior employer and mark verified or unable. Builds a verification flag; does not gate.';
+  if(a.primary&&a.primary.kind==='refs')return 'Load the references they sent, call them with the structured questions, capture answers.';
+  if(a.primary&&a.primary.kind==='checks')return 'Run the free registries now, send the cert + check request, track both check statuses.';
+  if(a.primary&&a.primary.kind==='lock')return 'Offer is locked until the third-party background check returns clear.';
+  if(a.primary&&a.primary.kind==='email-tpl')return 'Send the templated email now. The candidate moves forward automatically once sent.';
+  if(a.primary&&a.primary.kind==='checkin')return 'Log a retention check-in. Feeds the data loop that improves scoring over time.';
+  return '';
+}
+function workBlock(a){
+  if(!a.primary)return'';
+  const k=a.primary.kind;
+  if(k==='questions')return questionsBlock(a.primary.stage,a.primary.nextStage);
+  if(k==='verify')return verifyBlock();
+  if(k==='refs')return refsBlock();
+  if(k==='checks')return checksBlock();
+  return '';
+}
+function hgate(k,v){W.gates[k]=W.gates[k]===v?'':v;renderWorkspace();}
+function declineFromWS(){if(!confirm('Decline this candidate?'))return;doEmail('reject','Declined');}
+async function addNote(){const t=document.getElementById('ws-note').value.trim();if(!t){toast('Type a note first');return;}logW(t);await saveW(true);toast('Note added');renderWorkspace();}
+
+/* ----- questions ----- */
+function questionsBlock(stage,nextStage){
+  const qs=QBANK.filter(x=>x.st===stage);
+  const ans=qs.filter(x=>W.answers[x.id]!=null).length;
+  const body=qs.map(it=>`<div class="qrow"><div class="qq">${esc(it.q)}</div><div class="qopts">${it.o.map(o=>`<button class="${W.answers[it.id]===o[1]?'on':''}" onclick="qans('${it.id}',${o[1]},'${stage}','${nextStage}')">${esc(o[0])}</button>`).join('')}</div></div>`).join('');
+  const script=stage==='Interview'?['Welcome & ease in','Walk the role honestly — hours, pay, personal care','Ask each question; note what you hear','Invite their questions','Explain next steps & timeline']
+    :['Confirm it is a good time','Confirm interest, availability, pay','Run the questions','Tell them references will be needed','Set up the booking link'];
+  return `<div class="wscard" id="ws-questions"><h3>${stage==='Interview'?'Structured interview':'Phone screen'} <span style="font-size:11px;color:var(--soft);font-weight:600">${ans}/${qs.length} answered</span></h3>
+    <div style="font-size:12px;color:var(--soft);margin-bottom:8px">Pick what you hear — the score updates itself.</div>
+    <details style="margin-bottom:10px"><summary style="font-size:12px;font-weight:600;color:var(--sky-deep);cursor:pointer">📋 Call structure</summary><ol style="padding-left:20px;font-size:12.5px;line-height:1.8;color:var(--mid);margin-top:8px">${script.map(l=>'<li>'+esc(l)+'</li>').join('')}</ol></details>
+    ${body}
+    <div class="brow" style="margin-top:14px;gap:8px">
+      <button class="btn-primary bg-grn" onclick="completeQuestions('${nextStage}')">Complete &amp; advance →</button>
+    </div></div>`;
+}
+function qans(id,v,stage,nextStage){W.answers[id]=W.answers[id]===v?undefined:v;renderWorkspace();}
+async function completeQuestions(nextStage){applyAnswers();const sc=scoreW();
+  if(sc.dec.cls==='red'){if(!confirm('Score lands at DECLINE. Decline?'))return;return doEmail('reject','Declined');}
+  W.stage=nextStage;W.st.due=today();logW('Completed step → '+nextStage+' (Q'+sc.Q+'/R'+sc.R+')');
+  await saveW(true);toast('→ '+nextStage);renderWorkspace();}
+
+/* ----- verify employers ----- */
+function verifyBlock(){
+  const emp=W.st.employers||[];
+  const list=emp.map((e,i)=>`<div class="lrow"><input value="${esc(e.name||'')}" placeholder="Employer / supervisor / phone" oninput="W.st.employers[${i}].name=this.value"><span class="vbtns"><button class="ok ${e.v==='ok'?'on':''}" onclick="vset(${i},'ok')">verified</button><button class="no ${e.v==='no'?'on':''}" onclick="vset(${i},'no')">unable</button></span></div>`).join('');
+  return `<div class="wscard" id="ws-verify"><h3>Verify past employers</h3>
+    <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Call each prior employer and mark verified or unable. This builds a confidence flag; it does not gate.</div>
+    ${list||'<div style="font-size:12px;color:var(--soft);padding:8px 0">No employers added yet.</div>'}
+    <button class="btn-sec bg-cream" style="margin-top:10px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',v:''});renderWorkspace()">+ add employer</button>
+    <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Employers verified')">Done → references →</button></div></div>`;
+}
+function vset(i,v){W.st.employers[i].v=W.st.employers[i].v===v?'':v;renderWorkspace();}
+
+/* ----- references ----- */
+function refsBlock(){
+  const refs=W.st.refs||[];
+  const list=refs.map((rf,i)=>`<div class="lrow"><input value="${esc(rf.name||'')}" placeholder="Reference name & phone" oninput="W.st.refs[${i}].name=this.value">${rf.name?'<a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" href="tel:">📞</a>':''}</div>`).join('');
+  const qs=QBANK.filter(x=>x.st==='Reference').map(it=>`<div class="qrow"><div class="qq">${esc(it.q)}</div><div class="qopts">${it.o.map(o=>`<button class="${W.answers[it.id]===o[1]?'on':''}" onclick="qans('${it.id}',${o[1]},'Reference','Background')">${esc(o[0])}</button>`).join('')}</div></div>`).join('');
+  return `<div class="wscard" id="ws-refs"><h3>Reference checks</h3>
+    <div style="font-size:12px;color:var(--soft);margin-bottom:8px">Load the references they sent, then call them with these questions.</div>
+    ${list||'<div style="font-size:12px;color:var(--soft);padding:8px 0">No references added yet.</div>'}
+    <button class="btn-sec bg-cream" style="margin:10px 0;width:auto;padding:7px 13px" onclick="W.st.refs=W.st.refs||[];W.st.refs.push({name:''});renderWorkspace()">+ add reference</button>
+    <h4 style="margin-top:14px">Reference questions</h4>${qs}
+    <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="completeQuestions('Background')">Complete &amp; advance →</button></div></div>`;
+}
+
+/* ----- background & checks ----- */
+function flagPill(v){const map={clear:['Clear','pg'],flag:['Flag','pr2'],pending:['Pending','pa']};const m=map[v]||['—','psoft'];return '<span class="pill '+m[1]+'">'+m[0]+'</span>';}
+function chkOpts(which){return ['','pending','clear','flag'].map(o=>`<option value="${o}" ${o===W.st[which]?'selected':''}>${o||'set status'}</option>`).join('');}
+function checksBlock(){
+  return `<div class="wscard" id="ws-checks"><h3>Background &amp; certificates</h3>
+    <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Send the certs + background consent request, run the free registries now, and track both checks.</div>
+    <h4>Free registries — run now</h4>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
+      <a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" target="_blank" href="https://exclusions.oig.hhs.gov/">OIG Exclusions ↗</a>
+      <a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" target="_blank" href="https://www.odh.ohio.gov/know-our-programs/nurse-aide-registry/nurse-aide-registry">OH Nurse Aide ↗</a>
+      <a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" target="_blank" href="https://oh.db2.alliantenroll.com/">OH BCI / Webcheck ↗</a>
+    </div>
+    <h4>Status</h4>
+    <div class="kvrow">Required state check ${flagPill(W.st.reqCheck)}<select onchange="W.st.reqCheck=this.value;renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('reqCheck')}</select></div>
+    <div class="kvrow">3rd-party check (API) ${flagPill(W.st.tpCheck)}<select onchange="W.st.tpCheck=this.value;renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('tpCheck')}</select></div>
+    <div style="font-size:11px;color:var(--soft);margin-top:8px">When the provider's API is connected, the 3rd-party status flips automatically and unlocks the offer. The required check can stay pending — the candidate just can't be matched to a patient until it clears.</div>
+    <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceWS('Interview invite','Checks underway → interview invite')">Done → invite to interview →</button></div></div>`;
+}
+
+/* ===================== transitions ===================== */
+async function advanceWS(toStage,msg){W.stage=toStage;if(msg)logW(msg);if(toStage==='Screen invite'||toStage==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();await saveW(true);toast('→ '+toStage);renderWorkspace();}
+async function doCheckin(){const t=prompt('Check-in note (e.g. "30-day — going well")');if(t==null)return;logW('Check-in: '+t);W.st.due=plusDays(60);await saveW(true);renderWorkspace();}
+
+/* ===================== documents ===================== */
 function safeName(s){return String(s).replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,' ').trim();}
-async function loadDocs(name){
-  const el=document.getElementById('d-docs');if(!el||!driveId)return;
-  const path='caregivers/'+safeName(name)+'/onboarding';
+function fmtSize(n){if(!n)return'';if(n<1024)return n+' B';if(n<1024*1024)return(n/1024).toFixed(1)+' KB';return(n/1024/1024).toFixed(1)+' MB';}
+async function loadDocs(){
+  const el=document.getElementById('ws-doclist');if(!el||!driveId||!W)return;
+  const path='caregivers/'+safeName(W.name)+'/onboarding';
   const enc=path.split('/').map(encodeURIComponent).join('/');
   try{
     const r=await gfetch(GR+'/drives/'+driveId+'/root:/'+enc+':/children?$select=name,webUrl,size,file,folder');
-    if(r.status===404){el.innerHTML='<div style="font-size:12px;color:var(--soft);background:var(--cream);border-radius:8px;padding:9px 11px">No onboarding folder yet. <button class="btn-sec bg-sky-l" style="margin-top:8px" onclick="createDocFolder()">Create folder</button></div>';return;}
-    if(!r.ok){el.innerHTML='<div style="font-size:12px;color:var(--soft)">Couldn\'t load documents ('+r.status+').</div>';return;}
+    if(r.status===404){el.innerHTML='<div style="font-size:12px;color:var(--soft);padding:6px 0">No files yet. The folder will be created automatically the first time you upload.</div>';return;}
+    if(!r.ok){el.innerHTML='<div style="font-size:12px;color:var(--soft)">Couldn\'t load ('+r.status+').</div>';return;}
     const items=((await r.json()).value)||[];
-    if(!items.length){el.innerHTML='<div style="font-size:12px;color:var(--soft);background:var(--cream);border-radius:8px;padding:9px 11px">Folder ready — no files yet. Emailed documents land here once the inbox flow runs.</div>';return;}
-    el.innerHTML=items.map(f=>'<a href="'+esc(f.webUrl)+'" target="_blank" style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border-soft);font-size:13px;color:var(--sky-deep);text-decoration:none">'+(f.folder?'📁':'📄')+' '+esc(f.name)+'</a>').join('');
+    if(!items.length){el.innerHTML='<div style="font-size:12px;color:var(--soft);padding:6px 0">Folder ready — no files yet.</div>';return;}
+    el.innerHTML=items.map(f=>'<div class="docrow"><a href="'+esc(f.webUrl)+'" target="_blank">'+(f.folder?'📁':'📄')+' '+esc(f.name)+'</a><span class="sz">'+fmtSize(f.size)+'</span></div>').join('');
   }catch(e){el.innerHTML='<div style="font-size:12px;color:var(--soft)">Documents unavailable.</div>';}
 }
-async function createDocFolder(){const segs=['caregivers',safeName(W.name),'onboarding'];let cur='';
-  try{for(const seg of segs){const parent=cur?('root:/'+cur.split('/').map(encodeURIComponent).join('/')+':'):'root';
-      await gfetch(GR+'/drives/'+driveId+'/'+parent+'/children',{method:'POST',body:JSON.stringify({name:seg,folder:{},'@microsoft.graph.conflictBehavior':'fail'})});
-      cur=cur?(cur+'/'+seg):seg;}
-    toast('Folder created');loadDocs(W.name);}catch(e){toast('Could not create folder');}
+async function ensureFolder(){const segs=['caregivers',safeName(W.name),'onboarding'];let cur='';
+  for(const seg of segs){
+    const parent=cur?('root:/'+cur.split('/').map(encodeURIComponent).join('/')+':'):'root';
+    /* tolerate conflicts: if exists, that's fine */
+    await gfetch(GR+'/drives/'+driveId+'/'+parent+'/children',{method:'POST',body:JSON.stringify({name:seg,folder:{},'@microsoft.graph.conflictBehavior':'replace'})}).catch(()=>{});
+    cur=cur?(cur+'/'+seg):seg;}
+  return cur;
 }
-function advanceToScreen(){W.stage='Screen invite';W.st.due=plusDays(3);logW('Advanced to screening');saveW(true).then(()=>{doEmail(W.row,'screen_invite');});}
-function markBooked(nx){const v=document.getElementById('d-bk').value;if(!v){toast('Pick a date & time');return;}W.st.booking=v;W.stage=nx;W.st.due=null;logW('Booked '+fmtDay(v.slice(0,10))+' '+fmtTime(v));saveW(true).then(()=>{closeDrawer();toast('Booked');});}
-function markHired(){W.stage='Hired';W.st.due=plusDays(30);logW('Hired');saveW(true).then(()=>{closeDrawer();toast('Hired ✓');});}
-function addNote(){const t=document.getElementById('d-note').value.trim();if(!t){toast('Type a note first');return;}logW(t);saveW(true).then(()=>{toast('Note added');renderDrawer&&openCand(W.row);});}
+async function uploadFiles(files){
+  if(!files||!files.length)return;
+  const el=document.getElementById('ws-doclist');el.innerHTML='<div style="font-size:12px;color:var(--soft)"><span class="spin"></span> Uploading & creating folder if needed…</div>';
+  try{
+    const folder=await ensureFolder();
+    for(const f of files){
+      const path=folder+'/'+f.name;
+      const enc=path.split('/').map(encodeURIComponent).join('/');
+      const buf=await f.arrayBuffer();
+      const r=await gfetch(GR+'/drives/'+driveId+'/root:/'+enc+':/content',{method:'PUT',body:buf,headers:{'Content-Type':f.type||'application/octet-stream'}});
+      if(!r.ok)throw new Error('Upload failed: '+r.status);
+      logW('Uploaded: '+f.name);
+    }
+    await saveW(true);toast('Uploaded');loadDocs();
+  }catch(e){toast(e.message);loadDocs();}
+}
+
+/* ===================== calendar tab ===================== */
+function startOfWeek(d){const x=new Date(d);const day=x.getDay();const diff=x.getDate()-day+(day===0?-6:1);x.setDate(diff);x.setHours(0,0,0,0);return x;}
+function renderCalendar(){
+  const base=startOfWeek(new Date());base.setDate(base.getDate()+calOffset*7);
+  const end=new Date(base);end.setDate(end.getDate()+6);
+  const fmtRange=new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric'});
+  document.getElementById('calendar-view').innerHTML=`
+    <div class="cal-head">
+      <div class="cal-nav">
+        <button onclick="calNav(-1)">‹ prev</button>
+        <button onclick="calNav(0)">today</button>
+        <button onclick="calNav(1)">next ›</button>
+      </div>
+      <div class="cal-title">${fmtRange.format(base)} – ${fmtRange.format(end)}</div>
+      <span style="font-size:11px;color:var(--soft)">Slots stored on the candidate record. Wire to Microsoft Bookings to publish public slots.</span>
+    </div>
+    ${[0,1,2,3,4,5,6].map(off=>renderCalDay(base,off)).join('')}`;
+}
+function renderCalDay(base,off){
+  const d=new Date(base);d.setDate(d.getDate()+off);const iso=d.toISOString().slice(0,10);
+  const events=[];
+  pipeline.forEach(c=>{
+    if(c.stage==='Declined')return;
+    if(c.st.booking&&c.st.booking.slice(0,10)===iso)events.push({kind:'booked',time:c.st.booking.slice(11,16),c:c});
+    (c.st.slots||[]).forEach(s=>{if(s.slice(0,10)===iso)events.push({kind:'slot',time:s.slice(11,16),c:c});});
+  });
+  events.sort((a,b)=>a.time<b.time?-1:1);
+  const isToday=iso===today();
+  const headBg=isToday?'background:var(--sky-pale);':'';
+  return `<div class="cal-day" style="${headBg}"><h3>${fmtDayLong(iso)} ${isToday?'<span style="font-size:10px;color:var(--sky-deep);font-weight:700;letter-spacing:.05em">TODAY</span>':''} <span class="dadd" onclick="addSlotPrompt('${iso}')">+ open slot</span></h3>
+    ${events.length?events.map(e=>calEventRow(e)).join(''):'<div class="cal-empty">No slots — click "open slot" to add one.</div>'}</div>`;
+}
+function calEventRow(e){
+  if(e.kind==='booked'){
+    const t12=new Date('2000-01-01T'+e.time).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    return `<div class="cal-slot"><div class="t">${t12}</div><div class="who"><div class="nm">${esc(e.c.name)} <span class="pill pa" style="margin-left:6px;font-size:9px">Booked · ${esc(e.c.stage)}</span></div><div class="ph">${esc(e.c.phone||'')}</div></div><div class="act"><button class="open" onclick="openWorkspace(${e.c.excelRow})">Open</button></div></div>`;
+  }
+  const t12=new Date('2000-01-01T'+e.time).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+  return `<div class="cal-slot"><div class="t">${t12}</div><div class="who"><div class="nm" style="color:var(--soft)">Open slot offered to ${esc(e.c.name)}</div></div><div class="act"><button class="close" onclick="closeSlot(${e.c.excelRow},'${e.time}')">Close</button></div></div>`;
+}
+function calNav(n){if(n===0)calOffset=0;else calOffset+=n;renderCalendar();}
+async function addSlotPrompt(iso){const candR=prompt('Add a slot for which candidate?\nEnter their row number from "All candidates" (e.g. 6) or candidate name.');
+  if(!candR)return;
+  let c=pipeline.find(x=>String(x.excelRow)===String(candR));
+  if(!c)c=pipeline.find(x=>x.name.toLowerCase()===String(candR).toLowerCase());
+  if(!c){toast('No matching candidate');return;}
+  const t=prompt('Time (24h, e.g. 14:30)','10:00');if(!t||!/^\d{1,2}:\d{2}$/.test(t)){toast('Bad time');return;}
+  loadW(c.excelRow);W.st.slots=W.st.slots||[];W.st.slots.push(iso+'T'+t.padStart(5,'0'));logW('Opened slot '+iso+' '+t);await saveW(true);renderCalendar();
+}
+async function closeSlot(r,time){loadW(r);W.st.slots=(W.st.slots||[]).filter(s=>!(s.indexOf(time)>-1));logW('Closed slot '+time);await saveW(true);renderCalendar();}
 
 /* ===================== add candidate ===================== */
 const SETTINGS=[['home','Home care'],['memory','Memory care'],['hospice','Hospice'],['facility','Facility'],['hospital','Hospital']];
@@ -1030,27 +1337,26 @@ function openAdd(){AD={facts:{settings:[],days:[],shifts:[]},gates:{}};
     <label>Short stints (&lt;6mo) last 3yr</label><input id="x_shorts" type="number" value="0" style="margin-bottom:10px">
     <label>Days available</label><div id="x_days" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${DAYS.map(d=>`<button class="btn-sm bg-cream" style="flex:0 0 auto" onclick="tog('days','${d}',this)">${d}</button>`).join('')}</div>
     <label>Shifts</label><div id="x_shifts" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${SHIFTSEG.map(s=>`<button class="btn-sm bg-cream" style="flex:0 0 auto" onclick="tog('shifts','${s}',this)">${s}</button>`).join('')}</div>
-    <label>Gates</label><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${GATES.map(([k,l])=>`<div style="display:flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--border);border-radius:999px;padding:3px 6px 3px 11px;font-size:12px">${l}<span style="display:flex;gap:4px"><button onclick="agate('${k}','Y',this)" style="width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:#fff;font-size:10px;font-weight:700;cursor:pointer">Y</button><button onclick="agate('${k}','N',this)" style="width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:#fff;font-size:10px;font-weight:700;cursor:pointer">N</button></span></div>`).join('')}</div>
+    <label>Gates</label><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${GATES.map(([k,l])=>`<div class="gateitem">${l}<span class="yn"><button class="y" onclick="agate('${k}','Y',this)">Y</button><button class="n" onclick="agate('${k}','N',this)">N</button></span></div>`).join('')}</div>
     <button class="esave" style="width:100%" onclick="saveAdd()">Add to pipeline</button></div>`;
   document.getElementById('aoverlay').classList.add('open');document.getElementById('adrawer').classList.add('open');}
 function closeAdd(){document.getElementById('aoverlay').classList.remove('open');document.getElementById('adrawer').classList.remove('open');AD=null;}
 function tog(g,v,b){const a=AD.facts[g],i=a.indexOf(v);if(i<0){a.push(v);b.classList.remove('bg-cream');b.classList.add('bg-sky');}else{a.splice(i,1);b.classList.add('bg-cream');b.classList.remove('bg-sky');}}
-function agate(k,v,b){AD.gates[k]=AD.gates[k]===v?'':v;const p=b.parentNode;p.querySelectorAll('button').forEach(x=>{x.style.background='#fff';x.style.color='';});if(AD.gates[k]===v){b.style.background=v==='Y'?'var(--grn)':'var(--red)';b.style.color='#fff';}}
+function agate(k,v,b){AD.gates[k]=AD.gates[k]===v?'':v;const p=b.parentNode;p.querySelectorAll('button').forEach(x=>x.classList.remove('on'));if(AD.gates[k])b.classList.add('on');}
 const SERVICE_ZIPS={'44118':5,'44106':5,'44112':5,'44121':5,'44120':4,'44122':4,'44124':4,'44104':4,'44103':4,'44108':4,'44110':4,'44117':4,'44119':3,'44123':3,'44132':3,'44143':3,'44105':3,'44109':3,'44128':3,'44137':3,'44125':3,'44131':2,'44141':2,'44146':2,'44139':2,'44092':2,'44060':1,'44094':1,'44095':1};
 function rProx(z){if(!/^\d{5}$/.test(z||''))return'';return SERVICE_ZIPS[z]??1;}
 function rTen(l,sh){let b={u6:1,u12:2,y12:3,y23:4,y3p:5}[l];if(b==null)return'';sh=+sh||0;if(sh>=2)b=Math.max(1,b-2);else if(sh===1)b=Math.max(1,b-1);return b;}
 function rComp(y,set,cred){let b={'0':1,u1:2,'12':3,'35':4,'5p':4}[y];if(b==null)return'';const rel=(set||[]).filter(s=>['home','memory','hospice'].includes(s)).length;if(rel>=2)b=Math.min(5,b+1);if(y==='5p'&&rel>=1)b=5;if(!cred&&b>3)b=3;return b;}
 function rAva(d,sh){const dd=(d||[]).length,ss=(sh||[]).length;if(!dd)return'';let r=dd>=6?5:dd>=4?4:dd>=2?3:2;if(ss<=1&&r>3)r=3;return r;}
 async function saveAdd(){const g=id=>document.getElementById(id).value.trim();const name=g('x_name');if(!name){toast('Name required');return;}
-  const f=AD.facts,gv=k=>AD.gates[k]||'',cred=AD.gates.cr==='Y';
-  const prx=rProx(g('x_zip')),ten=rTen(g('x_longest'),g('x_shorts')),cmp=rComp(g('x_years'),f.settings,cred),ava=rAva(f.days,f.shifts);
+  const f=AD.facts,gv=k=>AD.gates[k]||'',cred=AD.gates.cr==='Y',zip=g('x_zip');
+  const prx=rProx(zip),ten=rTen(g('x_longest'),g('x_shorts')),cmp=rComp(g('x_years'),f.settings,cred),ava=rAva(f.days,f.shifts);
   const pills=g('x_pills').split(',').map(x=>x.trim()).filter(Boolean);
-  const st={due:null,booking:null,pills,cert:g('x_cert'),license:g('x_lic'),reqCheck:'',tpCheck:'',employers:[],refs:[],sent:{},log:[{t:stamp(),x:'Added manually'}]};
+  const st={due:null,booking:null,zip:zip,pills,cert:g('x_cert'),license:g('x_lic'),reqCheck:'',tpCheck:'',employers:[],refs:[],sent:{},slots:[],log:[{t:stamp(),x:'Added manually'}]};
   const row=nextRow,bl=v=>(v===''||v==null?'':v);
   try{
     await patchRange('C'+row+':L'+row,[[name,g('x_phone'),g('x_email'),g('x_source'),'Applied',bl(gv('wa')),bl(gv('cr')),bl(gv('bg')),bl(gv('tr')),bl(gv('av'))]]);
-    await patchRange('N'+row+':T'+row,[['','','','','',bl(cmp),'']]);
-    await patchRange('V'+row+':Y'+row,[[bl(ten),bl(prx),bl(ava),'']]);
+    await patchRange('N'+row+':Y'+row,[['','','','','',bl(cmp),'','',bl(ten),bl(prx),bl(ava),'']]);
     await patchRange('AJ'+row,[[JSON.stringify(st)]]);
     toast('Added');closeAdd();await loadData();
   }catch(e){toast('Add failed: '+e.message);}}
