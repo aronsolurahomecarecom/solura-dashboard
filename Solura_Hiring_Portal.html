@@ -761,7 +761,8 @@ td{padding:13px 16px;vertical-align:top;}
 const CLIENT_ID='bf86d4a3-f6bb-4ad7-991e-098d632b2c0b';
 const FILE_URL='https://solurahomecare.sharepoint.com/:x:/s/careers9/IQCLjIDe38W4SbS2p7XrEVi7ARw5Swud_Tm7rES6x7yfvaw?e=gMrkph';
 const TENANT='1b2cdbea-de19-47d2-9512-ea102905e3eb',SHEET='Pipeline';
-const SCOPES='openid profile email Files.ReadWrite.All Sites.ReadWrite.All Mail.Send Mail.ReadWrite offline_access';
+const SCOPES='openid profile email Files.ReadWrite.All Sites.ReadWrite.All Mail.Send Mail.ReadWrite Bookings.ReadWrite.All offline_access';
+const BOOKING_ID='careers1@solurahomecare.com'; /* the Bookings business identifier — used for the Sync to Bookings API call */
 const GR='https://graph.microsoft.com/v1.0',REDIRECT=location.href.split('?')[0].split('#')[0];
 let tok='',driveId='',itemId='',pipeline=[],nextRow=null;
 let collapsed={0:false,1:false,2:false,3:true,4:true};
@@ -803,7 +804,7 @@ async function onSignedIn(){setConn(true);
   try{const r=await gfetch(GR+'/shares/'+encodeShareUrl(FILE_URL)+'/driveItem?$select=id,parentReference,name');
     if(!r.ok)throw new Error('Could not open the file ('+r.status+')');
     const j=await r.json();itemId=j.id;driveId=j.parentReference.driveId;
-    await loadData();await loadAvailability();}catch(e){toast(e.message);}}
+    await loadData();await loadAvailability();await syncFromBookings(true);}catch(e){toast(e.message);}}
 async function patchRange(addr,values){const base=GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET;
   const r=await gfetch(base+"/range(address='"+addr+"')",{method:'PATCH',body:JSON.stringify({values:values})});
   if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||r.status);}}
@@ -864,6 +865,78 @@ async function loadAvailability(){
     if(!r.ok)return;const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{AVAIL=Object.assign({pattern:{},slots:[],offs:[]},JSON.parse(v[0][0]));}catch(e){}}}catch(e){}
 }
 async function saveAvailability(){try{await patchRange('AK1',[[JSON.stringify(AVAIL)]]);}catch(e){toast('Could not save availability');}}
+
+/* ===================== Microsoft Bookings sync ===================== */
+/* Two-way: push permanent schedule to Bookings business hours; pull appointments back into the pipeline */
+const DAY_LONG={Mon:'monday',Tue:'tuesday',Wed:'wednesday',Thu:'thursday',Fri:'friday',Sat:'saturday',Sun:'sunday'};
+let bookingsEnabled=true; /* flips to false if Bookings API isn't accessible */
+
+async function syncToBookings(silent){
+  if(!bookingsEnabled)return;
+  /* convert AVAIL.pattern into Bookings businessHours format */
+  const businessHours=Object.keys(DAY_LONG).map(d=>{
+    const shifts=AVAIL.pattern[d]||[];
+    const timeSlots=shifts.map(sh=>{const r=shiftToRange(sh);
+      /* overnight wraps midnight — Bookings can't represent that as a single slot; cap at 23:59 */
+      const end=(sh==='Overnight')?'23:59:00.0000000':r.e+':00.0000000';
+      return {start:r.s+':00.0000000',end:end};});
+    return {day:DAY_LONG[d],timeSlots:timeSlots};
+  });
+  try{
+    const r=await gfetch(GR+'/solutions/bookingBusinesses/'+encodeURIComponent(BOOKINGS_ID),
+      {method:'PATCH',body:JSON.stringify({businessHours})});
+    if(!r.ok){const e=await r.json().catch(()=>({}));
+      if(r.status===403){bookingsEnabled=false;if(!silent)toast('⚠ Bookings sync needs re-sign in for new permissions');}
+      else if(r.status===404){bookingsEnabled=false;if(!silent)toast('Bookings business not found at '+BOOKINGS_ID);}
+      else if(!silent)toast('Bookings push failed: '+((e.error&&e.error.message)||r.status));
+      return;}
+    if(!silent)toast('✓ Schedule pushed to Bookings');
+  }catch(e){if(!silent)toast('Bookings push error: '+e.message);}
+}
+
+async function syncFromBookings(silent){
+  if(!bookingsEnabled||!pipeline.length)return;
+  try{
+    const r=await gfetch(GR+'/solutions/bookingBusinesses/'+encodeURIComponent(BOOKINGS_ID)+'/appointments');
+    if(!r.ok){if(r.status===403){bookingsEnabled=false;}return;}
+    const apps=((await r.json()).value)||[];
+    const now=Date.now();
+    /* keep appointments in window: last 3 days through next 60 days */
+    const winLo=now-3*86400000,winHi=now+60*86400000;
+    let synced=0,unmatched=[];
+    for(const app of apps){
+      if(!app.startDateTime||!app.startDateTime.dateTime)continue;
+      const start=new Date(app.startDateTime.dateTime).getTime();
+      if(start<winLo||start>winHi)continue;
+      const customer=(app.customers||[])[0];if(!customer)continue;
+      const email=(customer.emailAddress||'').toLowerCase();if(!email)continue;
+      const c=pipeline.find(x=>x.email&&x.email.toLowerCase()===email);
+      if(!c){unmatched.push({email,name:customer.name,start:app.startDateTime.dateTime,id:app.id});continue;}
+      const bk=app.startDateTime.dateTime.slice(0,16); /* YYYY-MM-DDTHH:mm */
+      const already=c.st.booking===bk&&c.st.bookingsId===app.id;
+      if(already)continue;
+      /* update candidate */
+      c.st.booking=bk;c.st.bookingsId=app.id;
+      let stageChange=null;
+      if(c.stage==='Screen invite'){c.stage='Screen booked';stageChange='Screen booked';}
+      else if(c.stage==='Interview invite'){c.stage='Interview booked';stageChange='Interview booked';}
+      c.st.log=c.st.log||[];
+      c.st.log.push({t:stamp(),x:'📅 Bookings: '+bk+(stageChange?' → '+stageChange:'')});
+      try{
+        const row=c.excelRow;
+        await patchRange('G'+row,[[c.stage]]);
+        await patchRange('AJ'+row,[[JSON.stringify(c.st)]]);
+        synced++;
+      }catch(e){}
+    }
+    if(unmatched.length){
+      AVAIL.unmatched=unmatched;await saveAvailability();
+    }else if(AVAIL.unmatched&&AVAIL.unmatched.length){
+      AVAIL.unmatched=[];await saveAvailability();
+    }
+    if(synced){if(!silent)toast('📅 '+synced+' new booking'+(synced===1?'':'s')+' synced');render();}
+  }catch(e){console.warn('Bookings pull failed:',e.message);}
+}
 
 /* ===================== scoring engine ===================== */
 const QW={rel:15,com:12,jud:12,doc:11,ref:20,cmp:20,phn:10},RW={ten:40,prx:20,ava:15,exp:25};
@@ -1160,6 +1233,7 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
 
 /* ===================== email ===================== */
 const BOOK_LINK='https://outlook.office.com/book/careers1@solurahomecare.com/?ismsaljsauthenabled';
+const BOOKINGS_ID='careers1@solurahomecare.com'; /* Bookings business identifier — matches the prefix in BOOK_LINK */
 const TEMPLATES={
  screen_invite:c=>({s:'Next step with Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying. Let's set up a quick 15-minute call — pick a time here:\n${BOOK_LINK}\n\nSolura Home Care Hiring`}),
  screen_nudge:c=>({s:'Still interested? — Solura Home Care',b:`Hi ${first(c)},\n\nJust following up — pick a 15-minute slot whenever it's convenient:\n${BOOK_LINK}\n\nSolura Home Care`}),
@@ -1451,6 +1525,14 @@ function renderCalendar(){
   const base=startOfWeek(new Date());base.setDate(base.getDate()+calOffset*7);
   const end=new Date(base);end.setDate(end.getDate()+6);
   const fmt=new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric'});
+  const um=(AVAIL.unmatched||[]).filter(u=>new Date(u.start).getTime()>=Date.now()-86400000);
+  const unmatchedCard=um.length?`<div class="pattern-card" style="border-color:var(--gold);background:linear-gradient(135deg,#FEF3DC,#fff)">
+    <h4 style="color:var(--gold-deep)">⚑ ${um.length} booking${um.length===1?'':'s'} not yet linked to a candidate</h4>
+    <div class="sub">Someone booked via your public link but their email doesn't match anyone in the pipeline. Add them or check the email.</div>
+    ${um.map(u=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border-soft);font-size:12.5px">
+      <div><b>${esc(u.name||'(no name)')}</b> <span style="color:var(--soft)">${esc(u.email||'')}</span><div style="font-size:11px;color:var(--soft)">${esc(new Date(u.start).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))}</div></div>
+      <button class="cal-btn" onclick="openAddFromBooking('${esc(u.name||'')}','${esc(u.email||'')}','${esc(u.start)}')">+ add candidate</button></div>`).join('')}
+  </div>`:'';
   document.getElementById('calendar-view').innerHTML=`
     <div class="cal-head">
       <div class="cal-nav">
@@ -1459,23 +1541,60 @@ function renderCalendar(){
         <button onclick="calNav(1)">next ›</button>
       </div>
       <div class="cal-title">${fmt.format(base)} – ${fmt.format(end)}</div>
+      <button class="cal-btn" onclick="manualBookingsSync()" title="Pull latest bookings from Microsoft Bookings">⟳ refresh</button>
       <button class="cal-btn" onclick="avPatternOpen=!avPatternOpen;renderCalendar()">${avPatternOpen?'Hide':'⚙'} permanent schedule</button>
     </div>
+    ${unmatchedCard}
     ${avPatternOpen?patternEditor():''}
     ${[0,1,2,3,4,5,6].map(off=>renderCalDay(base,off)).join('')}`;
+}
+async function manualBookingsSync(){toast('Syncing with Bookings…');await syncFromBookings(false);renderCalendar();}
+function openAddFromBooking(name,email,startISO){
+  openAdd();
+  /* prefill */
+  setTimeout(()=>{
+    if(!AD)return;
+    AD.name=name||'';AD.email=email||'';
+    renderAdd();
+  },100);
 }
 function patternEditor(){
   const shiftLabel=sh=>{const r=shiftToRange(sh);return sh+' <span style="font-weight:400;color:var(--soft);font-size:10px">'+r.s+'–'+r.e+'</span>';};
   return `<div class="pattern-card">
     <h4>Permanent weekly schedule</h4>
-    <div class="sub">Pick the shifts you're typically available — these become recurring open blocks candidates can book against. Specific days can be overridden below.</div>
+    <div class="sub">Pick the shifts you're typically available. Each toggle saves instantly <em>and</em> pushes to Microsoft Bookings, so candidates can only book within these hours.</div>
     ${DAYS.map(d=>{const on=(AVAIL.pattern[d]||[]).length>0;
       return `<div class="day-row ${on?'':'off'}"><div class="day-lbl">${d}</div><div class="shifts">${SHIFTS.map(sh=>`<button class="${(AVAIL.pattern[d]||[]).includes(sh)?'on':''}" onclick="togPatternShift('${d}','${sh}')">${shiftLabel(sh)}</button>`).join('')}</div></div>`;}).join('')}
-    <div style="margin-top:12px;font-size:11.5px;color:var(--soft)">Shift hours: Morning 9–12 · Afternoon 1–5 · Evening 5–8 · Overnight 8pm–6am. Changes save instantly.</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:14px;padding-top:12px;border-top:1px dashed var(--border)">
+      <button id="sync-btn" class="cal-btn" style="background:var(--sky-pale);color:var(--sky-deep);border-color:var(--sky-mid)" onclick="syncToBookings(false)">⇪ Re-push to Bookings</button>
+      <span style="font-size:11.5px;color:var(--soft)">Manual override if you suspect Bookings is out of sync.</span>
+    </div>
+    <div style="margin-top:10px;font-size:11.5px;color:var(--soft)">Shift hours: Morning 9–12 · Afternoon 1–5 · Evening 5–8 · Overnight 8pm–6am.</div>
   </div>`;
 }
 async function togPatternShift(day,sh){AVAIL.pattern[day]=AVAIL.pattern[day]||[];const i=AVAIL.pattern[day].indexOf(sh);if(i<0)AVAIL.pattern[day].push(sh);else AVAIL.pattern[day].splice(i,1);
-  if(!AVAIL.pattern[day].length)delete AVAIL.pattern[day];await saveAvailability();renderCalendar();}
+  if(!AVAIL.pattern[day].length)delete AVAIL.pattern[day];await saveAvailability();syncToBookings(true);renderCalendar();}
+
+/* push the portal's permanent schedule into Microsoft Bookings as business hours */
+async function syncToBookings(){
+  const dayMap={Mon:'monday',Tue:'tuesday',Wed:'wednesday',Thu:'thursday',Fri:'friday',Sat:'saturday',Sun:'sunday'};
+  let hasOvernight=false;
+  const businessHours=DAYS.map(d=>{const shifts=AVAIL.pattern[d]||[];const slots=[];
+    shifts.forEach(sh=>{const r=shiftToRange(sh);if(!r)return;
+      if(r.s>=r.e){hasOvernight=true;slots.push({startTime:r.s+':00.0000000',endTime:'23:59:00.0000000'});}
+      else slots.push({startTime:r.s+':00.0000000',endTime:r.e+':00.0000000'});});
+    slots.sort((a,b)=>a.startTime<b.startTime?-1:1);return {day:dayMap[d],timeSlots:slots};});
+  if(hasOvernight&&!confirm('Overnight shifts span midnight, which Bookings doesn\'t handle as one slot — they\'ll be truncated at 11:59pm. Continue?'))return;
+  const btn=document.getElementById('sync-btn');if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span> Syncing…';}
+  try{const r=await gfetch(GR+'/solutions/bookingBusinesses/'+encodeURIComponent(BOOKING_ID),{method:'PATCH',body:JSON.stringify({businessHours:businessHours})});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||('Sync failed '+r.status));}
+    toast('✓ Synced to Bookings');
+  }catch(e){
+    if(/Bookings|consent|permission|forbidden|unauthorized/i.test(e.message))toast('Sign out & back in to grant the new Bookings permission');
+    else toast('Sync failed: '+e.message);
+  }
+  if(btn){btn.disabled=false;btn.innerHTML='⟲ Sync to Bookings';}
+}
 function renderCalDay(base,off){
   const d=new Date(base);d.setDate(d.getDate()+off);const iso=d.toISOString().slice(0,10);
   const isToday=iso===today();
@@ -1624,7 +1743,9 @@ async function saveAdd(){if(!AD.name){toast('Name required');return;}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._t);t._t=setTimeout(()=>{t.style.opacity='0';t.style.transform='translateX(-50%) translateY(20px)';},2300);}
 (async function init(){tok=sessionStorage.getItem('ht')||'';
   if(await handleAuthCallback())return;
-  if(tok||await refreshToken())await onSignedIn();else setConn(false);})();
+  if(tok||await refreshToken())await onSignedIn();else setConn(false);
+  /* re-sync bookings when window regains focus */
+  window.addEventListener('focus',()=>{if(tok&&bookingsEnabled)syncFromBookings(true);});})();
 </script>
 </body>
 </html>
