@@ -809,9 +809,13 @@ async function patchRange(addr,values){const base=GR+'/drives/'+driveId+'/items/
   if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||r.status);}}
 
 /* Graph sendMail */
+/* SEND_AS: the shared mailbox to send from. Empty string = send from the signed-in user's own mailbox. */
+/* PREREQUISITE for non-empty value: signed-in account must have "Send As" permission on the mailbox in Exchange. */
+const SEND_AS='careers@solurahomecare.com';
 async function sendMailViaGraph(to,subject,bodyText){
   const html='<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#111;white-space:pre-wrap">'+esc(bodyText)+'</div>';
   const msg={subject:subject,body:{contentType:'HTML',content:html},toRecipients:[{emailAddress:{address:to}}]};
+  if(SEND_AS){msg.from={emailAddress:{address:SEND_AS}};msg.sender={emailAddress:{address:SEND_AS}};}
   const r=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:msg,saveToSentItems:true})});
   if(!(r.ok||r.status===202)){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||('Send failed '+r.status));}
 }
