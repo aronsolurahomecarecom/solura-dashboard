@@ -662,6 +662,36 @@ td{padding:13px 16px;vertical-align:top;}
 #adrawer{right:-560px;width:520px;}
 #adrawer.open{right:0;}
 
+/* email modal must sit ABOVE the candidate workspace (workspace = z-index 501) */
+.modal{z-index:700 !important;}
+
+/* header refresh button */
+.refresh-btn{font-family:inherit;font-size:14px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:6px 10px;cursor:pointer;display:flex;align-items:center;justify-content:center;width:34px;height:34px;transition:background .18s,transform .18s;}
+.refresh-btn:hover{background:rgba(255,255,255,.18);}
+.refresh-btn svg{width:16px;height:16px;transition:transform .35s cubic-bezier(.4,0,.2,1);}
+.refresh-btn.spinning svg{animation:spin360 .8s cubic-bezier(.4,0,.2,1);}
+@keyframes spin360{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+
+/* video meeting popup button */
+.meet-btn{font-family:inherit;font-size:12px;font-weight:700;color:#fff;background:linear-gradient(135deg,#6264A7,#464775);border:none;border-radius:8px;padding:9px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:0 2px 8px rgba(98,100,167,.3);transition:transform .15s,box-shadow .15s,filter .15s;}
+.meet-btn:hover{transform:translateY(-1px);filter:brightness(1.07);box-shadow:0 4px 12px rgba(98,100,167,.4);}
+.meet-btn svg{width:13px;height:13px;}
+
+/* empty section compact bar */
+.wscard-empty{background:#FAFAF7;border:1px dashed var(--border);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;animation:fadeUp .25s ease both;}
+.wscard-empty .lbl{color:var(--soft);font-weight:600;display:flex;align-items:center;gap:6px;}
+.wscard-empty .lbl b{color:var(--mid);}
+.wscard-empty button{font-family:inherit;font-size:11.5px;font-weight:600;padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:#fff;color:var(--sky-deep);cursor:pointer;transition:all .15s;}
+.wscard-empty button:hover{background:var(--sky-pale);border-color:var(--sky-mid);}
+
+/* animation polish — GPU accelerated transforms only */
+.dr,.btn-primary,.btn-sec,.fchip,.cal-day,.wscard,.kv,.sbadge,.bandpill,.scorebig,.wsclose,.cbadge,.dlbadge{will-change:transform;}
+.workspace,.modal,.drawer{will-change:transform,opacity;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* smooth scroll for workspace body */
+.wsbody{scroll-behavior:smooth;}
+
 /* row animations */
 .dr{transition:background .2s,box-shadow .2s,transform .14s !important;}
 .dr:hover{transform:translateX(2px);}
@@ -686,6 +716,9 @@ td{padding:13px 16px;vertical-align:top;}
       <button class="tab-btn" id="tab-set" onclick="setView('settings')">Settings</button>
     </div>
     <button class="filterbtn" id="btn-filter" style="display:none" onclick="toggleFilterPanel()">⚙ Filter <span class="ct" id="filterct" style="display:none">0</span></button>
+    <button class="refresh-btn" id="hdr-refresh" style="display:none" onclick="manualRefresh()" title="Refresh data from sheet">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8a6 6 0 0 1 10.243-4.243M14 8a6 6 0 0 1-10.243 4.243"/><path d="M12 3v3h-3M4 13v-3h3"/></svg>
+    </button>
     <div class="sync-pill"><div class="sdot" id="sdot"></div><span id="slabel">Not connected</span></div>
     <button class="hbtn hbtn-gold" id="btn-add" style="display:none" onclick="openAdd()">+ Add</button>
     <button class="hbtn hbtn-ghost" id="btn-out" style="display:none" onclick="signOut()">Sign out</button>
@@ -763,15 +796,16 @@ td{padding:13px 16px;vertical-align:top;}
 const CLIENT_ID='bf86d4a3-f6bb-4ad7-991e-098d632b2c0b';
 const FILE_URL='https://solurahomecare.sharepoint.com/:x:/s/careers9/IQCLjIDe38W4SbS2p7XrEVi7ARw5Swud_Tm7rES6x7yfvaw?e=gMrkph';
 const TENANT='1b2cdbea-de19-47d2-9512-ea102905e3eb',SHEET='Pipeline';
-const SCOPES='openid profile email Files.ReadWrite.All Sites.ReadWrite.All Mail.Send Mail.ReadWrite Bookings.ReadWrite.All offline_access';
+const SCOPES='openid profile email Files.ReadWrite.All Sites.ReadWrite.All Mail.Send Mail.ReadWrite offline_access';
 const BOOKING_ID='careers1@solurahomecare.com'; /* the Bookings business identifier — used for the Sync to Bookings API call */
 const GR='https://graph.microsoft.com/v1.0',REDIRECT=location.href.split('?')[0].split('#')[0];
 let tok='',driveId='',itemId='',pipeline=[],nextRow=null;
+let workbookSessionId=null,workbookSessionExpiresAt=0; /* Excel workbook session: batched writes, dramatically faster */
 let collapsed={0:false,1:false,2:false,3:true,4:true};
 let F={stage:new Set(),band:new Set(),source:new Set(),cert:new Set(),expertise:new Set(),zip:''};
 let view='pipeline',calOffset=0,wsRow=null;
 let AVAIL={pattern:{},slots:[],offs:[]}; /* pattern={Mon:["Morning","Afternoon"]}; slots=specific ISO datetimes; offs=specific dates removed from pattern */
-let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{}}; /* persistent custom adds + edited email templates */
+let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{},scripts:{}}; /* persistent custom adds + edited templates + edited call scripts */
 let avPatternOpen=false;
 
 async function genPKCE(){const v=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -779,7 +813,7 @@ async function genPKCE(){const v=Array.from(crypto.getRandomValues(new Uint8Arra
   const ch=btoa(String.fromCharCode.apply(null,new Uint8Array(h))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');return {verifier:v,challenge:ch};}
 async function signIn(){const p=await genPKCE();sessionStorage.setItem('hpkce_v',p.verifier);
   location.href='https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/authorize?client_id='+CLIENT_ID+'&response_type=code&redirect_uri='+encodeURIComponent(REDIRECT)+'&scope='+encodeURIComponent(SCOPES)+'&code_challenge='+p.challenge+'&code_challenge_method=S256&prompt=select_account';}
-function signOut(){sessionStorage.removeItem('ht');sessionStorage.removeItem('hpkce_v');localStorage.removeItem('hr');tok='';driveId='';itemId='';pipeline=[];setConn(false);}
+function signOut(){closeWorkbookSession();sessionStorage.removeItem('ht');sessionStorage.removeItem('hpkce_v');localStorage.removeItem('hr');tok='';driveId='';itemId='';pipeline=[];setConn(false);}
 async function refreshToken(){const rt=localStorage.getItem('hr');if(!rt)return false;
   try{const r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:SCOPES})});
     const j=await r.json();if(j.access_token){tok=j.access_token;sessionStorage.setItem('ht',tok);if(j.refresh_token)localStorage.setItem('hr',j.refresh_token);return true;}}catch(e){}localStorage.removeItem('hr');return false;}
@@ -800,6 +834,7 @@ function setConn(on){
   document.getElementById('btn-out').style.display=on?'inline-block':'none';
   document.getElementById('btn-add').style.display=on?'inline-block':'none';
   document.getElementById('btn-filter').style.display=on?'flex':'none';
+  document.getElementById('hdr-refresh').style.display=on?'flex':'none';
   document.getElementById('hdr-search-wrap').style.display=on?'flex':'none';
   document.getElementById('tabsbar').style.display=on?'flex':'none';
 }
@@ -807,10 +842,28 @@ async function onSignedIn(){setConn(true);
   try{const r=await gfetch(GR+'/shares/'+encodeShareUrl(FILE_URL)+'/driveItem?$select=id,parentReference,name');
     if(!r.ok)throw new Error('Could not open the file ('+r.status+')');
     const j=await r.json();itemId=j.id;driveId=j.parentReference.driveId;
-    await loadData();await loadAvailability();await loadSettings();await syncFromBookings(true);}catch(e){toast(e.message);}}
+    await loadData();await loadAvailability();await loadSettings();}catch(e){toast(e.message);}}
 async function patchRange(addr,values){const base=GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET;
-  const r=await gfetch(base+"/range(address='"+addr+"')",{method:'PATCH',body:JSON.stringify({values:values})});
+  const sid=await getWorkbookSession();
+  const headers=sid?{'workbook-session-id':sid}:{};
+  const r=await gfetch(base+"/range(address='"+addr+"')",{method:'PATCH',body:JSON.stringify({values:values}),headers:headers});
   if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||r.status);}}
+
+/* Excel workbook session — batched writes are ~3-5x faster + reduce sheet locking.
+   Sessions last ~5min idle; we refresh on use, kill on signout. */
+async function getWorkbookSession(){
+  if(workbookSessionId&&Date.now()<workbookSessionExpiresAt)return workbookSessionId;
+  try{
+    const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/createSession',{method:'POST',body:JSON.stringify({persistChanges:true})});
+    if(!r.ok)return null;
+    const j=await r.json();workbookSessionId=j.id;workbookSessionExpiresAt=Date.now()+4*60*1000;
+    return workbookSessionId;
+  }catch(e){return null;}
+}
+async function closeWorkbookSession(){if(!workbookSessionId)return;
+  try{await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/closeSession',{method:'POST',headers:{'workbook-session-id':workbookSessionId}});}catch(e){}
+  workbookSessionId=null;workbookSessionExpiresAt=0;
+}
 
 /* Graph sendMail */
 /* SEND_AS: the shared mailbox to send from. Empty string = send from the signed-in user's own mailbox. */
@@ -872,81 +925,15 @@ async function saveAvailability(){try{await patchRange('AK1',[[JSON.stringify(AV
 /* settings stored in cell AL1: custom expertise/cert/source adds + edited templates */
 async function loadSettings(){
   try{const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AL1')?$select=values");
-    if(!r.ok)return;const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{SETTINGS=Object.assign({customExpertise:[],customCerts:[],customSources:[],templates:{}},JSON.parse(v[0][0]));}catch(e){}}}catch(e){}
+    if(!r.ok)return;const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{SETTINGS=Object.assign({customExpertise:[],customCerts:[],customSources:[],templates:{},scripts:{}},JSON.parse(v[0][0]));}catch(e){}}}catch(e){}
 }
 async function saveSettings(){try{await patchRange('AL1',[[JSON.stringify(SETTINGS)]]);}catch(e){toast('Could not save settings');}}
 
 /* ===================== Microsoft Bookings sync ===================== */
-/* Two-way: push permanent schedule to Bookings business hours; pull appointments back into the pipeline */
+/* Cal.com is the source of truth for bookings — appointments flow in via the Cloudflare Worker webhook (writes directly to the sheet). The portal's permanent schedule is a visual record only; set actual hours in Cal.com → Availability. */
 const DAY_LONG={Mon:'monday',Tue:'tuesday',Wed:'wednesday',Thu:'thursday',Fri:'friday',Sat:'saturday',Sun:'sunday'};
-let bookingsEnabled=true; /* flips to false if Bookings API isn't accessible */
-
-async function syncToBookings(silent){
-  if(!bookingsEnabled)return;
-  /* convert AVAIL.pattern into Bookings businessHours format */
-  const businessHours=Object.keys(DAY_LONG).map(d=>{
-    const shifts=AVAIL.pattern[d]||[];
-    const timeSlots=shifts.map(sh=>{const r=shiftToRange(sh);
-      /* overnight wraps midnight — Bookings can't represent that as a single slot; cap at 23:59 */
-      const end=(sh==='Overnight')?'23:59:00.0000000':r.e+':00.0000000';
-      return {start:r.s+':00.0000000',end:end};});
-    return {day:DAY_LONG[d],timeSlots:timeSlots};
-  });
-  try{
-    const r=await gfetch(GR+'/solutions/bookingBusinesses/'+encodeURIComponent(BOOKINGS_ID),
-      {method:'PATCH',body:JSON.stringify({businessHours})});
-    if(!r.ok){const e=await r.json().catch(()=>({}));
-      if(r.status===403){bookingsEnabled=false;if(!silent)toast('⚠ Bookings sync needs re-sign in for new permissions');}
-      else if(r.status===404){bookingsEnabled=false;if(!silent)toast('Bookings business not found at '+BOOKINGS_ID);}
-      else if(!silent)toast('Bookings push failed: '+((e.error&&e.error.message)||r.status));
-      return;}
-    if(!silent)toast('✓ Schedule pushed to Bookings');
-  }catch(e){if(!silent)toast('Bookings push error: '+e.message);}
-}
-
-async function syncFromBookings(silent){
-  if(!bookingsEnabled||!pipeline.length)return;
-  try{
-    const r=await gfetch(GR+'/solutions/bookingBusinesses/'+encodeURIComponent(BOOKINGS_ID)+'/appointments');
-    if(!r.ok){if(r.status===403){bookingsEnabled=false;}return;}
-    const apps=((await r.json()).value)||[];
-    const now=Date.now();
-    /* keep appointments in window: last 3 days through next 60 days */
-    const winLo=now-3*86400000,winHi=now+60*86400000;
-    let synced=0,unmatched=[];
-    for(const app of apps){
-      if(!app.startDateTime||!app.startDateTime.dateTime)continue;
-      const start=new Date(app.startDateTime.dateTime).getTime();
-      if(start<winLo||start>winHi)continue;
-      const customer=(app.customers||[])[0];if(!customer)continue;
-      const email=(customer.emailAddress||'').toLowerCase();if(!email)continue;
-      const c=pipeline.find(x=>x.email&&x.email.toLowerCase()===email);
-      if(!c){unmatched.push({email,name:customer.name,start:app.startDateTime.dateTime,id:app.id});continue;}
-      const bk=app.startDateTime.dateTime.slice(0,16); /* YYYY-MM-DDTHH:mm */
-      const already=c.st.booking===bk&&c.st.bookingsId===app.id;
-      if(already)continue;
-      /* update candidate */
-      c.st.booking=bk;c.st.bookingsId=app.id;
-      let stageChange=null;
-      if(c.stage==='Screen invite'){c.stage='Screen booked';stageChange='Screen booked';}
-      else if(c.stage==='Interview invite'){c.stage='Interview booked';stageChange='Interview booked';}
-      c.st.log=c.st.log||[];
-      c.st.log.push({t:stamp(),x:'📅 Bookings: '+bk+(stageChange?' → '+stageChange:'')});
-      try{
-        const row=c.excelRow;
-        await patchRange('G'+row,[[c.stage]]);
-        await patchRange('AJ'+row,[[JSON.stringify(c.st)]]);
-        synced++;
-      }catch(e){}
-    }
-    if(unmatched.length){
-      AVAIL.unmatched=unmatched;await saveAvailability();
-    }else if(AVAIL.unmatched&&AVAIL.unmatched.length){
-      AVAIL.unmatched=[];await saveAvailability();
-    }
-    if(synced){if(!silent)toast('📅 '+synced+' new booking'+(synced===1?'':'s')+' synced');render();}
-  }catch(e){console.warn('Bookings pull failed:',e.message);}
-}
+async function syncToBookings(){/* no-op — Cal.com manages availability via the Outlook calendar sync */}
+async function syncFromBookings(){/* no-op — bookings arrive via Cloudflare webhook → sheet → loadData() */}
 
 /* ===================== scoring engine ===================== */
 const QW={rel:15,com:12,jud:12,doc:11,ref:20,cmp:20,phn:10},RW={ten:40,prx:20,ava:15,exp:25};
@@ -996,16 +983,16 @@ const QBANK=[
 ];
 
 /* ===================== sequence ===================== */
-const FLOW=['Applied','Screen invite','Screen booked','Verify employers','References','Interview invite','Interview booked','Background','Offer','Onboarding','Hired'];
-const FLOW_SHORT={'Applied':'Apply','Screen invite':'Invite','Screen booked':'Screen','Verify employers':'Verify','References':'Refs','Background':'Checks','Interview invite':'Invite','Interview booked':'Interview','Offer':'Offer','Onboarding':'Onboard','Hired':'Hired'};
+const FLOW=['Applied','Screen invite','Screen booked','Ask references','Verify employers','References','Interview invite','Interview booked','Offer','Onboarding','Hired'];
+const FLOW_SHORT={'Applied':'Apply','Screen invite':'Invite','Screen booked':'Screen','Ask references':'Ask refs','Verify employers':'Verify','References':'Refs','Interview invite':'Invite','Interview booked':'Interview','Offer':'Offer','Onboarding':'Onboard','Hired':'Hired'};
 const STAGEINFO={
  'Applied':{phase:'New',next:'Review',color:['#EBF3FB','#1E4E8C']},
  'Screen invite':{phase:'Screening',next:'Send screen invite',color:['#FEF7E8','#9A6100']},
  'Screen booked':{phase:'Screening',next:'Run phone screen',color:['#FEF7E8','#9A6100']},
+ 'Ask references':{phase:'References',next:'Send references request',color:['#FEF7E8','#9A6100']},
  'Verify employers':{phase:'Verify',next:'Verify past employers',color:['#EFEAFC','#5B4BAA']},
  'References':{phase:'References',next:'Call references',color:['#EFEAFC','#5B4BAA']},
- 'Background':{phase:'Background',next:'Send certs & checks',color:['#EFEAFC','#5B4BAA']},
- 'Interview invite':{phase:'Interview',next:'Send interview invite',color:['#EBF3FB','#1E4E8C']},
+ 'Interview invite':{phase:'Interview',next:'Send interview invite + start BG',color:['#EBF3FB','#1E4E8C']},
  'Interview booked':{phase:'Interview',next:'Run interview',color:['#EBF3FB','#1E4E8C']},
  'Offer':{phase:'Offer',next:'Send offer',color:['#EBF5EA','#3D7A34']},
  'Onboarding':{phase:'Onboarding',next:'Send onboarding',color:['#EBF5EA','#3D7A34']},
@@ -1029,7 +1016,8 @@ function pAns(row){let a={};try{if(row[34])a=JSON.parse(row[34]);}catch(e){}retu
 function cardOf(i,row){return {excelRow:i+1,row:row,name:String(row[2]),phone:String(row[3]||''),email:String(row[4]||''),
   source:String(row[5]||''),stage:String(row[6]||'Applied'),notes:String(row[33]||''),st:pState(row),answers:pAns(row)};}
 async function loadData(){
-  const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+'/usedRange?$select=values');
+  const sid=await getWorkbookSession();const h=sid?{'workbook-session-id':sid}:{};
+  const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+'/usedRange?$select=values',{headers:h});
   if(!r.ok){toast('Load failed: '+r.status);return;}
   const vals=(await r.json()).values||[];pipeline=[];nextRow=null;
   for(let i=2;i<vals.length;i++){const row=vals[i];
@@ -1040,7 +1028,8 @@ async function loadData(){
   render();
 }
 async function refreshRow(excelRow){
-  const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+"/range(address='A"+excelRow+":AJ"+excelRow+"')?$select=values");
+  const sid=await getWorkbookSession();const h=sid?{'workbook-session-id':sid}:{};
+  const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+"/range(address='A"+excelRow+":AJ"+excelRow+"')?$select=values",{headers:h});
   if(!r.ok)return;
   const vals=(await r.json()).values||[[]];const row=vals[0];
   const idx=pipeline.findIndex(c=>c.excelRow===excelRow);
@@ -1084,19 +1073,27 @@ function action(c){
   else if(s==='Screen booked'||s==='Interview booked'){
     const d=st.booking?st.booking.slice(0,10):null;
     const isScreen=s==='Screen booked';
-    if(m!=null&&m<=60&&m>-150){bucket='action';timing=dn('Call now','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Background',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
-    else if(d===today()){bucket='action';timing=dn('Call today','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Background',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
-    else if(d&&d>today()){bucket='awaiting';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Background',label:'Open call workspace',cls:'sky'};}
-    else{bucket='action';timing=dn('Overdue call','pr2','');primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Background',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}}
+    if(m!=null&&m<=60&&m>-150){bucket='action';timing=dn('Call now','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
+    else if(d===today()){bucket='action';timing=dn('Call today','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
+    else if(d&&d>today()){bucket='awaiting';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:'Open call workspace',cls:'sky'};}
+    else{bucket='action';timing=dn('Overdue call','pr2','');primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}}
+  else if(s==='Ask references'){
+    const sent=st.sent&&st.sent.ask_references;
+    if(!sent){bucket='action';timing=dn('Send references request','pnew');primary={kind:'email-tpl',tpl:'ask_references',advanceTo:'Verify employers',label:'Send references request',cls:'gold'};}
+    else{bucket='awaiting';timing=dn('Awaiting references','psoft');primary={kind:'email-tpl',tpl:'ask_references',label:'Nudge for references',cls:'gold'};}}
   else if(s==='Verify employers'){bucket='action';timing=dn('Verify past employers','pnew');primary={kind:'verify',label:'Open verify hub',cls:'sky'};}
   else if(s==='References'){bucket='action';timing=dn('Call references','pnew');primary={kind:'refs',label:'Open reference hub',cls:'sky'};}
-  else if(s==='Background'){
-    if(st.reqCheck==='pending'||st.tpCheck==='pending'){bucket='checks';timing=dn('Checks running','psoft');primary={kind:'checks',label:'Open checks hub',cls:'sky'};}
-    else if(st.sent&&st.sent.bg_request&&!st.reqCheck&&!st.tpCheck){bucket='awaiting';timing=dn('Certs requested','psoft');primary={kind:'checks',label:'Open checks hub',cls:'sky'};}
-    else{bucket='action';timing=dn('Send certs & checks','pnew');primary={kind:'email-tpl',tpl:'bg_request',label:'Send cert & check request',cls:'gold'};}}
+  else if(s==='Interview invite'){
+    /* Interview invite stage also kicks off background check in parallel */
+    const sent=st.sent&&st.sent.interview_invite;
+    const bgStarted=st.tpCheck||st.reqCheck||(st.sent&&st.sent.bg_request);
+    if(!sent){bucket='action';timing=dn('Send invite + start BG','pnew');primary={kind:'email-tpl',tpl:'interview_invite',label:'Send interview invite + BG request',cls:'gold'};}
+    else if(!bgStarted){bucket='action';timing=dn('Start background check','pnew');primary={kind:'email-tpl',tpl:'bg_request',label:'Send BG consent request',cls:'gold'};}
+    else{bucket='awaiting';timing=dn('Awaiting booking','psoft',st.due?('nudge '+fmtDay(st.due)):'');primary={kind:'email-tpl',tpl:'interview_invite',label:'Send nudge',cls:'gold'};}}
   else if(s==='Offer'){
     if(st.tpCheck==='clear'){bucket='action';timing=dn('Send offer','pa');primary={kind:'email-tpl',tpl:'offer',advanceTo:'Onboarding',label:'Send offer',cls:'grn'};}
-    else{bucket='checks';timing=dn('3rd-party check pending','psoft');primary={kind:'lock',label:'🔒 Awaiting check',cls:'lock'};}}
+    else if(st.tpCheck==='flag'){bucket='action';timing=dn('Background flagged','pr2');primary={kind:'checks',label:'Review check result',cls:'red'};}
+    else{bucket='checks';timing=dn('BG check pending','psoft');primary={kind:'lock',label:'🔒 Awaiting check',cls:'lock'};}}
   else if(s==='Onboarding'){bucket='action';timing=dn('Send onboarding','pa');primary={kind:'email-tpl',tpl:'onboarding',advanceTo:'Hired',label:'Send onboarding',cls:'grn'};}
   else{bucket='action';timing=dn(info.next,'pnew');primary={kind:'open',label:'Open',cls:'sky'};}
   return{bucket,timing,info,primary,matchable};
@@ -1246,13 +1243,15 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
   }catch(e){toast('Save failed: '+e.message);}}
 
 /* ===================== email ===================== */
-const BOOK_LINK='https://outlook.office.com/book/careers1@solurahomecare.com/?ismsaljsauthenabled';
-const BOOKINGS_ID='careers1@solurahomecare.com'; /* Bookings business identifier — matches the prefix in BOOK_LINK */
+/* BOOK_LINK is the public Cal.com URL — replace with your actual Cal.com event URL after setup.
+   Example: https://cal.com/solura-hiring/phone-screen (use the screen URL since it goes out first) */
+const BOOK_LINK='https://cal.com/solura-hiring/phone-screen';
 const TEMPLATES={
  screen_invite:c=>({s:'Next step with Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying. Let's set up a quick 15-minute call — pick a time here:\n${BOOK_LINK}\n\nSolura Home Care Hiring`}),
  screen_nudge:c=>({s:'Still interested? — Solura Home Care',b:`Hi ${first(c)},\n\nJust following up — pick a 15-minute slot whenever it's convenient:\n${BOOK_LINK}\n\nSolura Home Care`}),
- interview_invite:c=>({s:'Interview with Solura Home Care',b:`Hi ${first(c)},\n\nGreat speaking with you. Let's schedule a longer interview — book here:\n${BOOK_LINK}\n\nSolura Home Care`}),
- bg_request:c=>({s:'Certificates & background check',b:`Hi ${first(c)},\n\nYou're moving forward. Please reply with copies of your certifications, and we'll send a secure link to consent to a background check.\n\nSolura Home Care`}),
+ ask_references:c=>({s:'A quick favor — references — Solura Home Care',b:`Hi ${first(c)},\n\nGreat speaking with you. To move forward, we need 2–3 professional references — ideally previous supervisors from caregiving roles.\n\nPlease reply with for each one:\n• Name\n• Their role / how you worked together\n• Phone number\n• Best time to reach them\n\nWe'll handle the calls. Thanks!\n\nSolura Home Care`}),
+ interview_invite:c=>({s:'Interview with Solura Home Care + background check',b:`Hi ${first(c)},\n\nGreat news — you're moving to the interview stage. Two things:\n\n1) Book a 60-minute interview here:\n${BOOK_LINK}\n\n2) We'll also need to run a standard background check while we're scheduling. Please reply with your consent to run the check, along with copies of any caregiving certificates you have.\n\nThe interview can happen while the check is processing.\n\nSolura Home Care`}),
+ bg_request:c=>({s:'Background check consent — Solura Home Care',b:`Hi ${first(c)},\n\nFollowing up on the background check. Please reply with:\n• Your written consent to run a standard background check\n• Copies of any caregiving certifications\n\nWe'll send the secure check link as soon as we receive these.\n\nSolura Home Care`}),
  offer:c=>({s:'Your offer — Solura Home Care',b:`Hi ${first(c)},\n\nWe're delighted to offer you a caregiver position at ${payRange()}. Your formal offer follows via DocuSign.\n\nWelcome aboard,\nSolura Home Care`}),
  onboarding:c=>({s:'Onboarding — Solura Home Care',b:`Hi ${first(c)},\n\nWelcome! Complete onboarding and book orientation here:\n[onboarding link]\n\nSolura Home Care`}),
  reject:c=>({s:'Update on your application',b:`Hi ${first(c)},\n\nThank you for your interest in Solura Home Care. After careful review we won't be moving forward at this time. We appreciate the time you invested and wish you the very best.\n\nSolura Home Care`}),
@@ -1440,19 +1439,38 @@ function stepWhy(a,sc){
 }
 function workBlock(a){if(!a.primary)return'';const k=a.primary.kind;
   if(k==='questions')return questionsBlock(a.primary.stage,a.primary.nextStage);
-  if(k==='verify')return verifyBlock();if(k==='refs')return refsBlock();if(k==='checks')return checksBlock();return'';}
+  if(k==='verify')return verifyBlock();if(k==='refs')return refsBlock();
+  if(k==='checks'||k==='lock')return checksBlock();return'';}
 function hgate(k,v){W.gates[k]=W.gates[k]===v?'':v;renderWorkspace();}
 function declineFromWS(){if(!confirm('Decline this candidate?'))return;doEmail('reject','Declined');}
 async function addNote(){const t=document.getElementById('ws-note').value.trim();if(!t){toast('Type a note first');return;}logW(t);await saveW(true);toast('Note added');renderWorkspace();}
 
+/* Open the Cal.com video meeting in a popup window — no tab navigation away */
+function openMeetingPopup(url){
+  if(!url){toast('No meeting link on this booking');return;}
+  const w=Math.min(1100,window.screen.availWidth-80),h=Math.min(750,window.screen.availHeight-80);
+  const left=(window.screen.availWidth-w)/2,top=(window.screen.availHeight-h)/2;
+  window.open(url,'soluraMeeting','popup=yes,width='+w+',height='+h+',left='+left+',top='+top+',menubar=no,toolbar=no,location=no');
+}
+function meetButton(url,label){return '<button class="meet-btn" onclick="openMeetingPopup(\''+esc(url||'')+'\')"><svg viewBox=\"0 0 16 16\" fill=\"currentColor\"><path d=\"M3 4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H3zm10 1.5l2.5-1.5v8L13 10.5v-5z\"/></svg>'+esc(label||'Open meeting')+'</button>';}
+
+/* compact "empty section" bar — used when a workspace card would render essentially blank */
+function emptyCard(icon,label,actionLabel,onclick){return `<div class="wscard-empty"><div class="lbl"><b>${esc(icon)}</b> ${esc(label)}</div>${actionLabel?'<button onclick="'+onclick+'">'+esc(actionLabel)+'</button>':''}</div>`;}
+
 function questionsBlock(stage,nextStage){
   const qs=QBANK.filter(x=>x.st===stage);const ans=qs.filter(x=>W.answers[x.id]!=null).length;
-  const body=qs.map(it=>`<div class="qrow"><div class="qq">${esc(it.q)}</div><div class="qopts">${it.o.map(o=>`<button class="${W.answers[it.id]===o[1]?'on':''}" onclick="qans('${it.id}',${o[1]},'${stage}','${nextStage}')">${esc(o[0])}</button>`).join('')}</div></div>`).join('');
-  const script=stage==='Interview'?['Welcome & ease in','Walk the role honestly — hours, pay, personal care','Ask each question; note what you hear','Invite their questions','Explain next steps & timeline']
+  /* user-edited script (Settings) overrides the default */
+  const scriptKey=stage==='Interview'?'interview_script':'screen_script';
+  const defaultScript=stage==='Interview'?['Welcome & ease in','Walk the role honestly — hours, pay, personal care','Ask each question; note what you hear','Invite their questions','Explain next steps & timeline']
     :['Confirm it is a good time','Confirm interest, availability, pay','Run the questions','Tell them references will be needed','Set up the booking link'];
+  const script=(SETTINGS.scripts&&SETTINGS.scripts[scriptKey])||defaultScript;
+  const meetingUrl=W.st.meetingUrl||'';
+  const meetingBtn=meetingUrl?meetButton(meetingUrl,stage==='Interview'?'Open interview meeting':'Open call'):'';
+  const body=qs.map(it=>`<div class="qrow"><div class="qq">${esc(it.q)}</div><div class="qopts">${it.o.map(o=>`<button class="${W.answers[it.id]===o[1]?'on':''}" onclick="qans('${it.id}',${o[1]},'${stage}','${nextStage}')">${esc(o[0])}</button>`).join('')}</div></div>`).join('');
   return `<div class="wscard" id="ws-questions"><h3>${stage==='Interview'?'Structured interview':'Phone screen'} <span style="font-size:11px;color:var(--soft);font-weight:600">${ans}/${qs.length} answered</span></h3>
+    ${meetingBtn?'<div style="margin-bottom:12px">'+meetingBtn+'</div>':''}
     <div style="font-size:12px;color:var(--soft);margin-bottom:8px">Pick what you hear — the score updates itself.</div>
-    <details style="margin-bottom:10px"><summary style="font-size:12px;font-weight:600;color:var(--sky-deep);cursor:pointer">📋 Call structure</summary><ol style="padding-left:20px;font-size:12.5px;line-height:1.8;color:var(--mid);margin-top:8px">${script.map(l=>'<li>'+esc(l)+'</li>').join('')}</ol></details>
+    <details style="margin-bottom:10px" open><summary style="font-size:12px;font-weight:600;color:var(--sky-deep);cursor:pointer">📋 Call structure (editable in Settings)</summary><ol style="padding-left:20px;font-size:12.5px;line-height:1.8;color:var(--mid);margin-top:8px">${script.map(l=>'<li>'+esc(l)+'</li>').join('')}</ol></details>
     ${body}
     <div class="brow" style="margin-top:14px;gap:8px"><button class="btn-primary bg-grn" onclick="completeQuestions('${nextStage}')">Complete &amp; advance →</button></div></div>`;
 }
@@ -1462,10 +1480,14 @@ async function completeQuestions(nextStage){applyAnswers();const sc=scoreW();
   W.stage=nextStage;W.st.due=today();logW('Completed step → '+nextStage+' (Q'+sc.Q+'/R'+sc.R+')');
   await saveW(true);toast('→ '+nextStage);renderWorkspace();}
 function verifyBlock(){const emp=W.st.employers||[];
+  if(!emp.length){
+    return emptyCard('🏢','No past employers added','+ add employer','W.st.employers=W.st.employers||[];W.st.employers.push({name:\'\',v:\'\'});renderWorkspace()')
+      +`<div class="brow" style="margin-top:6px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Skipped employer verify')" style="flex:0 0 auto;padding:8px 14px">Skip → references →</button></div>`;
+  }
   const list=emp.map((e,i)=>`<div class="lrow"><input value="${esc(e.name||'')}" placeholder="Employer / supervisor / phone" oninput="W.st.employers[${i}].name=this.value"><span class="vbtns"><button class="ok ${e.v==='ok'?'on':''}" onclick="vset(${i},'ok')">verified</button><button class="no ${e.v==='no'?'on':''}" onclick="vset(${i},'no')">unable</button></span></div>`).join('');
   return `<div class="wscard" id="ws-verify"><h3>Verify past employers</h3>
     <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Call each prior employer and mark verified or unable. Builds a confidence flag; does not gate.</div>
-    ${list||'<div style="font-size:12px;color:var(--soft);padding:8px 0">No employers added yet.</div>'}
+    ${list}
     <button class="btn-sec bg-cream" style="margin-top:10px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',v:''});renderWorkspace()">+ add employer</button>
     <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Employers verified')">Done → references →</button></div></div>`;
 }
@@ -1482,18 +1504,20 @@ function refsBlock(){const refs=W.st.refs||[];
 }
 function flagPill(v){const map={clear:['Clear','pg'],flag:['Flag','pr2'],pending:['Pending','pa']};const m=map[v]||['—','psoft'];return '<span class="pill '+m[1]+'">'+m[0]+'</span>';}
 function chkOpts(which){return ['','pending','clear','flag'].map(o=>`<option value="${o}" ${o===W.st[which]?'selected':''}>${o||'set status'}</option>`).join('');}
-function checksBlock(){return `<div class="wscard" id="ws-checks"><h3>Background &amp; certificates</h3>
-    <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Send the certs + background consent request, run the free registries now, and track both checks.</div>
-    <h4>Free registries — run now</h4>
+function checksBlock(){
+  /* Save changes on every status update so refresh from elsewhere reflects it */
+  return `<div class="wscard" id="ws-checks"><h3>Background &amp; certificates</h3>
+    <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Track both checks. The Offer button unlocks automatically when the 3rd-party check returns clear.</div>
+    <h4>Free registries — run anytime</h4>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
       <a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" target="_blank" href="https://exclusions.oig.hhs.gov/">OIG Exclusions ↗</a>
       <a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" target="_blank" href="https://www.odh.ohio.gov/know-our-programs/nurse-aide-registry/nurse-aide-registry">OH Nurse Aide ↗</a>
       <a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" target="_blank" href="https://oh.db2.alliantenroll.com/">OH BCI / Webcheck ↗</a></div>
     <h4>Status</h4>
-    <div class="kvrow">Required state check ${flagPill(W.st.reqCheck)}<select onchange="W.st.reqCheck=this.value;renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('reqCheck')}</select></div>
-    <div class="kvrow">3rd-party check (API) ${flagPill(W.st.tpCheck)}<select onchange="W.st.tpCheck=this.value;renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('tpCheck')}</select></div>
-    <div style="font-size:11px;color:var(--soft);margin-top:8px">When the provider's API is connected, the 3rd-party status flips automatically and unlocks the offer. The required check can stay pending — the candidate just can't be matched to a patient until it clears.</div>
-    <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceWS('Offer','Checks cleared → ready for offer')">Done → ready for offer →</button></div></div>`;
+    <div class="kvrow">Required state check ${flagPill(W.st.reqCheck)}<select onchange="W.st.reqCheck=this.value;saveW(true);renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('reqCheck')}</select></div>
+    <div class="kvrow">3rd-party check ${flagPill(W.st.tpCheck)}<select onchange="W.st.tpCheck=this.value;saveW(true);renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('tpCheck')}</select></div>
+    <div style="font-size:11px;color:var(--soft);margin-top:8px">When the background-check API webhook fires, the 3rd-party status flips automatically. Required check stays pending → candidate can't be patient-matched until it clears, but the offer can still go out.</div>
+  </div>`;
 }
 async function advanceWS(toStage,msg){W.stage=toStage;if(msg)logW(msg);if(toStage==='Screen invite'||toStage==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();await saveW(true);toast('→ '+toStage);renderWorkspace();}
 
@@ -1566,14 +1590,15 @@ function renderCalendar(){
         <button onclick="calNav(1)">next ›</button>
       </div>
       <div class="cal-title">${fmt.format(base)} – ${fmt.format(end)}</div>
-      <button class="cal-btn" onclick="manualBookingsSync()" title="Pull latest bookings from Microsoft Bookings">⟳ refresh</button>
+      <button class="cal-btn" onclick="manualRefresh()" title="Reload latest data from sheet (where Cal.com bookings land via webhook)">⟳ refresh</button>
       <button class="cal-btn" onclick="avPatternOpen=!avPatternOpen;renderCalendar()">${avPatternOpen?'Hide':'⚙'} permanent schedule</button>
     </div>
     ${unmatchedCard}
     ${avPatternOpen?patternEditor():''}
     ${[0,1,2,3,4,5,6].map(off=>renderCalDay(base,off)).join('')}`;
 }
-async function manualBookingsSync(){toast('Syncing with Bookings…');await syncFromBookings(false);renderCalendar();}
+async function manualRefresh(){const btn=document.getElementById('hdr-refresh');if(btn)btn.classList.add('spinning');toast('Refreshing…');try{await loadData();if(view==='calendar')renderCalendar();}finally{if(btn)setTimeout(()=>btn.classList.remove('spinning'),300);}}
+async function manualBookingsSync(){return manualRefresh();} /* legacy name */
 function openAddFromBooking(name,email,startISO){
   openAdd();
   /* prefill */
@@ -1586,8 +1611,10 @@ function openAddFromBooking(name,email,startISO){
 
 /* ===================== Settings view ===================== */
 const TEMPLATE_LABELS={
- screen_invite:'Screen invite',screen_nudge:'Screen nudge',interview_invite:'Interview invite',
- bg_request:'Background check request',offer:'Offer',onboarding:'Onboarding',
+ screen_invite:'Screen invite',screen_nudge:'Screen nudge',
+ ask_references:'Ask for references',
+ interview_invite:'Interview invite + BG',bg_request:'BG consent request',
+ offer:'Offer',onboarding:'Onboarding',
  reject:'Rejection',missing:'Request missing info'
 };
 function defaultTplFor(k){const dummy={name:'John Smith',email:'',phone:'',source:'',st:{},__missing:['Work authorization']};return (TEMPLATES[k]||TEMPLATES.screen_invite)(dummy);}
@@ -1608,6 +1635,25 @@ function renderSettings(){
       </div>
     </div>`;
   }).join('');
+  /* call-structure scripts editor */
+  const scriptDefaults={
+    screen_script:['Confirm it is a good time','Confirm interest, availability, pay','Run the questions','Tell them references will be needed','Set up the booking link'],
+    interview_script:['Welcome & ease in','Walk the role honestly — hours, pay, personal care','Ask each question; note what you hear','Invite their questions','Explain next steps & timeline']
+  };
+  const scriptLabels={screen_script:'Phone screen — call structure',interview_script:'Interview — call structure'};
+  const scripts=Object.keys(scriptDefaults).map(k=>{
+    const lines=(SETTINGS.scripts&&SETTINGS.scripts[k])||scriptDefaults[k];
+    const isEdited=!!(SETTINGS.scripts&&SETTINGS.scripts[k]);
+    return `<div class="wscard" style="margin-bottom:14px">
+      <h3>${esc(scriptLabels[k])} ${isEdited?'<span class="pill pa" style="font-size:9px;font-weight:700">EDITED</span>':'<span class="pill pg" style="font-size:9px;font-weight:700">DEFAULT</span>'}</h3>
+      <div style="font-size:11px;color:var(--soft);margin-bottom:10px">One step per line — what you should be doing at this point in the call. Appears at the top of the call workspace.</div>
+      <textarea id="script_${k}" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;min-height:130px;outline:none;resize:vertical">${esc(lines.join('\n'))}</textarea>
+      <div class="brow" style="margin-top:10px;gap:8px">
+        <button class="btn-primary bg-grn" onclick="saveScript('${k}')" style="flex:0 0 auto;padding:8px 16px">Save edit</button>
+        ${isEdited?`<button class="btn-sec bg-cream" onclick="revertScript('${k}')" style="flex:0 0 auto;padding:8px 14px;color:var(--red)">Revert to default</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
   const renderCustomList=(label,items,kind)=>`<div class="wscard" style="margin-bottom:14px">
     <h3>Custom ${label}</h3>
     <div style="font-size:11.5px;color:var(--soft);margin-bottom:10px">Anything typed once in the Add Candidate form lands here permanently. Delete if obsolete.</div>
@@ -1618,12 +1664,19 @@ function renderSettings(){
       <h2 style="font-family:'Cormorant Garamond',serif;font-size:26px;color:var(--sky-deep);font-weight:600;margin:8px 0 14px">Settings</h2>
       <h3 style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep);font-weight:600;margin:18px 0 10px">Email templates</h3>
       ${tpls}
+      <h3 style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep);font-weight:600;margin:24px 0 10px">Call scripts</h3>
+      <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Editable guidance shown at the top of phone screen / interview workspaces. Refresh the workspace after editing to see changes.</div>
+      ${scripts}
       <h3 style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep);font-weight:600;margin:24px 0 10px">Custom lists</h3>
       ${renderCustomList('expertise',SETTINGS.customExpertise||[],'customExpertise')}
       ${renderCustomList('certificates',SETTINGS.customCerts||[],'customCerts')}
       ${renderCustomList('sources',SETTINGS.customSources||[],'customSources')}
     </div>`;
 }
+async function saveScript(k){const lines=document.getElementById('script_'+k).value.split('\n').map(s=>s.trim()).filter(Boolean);
+  SETTINGS.scripts=SETTINGS.scripts||{};SETTINGS.scripts[k]=lines;await saveSettings();toast('Script saved');renderSettings();}
+async function revertScript(k){if(!confirm('Revert to default?'))return;
+  delete SETTINGS.scripts[k];await saveSettings();toast('Reverted');renderSettings();}
 async function saveTemplate(k){const s=document.getElementById('tpl_s_'+k).value;const b=document.getElementById('tpl_b_'+k).value;
   SETTINGS.templates=SETTINGS.templates||{};SETTINGS.templates[k]={s,b};await saveSettings();toast('Template saved');renderSettings();}
 async function revertTemplate(k){if(!confirm('Revert to default? Your edits will be lost.'))return;
@@ -1633,18 +1686,17 @@ function patternEditor(){
   const shiftLabel=sh=>{const r=shiftToRange(sh);return sh+' <span style="font-weight:400;color:var(--soft);font-size:10px">'+r.s+'–'+r.e+'</span>';};
   return `<div class="pattern-card">
     <h4>Permanent weekly schedule</h4>
-    <div class="sub">Pick the shifts you're typically available. Each toggle saves instantly <em>and</em> pushes to Microsoft Bookings, so candidates can only book within these hours.</div>
+    <div class="sub">Visual record of when you're typically available. Cal.com reads your Outlook calendar directly — to actually block booking time, edit Outlook (or Cal.com's working hours).</div>
     ${DAYS.map(d=>{const on=(AVAIL.pattern[d]||[]).length>0;
       return `<div class="day-row ${on?'':'off'}"><div class="day-lbl">${d}</div><div class="shifts">${SHIFTS.map(sh=>`<button class="${(AVAIL.pattern[d]||[]).includes(sh)?'on':''}" onclick="togPatternShift('${d}','${sh}')">${shiftLabel(sh)}</button>`).join('')}</div></div>`;}).join('')}
     <div style="display:flex;align-items:center;gap:10px;margin-top:14px;padding-top:12px;border-top:1px dashed var(--border)">
-      <button id="sync-btn" class="cal-btn" style="background:var(--sky-pale);color:var(--sky-deep);border-color:var(--sky-mid)" onclick="syncToBookings(false)">⇪ Re-push to Bookings</button>
-      <span style="font-size:11.5px;color:var(--soft)">Manual override if you suspect Bookings is out of sync.</span>
+      <span style="font-size:11.5px;color:var(--soft);line-height:1.45">This is a visual record only. Your <em>real</em> availability lives in your Outlook calendar — Cal.com pulls free/busy from there automatically. Block time in Outlook to take yourself offline.</span>
     </div>
     <div style="margin-top:10px;font-size:11.5px;color:var(--soft)">Shift hours: Morning 9–12 · Afternoon 1–5 · Evening 5–8 · Overnight 8pm–6am.</div>
   </div>`;
 }
 async function togPatternShift(day,sh){AVAIL.pattern[day]=AVAIL.pattern[day]||[];const i=AVAIL.pattern[day].indexOf(sh);if(i<0)AVAIL.pattern[day].push(sh);else AVAIL.pattern[day].splice(i,1);
-  if(!AVAIL.pattern[day].length)delete AVAIL.pattern[day];await saveAvailability();syncToBookings(true);renderCalendar();}
+  if(!AVAIL.pattern[day].length)delete AVAIL.pattern[day];await saveAvailability();renderCalendar();}
 
 /* push the portal's permanent schedule into Microsoft Bookings as business hours */
 async function syncToBookings(){
@@ -1825,7 +1877,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.sty
   if(await handleAuthCallback())return;
   if(tok||await refreshToken())await onSignedIn();else setConn(false);
   /* re-sync bookings when window regains focus */
-  window.addEventListener('focus',()=>{if(tok&&bookingsEnabled)syncFromBookings(true);});})();
+  window.addEventListener('focus',()=>{if(tok)manualRefresh();});})();
 </script>
 </body>
 </html>
