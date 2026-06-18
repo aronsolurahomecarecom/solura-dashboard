@@ -741,6 +741,11 @@ td{padding:13px 16px;vertical-align:top;}
 .attach-row button:disabled{opacity:.5;cursor:default;}
 .email-modal-foot{padding:12px 22px;border-top:1px solid var(--border);background:#FAFAF7;display:flex;justify-content:flex-end;gap:8px;}
 
+/* fullscreen toggle — expands any container to full viewport */
+.workspace.fullscreen{left:0 !important;width:100% !important;max-width:100% !important;}
+.email-modal.fullscreen .email-modal-card{max-width:100% !important;max-height:100vh !important;height:100vh;width:100vw;border-radius:0;}
+.email-modal.fullscreen{padding:0;}
+
 /* sequence editor — drag-and-drop reorder */
 .seq-row{display:flex;align-items:center;gap:10px;padding:11px 13px;background:#fff;border:1.5px solid var(--border);border-radius:9px;margin-bottom:7px;cursor:grab;transition:border-color .15s,box-shadow .15s,transform .12s;user-select:none;}
 .seq-row:hover{border-color:var(--sky-mid);box-shadow:0 1px 4px rgba(58,125,201,.1);}
@@ -858,6 +863,7 @@ td{padding:13px 16px;vertical-align:top;}
       <div class="wshead-s" id="ws-sub"></div>
     </div>
     <div class="wshead-r">
+      <button class="wsclose" onclick="toggleFullscreen('workspace')" title="Toggle fullscreen" style="margin-right:6px">⛶</button>
       <button class="wsclose" onclick="closeWorkspace()">✕</button>
     </div>
   </div>
@@ -878,6 +884,7 @@ td{padding:13px 16px;vertical-align:top;}
   <div class="email-modal-card" style="position:relative">
     <div class="email-modal-head">
       <button class="close-x" onclick="closeEmailDetail()">×</button>
+      <button class="close-x" onclick="toggleFullscreen('email-modal')" title="Toggle fullscreen" style="right:54px">⛶</button>
       <h3 id="em-subject">Loading…</h3>
       <div class="meta" id="em-meta"></div>
     </div>
@@ -1434,7 +1441,10 @@ function doPrimary(r){const c=pipeline.find(x=>x.excelRow===r);if(!c)return;cons
       if(p.stage==='Interview'&&c.st.meetingUrl){
         setTimeout(()=>openMeetingPopup(c.st.meetingUrl),350);
       }else if(p.stage==='Phone Screen'&&c.phone){
-        setTimeout(()=>{const el=document.createElement('a');el.href='tel:'+c.phone.replace(/[^0-9+]/g,'');el.click();},350);
+        /* Google Voice popup pre-dialed with candidate's number */
+        const num=c.phone.replace(/[^0-9+]/g,'');
+        const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
+        setTimeout(()=>openLinkPopup('https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164),'gvoice',420,640),350);
       }
     }
     return;
@@ -1481,7 +1491,7 @@ const TEMPLATES={
  ask_references:c=>{const refLink='https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(c.email||'');
    return {s:'Quick form — your references — Solura Home Care',b:`Hi ${first(c)},\n\nGreat speaking with you. To move forward, please share 2–3 professional references using this short form:\n\n${refLink}\n\nIt takes about 90 seconds. You'll need their name, phone, and how you know them. We do the actual calling.\n\nThanks!\nSolura Home Care`};},
  interview_invite:c=>({s:'Interview with Solura Home Care + background check',b:`Hi ${first(c)},\n\nGreat news — you're moving to the interview stage. Two things:\n\n1) Book a 60-minute interview here:\n${BOOK_LINK}\n\n2) We'll also need to run a standard background check while we're scheduling. Please reply with your consent to run the check, along with copies of any caregiving certificates you have.\n\nThe interview can happen while the check is processing.\n\nSolura Home Care`}),
- bg_request:c=>({s:'Background check consent — Solura Home Care',b:`Hi ${first(c)},\n\nFollowing up on the background check. Please reply with:\n• Your written consent to run a standard background check\n• Copies of any caregiving certifications\n\nWe'll send the secure check link as soon as we receive these.\n\nSolura Home Care`}),
+ bg_request:c=>({s:'Background check + certifications — Solura Home Care',b:`Hi ${first(c)},\n\nFollowing up on the background check. There are two pieces:\n\n1) Send us copies of any caregiving certifications you have (STNA, CNA, HHA, CPR, etc.) — just reply with photos or PDFs.\n\n2) You'll need to complete an Ohio BCI Webcheck fingerprint background check. We can't do this for you — it has to be the candidate. Go to a Webcheck-authorized location (search "BCI Webcheck near me") and request:\n  • BCI background check\n  • FBI background check (out-of-state agencies)\n  • Results sent directly to: Solura Home Care, Cleveland Heights, OH\n\nThe cost is around $25 each. Bring photo ID. Most pharmacies and UPS stores offer this.\n\nWe'll send the secure 3rd-party check link separately once we receive your certifications.\n\nSolura Home Care`}),
  offer:c=>({s:'Your offer — Solura Home Care',b:`Hi ${first(c)},\n\nWe're delighted to offer you a caregiver position at ${payRange()}. Your formal offer follows via DocuSign.\n\nWelcome aboard,\nSolura Home Care`}),
  onboarding:c=>({s:'Onboarding — Solura Home Care',b:`Hi ${first(c)},\n\nWelcome! Complete onboarding and book orientation here:\n[onboarding link]\n\nSolura Home Care`}),
  reject:c=>({s:'Update on your application',b:`Hi ${first(c)},\n\nThank you for your interest in Solura Home Care. After careful review we won't be moving forward at this time. We appreciate the time you invested and wish you the very best.\n\nSolura Home Care`}),
@@ -1717,9 +1727,24 @@ async function addNote(){const t=document.getElementById('ws-note').value.trim()
 /* Open the Cal.com video meeting in a popup window — no tab navigation away */
 function openMeetingPopup(url){
   if(!url){toast('No meeting link on this booking');return;}
-  const w=Math.min(1100,window.screen.availWidth-80),h=Math.min(750,window.screen.availHeight-80);
-  const left=(window.screen.availWidth-w)/2,top=(window.screen.availHeight-h)/2;
-  window.open(url,'soluraMeeting','popup=yes,width='+w+',height='+h+',left='+left+',top='+top+',menubar=no,toolbar=no,location=no');
+  openLinkPopup(url,'soluraMeeting',1100,750);
+}
+/* Toggle fullscreen for a given element id (workspace, email-modal, etc.) */
+function toggleFullscreen(id){
+  const el=document.getElementById(id);if(!el)return;
+  el.classList.toggle('fullscreen');
+}
+/* Generic popup-window opener — every external link in the portal goes through this. */
+function openLinkPopup(url,name,w,h){
+  if(!url){toast('No URL');return;}
+  name=name||'soluraPopup';
+  w=w||Math.min(1000,window.screen.availWidth-80);
+  h=h||Math.min(700,window.screen.availHeight-80);
+  const left=Math.max(0,(window.screen.availWidth-w)/2),top=Math.max(0,(window.screen.availHeight-h)/2);
+  const win=window.open(url,name,'popup=yes,width='+w+',height='+h+',left='+left+',top='+top+',menubar=no,toolbar=no,location=no');
+  if(!win){toast('Popup blocked — allow popups for this site');return false;}
+  try{win.focus();}catch(e){}
+  return win;
 }
 function meetButton(url,label){return '<button class="meet-btn" onclick="openMeetingPopup(\''+esc(url||'')+'\')"><svg viewBox=\"0 0 16 16\" fill=\"currentColor\"><path d=\"M3 4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H3zm10 1.5l2.5-1.5v8L13 10.5v-5z\"/></svg>'+esc(label||'Open meeting')+'</button>';}
 
@@ -1733,13 +1758,17 @@ function questionsBlock(stage,nextStage){
   const defaultScript=stage==='Interview'?['Welcome & ease in','Walk the role honestly — hours, pay, personal care','Ask each question; note what you hear','Invite their questions','Explain next steps & timeline']
     :['Confirm it is a good time','Confirm interest, availability, pay','Run the questions','Tell them references will be needed','Set up the booking link'];
   const script=(SETTINGS.scripts&&SETTINGS.scripts[scriptKey])||defaultScript;
-  /* prominent Call button — meeting popup for interview, tel: link for phone screen */
+  /* prominent Call button — Google Voice popup for phone screen (user switched back to phone calls);
+     meeting popup for interview */
   let callBtn='';
   if(stage==='Interview'&&W.st.meetingUrl){
     callBtn=meetButton(W.st.meetingUrl,'▶ Open Teams meeting');
   }else if(stage==='Phone Screen'&&W.phone){
     const num=W.phone.replace(/[^0-9+]/g,'');
-    callBtn='<a class="meet-btn" href="tel:'+esc(num)+'" style="text-decoration:none;background:linear-gradient(135deg,#3D7A34,#2C5825);box-shadow:0 2px 8px rgba(61,122,52,.3)"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.568 17.568 0 0 0 4.168 6.608 17.569 17.569 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/></svg>Call '+esc(W.phone)+'</a>';
+    const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
+    const gvUrl='https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164);
+    callBtn='<button class="meet-btn" onclick="openLinkPopup(\''+esc(gvUrl)+'\',\'gvoice\',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);box-shadow:0 2px 8px rgba(66,133,244,.3)"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.568 17.568 0 0 0 4.168 6.608 17.569 17.569 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/></svg>Call '+esc(W.phone)+' via Google Voice</button>'
+      +' <a href="tel:'+esc(num)+'" class="meet-btn" style="background:linear-gradient(135deg,#3D7A34,#2C5825);box-shadow:0 2px 8px rgba(61,122,52,.3);text-decoration:none;margin-left:6px"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.568 17.568 0 0 0 4.168 6.608 17.569 17.569 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/></svg>tel:</a>';
   }else if(stage==='Interview'){
     callBtn='<div style="font-size:11.5px;color:var(--soft);padding:8px 12px;background:#FAFAF7;border-radius:8px;border:1px dashed var(--border)">⚠ No meeting URL captured yet — should arrive automatically when Cal.com fires the booking webhook.</div>';
   }
@@ -1781,29 +1810,64 @@ function refsBlock(){const refs=W.st.refs||[];
 }
 function flagPill(v){const map={clear:['Clear','pg'],flag:['Flag','pr2'],pending:['Pending','pa']};const m=map[v]||['—','psoft'];return '<span class="pill '+m[1]+'">'+m[0]+'</span>';}
 function chkOpts(which){return ['','pending','clear','flag'].map(o=>`<option value="${o}" ${o===W.st[which]?'selected':''}>${o||'set status'}</option>`).join('');}
+const REGISTRIES=[
+ /* [key, label, url, requirement] — required for OH home care unless noted */
+ {k:'oig',l:'OIG/HHS Exclusions',u:'https://exclusions.oig.hhs.gov/',req:'required'},
+ {k:'sam',l:'SAM.gov Exclusions',u:'https://sam.gov/content/exclusions',req:'required'},
+ {k:'ohnar',l:'OH Nurse Aide Registry',u:'https://www.odh.ohio.gov/know-our-programs/nurse-aide-registry/nurse-aide-registry',req:'required for STNAs'},
+ {k:'ohltc',l:'OH Long-Term Care Worker Registry',u:'https://www.odh.ohio.gov/know-our-programs/nurse-aide-registry/resources/long-term-care-worker-registry',req:'required'},
+ {k:'oddabuser',l:'OH DODD Abuser Registry',u:'https://dodd.ohio.gov/wps/portal/gov/dodd/forms-and-rules/abuser-registry',req:'required'},
+ {k:'sexoffender',l:'National Sex Offender Public Website',u:'https://www.nsopw.gov/',req:'recommended'},
+ {k:'ohnurselic',l:'OH Nursing License Verification',u:'https://elicense.ohio.gov/oh_verifylicense',req:'if RN/LPN claimed'}
+];
+function chkStatusOpts(cur){const opts=[['','— not checked —'],['clean','Clean'],['flag','Found — flagged'],['na','N/A']];return opts.map(([v,l])=>'<option value="'+v+'" '+(cur===v?'selected':'')+'>'+esc(l)+'</option>').join('');}
 function checksBlock(){
-  /* Save changes on every status update so refresh from elsewhere reflects it */
+  W.st.registryChecks=W.st.registryChecks||{};
+  /* Render each registry as a row with: link + status select + notes input */
+  const rows=REGISTRIES.map(r=>{
+    const rc=W.st.registryChecks[r.k]||{};
+    const reqClass=r.req==='required'?'pa':r.req==='recommended'?'psoft':'pg';
+    return `<div style="border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:8px;background:#FAFAF7">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px">
+        <span style="font-size:13px;font-weight:600;color:var(--mid)">${esc(r.l)}</span>
+        <span class="pill ${reqClass}" style="font-size:9px;font-weight:700">${esc(r.req.toUpperCase())}</span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <button class="btn-sm bg-sky-l" style="flex:0 0 auto;cursor:pointer" onclick="openLinkPopup('${esc(r.u)}','reg_${r.k}',1000,750)">Open registry ↗</button>
+        <select onchange="setRegistryResult('${r.k}','status',this.value)" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12px;flex:0 0 auto">${chkStatusOpts(rc.status)}</select>
+        <input type="text" value="${esc(rc.notes||'')}" placeholder="notes (optional)" oninput="setRegistryResult('${r.k}','notes',this.value)" onblur="saveW(true)" style="flex:1;min-width:140px;padding:6px 9px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12px">
+      </div>
+    </div>`;
+  }).join('');
   return `<div class="wscard" id="ws-checks"><h3>Background &amp; certificates</h3>
-    <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Track both checks. The Offer button unlocks automatically when the 3rd-party check returns clear.</div>
-    <h4>Free registries — run anytime</h4>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
-      <a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" target="_blank" href="https://exclusions.oig.hhs.gov/">OIG Exclusions ↗</a>
-      <a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" target="_blank" href="https://www.odh.ohio.gov/know-our-programs/nurse-aide-registry/nurse-aide-registry">OH Nurse Aide ↗</a>
-      <a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" target="_blank" href="https://oh.db2.alliantenroll.com/">OH BCI / Webcheck ↗</a></div>
-    <h4>Status</h4>
+    <div style="font-size:12px;color:var(--soft);margin-bottom:12px">Run each registry, record what you found. The Offer button unlocks when the 3rd-party check returns clear.</div>
+    <h4>Registry checks</h4>
+    ${rows}
+    <h4 style="margin-top:18px">Overall status</h4>
     <div class="kvrow">Required state check ${flagPill(W.st.reqCheck)}<select onchange="W.st.reqCheck=this.value;saveW(true);renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('reqCheck')}</select></div>
     <div class="kvrow">3rd-party check ${flagPill(W.st.tpCheck)}<select onchange="W.st.tpCheck=this.value;saveW(true);renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('tpCheck')}</select></div>
-    <div style="font-size:11px;color:var(--soft);margin-top:8px">When the background-check API webhook fires, the 3rd-party status flips automatically. Required check stays pending → candidate can't be patient-matched until it clears, but the offer can still go out.</div>
+    <div style="font-size:11px;color:var(--soft);margin-top:8px">Background-check API webhook flips 3rd-party status automatically. State check (BCII Webcheck) is done by the candidate — link is in the BG-consent email.</div>
   </div>`;
 }
+function setRegistryResult(key,field,val){W.st.registryChecks=W.st.registryChecks||{};W.st.registryChecks[key]=W.st.registryChecks[key]||{};W.st.registryChecks[key][field]=val;if(field==='status')saveW(true);}
 async function advanceWS(toStage,msg){
   W.stage=toStage;if(msg)logW(msg);
   if(toStage==='Screen invite'||toStage==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();
   await saveW(true);
   toast('→ '+toStage);
-  /* Hired → auto-export activity log to the candidate's onboarding folder */
   if(toStage==='Hired'){uploadHiredActivityLog(W).catch(e=>console.warn('Activity log upload:',e.message));}
+  /* clear any focused hub — the prior task is done. User returns to overview by default. */
+  W.focusedHub=null;
   renderWorkspace();
+  /* auto-progression: if the new stage's primary action is sending a template email,
+     fire it so the user doesn't have to find the next button. */
+  const c=pipeline.find(x=>x.excelRow===W.row);
+  if(c){
+    const a=action(c);
+    if(a.primary&&a.primary.kind==='email-tpl'){
+      setTimeout(()=>doEmail(a.primary.tpl,a.primary.advanceTo),250);
+    }
+  }
 }
 /* ===================== email detail view + attachment upload ===================== */
 let _emailCache={}; /* messageId -> full message object (cached during session) */
@@ -2535,7 +2599,10 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.sty
   if(await handleAuthCallback())return;
   if(tok||await refreshToken())await onSignedIn();else setConn(false);
   /* re-sync bookings when window regains focus */
-  window.addEventListener('focus',()=>{if(tok)manualRefresh();});})();
+  window.addEventListener('focus',()=>{if(tok)manualRefresh();});
+  /* periodic refresh while portal is active — catches Cal.com bookings without manual refresh.
+     60s cadence is gentle on rate limits and enough to feel "live" for hiring workflow. */
+  setInterval(()=>{if(tok&&!document.hidden&&!_saveInFlight)manualRefresh();},60000);})();
 </script>
 </body>
 </html>
