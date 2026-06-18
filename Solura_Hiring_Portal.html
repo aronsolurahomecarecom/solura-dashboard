@@ -741,10 +741,27 @@ td{padding:13px 16px;vertical-align:top;}
 .attach-row button:disabled{opacity:.5;cursor:default;}
 .email-modal-foot{padding:12px 22px;border-top:1px solid var(--border);background:#FAFAF7;display:flex;justify-content:flex-end;gap:8px;}
 
-/* fullscreen toggle — actually covers the viewport, no margins, no rounded corners */
+/* fullscreen toggle — actually covers the viewport with smooth expand animation */
+.workspace{transition:opacity .3s ease,transform .32s cubic-bezier(.4,0,.2,1),visibility 0s linear .3s,top .35s cubic-bezier(.4,0,.2,1),left .35s cubic-bezier(.4,0,.2,1),right .35s cubic-bezier(.4,0,.2,1),bottom .35s cubic-bezier(.4,0,.2,1),border-radius .35s cubic-bezier(.4,0,.2,1),width .35s cubic-bezier(.4,0,.2,1),height .35s cubic-bezier(.4,0,.2,1) !important;}
 .workspace.fullscreen{top:0 !important;left:0 !important;right:0 !important;bottom:0 !important;width:100vw !important;height:100vh !important;max-width:none !important;border-radius:0 !important;border:none !important;}
 .email-modal.fullscreen{padding:0 !important;}
+.email-modal-card{transition:max-width .35s cubic-bezier(.4,0,.2,1),max-height .35s cubic-bezier(.4,0,.2,1),width .35s cubic-bezier(.4,0,.2,1),height .35s cubic-bezier(.4,0,.2,1),border-radius .3s ease;}
 .email-modal.fullscreen .email-modal-card{max-width:none !important;max-height:none !important;width:100vw !important;height:100vh !important;border-radius:0 !important;}
+
+/* focused hub & workspace card entrances — staggered fade-up */
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.wscard{animation:fadeUp .32s cubic-bezier(.4,0,.2,1) both;}
+.wscard:nth-child(2){animation-delay:40ms;}
+.wscard:nth-child(3){animation-delay:80ms;}
+.wscard:nth-child(4){animation-delay:120ms;}
+.wscard:nth-child(5){animation-delay:160ms;}
+
+/* button micro-interactions */
+.btn-primary,.btn-sec{transition:transform .12s cubic-bezier(.4,0,.2,1),box-shadow .15s,background .15s,border-color .15s;}
+.btn-primary:active,.btn-sec:active{transform:scale(.97);}
+.meet-btn{transition:transform .12s cubic-bezier(.4,0,.2,1),box-shadow .15s,filter .15s;}
+.meet-btn:hover{transform:translateY(-1px);filter:brightness(1.06);}
+.meet-btn:active{transform:scale(.97);}
 
 /* sequence editor — drag-and-drop reorder */
 .seq-row{display:flex;align-items:center;gap:10px;padding:11px 13px;background:#fff;border:1.5px solid var(--border);border-radius:9px;margin-bottom:7px;cursor:grab;transition:border-color .15s,box-shadow .15s,transform .12s;user-select:none;}
@@ -1718,6 +1735,16 @@ function renderWorkspace(){
   const logs=(W.st.log||[]).slice().reverse().map(l=>`<div class="logentry"><span class="when">${esc(l.t)}</span>${esc(l.x)}</div>`).join('')||'<div style="font-size:12px;color:var(--soft)">No activity yet.</div>';
   /* emails — pulled from inbox on refresh, matched by sender == candidate's email */
   const emailList=(W.st.emails||[]);
+  /* refs preview — small card visible at all stages once refs are on file. Distinct from the full refsBlock,
+     which is the working surface at the References stage. */
+  let refsPreviewCard='';
+  const _refs=W.st.refs||[];
+  if(_refs.length){
+    const fromForm=_refs.filter(r=>r.submittedAt).length;
+    const items=_refs.slice(0,3).map(r=>`<div style="font-size:12px;color:var(--mid);padding:4px 0"><b>${esc(r.name||'(no name)')}</b>${r.phone?' · '+esc(r.phone):''}${r.relationshipLabel?' · <span style="color:var(--soft)">'+esc(r.relationshipLabel)+'</span>':''}</div>`).join('');
+    refsPreviewCard=`<div class="wscard" style="border-color:var(--gold-mid)"><h3>References on file <span style="font-size:11px;color:var(--soft);font-weight:600">${_refs.length} total${fromForm?' · '+fromForm+' from form':''}</span></h3>${items}${_refs.length>3?'<div style="font-size:11px;color:var(--soft);margin-top:4px">+ '+(_refs.length-3)+' more — open Reference checks hub to call them all.</div>':''}<button class="btn-sec bg-cream" style="margin-top:10px;padding:6px 12px;font-size:12px" onclick="W.focusedHub=\'refs\';renderWorkspace()">Open Reference checks →</button></div>`;
+  }
+
   let emailsCard='';
   if(emailList.length){
     const items=emailList.slice(0,6).map(e=>{
@@ -1738,7 +1765,7 @@ function renderWorkspace(){
   document.getElementById('ws-body').innerHTML=`
     ${thisStep}
     <div class="wsgrid">
-      <div>${gatesCard}${work}${docs}${emailsCard}${activity}</div>
+      <div>${gatesCard}${work}${docs}${refsPreviewCard}${emailsCard}${activity}</div>
       <div>${identity}${scoreCard}</div>
     </div>`;
   /* sticky footer with primary action — always visible */
@@ -1854,14 +1881,54 @@ function verifyBlock(){const emp=W.st.employers||[];
     <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Employers verified')">Done → references →</button></div></div>`;
 }
 function vset(i,v){W.st.employers[i].v=W.st.employers[i].v===v?'':v;renderWorkspace();}
-function refsBlock(){const refs=W.st.refs||[];
-  const list=refs.map((rf,i)=>`<div class="lrow"><input value="${esc(rf.name||'')}" placeholder="Reference name & phone" oninput="W.st.refs[${i}].name=this.value">${rf.name?'<a class="btn-sm bg-sky-l" style="text-decoration:none;flex:0 0 auto" href="tel:">📞</a>':''}</div>`).join('');
+function refsBlock(){
+  const refs=W.st.refs||[];
+  const REL={supervisor:'Former supervisor',coworker:'Coworker',patientFamily:'Patient family',case_manager:'Case manager',personal:'Personal',other:'Other'};
+  const TIME={morning:'Mornings',afternoon:'Afternoons',evening:'Evenings',any:'Any time'};
+  /* per-ref card: name, relationship, phone (click-to-call), email, best time, candidate's notes,
+     plus YOUR outcome dropdown + notes after you call them. */
+  const list=refs.map((rf,i)=>{
+    const num=(rf.phone||'').replace(/[^0-9+]/g,'');
+    const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
+    const gvUrl=num?'https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164):'';
+    const submitted=rf.submittedAt?new Date(rf.submittedAt).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';
+    const fromForm=!!rf.submittedAt;
+    const outcome=rf.outcome||'';
+    const ourNotes=rf.callNotes||'';
+    return `<div class="ref-card" style="background:#fff;border:1.5px solid ${fromForm?'var(--gold-mid)':'var(--border)'};border-radius:11px;padding:13px 14px;margin-bottom:10px;animation:fadeUp .3s ease both;animation-delay:${i*40}ms">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px">
+        <div style="flex:1">
+          <div style="font-weight:700;color:var(--dark);font-size:14.5px">${esc(rf.name||'(no name)')}</div>
+          <div style="font-size:11.5px;color:var(--soft);margin-top:2px">${esc(rf.relationshipLabel||REL[rf.relationship]||rf.relationship||'—')}${rf.durationLabel?' · known '+esc(rf.durationLabel):''}</div>
+        </div>
+        ${fromForm?'<span class="pill pa" style="font-size:9px;font-weight:700;flex:0 0 auto">FROM FORM · '+esc(submitted)+'</span>':'<span class="pill psoft" style="font-size:9px;font-weight:700;flex:0 0 auto">MANUAL</span>'}
+      </div>
+      ${num?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="btn-sm" onclick="openLinkPopup('${esc(gvUrl)}','gvoice',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer">☎ Call ${esc(rf.phone)}</button>
+        ${rf.email?'<a class="btn-sm bg-cream" style="text-decoration:none" href="mailto:'+esc(rf.email)+'">✉ '+esc(rf.email)+'</a>':''}
+        ${rf.bestTimeLabel||TIME[rf.bestTime]?'<span style="font-size:11px;color:var(--soft);align-self:center">best: '+esc(rf.bestTimeLabel||TIME[rf.bestTime])+'</span>':''}
+      </div>`:''}
+      ${rf.notes?`<div style="background:var(--cream);padding:8px 10px;border-radius:7px;font-size:11.5px;color:var(--mid);margin-bottom:8px;border-left:3px solid var(--gold-mid)"><b style="color:var(--soft);font-size:10px;text-transform:uppercase">From candidate:</b><br>${esc(rf.notes)}</div>`:''}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <select onchange="W.st.refs[${i}].outcome=this.value;saveW(true);renderWorkspace()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">
+          <option value="">— call outcome —</option>
+          <option value="strong" ${outcome==='strong'?'selected':''}>Strong endorsement</option>
+          <option value="mixed" ${outcome==='mixed'?'selected':''}>Mixed</option>
+          <option value="negative" ${outcome==='negative'?'selected':''}>Negative</option>
+          <option value="nopickup" ${outcome==='nopickup'?'selected':''}>Couldn't reach</option>
+          <option value="bad_num" ${outcome==='bad_num'?'selected':''}>Bad number</option>
+        </select>
+        <input type="text" value="${esc(ourNotes)}" placeholder="Your notes from the call (optional)" oninput="W.st.refs[${i}].callNotes=this.value" onblur="saveW(true)" style="flex:1;min-width:160px;padding:5px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">
+        ${!fromForm?'<button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer" onclick="if(confirm(\'Remove this reference?\')){W.st.refs.splice('+i+',1);saveW(true);renderWorkspace();}">×</button>':''}
+      </div>
+    </div>`;
+  }).join('');
   const qs=QBANK.filter(x=>x.st==='Reference').map(it=>`<div class="qrow"><div class="qq">${esc(it.q)}</div><div class="qopts">${it.o.map(o=>`<button class="${W.answers[it.id]===o[1]?'on':''}" onclick="qans('${it.id}',${o[1]},'Reference','Background')">${esc(o[0])}</button>`).join('')}</div></div>`).join('');
-  return `<div class="wscard" id="ws-refs"><h3>Reference checks</h3>
-    <div style="font-size:12px;color:var(--soft);margin-bottom:8px">Load the references they sent, then call them with these questions.</div>
-    ${list||'<div style="font-size:12px;color:var(--soft);padding:8px 0">No references added yet.</div>'}
-    <button class="btn-sec bg-cream" style="margin:10px 0;width:auto;padding:7px 13px" onclick="W.st.refs=W.st.refs||[];W.st.refs.push({name:''});renderWorkspace()">+ add reference</button>
-    <h4 style="margin-top:14px">Reference questions</h4>${qs}
+  return `<div class="wscard" id="ws-refs"><h3>Reference checks <span style="font-size:11px;color:var(--soft);font-weight:600">${refs.length} on file</span></h3>
+    <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Refs with a <span class="pill pa" style="font-size:9px">FROM FORM</span> badge came from the candidate's own submission. Call each, then record the outcome below.</div>
+    ${list||'<div style="font-size:12.5px;color:var(--soft);padding:14px;background:var(--cream);border-radius:8px;text-align:center">No references yet. Either the candidate hasn\'t submitted the form, or you can add them manually below.</div>'}
+    <button class="btn-sec bg-cream" style="margin:6px 0 14px;width:auto;padding:7px 13px" onclick="W.st.refs=W.st.refs||[];W.st.refs.push({name:'',phone:'',relationship:'other'});renderWorkspace()">+ add reference manually</button>
+    <h4 style="margin-top:10px">Overall assessment questions</h4>${qs}
     <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="completeQuestions('Interview invite')">Complete &amp; advance →</button></div></div>`;
 }
 function flagPill(v){const map={clear:['Clear','pg'],flag:['Flag','pr2'],pending:['Pending','pa']};const m=map[v]||['—','psoft'];return '<span class="pill '+m[1]+'">'+m[0]+'</span>';}
