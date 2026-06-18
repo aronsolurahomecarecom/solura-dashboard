@@ -1281,9 +1281,11 @@ function action(c){
   else if(s==='Screen booked'||s==='Interview booked'){
     const d=st.booking?st.booking.slice(0,10):null;
     const isScreen=s==='Screen booked';
+    /* All booked candidates live in Action bucket — the user wants to see them as something to prep for,
+       not buried in Awaiting. The timing text + label distinguish urgency. */
     if(m!=null&&m<=60&&m>-150){bucket='action';timing=dn('Call now','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
     else if(d===today()){bucket='action';timing=dn('Call today','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
-    else if(d&&d>today()){bucket='awaiting';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:'Open call workspace',cls:'sky'};}
+    else if(d&&d>today()){bucket='action';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Prep & open phone screen':'Prep & open interview',cls:'sky'};}
     else{bucket='action';timing=dn('Overdue call','pr2','');primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}}
   else if(s==='Ask references'){
     const sent=st.sent&&st.sent.ask_references;
@@ -1870,14 +1872,30 @@ async function completeQuestions(nextStage){applyAnswers();const sc=scoreW();
 }
 function verifyBlock(){const emp=W.st.employers||[];
   if(!emp.length){
-    return emptyCard('🏢','No past employers added','+ add employer','W.st.employers=W.st.employers||[];W.st.employers.push({name:\'\',v:\'\'});renderWorkspace()')
+    return emptyCard('🏢','No past employers added','+ add employer','W.st.employers=W.st.employers||[];W.st.employers.push({name:\'\',phone:\'\',v:\'\'});renderWorkspace()')
       +`<div class="brow" style="margin-top:6px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Skipped employer verify')" style="flex:0 0 auto;padding:8px 14px">Skip → references →</button></div>`;
   }
-  const list=emp.map((e,i)=>`<div class="lrow"><input value="${esc(e.name||'')}" placeholder="Employer / supervisor / phone" oninput="W.st.employers[${i}].name=this.value"><span class="vbtns"><button class="ok ${e.v==='ok'?'on':''}" onclick="vset(${i},'ok')">verified</button><button class="no ${e.v==='no'?'on':''}" onclick="vset(${i},'no')">unable</button></span></div>`).join('');
-  return `<div class="wscard" id="ws-verify"><h3>Verify past employers</h3>
+  const list=emp.map((e,i)=>{
+    const num=(e.phone||'').replace(/[^0-9+]/g,'');
+    const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
+    const gvUrl=num?'https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164):'';
+    const callBtn=num?`<button class="btn-sm" onclick="openLinkPopup('${esc(gvUrl)}','gvoice',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Call via Google Voice">☎</button>`:'';
+    return `<div class="emp-row" style="background:#fff;border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:8px;animation:fadeUp .3s ease both;animation-delay:${i*40}ms">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+        <input value="${esc(e.name||'')}" placeholder="Employer / supervisor name" oninput="W.st.employers[${i}].name=this.value" onblur="saveW(true)" style="flex:1;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <input value="${esc(e.phone||'')}" placeholder="Phone number" oninput="W.st.employers[${i}].phone=this.value;renderWorkspace()" onblur="saveW(true)" style="flex:1;min-width:130px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
+        ${callBtn}
+        <span class="vbtns" style="flex:0 0 auto"><button class="ok ${e.v==='ok'?'on':''}" onclick="vset(${i},'ok')">verified</button><button class="no ${e.v==='no'?'on':''}" onclick="vset(${i},'no')">unable</button></span>
+        <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;flex:0 0 auto" onclick="if(confirm('Remove this employer?')){W.st.employers.splice(${i},1);saveW(true);renderWorkspace();}">×</button>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="wscard" id="ws-verify"><h3>Verify past employers <span style="font-size:11px;color:var(--soft);font-weight:600">${emp.length} on file</span></h3>
     <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Call each prior employer and mark verified or unable. Builds a confidence flag; does not gate.</div>
     ${list}
-    <button class="btn-sec bg-cream" style="margin-top:10px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',v:''});renderWorkspace()">+ add employer</button>
+    <button class="btn-sec bg-cream" style="margin-top:10px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:''});renderWorkspace()">+ add employer</button>
     <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Employers verified')">Done → references →</button></div></div>`;
 }
 function vset(i,v){W.st.employers[i].v=W.st.employers[i].v===v?'':v;renderWorkspace();}
@@ -1885,8 +1903,6 @@ function refsBlock(){
   const refs=W.st.refs||[];
   const REL={supervisor:'Former supervisor',coworker:'Coworker',patientFamily:'Patient family',case_manager:'Case manager',personal:'Personal',other:'Other'};
   const TIME={morning:'Mornings',afternoon:'Afternoons',evening:'Evenings',any:'Any time'};
-  /* per-ref card: name, relationship, phone (click-to-call), email, best time, candidate's notes,
-     plus YOUR outcome dropdown + notes after you call them. */
   const list=refs.map((rf,i)=>{
     const num=(rf.phone||'').replace(/[^0-9+]/g,'');
     const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
@@ -1895,19 +1911,28 @@ function refsBlock(){
     const fromForm=!!rf.submittedAt;
     const outcome=rf.outcome||'';
     const ourNotes=rf.callNotes||'';
-    return `<div class="ref-card" style="background:#fff;border:1.5px solid ${fromForm?'var(--gold-mid)':'var(--border)'};border-radius:11px;padding:13px 14px;margin-bottom:10px;animation:fadeUp .3s ease both;animation-delay:${i*40}ms">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px">
-        <div style="flex:1">
-          <div style="font-weight:700;color:var(--dark);font-size:14.5px">${esc(rf.name||'(no name)')}</div>
-          <div style="font-size:11.5px;color:var(--soft);margin-top:2px">${esc(rf.relationshipLabel||REL[rf.relationship]||rf.relationship||'—')}${rf.durationLabel?' · known '+esc(rf.durationLabel):''}</div>
-        </div>
-        ${fromForm?'<span class="pill pa" style="font-size:9px;font-weight:700;flex:0 0 auto">FROM FORM · '+esc(submitted)+'</span>':'<span class="pill psoft" style="font-size:9px;font-weight:700;flex:0 0 auto">MANUAL</span>'}
-      </div>
-      ${num?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+    /* For FORM-submitted refs: show as a display card with all info from the candidate.
+       For MANUAL refs: show editable input fields so the user can fill them in. */
+    const header=fromForm
+      ? `<div style="flex:1"><div style="font-weight:700;color:var(--dark);font-size:14.5px">${esc(rf.name||'(no name)')}</div><div style="font-size:11.5px;color:var(--soft);margin-top:2px">${esc(rf.relationshipLabel||REL[rf.relationship]||rf.relationship||'—')}${rf.durationLabel?' · known '+esc(rf.durationLabel):''}</div></div>`
+      : `<div style="flex:1;display:flex;flex-direction:column;gap:6px"><input value="${esc(rf.name||'')}" placeholder="Reference name" oninput="W.st.refs[${i}].name=this.value" onblur="saveW(true)" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;font-weight:600"><select onchange="W.st.refs[${i}].relationship=this.value;W.st.refs[${i}].relationshipLabel=this.options[this.selectedIndex].text;saveW(true);renderWorkspace()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:11.5px;width:auto;align-self:flex-start">${Object.entries(REL).map(([k,v])=>'<option value="'+k+'" '+(rf.relationship===k?'selected':'')+'>'+v+'</option>').join('')}</select></div>`;
+    const contactRow=fromForm
+      ? (num?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
         <button class="btn-sm" onclick="openLinkPopup('${esc(gvUrl)}','gvoice',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer">☎ Call ${esc(rf.phone)}</button>
         ${rf.email?'<a class="btn-sm bg-cream" style="text-decoration:none" href="mailto:'+esc(rf.email)+'">✉ '+esc(rf.email)+'</a>':''}
         ${rf.bestTimeLabel||TIME[rf.bestTime]?'<span style="font-size:11px;color:var(--soft);align-self:center">best: '+esc(rf.bestTimeLabel||TIME[rf.bestTime])+'</span>':''}
-      </div>`:''}
+      </div>`:'')
+      : `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <input value="${esc(rf.phone||'')}" placeholder="Phone" oninput="W.st.refs[${i}].phone=this.value;renderWorkspace()" onblur="saveW(true)" style="flex:1;min-width:130px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
+        <input value="${esc(rf.email||'')}" placeholder="Email (optional)" oninput="W.st.refs[${i}].email=this.value" onblur="saveW(true)" style="flex:1;min-width:130px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
+        ${num?`<button class="btn-sm" onclick="openLinkPopup('${esc(gvUrl)}','gvoice',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Call via Google Voice">☎ Call</button>`:''}
+      </div>`;
+    return `<div class="ref-card" style="background:#fff;border:1.5px solid ${fromForm?'var(--gold-mid)':'var(--border)'};border-radius:11px;padding:13px 14px;margin-bottom:10px;animation:fadeUp .3s ease both;animation-delay:${i*40}ms">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px">
+        ${header}
+        ${fromForm?'<span class="pill pa" style="font-size:9px;font-weight:700;flex:0 0 auto">FROM FORM · '+esc(submitted)+'</span>':'<span class="pill psoft" style="font-size:9px;font-weight:700;flex:0 0 auto">MANUAL</span>'}
+      </div>
+      ${contactRow}
       ${rf.notes?`<div style="background:var(--cream);padding:8px 10px;border-radius:7px;font-size:11.5px;color:var(--mid);margin-bottom:8px;border-left:3px solid var(--gold-mid)"><b style="color:var(--soft);font-size:10px;text-transform:uppercase">From candidate:</b><br>${esc(rf.notes)}</div>`:''}
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <select onchange="W.st.refs[${i}].outcome=this.value;saveW(true);renderWorkspace()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">
@@ -1919,7 +1944,7 @@ function refsBlock(){
           <option value="bad_num" ${outcome==='bad_num'?'selected':''}>Bad number</option>
         </select>
         <input type="text" value="${esc(ourNotes)}" placeholder="Your notes from the call (optional)" oninput="W.st.refs[${i}].callNotes=this.value" onblur="saveW(true)" style="flex:1;min-width:160px;padding:5px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">
-        ${!fromForm?'<button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer" onclick="if(confirm(\'Remove this reference?\')){W.st.refs.splice('+i+',1);saveW(true);renderWorkspace();}">×</button>':''}
+        <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer" onclick="if(confirm('Remove this reference?')){W.st.refs.splice(${i},1);saveW(true);renderWorkspace();}">×</button>
       </div>
     </div>`;
   }).join('');
