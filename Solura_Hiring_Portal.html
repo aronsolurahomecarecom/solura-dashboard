@@ -1198,6 +1198,35 @@ function stamp(){return new Date().toLocaleDateString('en-US',{month:'short',day
 function dayName(iso){return DAYS[(new Date(iso+'T00:00').getDay()+6)%7];}
 
 /* ===================== action engine ===================== */
+/* Predicted quality at the Applied stage — uses the screening answers from the application form
+   to flag candidates we shouldn't waste a phone screen on. Tiers:
+   - 'decline' : at least one hard disqualifier; primary becomes Decline-and-email
+   - 'review'  : 2+ soft concerns; primary becomes Review (user opens workspace before deciding)
+   - 'ok'      : clean, send screen invite as usual */
+function predictedQuality(c){
+  const s=(c.st&&c.st.screening)||{};
+  const g=c.gates||{};
+  const hard=[];
+  if(s.age18==='no')hard.push('Under 18');
+  if(s.revoked==='yes')hard.push('Credential revoked');
+  if(s.abuseFinding==='yes')hard.push('Abuse finding');
+  if(s.personalCare==='no')hard.push('Refuses personal care');
+  if(s.lifting==='no')hard.push("Can't lift 25 lbs");
+  if(g.wa==='✗')hard.push('No work authorization');
+  if(hard.length)return{tier:'decline',reasons:hard};
+
+  const soft=[];
+  const yrs=String(c.years||'').toLowerCase();
+  const noExp=yrs==='0'||yrs==='<1'||yrs==='none'||yrs.indexOf('less than')>-1;
+  if(noExp)soft.push('No prior experience');
+  if(!c.credential&&noExp)soft.push('No certifications');
+  if(s.smoker==='yes')soft.push('Smoker');
+  if(g.tr==='✗')soft.push('No reliable transport');
+  if(g.cr==='?')soft.push('Credential unverified');
+  if(soft.length>=2)return{tier:'review',reasons:soft};
+  return{tier:'ok',reasons:[]};
+}
+
 function action(c){
   const s=c.stage,st=c.st,info=STAGEINFO[s]||STAGEINFO['Applied'];
   if(s==='Declined')return{bucket:'closed',info};
@@ -1212,8 +1241,21 @@ function action(c){
     timing=dn(matchable?'Patient-matchable':'Required check pending',matchable?'pg':'pa',st.due?('check-in '+fmtDay(st.due)):'');
     primary={kind:'checkin',label:'Log check-in',cls:'grn'};}
   else if(s==='Applied'){
-    if(sc.dec.cls==='red'){bucket='action';timing=dn('Score below bar','pr2');primary={kind:'decline',label:'Decline & email',cls:'red'};}
-    else{bucket='action';timing=dn('Send screen invite','pnew');primary={kind:'email-tpl',tpl:'screen_invite',advanceTo:'Screen invite',label:'Send screen invite',cls:'gold'};}}
+    const pq=predictedQuality(c);
+    if(sc.dec.cls==='red'||pq.tier==='decline'){
+      const reasons=pq.tier==='decline'?pq.reasons:['Score below bar'];
+      bucket='action';
+      timing=dn('Decline recommended — '+reasons.slice(0,2).join(', '),'pr2');
+      primary={kind:'decline',label:'Decline & email',cls:'red'};
+    }else if(pq.tier==='review'){
+      bucket='action';
+      timing=dn('Review first — '+pq.reasons.slice(0,2).join(', '),'pa');
+      primary={kind:'open',label:'Review before inviting',cls:'gold'};
+    }else{
+      bucket='action';
+      timing=dn('Send screen invite','pnew');
+      primary={kind:'email-tpl',tpl:'screen_invite',advanceTo:'Screen invite',label:'Send screen invite',cls:'gold'};
+    }}
   else if(s==='Screen invite'||s==='Interview invite'){
     const sent=s==='Screen invite'?(st.sent&&st.sent.screen_invite):(st.sent&&st.sent.interview_invite);
     const tpl=s==='Screen invite'?'screen_invite':'interview_invite';
@@ -1457,7 +1499,7 @@ function doPrimary(r){const c=pipeline.find(x=>x.excelRow===r);if(!c)return;cons
   if(p.kind==='custom-advance'){openWorkspace(r);return setTimeout(()=>{if(confirm('Mark "'+stageLabel(W.stage)+'" complete and advance to '+stageLabel(p.nextStage)+'?')){advanceWS(p.nextStage,'Custom milestone "'+stageLabel(W.stage)+'" complete');}},100);}
   return openWorkspace(r);
 }
-function quickDecline(r){if(!confirm('Decline this candidate? They\'ll get the rejection email.'))return;loadW(r);doEmail('reject','Declined');}
+function quickDecline(r){loadW(r);doEmail('reject','Declined');}
 
 /* ===================== working copy ===================== */
 let W=null;
@@ -1721,7 +1763,7 @@ function workBlock(a){if(!a.primary)return'';const k=a.primary.kind;
   if(k==='verify')return verifyBlock();if(k==='refs')return refsBlock();
   if(k==='checks'||k==='lock')return checksBlock();return'';}
 function hgate(k,v){W.gates[k]=W.gates[k]===v?'':v;renderWorkspace();}
-function declineFromWS(){if(!confirm('Decline this candidate?'))return;doEmail('reject','Declined');}
+function declineFromWS(){doEmail('reject','Declined');}
 async function addNote(){const t=document.getElementById('ws-note').value.trim();if(!t){toast('Type a note first');return;}logW(t);await saveW(true);toast('Note added');renderWorkspace();}
 
 /* Open the Cal.com video meeting in a popup window — no tab navigation away */
@@ -1782,9 +1824,15 @@ function questionsBlock(stage,nextStage){
 }
 function qans(id,v,stage,nextStage){W.answers[id]=W.answers[id]===v?undefined:v;renderWorkspace();}
 async function completeQuestions(nextStage){applyAnswers();const sc=scoreW();
-  if(sc.dec.cls==='red'){if(!confirm('Score lands at DECLINE. Decline?'))return;return doEmail('reject','Declined');}
+  if(sc.dec.cls==='red'){return doEmail('reject','Declined');}
   W.stage=nextStage;W.st.due=today();logW('Completed step → '+nextStage+' (Q'+sc.Q+'/R'+sc.R+')');
-  await saveW(true);toast('→ '+nextStage);renderWorkspace();}
+  await saveW(true);toast('→ '+nextStage);
+  /* auto-progression handled by advanceWS pattern: clear focus + open next email if applicable */
+  W.focusedHub=null;
+  renderWorkspace();
+  const c=pipeline.find(x=>x.excelRow===W.row);
+  if(c){const a=action(c);if(a.primary&&a.primary.kind==='email-tpl'){setTimeout(()=>doEmail(a.primary.tpl,a.primary.advanceTo),250);}}
+}
 function verifyBlock(){const emp=W.st.employers||[];
   if(!emp.length){
     return emptyCard('🏢','No past employers added','+ add employer','W.st.employers=W.st.employers||[];W.st.employers.push({name:\'\',v:\'\'});renderWorkspace()')
