@@ -1482,9 +1482,10 @@ function doPrimary(r){const c=pipeline.find(x=>x.excelRow===r);if(!c)return;cons
     if(a.bucket==='action'){
       if(p.stage==='Interview'&&c.st.meetingUrl){
         setTimeout(()=>openMeetingPopup(c.st.meetingUrl),350);
-      }else if(p.stage==='Phone Screen'&&c.phone){
-        /* Google Voice popup pre-dialed with candidate's number */
-        const num=c.phone.replace(/[^0-9+]/g,'');
+      }else if(p.stage==='Phone Screen'&&(c.st.callPhone||c.phone)){
+        /* Google Voice popup pre-dialed with Cal.com booking phone (preferred) or application phone */
+        const phoneToCall=c.st.callPhone||c.phone;
+        const num=phoneToCall.replace(/[^0-9+]/g,'');
         const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
         setTimeout(()=>openLinkPopup('https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164),'gvoice',420,640),350);
       }
@@ -1805,12 +1806,19 @@ function questionsBlock(stage,nextStage){
   let callBtn='';
   if(stage==='Interview'&&W.st.meetingUrl){
     callBtn=meetButton(W.st.meetingUrl,'▶ Open Teams meeting');
-  }else if(stage==='Phone Screen'&&W.phone){
-    const num=W.phone.replace(/[^0-9+]/g,'');
-    const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
-    const gvUrl='https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164);
-    callBtn='<button class="meet-btn" onclick="openLinkPopup(\''+esc(gvUrl)+'\',\'gvoice\',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);box-shadow:0 2px 8px rgba(66,133,244,.3)"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.568 17.568 0 0 0 4.168 6.608 17.569 17.569 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/></svg>Call '+esc(W.phone)+' via Google Voice</button>'
-      +' <a href="tel:'+esc(num)+'" class="meet-btn" style="background:linear-gradient(135deg,#3D7A34,#2C5825);box-shadow:0 2px 8px rgba(61,122,52,.3);text-decoration:none;margin-left:6px"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.568 17.568 0 0 0 4.168 6.608 17.569 17.569 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/></svg>tel:</a>';
+  }else if(stage==='Phone Screen'){
+    /* prefer the phone the candidate entered at Cal.com booking time — it's more recent
+       and may differ from what they put on the application. Fall back to main phone. */
+    const phoneToCall=W.st.callPhone||W.phone||'';
+    const phoneSource=W.st.callPhone?'from Cal.com booking':'from application';
+    if(phoneToCall){
+      const num=phoneToCall.replace(/[^0-9+]/g,'');
+      const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
+      const gvUrl='https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164);
+      callBtn='<button class="meet-btn" onclick="openLinkPopup(\''+esc(gvUrl)+'\',\'gvoice\',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);box-shadow:0 2px 8px rgba(66,133,244,.3)"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.568 17.568 0 0 0 4.168 6.608 17.569 17.569 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/></svg>Call '+esc(phoneToCall)+' via Google Voice</button>'
+        +' <a href="tel:'+esc(num)+'" class="meet-btn" style="background:linear-gradient(135deg,#3D7A34,#2C5825);box-shadow:0 2px 8px rgba(61,122,52,.3);text-decoration:none;margin-left:6px"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.568 17.568 0 0 0 4.168 6.608 17.569 17.569 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/></svg>tel:</a>'
+        +'<div style="font-size:10px;color:var(--soft);margin-top:4px">Phone source: '+phoneSource+'</div>';
+    }
   }else if(stage==='Interview'){
     callBtn='<div style="font-size:11.5px;color:var(--soft);padding:8px 12px;background:#FAFAF7;border-radius:8px;border:1px dashed var(--border)">⚠ No meeting URL captured yet — should arrive automatically when Cal.com fires the booking webhook.</div>';
   }
