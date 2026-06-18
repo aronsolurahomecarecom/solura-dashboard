@@ -683,6 +683,7 @@ td{padding:13px 16px;vertical-align:top;}
     <div class="tabs-bar" id="tabsbar">
       <button class="tab-btn on" id="tab-pipe" onclick="setView('pipeline')">Pipeline</button>
       <button class="tab-btn" id="tab-cal" onclick="setView('calendar')">Calendar</button>
+      <button class="tab-btn" id="tab-set" onclick="setView('settings')">Settings</button>
     </div>
     <button class="filterbtn" id="btn-filter" style="display:none" onclick="toggleFilterPanel()">⚙ Filter <span class="ct" id="filterct" style="display:none">0</span></button>
     <div class="sync-pill"><div class="sdot" id="sdot"></div><span id="slabel">Not connected</span></div>
@@ -726,6 +727,7 @@ td{padding:13px 16px;vertical-align:top;}
     <div class="sw sw-all collapsed" id="sw-4" style="margin-top:8px"><div class="shdr" onclick="toggleBucket(4)"><div class="sdot2 soft"></div><div class="stitle">All candidates in pipeline</div><div class="scnt" id="c4">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t4"></tbody></table></div></div>
   </div>
   <div id="calendar-view" style="display:none"></div>
+  <div id="settings-view" style="display:none"></div>
 </div>
 
 <!-- generic modal -->
@@ -769,6 +771,7 @@ let collapsed={0:false,1:false,2:false,3:true,4:true};
 let F={stage:new Set(),band:new Set(),source:new Set(),cert:new Set(),expertise:new Set(),zip:''};
 let view='pipeline',calOffset=0,wsRow=null;
 let AVAIL={pattern:{},slots:[],offs:[]}; /* pattern={Mon:["Morning","Afternoon"]}; slots=specific ISO datetimes; offs=specific dates removed from pattern */
+let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{}}; /* persistent custom adds + edited email templates */
 let avPatternOpen=false;
 
 async function genPKCE(){const v=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -804,7 +807,7 @@ async function onSignedIn(){setConn(true);
   try{const r=await gfetch(GR+'/shares/'+encodeShareUrl(FILE_URL)+'/driveItem?$select=id,parentReference,name');
     if(!r.ok)throw new Error('Could not open the file ('+r.status+')');
     const j=await r.json();itemId=j.id;driveId=j.parentReference.driveId;
-    await loadData();await loadAvailability();await syncFromBookings(true);}catch(e){toast(e.message);}}
+    await loadData();await loadAvailability();await loadSettings();await syncFromBookings(true);}catch(e){toast(e.message);}}
 async function patchRange(addr,values){const base=GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET;
   const r=await gfetch(base+"/range(address='"+addr+"')",{method:'PATCH',body:JSON.stringify({values:values})});
   if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||r.status);}}
@@ -865,6 +868,13 @@ async function loadAvailability(){
     if(!r.ok)return;const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{AVAIL=Object.assign({pattern:{},slots:[],offs:[]},JSON.parse(v[0][0]));}catch(e){}}}catch(e){}
 }
 async function saveAvailability(){try{await patchRange('AK1',[[JSON.stringify(AVAIL)]]);}catch(e){toast('Could not save availability');}}
+
+/* settings stored in cell AL1: custom expertise/cert/source adds + edited templates */
+async function loadSettings(){
+  try{const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AL1')?$select=values");
+    if(!r.ok)return;const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{SETTINGS=Object.assign({customExpertise:[],customCerts:[],customSources:[],templates:{}},JSON.parse(v[0][0]));}catch(e){}}}catch(e){}
+}
+async function saveSettings(){try{await patchRange('AL1',[[JSON.stringify(SETTINGS)]]);}catch(e){toast('Could not save settings');}}
 
 /* ===================== Microsoft Bookings sync ===================== */
 /* Two-way: push permanent schedule to Bookings business hours; pull appointments back into the pipeline */
@@ -986,7 +996,7 @@ const QBANK=[
 ];
 
 /* ===================== sequence ===================== */
-const FLOW=['Applied','Screen invite','Screen booked','Verify employers','References','Background','Interview invite','Interview booked','Offer','Onboarding','Hired'];
+const FLOW=['Applied','Screen invite','Screen booked','Verify employers','References','Interview invite','Interview booked','Background','Offer','Onboarding','Hired'];
 const FLOW_SHORT={'Applied':'Apply','Screen invite':'Invite','Screen booked':'Screen','Verify employers':'Verify','References':'Refs','Background':'Checks','Interview invite':'Invite','Interview booked':'Interview','Offer':'Offer','Onboarding':'Onboard','Hired':'Hired'};
 const STAGEINFO={
  'Applied':{phase:'New',next:'Review',color:['#EBF3FB','#1E4E8C']},
@@ -1074,10 +1084,10 @@ function action(c){
   else if(s==='Screen booked'||s==='Interview booked'){
     const d=st.booking?st.booking.slice(0,10):null;
     const isScreen=s==='Screen booked';
-    if(m!=null&&m<=60&&m>-150){bucket='action';timing=dn('Call now','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
-    else if(d===today()){bucket='action';timing=dn('Call today','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
-    else if(d&&d>today()){bucket='awaiting';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Offer',label:'Open call workspace',cls:'sky'};}
-    else{bucket='action';timing=dn('Overdue call','pr2','');primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}}
+    if(m!=null&&m<=60&&m>-150){bucket='action';timing=dn('Call now','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Background',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
+    else if(d===today()){bucket='action';timing=dn('Call today','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Background',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
+    else if(d&&d>today()){bucket='awaiting';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Background',label:'Open call workspace',cls:'sky'};}
+    else{bucket='action';timing=dn('Overdue call','pr2','');primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Verify employers':'Background',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}}
   else if(s==='Verify employers'){bucket='action';timing=dn('Verify past employers','pnew');primary={kind:'verify',label:'Open verify hub',cls:'sky'};}
   else if(s==='References'){bucket='action';timing=dn('Call references','pnew');primary={kind:'refs',label:'Open reference hub',cls:'sky'};}
   else if(s==='Background'){
@@ -1112,18 +1122,19 @@ function updateFilterCount(){const ct=filterCount();const el=document.getElement
 function toggleFilterPanel(){const p=document.getElementById('filterpanel');p.classList.toggle('open');if(p.classList.contains('open'))renderFilterPanel();}
 function chip(cat,val,label){return '<button class="fchip'+(F[cat].has(val)?' on':'')+'" onclick="toggleFilter(\''+cat+'\',\''+val.replace(/'/g,"\\'")+'\')">'+esc(label||val)+'</button>';}
 function renderFilterPanel(){
-  const sources=Array.from(new Set(pipeline.map(c=>c.source||'').filter(x=>x))).sort();
-  const expertises=Array.from(new Set(pipeline.flatMap(c=>(c.st.pills||[])))).sort();
-  const certs=Array.from(new Set(pipeline.flatMap(c=>(c.st.certs||[])))).sort();
+  /* show ALL options the system knows about — common + more + any custom adds saved to SETTINGS */
+  const sources=Array.from(new Set([...SOURCES.filter(s=>s!=='Other'),...(SETTINGS.customSources||[])])).sort();
+  const expertises=Array.from(new Set([...EXPERTISE_COMMON,...EXPERTISE_MORE,...(SETTINGS.customExpertise||[])])).sort();
+  const certs=Array.from(new Set([...CERT_COMMON,...CERT_MORE,...(SETTINGS.customCerts||[])])).sort();
   const stages=FLOW;
   const bands=['HIRE TRACK','CONDITIONAL','HOLD / DEVELOP','DECLINE','In progress'];
   document.getElementById('filterpanel').innerHTML=`
     <div class="fpgrid">
       <div class="fpgroup"><label>Stage</label><div>${stages.map(s=>chip('stage',s)).join('')}</div></div>
       <div class="fpgroup"><label>Score band</label><div>${bands.map(b=>chip('band',b)).join('')}</div></div>
-      <div class="fpgroup"><label>Certificate</label><div>${(certs.length?certs:CERT_COMMON).map(c=>chip('cert',c)).join('')}</div></div>
-      <div class="fpgroup"><label>Source</label><div>${(sources.length?sources:SOURCES).map(s=>chip('source',s)).join('')}</div></div>
-      <div class="fpgroup"><label>Expertise</label><div>${(expertises.length?expertises:EXPERTISE_COMMON).map(e=>chip('expertise',e)).join('')}</div></div>
+      <div class="fpgroup"><label>Certificate</label><div>${certs.map(c=>chip('cert',c)).join('')}</div></div>
+      <div class="fpgroup"><label>Source</label><div>${sources.map(s=>chip('source',s)).join('')}</div></div>
+      <div class="fpgroup"><label>Expertise</label><div>${expertises.map(e=>chip('expertise',e)).join('')}</div></div>
       <div class="fpgroup"><label>ZIP starts with</label><input class="fpinput" placeholder="44118" value="${esc(F.zip)}" oninput="setZip(this.value)"></div>
     </div>
     <div class="fpfoot">
@@ -1137,9 +1148,12 @@ function renderFilterPanel(){
 function setView(v){view=v;
   document.getElementById('tab-pipe').classList.toggle('on',v==='pipeline');
   document.getElementById('tab-cal').classList.toggle('on',v==='calendar');
+  document.getElementById('tab-set').classList.toggle('on',v==='settings');
   document.getElementById('pipeline-view').style.display=v==='pipeline'?'block':'none';
   document.getElementById('calendar-view').style.display=v==='calendar'?'block':'none';
+  document.getElementById('settings-view').style.display=v==='settings'?'block':'none';
   document.getElementById('sync-bar').style.display=v==='pipeline'?'flex':'none';
+  if(v==='settings')renderSettings();
   render();
 }
 function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return renderCalendar();
@@ -1248,8 +1262,19 @@ function first(c){return (c.name||'there').split(' ')[0];}
 function payRange(){const floor=14,ceil=18;let base=15.5;if(W&&(W.st.certs||[]).some(x=>/CNA|STNA/i.test(x)))base+=1.25;const sc=W?scoreW():{Q:null};if(W&&(W.q.cmp>=4||(sc.Q&&sc.Q>=85)))base+=1;
   let lo=Math.max(floor,Math.round((base-0.5)*2)/2),hi=Math.min(ceil,Math.round((base+1)*2)/2);if(hi<lo)hi=lo;
   return '$'+(''+lo).replace(/\.0$/,'')+'–$'+(''+hi).replace(/\.0$/,'')+'/hr';}
-function doEmail(tpl,advanceTo){const t=(TEMPLATES[tpl]||TEMPLATES.screen_invite)(W);emailModal(tpl,t.s,t.b,advanceTo);}
-function doEmailMissing(){const sc=scoreW();W.__missing=sc.missingGates;const t=TEMPLATES.missing(W);emailModal('missing',t.s,t.b);}
+function getEffectiveTemplate(tplKey,c){
+  /* if user edited this template via Settings, use the edit; otherwise the built-in */
+  const custom=SETTINGS.templates&&SETTINGS.templates[tplKey];
+  if(custom){
+    /* substitute {first}, {bookLink}, {pay} placeholders */
+    const first=(c&&c.name||'there').split(' ')[0];
+    const sub=t=>t.replace(/\{first\}/g,first).replace(/\{bookLink\}/g,BOOK_LINK).replace(/\{pay\}/g,payRange()).replace(/\{missing\}/g,(c&&c.__missing||[]).map(x=>'• '+x).join('\n'));
+    return {s:sub(custom.s||''),b:sub(custom.b||'')};
+  }
+  return (TEMPLATES[tplKey]||TEMPLATES.screen_invite)(c);
+}
+function doEmail(tpl,advanceTo){const t=getEffectiveTemplate(tpl,W);emailModal(tpl,t.s,t.b,advanceTo);}
+function doEmailMissing(){const sc=scoreW();W.__missing=sc.missingGates;const t=getEffectiveTemplate('missing',W);emailModal('missing',t.s,t.b);}
 function emailModal(tpl,subj,body,advanceTo){
   document.getElementById('m-title').textContent=tpl==='reject'?'Send rejection email':'Send email';
   document.getElementById('mbox').style.maxWidth='640px';
@@ -1453,7 +1478,7 @@ function refsBlock(){const refs=W.st.refs||[];
     ${list||'<div style="font-size:12px;color:var(--soft);padding:8px 0">No references added yet.</div>'}
     <button class="btn-sec bg-cream" style="margin:10px 0;width:auto;padding:7px 13px" onclick="W.st.refs=W.st.refs||[];W.st.refs.push({name:''});renderWorkspace()">+ add reference</button>
     <h4 style="margin-top:14px">Reference questions</h4>${qs}
-    <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="completeQuestions('Background')">Complete &amp; advance →</button></div></div>`;
+    <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="completeQuestions('Interview invite')">Complete &amp; advance →</button></div></div>`;
 }
 function flagPill(v){const map={clear:['Clear','pg'],flag:['Flag','pr2'],pending:['Pending','pa']};const m=map[v]||['—','psoft'];return '<span class="pill '+m[1]+'">'+m[0]+'</span>';}
 function chkOpts(which){return ['','pending','clear','flag'].map(o=>`<option value="${o}" ${o===W.st[which]?'selected':''}>${o||'set status'}</option>`).join('');}
@@ -1468,7 +1493,7 @@ function checksBlock(){return `<div class="wscard" id="ws-checks"><h3>Background
     <div class="kvrow">Required state check ${flagPill(W.st.reqCheck)}<select onchange="W.st.reqCheck=this.value;renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('reqCheck')}</select></div>
     <div class="kvrow">3rd-party check (API) ${flagPill(W.st.tpCheck)}<select onchange="W.st.tpCheck=this.value;renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('tpCheck')}</select></div>
     <div style="font-size:11px;color:var(--soft);margin-top:8px">When the provider's API is connected, the 3rd-party status flips automatically and unlocks the offer. The required check can stay pending — the candidate just can't be matched to a patient until it clears.</div>
-    <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceWS('Interview invite','Checks underway → interview invite')">Done → invite to interview →</button></div></div>`;
+    <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceWS('Offer','Checks cleared → ready for offer')">Done → ready for offer →</button></div></div>`;
 }
 async function advanceWS(toStage,msg){W.stage=toStage;if(msg)logW(msg);if(toStage==='Screen invite'||toStage==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();await saveW(true);toast('→ '+toStage);renderWorkspace();}
 
@@ -1558,6 +1583,52 @@ function openAddFromBooking(name,email,startISO){
     renderAdd();
   },100);
 }
+
+/* ===================== Settings view ===================== */
+const TEMPLATE_LABELS={
+ screen_invite:'Screen invite',screen_nudge:'Screen nudge',interview_invite:'Interview invite',
+ bg_request:'Background check request',offer:'Offer',onboarding:'Onboarding',
+ reject:'Rejection',missing:'Request missing info'
+};
+function defaultTplFor(k){const dummy={name:'John Smith',email:'',phone:'',source:'',st:{},__missing:['Work authorization']};return (TEMPLATES[k]||TEMPLATES.screen_invite)(dummy);}
+function renderSettings(){
+  const tpls=Object.keys(TEMPLATE_LABELS).map(k=>{
+    const cur=SETTINGS.templates[k]||defaultTplFor(k);
+    const isEdited=!!SETTINGS.templates[k];
+    return `<div class="wscard" style="margin-bottom:14px">
+      <h3>${esc(TEMPLATE_LABELS[k])} ${isEdited?'<span class="pill pa" style="font-size:9px;font-weight:700">EDITED</span>':'<span class="pill pg" style="font-size:9px;font-weight:700">DEFAULT</span>'}</h3>
+      <div style="font-size:11px;color:var(--soft);margin-bottom:10px">Placeholders: <code>{first}</code> (first name) · <code>{bookLink}</code> · <code>{pay}</code> (pay range) · <code>{missing}</code> (for "request missing info")</div>
+      <h4>Subject</h4>
+      <input id="tpl_s_${k}" value="${esc(cur.s)}" style="width:100%;padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;outline:none;margin-bottom:10px">
+      <h4>Body</h4>
+      <textarea id="tpl_b_${k}" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;min-height:140px;outline:none;resize:vertical">${esc(cur.b)}</textarea>
+      <div class="brow" style="margin-top:10px;gap:8px">
+        <button class="btn-primary bg-grn" onclick="saveTemplate('${k}')" style="flex:0 0 auto;padding:8px 16px">Save edit</button>
+        ${isEdited?`<button class="btn-sec bg-cream" onclick="revertTemplate('${k}')" style="flex:0 0 auto;padding:8px 14px;color:var(--red)">Revert to default</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+  const renderCustomList=(label,items,kind)=>`<div class="wscard" style="margin-bottom:14px">
+    <h3>Custom ${label}</h3>
+    <div style="font-size:11.5px;color:var(--soft);margin-bottom:10px">Anything typed once in the Add Candidate form lands here permanently. Delete if obsolete.</div>
+    ${items.length?items.map(x=>`<span class="added-chip" style="margin:0 6px 6px 0">${esc(x)}<button onclick="removeCustom('${kind}','${esc(x).replace(/'/g,"\\'")}')">✕</button></span>`).join(''):'<span style="font-size:12px;color:var(--soft);font-style:italic">None yet</span>'}
+  </div>`;
+  document.getElementById('settings-view').innerHTML=`
+    <div style="max-width:780px;margin:0 auto;padding:8px 4px">
+      <h2 style="font-family:'Cormorant Garamond',serif;font-size:26px;color:var(--sky-deep);font-weight:600;margin:8px 0 14px">Settings</h2>
+      <h3 style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep);font-weight:600;margin:18px 0 10px">Email templates</h3>
+      ${tpls}
+      <h3 style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep);font-weight:600;margin:24px 0 10px">Custom lists</h3>
+      ${renderCustomList('expertise',SETTINGS.customExpertise||[],'customExpertise')}
+      ${renderCustomList('certificates',SETTINGS.customCerts||[],'customCerts')}
+      ${renderCustomList('sources',SETTINGS.customSources||[],'customSources')}
+    </div>`;
+}
+async function saveTemplate(k){const s=document.getElementById('tpl_s_'+k).value;const b=document.getElementById('tpl_b_'+k).value;
+  SETTINGS.templates=SETTINGS.templates||{};SETTINGS.templates[k]={s,b};await saveSettings();toast('Template saved');renderSettings();}
+async function revertTemplate(k){if(!confirm('Revert to default? Your edits will be lost.'))return;
+  delete SETTINGS.templates[k];await saveSettings();toast('Reverted');renderSettings();}
+async function removeCustom(kind,val){SETTINGS[kind]=(SETTINGS[kind]||[]).filter(x=>x!==val);await saveSettings();renderSettings();}
 function patternEditor(){
   const shiftLabel=sh=>{const r=shiftToRange(sh);return sh+' <span style="font-weight:400;color:var(--soft);font-size:10px">'+r.s+'–'+r.e+'</span>';};
   return `<div class="pattern-card">
@@ -1714,7 +1785,13 @@ function renderAdd(){
 function adTogglePill(v){const i=AD.pills.indexOf(v);if(i<0)AD.pills.push(v);else AD.pills.splice(i,1);renderAdd();}
 function adToggleCert(v){const i=AD.certs.indexOf(v);if(i<0)AD.certs.push(v);else AD.certs.splice(i,1);renderAdd();}
 function adAddCustom(kind){const fld=document.getElementById(kind==='cert'?'ad_certfree':'ad_expfree');const v=fld.value.trim();if(!v)return;
-  if(kind==='cert'){if(!AD.certs.includes(v))AD.certs.push(v);}else{if(!AD.pills.includes(v))AD.pills.push(v);}
+  if(kind==='cert'){if(!AD.certs.includes(v))AD.certs.push(v);
+    /* persist to permanent list */
+    if(!CERT_COMMON.includes(v)&&!CERT_MORE.includes(v)&&!(SETTINGS.customCerts||[]).includes(v)){
+      SETTINGS.customCerts=SETTINGS.customCerts||[];SETTINGS.customCerts.push(v);saveSettings();}}
+  else{if(!AD.pills.includes(v))AD.pills.push(v);
+    if(!EXPERTISE_COMMON.includes(v)&&!EXPERTISE_MORE.includes(v)&&!(SETTINGS.customExpertise||[]).includes(v)){
+      SETTINGS.customExpertise=SETTINGS.customExpertise||[];SETTINGS.customExpertise.push(v);saveSettings();}}
   fld.value='';renderAdd();}
 function adGate(k,v){AD.gates[k]=AD.gates[k]===v?'':v;renderAdd();}
 function adTogSet(k){const i=AD.settings.indexOf(k);if(i<0)AD.settings.push(k);else AD.settings.splice(i,1);renderAdd();}
@@ -1729,6 +1806,9 @@ async function saveAdd(){if(!AD.name){toast('Name required');return;}
   const gv=k=>AD.gates[k]||'',zip=AD.zip;
   const prx=rProx(zip),ten=rTen(AD.longest,AD.shorts),cmp=rComp(AD.years,AD.settings,AD.certs),ava=rAva(AD.dayShifts);
   const source=AD.source==='Other'?AD.otherSource:AD.source;
+  /* persist "Other" sources as permanent */
+  if(AD.source==='Other'&&AD.otherSource&&!SOURCES.includes(AD.otherSource)&&!(SETTINGS.customSources||[]).includes(AD.otherSource)){
+    SETTINGS.customSources=SETTINGS.customSources||[];SETTINGS.customSources.push(AD.otherSource);saveSettings();}
   const fullAddr=[AD.address,AD.city,AD.state,zip].filter(Boolean).join(', ');
   const st={due:null,booking:null,zip:zip,address:fullAddr,pills:AD.pills.slice(),certs:AD.certs.slice(),licenseState:AD.hasLicense?AD.licenseState:'',licenseNum:AD.hasLicense?AD.licenseNum:'',license:AD.hasLicense?'Y':'',reqCheck:'',tpCheck:'',employers:[],refs:[],sent:{},checkins:[],dayShifts:AD.dayShifts,log:[{t:stamp(),x:'Added manually'}]};
   const row=nextRow,bl=v=>(v===''||v==null?'':v);
