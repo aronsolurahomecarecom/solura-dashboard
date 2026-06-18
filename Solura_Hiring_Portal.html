@@ -1478,7 +1478,8 @@ const BOOK_LINK='https://cal.com/solura-hiring/phone-screen';
 const TEMPLATES={
  screen_invite:c=>({s:'Next step with Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying. Let's set up a quick 15-minute call — pick a time here:\n${BOOK_LINK}\n\nSolura Home Care Hiring`}),
  screen_nudge:c=>({s:'Still interested? — Solura Home Care',b:`Hi ${first(c)},\n\nJust following up — pick a 15-minute slot whenever it's convenient:\n${BOOK_LINK}\n\nSolura Home Care`}),
- ask_references:c=>({s:'A quick favor — references — Solura Home Care',b:`Hi ${first(c)},\n\nGreat speaking with you. To move forward, we need 2–3 professional references — ideally previous supervisors from caregiving roles.\n\nPlease reply with for each one:\n• Name\n• Their role / how you worked together\n• Phone number\n• Best time to reach them\n\nWe'll handle the calls. Thanks!\n\nSolura Home Care`}),
+ ask_references:c=>{const refLink='https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(c.email||'');
+   return {s:'Quick form — your references — Solura Home Care',b:`Hi ${first(c)},\n\nGreat speaking with you. To move forward, please share 2–3 professional references using this short form:\n\n${refLink}\n\nIt takes about 90 seconds. You'll need their name, phone, and how you know them. We do the actual calling.\n\nThanks!\nSolura Home Care`};},
  interview_invite:c=>({s:'Interview with Solura Home Care + background check',b:`Hi ${first(c)},\n\nGreat news — you're moving to the interview stage. Two things:\n\n1) Book a 60-minute interview here:\n${BOOK_LINK}\n\n2) We'll also need to run a standard background check while we're scheduling. Please reply with your consent to run the check, along with copies of any caregiving certificates you have.\n\nThe interview can happen while the check is processing.\n\nSolura Home Care`}),
  bg_request:c=>({s:'Background check consent — Solura Home Care',b:`Hi ${first(c)},\n\nFollowing up on the background check. Please reply with:\n• Your written consent to run a standard background check\n• Copies of any caregiving certifications\n\nWe'll send the secure check link as soon as we receive these.\n\nSolura Home Care`}),
  offer:c=>({s:'Your offer — Solura Home Care',b:`Hi ${first(c)},\n\nWe're delighted to offer you a caregiver position at ${payRange()}. Your formal offer follows via DocuSign.\n\nWelcome aboard,\nSolura Home Care`}),
@@ -1862,7 +1863,7 @@ async function saveAttachment(messageId,attIdx){
   const btn=document.getElementById('att-btn-'+attIdx);btn.disabled=true;btn.textContent='Saving…';
   try{
     const candidateName=W?W.name:'';if(!candidateName){toast('No candidate context');return;}
-    const folder='caregivers/'+safeFileName(candidateName)+'/emails';
+    const folder='caregivers/'+safeFileName(candidateName)+'/onboarding';
     await ensureFolderPath(folder);
     /* decode base64 → bytes → upload */
     const bin=atob(att.contentBytes);const bytes=new Uint8Array(bin.length);
