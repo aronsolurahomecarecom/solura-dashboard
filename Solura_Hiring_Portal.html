@@ -97,7 +97,8 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--cream);color:va
 .sw.collapsed .shdr{border-bottom-color:transparent;}
 .bucket-arrow{font-size:12px;color:var(--soft);transition:transform .25s ease;flex-shrink:0;}
 .sw.collapsed .bucket-arrow{transform:rotate(-90deg);}
-.sw .tc{max-height:5000px;overflow-x:auto;overflow-y:hidden;transition:max-height .35s cubic-bezier(.4,0,.2,1);}
+.sw .tc{max-height:5000px;overflow-x:auto;overflow-y:hidden;transition:max-height .35s cubic-bezier(.4,0,.2,1);scrollbar-width:none;-ms-overflow-style:none;}
+.sw .tc::-webkit-scrollbar{display:none;}
 .sw.collapsed .tc{max-height:0;}
 .sdot2{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
 .sdot2.red{background:var(--red);box-shadow:0 0 0 3px rgba(176,48,37,.12);}
@@ -107,7 +108,8 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--cream);color:va
 .sdot2.soft{background:var(--softer);}
 .stitle{font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:500;flex:1;color:var(--dark);}
 .scnt{font-size:10px;font-weight:700;padding:3px 10px;border-radius:12px;background:var(--cream);color:var(--soft);border:1px solid var(--border);}
-.tc{overflow-x:auto;}
+.tc{overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;}
+.tc::-webkit-scrollbar{display:none;}
 
 /* Table */
 table{width:100%;border-collapse:collapse;}
@@ -692,6 +694,87 @@ td{padding:13px 16px;vertical-align:top;}
 /* smooth scroll for workspace body */
 .wsbody{scroll-behavior:smooth;}
 
+/* button press feedback — visible response to every click before any save completes */
+.btn-primary,.btn-sec,.btn-sm,.cal-btn,.refresh-btn,.meet-btn,.fchip,.tab-btn{
+  transition:transform .12s cubic-bezier(.4,0,.2,1),box-shadow .15s,background .15s,filter .15s !important;
+}
+.btn-primary:active,.btn-sec:active,.btn-sm:active,.cal-btn:active,.meet-btn:active,.fchip:active,.tab-btn:active,a.meet-btn:active{
+  transform:scale(.96) !important;
+  filter:brightness(.97);
+}
+
+/* in-flight indicator — fixed bottom-right pulse during any sheet write */
+#save-pulse{position:fixed;bottom:18px;right:18px;background:rgba(30,78,140,.95);color:#fff;padding:7px 13px;border-radius:18px;font-size:11.5px;font-weight:600;box-shadow:0 4px 14px rgba(30,78,140,.35);display:none;align-items:center;gap:7px;z-index:900;animation:pulseIn .25s ease;}
+#save-pulse.on{display:flex;}
+#save-pulse .dot{width:6px;height:6px;border-radius:50%;background:#FFD884;animation:pulseDot 1s ease-in-out infinite;}
+@keyframes pulseIn{from{transform:translateY(8px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+@keyframes pulseDot{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.4;transform:scale(.7);}}
+
+/* auto-reject surfacer banner */
+.ar-box{background:linear-gradient(135deg,#FFF8E7,#FEF7E8);border:1.5px solid var(--gold-mid);border-radius:12px;padding:11px 14px;box-shadow:0 2px 10px rgba(200,135,10,.15);animation:fadeUp .3s ease both;}
+
+/* email cards in candidate workspace */
+.email-card{border-bottom:1px solid var(--border);padding:10px 0;cursor:pointer;transition:background .12s;}
+.email-card:hover{background:var(--cream);margin:0 -8px;padding:10px 8px;border-radius:6px;}
+.email-card:last-child{border-bottom:none;}
+
+/* email detail modal — full-screen mail viewer with attachments */
+.email-modal{position:fixed;inset:0;background:rgba(20,30,50,.55);z-index:750;display:none;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px);}
+.email-modal.open{display:flex;animation:fadeUp .2s ease;}
+.email-modal-card{background:#fff;border-radius:14px;max-width:780px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,.25);overflow:hidden;}
+.email-modal-head{padding:18px 22px;border-bottom:1px solid var(--border);background:linear-gradient(to right,var(--sky-deep),#1E5FA8);color:#fff;}
+.email-modal-head h3{font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:600;margin-bottom:4px;color:#fff;}
+.email-modal-head .meta{font-size:11.5px;color:rgba(255,255,255,.75);}
+.email-modal-head .close-x{position:absolute;top:14px;right:18px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center;}
+.email-modal-head .close-x:hover{background:rgba(255,255,255,.28);}
+.email-modal-body{padding:20px 22px;overflow-y:auto;flex:1;font-size:13.5px;line-height:1.6;color:var(--dark);}
+.email-modal-body img{max-width:100%;height:auto;}
+.email-modal-attach{padding:14px 22px;border-top:1px solid var(--border);background:#FAFAF7;}
+.email-modal-attach h4{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);margin-bottom:10px;font-weight:700;}
+.attach-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-soft);}
+.attach-row:last-child{border-bottom:none;}
+.attach-row .ai{width:30px;height:30px;border-radius:6px;background:var(--sky-pale);color:var(--sky-deep);display:grid;place-items:center;font-size:13px;flex:0 0 auto;}
+.attach-row .an{flex:1;font-size:12.5px;color:var(--mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.attach-row .as{font-size:11px;color:var(--soft);flex:0 0 auto;}
+.attach-row button{font-family:inherit;font-size:11.5px;font-weight:600;padding:6px 12px;border-radius:6px;border:1px solid var(--sky-mid);background:#fff;color:var(--sky-deep);cursor:pointer;flex:0 0 auto;}
+.attach-row button:hover{background:var(--sky-pale);}
+.attach-row button:disabled{opacity:.5;cursor:default;}
+.email-modal-foot{padding:12px 22px;border-top:1px solid var(--border);background:#FAFAF7;display:flex;justify-content:flex-end;gap:8px;}
+
+/* sequence editor — drag-and-drop reorder */
+.seq-row{display:flex;align-items:center;gap:10px;padding:11px 13px;background:#fff;border:1.5px solid var(--border);border-radius:9px;margin-bottom:7px;cursor:grab;transition:border-color .15s,box-shadow .15s,transform .12s;user-select:none;}
+.seq-row:hover{border-color:var(--sky-mid);box-shadow:0 1px 4px rgba(58,125,201,.1);}
+.seq-row.dragging{opacity:.4;cursor:grabbing;}
+.seq-row.drop-target{border-color:var(--sky);background:var(--sky-pale);transform:translateX(4px);}
+.seq-row.core{background:linear-gradient(to right,#FAFAF7,#fff);}
+.seq-row.custom{background:linear-gradient(to right,#FEF7E8,#fff);border-color:var(--gold-mid);}
+.seq-handle{color:var(--soft);font-size:18px;line-height:1;flex:0 0 auto;cursor:grab;}
+.seq-handle:hover{color:var(--mid);}
+.seq-num{font-size:11px;font-weight:700;color:var(--sky-deep);background:var(--sky-pale);padding:3px 8px;border-radius:6px;flex:0 0 auto;}
+.seq-label{font-size:13.5px;font-weight:600;color:var(--dark);flex:1;}
+.seq-label .raw{font-size:10.5px;color:var(--soft);font-weight:500;display:block;margin-top:2px;}
+.seq-badge{font-size:9.5px;font-weight:700;padding:3px 7px;border-radius:5px;background:var(--cream);color:var(--soft);text-transform:uppercase;letter-spacing:.06em;flex:0 0 auto;}
+.seq-badge.custom{background:var(--gold-pale,#FEF7E8);color:var(--gold-deep,#8B6500);}
+.seq-actions{display:flex;gap:5px;flex:0 0 auto;}
+.seq-actions button{font-family:inherit;font-size:11.5px;padding:5px 9px;border-radius:5px;border:1px solid var(--border);background:#fff;color:var(--mid);cursor:pointer;line-height:1;}
+.seq-actions button:hover{background:var(--cream);}
+.seq-actions button.del{color:var(--red);border-color:var(--red);}
+.seq-actions button.del:hover{background:var(--red);color:#fff;}
+.seq-dirty{font-size:9.5px;font-weight:700;color:var(--gold-deep,#8B6500);background:var(--gold-pale,#FEF7E8);padding:2px 7px;border-radius:5px;flex:0 0 auto;}
+.ar-head{display:flex;align-items:center;gap:10px;}
+.ar-icon{font-size:18px;}
+.ar-title{font-size:13.5px;font-weight:700;color:var(--gold-deep,#8B6500);flex:1;}
+.ar-toggle{font-family:inherit;font-size:11.5px;font-weight:600;padding:5px 12px;border-radius:6px;border:1px solid var(--gold-mid);background:#fff;color:var(--gold-deep,#8B6500);cursor:pointer;}
+.ar-toggle:hover{background:var(--gold-pale);}
+.ar-list{max-height:0;overflow:hidden;transition:max-height .3s cubic-bezier(.4,0,.2,1);}
+.ar-list.open{max-height:600px;}
+.ar-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid rgba(200,135,10,.2);font-size:12.5px;}
+.ar-row:first-child{margin-top:8px;}
+.ar-name{font-weight:600;color:var(--mid);flex:1;}
+.ar-stage{font-size:11px;color:var(--soft);}
+.ar-btn{font-family:inherit;font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:6px;border:1px solid var(--red);background:#fff;color:var(--red);cursor:pointer;}
+.ar-btn:hover{background:var(--red);color:#fff;}
+
 /* row animations */
 .dr{transition:background .2s,box-shadow .2s,transform .14s !important;}
 .dr:hover{transform:translateX(2px);}
@@ -790,6 +873,22 @@ td{padding:13px 16px;vertical-align:top;}
 </aside>
 
 <div class="toast" id="toast" style="position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--dark);color:#fff;font-size:13px;font-weight:600;padding:11px 20px;border-radius:999px;box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;transition:all .25s;z-index:600"></div>
+<div id="save-pulse"><div class="dot"></div><span>Saving…</span></div>
+<div class="email-modal" id="email-modal" onclick="if(event.target===this)closeEmailDetail()">
+  <div class="email-modal-card" style="position:relative">
+    <div class="email-modal-head">
+      <button class="close-x" onclick="closeEmailDetail()">×</button>
+      <h3 id="em-subject">Loading…</h3>
+      <div class="meta" id="em-meta"></div>
+    </div>
+    <div class="email-modal-body" id="em-body"><div style="color:var(--soft);text-align:center;padding:40px">Fetching message…</div></div>
+    <div class="email-modal-attach" id="em-attach" style="display:none"><h4>Attachments</h4><div id="em-attach-list"></div></div>
+    <div class="email-modal-foot">
+      <a id="em-outlook" href="#" target="_blank" class="btn-sec bg-cream" style="text-decoration:none;padding:8px 14px">Open in Outlook ↗</a>
+      <button class="btn-primary bg-grn" onclick="closeEmailDetail()" style="padding:8px 18px">Close</button>
+    </div>
+  </div>
+</div>
 
 <script>
 /* ===================== Graph wiring ===================== */
@@ -801,11 +900,21 @@ const BOOKING_ID='careers1@solurahomecare.com'; /* the Bookings business identif
 const GR='https://graph.microsoft.com/v1.0',REDIRECT=location.href.split('?')[0].split('#')[0];
 let tok='',driveId='',itemId='',pipeline=[],nextRow=null;
 let workbookSessionId=null,workbookSessionExpiresAt=0; /* Excel workbook session: batched writes, dramatically faster */
-let collapsed={0:false,1:false,2:false,3:true,4:true};
-let F={stage:new Set(),band:new Set(),source:new Set(),cert:new Set(),expertise:new Set(),zip:''};
+let collapsed={0:false,1:true,2:true,3:true,4:true};
+let F={stage:new Set(),band:new Set(),source:new Set(),cert:new Set(),expertise:new Set(),schedule:new Set(),zip:''};
 let view='pipeline',calOffset=0,wsRow=null;
 let AVAIL={pattern:{},slots:[],offs:[]}; /* pattern={Mon:["Morning","Afternoon"]}; slots=specific ISO datetimes; offs=specific dates removed from pattern */
-let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{},scripts:{}}; /* persistent custom adds + edited templates + edited call scripts */
+let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{},scripts:{},config:{payFloor:14,payCeil:18,payCnaPremium:1.25,payQualityNudge:1,autoRejectDays:14,serviceZips:'44118,44106,44120,44121,44122,44104,44112',admins:[]},flow:{order:null,labels:{},custom:[]}}; /* flow.order = user-edited stage order; flow.labels = display overrides; flow.custom = user-added milestone stages (manual advance only) */
+
+/* Effective flow: user-edited order if present, else default FLOW. Custom milestone stages are inserted at saved positions. */
+function flowOrder(){
+  const o=(SETTINGS.flow&&SETTINGS.flow.order);
+  if(Array.isArray(o)&&o.length)return o.slice();
+  return FLOW.slice();
+}
+function stageLabel(s){return (SETTINGS.flow&&SETTINGS.flow.labels&&SETTINGS.flow.labels[s])||s;}
+function isCustomStage(s){return (SETTINGS.flow&&SETTINGS.flow.custom||[]).some(c=>c.key===s);}
+function customStageInfo(s){return (SETTINGS.flow&&SETTINGS.flow.custom||[]).find(c=>c.key===s);}
 let avPatternOpen=false;
 
 async function genPKCE(){const v=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -835,19 +944,46 @@ function setConn(on){
   document.getElementById('btn-add').style.display=on?'inline-block':'none';
   document.getElementById('btn-filter').style.display=on?'flex':'none';
   document.getElementById('hdr-refresh').style.display=on?'flex':'none';
+  /* Settings tab only visible to admins (after userEmail fetched) */
+  const setTab=document.getElementById('tab-set');if(setTab)setTab.style.display=(on&&isAdmin())?'inline-flex':'none';
   document.getElementById('hdr-search-wrap').style.display=on?'flex':'none';
   document.getElementById('tabsbar').style.display=on?'flex':'none';
 }
+/* hardcoded super-admin — always has settings access regardless of SETTINGS state.
+   Additional admins editable in Settings → Admin access. */
+const SUPER_ADMINS=['aron@solurahomecare.com'];
+let userEmail='',userName='';
+function isAdmin(){const e=(userEmail||'').toLowerCase();const extra=(SETTINGS.config&&SETTINGS.config.admins)||[];
+  return SUPER_ADMINS.indexOf(e)>-1||extra.map(x=>x.toLowerCase()).indexOf(e)>-1;}
+
 async function onSignedIn(){setConn(true);
-  try{const r=await gfetch(GR+'/shares/'+encodeShareUrl(FILE_URL)+'/driveItem?$select=id,parentReference,name');
+  try{
+    /* fetch user identity for admin gating */
+    try{const me=await gfetch(GR+'/me?$select=mail,userPrincipalName,displayName');
+      if(me.ok){const j=await me.json();userEmail=(j.mail||j.userPrincipalName||'').toLowerCase();userName=j.displayName||'';}}
+    catch(e){}
+    /* now that userEmail is known, refresh Settings tab visibility */
+    const setTab=document.getElementById('tab-set');if(setTab)setTab.style.display=isAdmin()?'inline-flex':'none';
+    const r=await gfetch(GR+'/shares/'+encodeShareUrl(FILE_URL)+'/driveItem?$select=id,parentReference,name');
     if(!r.ok)throw new Error('Could not open the file ('+r.status+')');
     const j=await r.json();itemId=j.id;driveId=j.parentReference.driveId;
-    await loadData();await loadAvailability();await loadSettings();}catch(e){toast(e.message);}}
+    await loadData();await loadAvailability();await loadSettings();
+    /* fire-and-forget email poll so signin isn't blocked by it */
+    pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));
+  }catch(e){toast(e.message);}
+}
+let _saveInFlight=0;
+function pulseOn(){_saveInFlight++;document.getElementById('save-pulse').classList.add('on');}
+function pulseOff(){_saveInFlight=Math.max(0,_saveInFlight-1);if(_saveInFlight===0)document.getElementById('save-pulse').classList.remove('on');}
 async function patchRange(addr,values){const base=GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET;
   const sid=await getWorkbookSession();
   const headers=sid?{'workbook-session-id':sid}:{};
-  const r=await gfetch(base+"/range(address='"+addr+"')",{method:'PATCH',body:JSON.stringify({values:values}),headers:headers});
-  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||r.status);}}
+  pulseOn();
+  try{
+    const r=await gfetch(base+"/range(address='"+addr+"')",{method:'PATCH',body:JSON.stringify({values:values}),headers:headers});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||r.status);}
+  }finally{pulseOff();}
+}
 
 /* Excel workbook session — batched writes are ~3-5x faster + reduce sheet locking.
    Sessions last ~5min idle; we refresh on use, kill on signout. */
@@ -925,7 +1061,13 @@ async function saveAvailability(){try{await patchRange('AK1',[[JSON.stringify(AV
 /* settings stored in cell AL1: custom expertise/cert/source adds + edited templates */
 async function loadSettings(){
   try{const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AL1')?$select=values");
-    if(!r.ok)return;const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{SETTINGS=Object.assign({customExpertise:[],customCerts:[],customSources:[],templates:{},scripts:{}},JSON.parse(v[0][0]));}catch(e){}}}catch(e){}
+    if(!r.ok)return;const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{
+      const saved=JSON.parse(v[0][0]);
+      SETTINGS=Object.assign({},SETTINGS,saved);
+      SETTINGS.config=Object.assign({},SETTINGS.config,saved.config||{});
+      SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},saved.flow||{});
+    }catch(e){}}}catch(e){}
+  applyCustomStagesToInfo();
 }
 async function saveSettings(){try{await patchRange('AL1',[[JSON.stringify(SETTINGS)]]);}catch(e){toast('Could not save settings');}}
 
@@ -1095,6 +1237,12 @@ function action(c){
     else if(st.tpCheck==='flag'){bucket='action';timing=dn('Background flagged','pr2');primary={kind:'checks',label:'Review check result',cls:'red'};}
     else{bucket='checks';timing=dn('BG check pending','psoft');primary={kind:'lock',label:'🔒 Awaiting check',cls:'lock'};}}
   else if(s==='Onboarding'){bucket='action';timing=dn('Send onboarding','pa');primary={kind:'email-tpl',tpl:'onboarding',advanceTo:'Hired',label:'Send onboarding',cls:'grn'};}
+  else if(isCustomStage(s)){
+    /* user-inserted milestone — manual advance only */
+    const eff=flowOrder();const idx=eff.indexOf(s);const next=idx>=0&&idx<eff.length-1?eff[idx+1]:'Hired';
+    bucket='action';timing=dn('Mark milestone complete','pnew');
+    primary={kind:'custom-advance',nextStage:next,label:'→ Mark complete & advance',cls:'sky'};
+  }
   else{bucket='action';timing=dn(info.next,'pnew');primary={kind:'open',label:'Open',cls:'sky'};}
   return{bucket,timing,info,primary,matchable};
 }
@@ -1108,13 +1256,20 @@ function matchFilters(c){
   if(F.source.size&&!F.source.has(c.source||'—'))return false;
   if(F.cert.size){const certs=(c.st.certs||[]).map(x=>x.toUpperCase());let ok=false;F.cert.forEach(x=>{if(certs.indexOf(x.toUpperCase())>-1)ok=true;});if(!ok)return false;}
   if(F.expertise.size){const px=(c.st.pills||[]).map(x=>x.toLowerCase());let ok=false;F.expertise.forEach(x=>{if(px.indexOf(x.toLowerCase())>-1)ok=true;});if(!ok)return false;}
+  if(F.schedule.size){
+    /* schedule filter keys are "Day-Shift" strings like "Mon-Morning". Match if candidate has that combo. */
+    const ds=c.st.dayShifts||{};
+    let ok=false;
+    F.schedule.forEach(key=>{const [day,shift]=key.split('-');if((ds[day]||[]).indexOf(shift)>-1)ok=true;});
+    if(!ok)return false;
+  }
   if(F.zip){if(!(c.st.zip||'').startsWith(F.zip))return false;}
   return true;
 }
-function filterCount(){let c=F.stage.size+F.band.size+F.source.size+F.cert.size+F.expertise.size;if(F.zip)c++;return c;}
+function filterCount(){let c=F.stage.size+F.band.size+F.source.size+F.cert.size+F.expertise.size+F.schedule.size;if(F.zip)c++;return c;}
 function toggleFilter(cat,val){F[cat].has(val)?F[cat].delete(val):F[cat].add(val);render();renderFilterPanel();}
 function setZip(v){F.zip=v.trim();render();updateFilterCount();}
-function clearFilters(){F={stage:new Set(),band:new Set(),source:new Set(),cert:new Set(),expertise:new Set(),zip:''};document.getElementById('search').value='';render();renderFilterPanel();}
+function clearFilters(){F={stage:new Set(),band:new Set(),source:new Set(),cert:new Set(),expertise:new Set(),schedule:new Set(),zip:''};document.getElementById('search').value='';render();renderFilterPanel();}
 function updateFilterCount(){const ct=filterCount();const el=document.getElementById('filterct');el.textContent=ct;el.style.display=ct?'inline-block':'none';document.getElementById('btn-filter').classList.toggle('on',ct>0);}
 function toggleFilterPanel(){const p=document.getElementById('filterpanel');p.classList.toggle('open');if(p.classList.contains('open'))renderFilterPanel();}
 function chip(cat,val,label){return '<button class="fchip'+(F[cat].has(val)?' on':'')+'" onclick="toggleFilter(\''+cat+'\',\''+val.replace(/'/g,"\\'")+'\')">'+esc(label||val)+'</button>';}
@@ -1125,6 +1280,10 @@ function renderFilterPanel(){
   const certs=Array.from(new Set([...CERT_COMMON,...CERT_MORE,...(SETTINGS.customCerts||[])])).sort();
   const stages=FLOW;
   const bands=['HIRE TRACK','CONDITIONAL','HOLD / DEVELOP','DECLINE','In progress'];
+  /* schedule: day×shift grid */
+  const schedDays=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const schedShifts=['Morning','Afternoon','Evening','Overnight'];
+  const schedChips=schedDays.map(d=>schedShifts.map(sh=>chip('schedule',d+'-'+sh,d+' '+sh.slice(0,3).toLowerCase())).join('')).join('<br style="line-height:0">');
   document.getElementById('filterpanel').innerHTML=`
     <div class="fpgrid">
       <div class="fpgroup"><label>Stage</label><div>${stages.map(s=>chip('stage',s)).join('')}</div></div>
@@ -1132,6 +1291,7 @@ function renderFilterPanel(){
       <div class="fpgroup"><label>Certificate</label><div>${certs.map(c=>chip('cert',c)).join('')}</div></div>
       <div class="fpgroup"><label>Source</label><div>${sources.map(s=>chip('source',s)).join('')}</div></div>
       <div class="fpgroup"><label>Expertise</label><div>${expertises.map(e=>chip('expertise',e)).join('')}</div></div>
+      <div class="fpgroup" style="grid-column:1/-1"><label>Schedule (any selected day+shift candidate is available for)</label><div style="line-height:1.9">${schedChips}</div></div>
       <div class="fpgroup"><label>ZIP starts with</label><input class="fpinput" placeholder="44118" value="${esc(F.zip)}" oninput="setZip(this.value)"></div>
     </div>
     <div class="fpfoot">
@@ -1142,7 +1302,9 @@ function renderFilterPanel(){
 }
 
 /* ===================== render ===================== */
-function setView(v){view=v;
+function setView(v){
+  if(v==='settings'&&!isAdmin()){toast('Settings is restricted to admins. Ask Aron to grant access.');return;}
+  view=v;
   document.getElementById('tab-pipe').classList.toggle('on',v==='pipeline');
   document.getElementById('tab-cal').classList.toggle('on',v==='calendar');
   document.getElementById('tab-set').classList.toggle('on',v==='settings');
@@ -1150,7 +1312,7 @@ function setView(v){view=v;
   document.getElementById('calendar-view').style.display=v==='calendar'?'block':'none';
   document.getElementById('settings-view').style.display=v==='settings'?'block':'none';
   document.getElementById('sync-bar').style.display=v==='pipeline'?'flex':'none';
-  if(v==='settings')renderSettings();
+  if(v==='settings'){seqInit();renderSettings();}
   render();
 }
 function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return renderCalendar();
@@ -1161,7 +1323,9 @@ function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return
   document.getElementById('kv2').textContent=B.checks.length;
   document.getElementById('kv3').textContent=B.hired.length;
   document.getElementById('kv4').textContent=all.length;
-  const ord=c=>FLOW.indexOf(c.stage);
+  /* auto-reject surfacer — banner above the buckets */
+  renderAutoRejectBanner();
+  const ord=c=>{const i=flowOrder().indexOf(c.stage);return i<0?999:i;};
   const byStage=(a,b)=>ord(a)-ord(b)||(a.name<b.name?-1:1);
   const byTime=(a,b)=>((a.st.booking||a.st.due||'~')<(b.st.booking||b.st.due||'~')?-1:1);
   fillBucket(0,B.action.sort(byStage));
@@ -1169,7 +1333,56 @@ function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return
   fillBucket(2,B.checks.sort(byStage));
   fillBucket(3,B.hired.sort((a,b)=>(a.name<b.name?-1:1)));
   fillBucket(4,all.sort((a,b)=>ord(b)-ord(a)||(a.name<b.name?-1:1)));
-  for(let i=0;i<5;i++)document.getElementById('sw-'+i).classList.toggle('collapsed',!!collapsed[i]);
+  /* Auto-collapse buckets that are empty (unless user explicitly expanded them this session) */
+  const counts=[B.action.length,B.awaiting.length,B.checks.length,B.hired.length,all.length];
+  for(let i=0;i<5;i++){
+    const wasManuallyOpened=collapsed[i]===false; /* explicit open */
+    const isEmpty=counts[i]===0;
+    const collapse=isEmpty?true:!!collapsed[i];
+    if(isEmpty&&!wasManuallyOpened){/* leave manual opens alone */}
+    document.getElementById('sw-'+i).classList.toggle('collapsed',collapse);
+  }
+}
+
+/* "stale" = stage hasn't moved in N days AND we're awaiting candidate response (not on us).
+   These are the candidates the auto-reject threshold is built for. */
+function computeIdleDays(c){
+  const lastTs=(c.st.log&&c.st.log.length)?c.st.log[c.st.log.length-1].t:'';
+  /* log timestamps are e.g. "Mar 15" — parse to current-year date */
+  if(!lastTs)return 0;
+  try{const d=new Date(lastTs+' '+new Date().getFullYear());if(isNaN(d.getTime()))return 0;
+    const diff=Math.floor((Date.now()-d.getTime())/86400000);
+    return diff<0?0:diff;}catch(e){return 0;}
+}
+function findStaleCandidates(){
+  const threshold=(SETTINGS.config&&SETTINGS.config.autoRejectDays)||14;
+  const awaitingStages=['Screen invite','Ask references','Interview invite'];
+  return pipeline.filter(c=>{
+    if(!awaitingStages.includes(c.stage))return false;
+    if((c.st.tpCheck==='clear'||c.st.tpCheck==='pending'))return false; /* checks are in flight, don't auto-reject */
+    return computeIdleDays(c)>=threshold;
+  });
+}
+function renderAutoRejectBanner(){
+  let banner=document.getElementById('autoreject-banner');
+  if(!banner){banner=document.createElement('div');banner.id='autoreject-banner';banner.style.cssText='margin:8px 0 14px 0';
+    const pipe=document.getElementById('pipeline-view');if(pipe)pipe.insertBefore(banner,pipe.firstChild);}
+  const stale=findStaleCandidates();
+  if(!stale.length){banner.innerHTML='';return;}
+  const threshold=(SETTINGS.config&&SETTINGS.config.autoRejectDays)||14;
+  const items=stale.slice(0,10).map(c=>{
+    const days=computeIdleDays(c);
+    return `<div class="ar-row"><span class="ar-name">${esc(c.name)}</span><span class="ar-stage">${esc(c.stage)} · idle ${days}d</span><button class="ar-btn" onclick="autoRejectOne(${c.excelRow})">Reject + email</button></div>`;
+  }).join('');
+  const more=stale.length>10?`<div style="font-size:11px;color:var(--soft);margin-top:6px">+ ${stale.length-10} more — adjust threshold in Settings</div>`:'';
+  banner.innerHTML=`<div class="ar-box">
+    <div class="ar-head"><span class="ar-icon">⏱</span><span class="ar-title">${stale.length} candidate${stale.length===1?'':'s'} idle ${threshold}+ days</span><button class="ar-toggle" onclick="document.getElementById('ar-list').classList.toggle('open')">review ▾</button></div>
+    <div class="ar-list" id="ar-list">${items}${more}</div>
+  </div>`;
+}
+async function autoRejectOne(row){
+  if(!confirm('Send rejection email and close this candidate?'))return;
+  loadW(row);doEmail('reject','Declined');
 }
 function fillBucket(i,list){
   document.getElementById('c'+i).textContent=list.length;
@@ -1189,7 +1402,7 @@ function rowHtml(c){
   const idline='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">'+band+certs+dl+pills+'</div>';
   const sub='<div class="dm-tag" style="margin-top:5px">'+(c.source?esc(c.source)+' · ':'')+'Q <span>'+(sc.Q==null?'—':sc.Q)+'</span> · R <span>'+(sc.R==null?'—':sc.R)+'</span></div>';
   const sci=a.info.color;
-  const stageBadge='<span class="sbadge" style="background:'+sci[0]+';color:'+sci[1]+';border-color:'+sci[1]+'33">'+esc(c.stage)+'</span>';
+  const stageBadge='<span class="sbadge" style="background:'+sci[0]+';color:'+sci[1]+';border-color:'+sci[1]+'33">'+esc(stageLabel(c.stage))+'</span>';
   let stageCell=stageBadge;
   if(c.stage==='Hired')stageCell+='<div class="matchbadge '+(a.matchable?'match-ok':'match-no')+'">'+(a.matchable?'✓ Matchable':'⚑ Not matchable')+'</div>';
   const timing='<span class="pill '+a.timing.pill+'">'+esc(a.timing.txt)+'</span>'+(a.timing.date?'<div style="font-size:11px;color:var(--soft);margin-top:3px">'+esc(a.timing.date)+'</div>':'');
@@ -1212,12 +1425,26 @@ function rowHtml(c){
 function doPrimary(r){const c=pipeline.find(x=>x.excelRow===r);if(!c)return;const a=action(c),p=a.primary;loadW(r);
   if(p.kind==='email-info')return doEmailMissing();
   if(p.kind==='email-tpl')return doEmail(p.tpl,p.advanceTo);
-  if(p.kind==='questions')return openWorkspace(r,'questions');
-  if(p.kind==='verify')return openWorkspace(r,'verify');
-  if(p.kind==='refs')return openWorkspace(r,'refs');
-  if(p.kind==='checks')return openWorkspace(r,'checks');
+  if(p.kind==='questions'){
+    /* open the candidate workspace, then enter focused-hub mode for the questions block */
+    openWorkspace(r);
+    W.focusedHub='questions';renderWorkspace();
+    /* auto-initiate the call when it's actually time to call */
+    if(a.bucket==='action'){
+      if(p.stage==='Interview'&&c.st.meetingUrl){
+        setTimeout(()=>openMeetingPopup(c.st.meetingUrl),350);
+      }else if(p.stage==='Phone Screen'&&c.phone){
+        setTimeout(()=>{const el=document.createElement('a');el.href='tel:'+c.phone.replace(/[^0-9+]/g,'');el.click();},350);
+      }
+    }
+    return;
+  }
+  if(p.kind==='verify'){openWorkspace(r);W.focusedHub='verify';renderWorkspace();return;}
+  if(p.kind==='refs'){openWorkspace(r);W.focusedHub='refs';renderWorkspace();return;}
+  if(p.kind==='checks'){openWorkspace(r);W.focusedHub='checks';renderWorkspace();return;}
   if(p.kind==='checkin')return openCheckin();
   if(p.kind==='decline')return doEmail('reject','Declined');
+  if(p.kind==='custom-advance'){openWorkspace(r);return setTimeout(()=>{if(confirm('Mark "'+stageLabel(W.stage)+'" complete and advance to '+stageLabel(p.nextStage)+'?')){advanceWS(p.nextStage,'Custom milestone "'+stageLabel(W.stage)+'" complete');}},100);}
   return openWorkspace(r);
 }
 function quickDecline(r){if(!confirm('Decline this candidate? They\'ll get the rejection email.'))return;loadW(r);doEmail('reject','Declined');}
@@ -1234,6 +1461,8 @@ function applyAnswers(){const by={};QBANK.forEach(it=>{const v=W.answers[it.id];
   Object.keys(by).forEach(d=>{const a=by[d],avg=Math.round(a.reduce((x,y)=>x+y)/a.length);if(['ten','exp','prx','ava'].includes(d))W.r[d]=avg;else W.q[d]=avg;});}
 function scoreW(){const Q=progressive(W.q,QW),R=progressive(W.r,RW),gs=gateState(W.gates);return{Q,R,gs,dec:decide(Q,R,W.q,W.r,gs),missingGates:missingGateLabels(W.gates)};}
 function logW(x){W.st.log=W.st.log||[];W.st.log.push({t:stamp(),x:x});}
+function setFocusedHub(kind){if(!W)return;W.focusedHub=kind;renderWorkspace();}
+function clearFocusedHub(){if(!W)return;W.focusedHub=null;renderWorkspace();}
 async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
   try{
     await patchRange('G'+row+':L'+row,[[W.stage,bl(W.gates.wa),bl(W.gates.cr),bl(W.gates.bg),bl(W.gates.tr),bl(W.gates.av)]]);
@@ -1351,14 +1580,36 @@ function openWorkspace(r,jump){wsRow=r;loadW(r);renderWorkspace(jump);
   if(jump){setTimeout(()=>{const el=document.getElementById('ws-'+jump);if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},250);}
 }
 function closeWorkspace(){document.getElementById('wsoverlay').classList.remove('open');document.getElementById('workspace').classList.remove('open');wsRow=null;}
+
+function renderFocusedHub(){
+  /* render just the focused hub + a tall header with back arrow — single-purpose task view */
+  const kind=W.focusedHub;
+  const c=pipeline.find(x=>x.excelRow===W.row);const a=action(c);
+  let block='';let title='';
+  if(kind==='questions'){
+    const stage=(W.stage==='Screen booked')?'Phone Screen':'Interview';
+    const next=(stage==='Phone Screen')?'Ask references':'Offer';
+    block=questionsBlock(stage,next);
+    title=stage==='Interview'?'Interview':'Phone screen';
+  }else if(kind==='verify'){block=verifyBlock();title='Verify past employers';}
+  else if(kind==='refs'){block=refsBlock();title='References';}
+  else if(kind==='checks'){block=checksBlock();title='Background & certificates';}
+  document.getElementById('ws-name').innerHTML='<button onclick="clearFocusedHub()" style="background:none;border:none;cursor:pointer;font-size:24px;color:var(--sky-deep);margin-right:8px;padding:0 6px;font-weight:700;vertical-align:-2px" title="Back to candidate overview">‹</button>'+esc(title);
+  const info=STAGEINFO[W.stage]||STAGEINFO['Applied'];
+  document.getElementById('ws-sub').innerHTML='<span style="color:var(--soft);font-size:13px">for </span><b>'+esc(W.name)+'</b> <span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-left:8px">'+esc(stageLabel(W.stage))+'</span>';
+  document.getElementById('ws-body').innerHTML=`<div style="max-width:760px;margin:0 auto">${block}</div>`;
+  document.getElementById('ws-action-bar').innerHTML='<button class="btn-sec bg-cream" onclick="clearFocusedHub()" style="padding:10px 18px">← Back to overview</button>';
+}
 function renderWorkspace(){
   if(!W)return;
   applyAnswers();
+  /* focused-hub mode — overrides normal render: shows only the requested hub + back arrow */
+  if(W.focusedHub){return renderFocusedHub();}
   const sc=scoreW(),col=BANDCSS[sc.dec.cls],info=STAGEINFO[W.stage]||STAGEINFO['Applied'];
   const c=pipeline.find(x=>x.excelRow===W.row);const a=action(c);
   document.getElementById('ws-name').textContent=W.name;
   document.getElementById('ws-sub').innerHTML=
-    '<span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-right:8px">'+esc(W.stage)+'</span>'
+    '<span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-right:8px">'+esc(stageLabel(W.stage))+'</span>'
     +'<span class="bandpill" style="background:'+col[0]+';color:'+col[1]+';margin-right:10px">'+sc.dec.band+'</span>'
     +(W.phone?'<a href="tel:'+telify(W.phone)+'">📞 '+esc(W.phone)+'</a>  ':'')
     +(W.email?'<a href="mailto:'+esc(W.email)+'">✉ '+esc(W.email)+'</a>':'');
@@ -1372,7 +1623,8 @@ function renderWorkspace(){
     <div class="label">${esc(a.info.next||'Open')}</div>
     <div class="why">${esc(why)}</div>
     ${primBtn}</div>`;
-  const stepper=FLOW.map(s=>{const cur=s===W.stage,done=FLOW.indexOf(s)<FLOW.indexOf(W.stage);return `<span class="step ${cur?'cur':done?'done':''}">${FLOW_SHORT[s]||s}</span>`;}).join('');
+  const eff=flowOrder();
+  const stepper=eff.map(s=>{const cur=s===W.stage,done=eff.indexOf(s)<eff.indexOf(W.stage);const lbl=FLOW_SHORT[s]||stageLabel(s);return `<span class="step ${cur?'cur':done?'done':''}">${esc(lbl)}</span>`;}).join('');
   const pills=(W.st.pills||[]).map(p=>'<span class="xpill" style="margin:0 4px 4px 0">'+esc(p)+'</span>').join('');
   const certList=(W.st.certs||[]).map(x=>'<span class="cbadge" style="margin:0 4px 4px 0">'+esc(x)+'</span>').join('');
   const dl=W.st.licenseNum||W.st.license?(W.st.licenseState||'')+' '+(W.st.licenseNum||W.st.license||''):'—';
@@ -1410,13 +1662,29 @@ function renderWorkspace(){
     ${ci.action?'<div><b>Action:</b> '+esc(ci.action)+'</div>':''}
     </div>`).join('');
   const logs=(W.st.log||[]).slice().reverse().map(l=>`<div class="logentry"><span class="when">${esc(l.t)}</span>${esc(l.x)}</div>`).join('')||'<div style="font-size:12px;color:var(--soft)">No activity yet.</div>';
+  /* emails — pulled from inbox on refresh, matched by sender == candidate's email */
+  const emailList=(W.st.emails||[]);
+  let emailsCard='';
+  if(emailList.length){
+    const items=emailList.slice(0,6).map(e=>{
+      const dt=e.received?new Date(e.received):null;
+      const when=dt?dt.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+      const clip=e.hasAttachments?'<span style="color:var(--gold);margin-right:4px" title="Has attachments">📎</span>':'';
+      return `<div class="email-card" onclick="openEmailDetail('${esc(e.id)}')">
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:3px"><span style="font-size:12.5px;font-weight:600;color:var(--mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${clip}${esc(e.subject||'(no subject)')}</span><span style="font-size:11px;color:var(--sky-deep);font-weight:600;flex:0 0 auto">open ›</span></div>
+        <div style="font-size:11px;color:var(--soft);margin-bottom:4px">${esc(when)}</div>
+        <div style="font-size:12px;color:var(--mid);line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(e.preview||'')}</div>
+      </div>`;
+    }).join('');
+    emailsCard=`<div class="wscard"><h3>Emails from candidate <span style="font-size:11px;color:var(--soft);font-weight:600">${emailList.length} pulled</span></h3>${items}${emailList.length>6?'<div style="font-size:11px;color:var(--soft);margin-top:8px">'+(emailList.length-6)+' more not shown — open in Outlook to see all.</div>':''}</div>`;
+  }
   const activity=`<div class="wscard"><h3>Activity</h3>${checkinList}${logs}
     <textarea id="ws-note" placeholder="Add a note…" style="width:100%;margin-top:12px;padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;min-height:54px;outline:none"></textarea>
     <button class="btn-sec bg-cream" style="margin-top:7px;width:auto;padding:7px 13px" onclick="addNote()">Add note</button></div>`;
   document.getElementById('ws-body').innerHTML=`
     ${thisStep}
     <div class="wsgrid">
-      <div>${gatesCard}${work}${docs}${activity}</div>
+      <div>${gatesCard}${work}${docs}${emailsCard}${activity}</div>
       <div>${identity}${scoreCard}</div>
     </div>`;
   /* sticky footer with primary action — always visible */
@@ -1464,11 +1732,19 @@ function questionsBlock(stage,nextStage){
   const defaultScript=stage==='Interview'?['Welcome & ease in','Walk the role honestly — hours, pay, personal care','Ask each question; note what you hear','Invite their questions','Explain next steps & timeline']
     :['Confirm it is a good time','Confirm interest, availability, pay','Run the questions','Tell them references will be needed','Set up the booking link'];
   const script=(SETTINGS.scripts&&SETTINGS.scripts[scriptKey])||defaultScript;
-  const meetingUrl=W.st.meetingUrl||'';
-  const meetingBtn=meetingUrl?meetButton(meetingUrl,stage==='Interview'?'Open interview meeting':'Open call'):'';
+  /* prominent Call button — meeting popup for interview, tel: link for phone screen */
+  let callBtn='';
+  if(stage==='Interview'&&W.st.meetingUrl){
+    callBtn=meetButton(W.st.meetingUrl,'▶ Open Teams meeting');
+  }else if(stage==='Phone Screen'&&W.phone){
+    const num=W.phone.replace(/[^0-9+]/g,'');
+    callBtn='<a class="meet-btn" href="tel:'+esc(num)+'" style="text-decoration:none;background:linear-gradient(135deg,#3D7A34,#2C5825);box-shadow:0 2px 8px rgba(61,122,52,.3)"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.568 17.568 0 0 0 4.168 6.608 17.569 17.569 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/></svg>Call '+esc(W.phone)+'</a>';
+  }else if(stage==='Interview'){
+    callBtn='<div style="font-size:11.5px;color:var(--soft);padding:8px 12px;background:#FAFAF7;border-radius:8px;border:1px dashed var(--border)">⚠ No meeting URL captured yet — should arrive automatically when Cal.com fires the booking webhook.</div>';
+  }
   const body=qs.map(it=>`<div class="qrow"><div class="qq">${esc(it.q)}</div><div class="qopts">${it.o.map(o=>`<button class="${W.answers[it.id]===o[1]?'on':''}" onclick="qans('${it.id}',${o[1]},'${stage}','${nextStage}')">${esc(o[0])}</button>`).join('')}</div></div>`).join('');
   return `<div class="wscard" id="ws-questions"><h3>${stage==='Interview'?'Structured interview':'Phone screen'} <span style="font-size:11px;color:var(--soft);font-weight:600">${ans}/${qs.length} answered</span></h3>
-    ${meetingBtn?'<div style="margin-bottom:12px">'+meetingBtn+'</div>':''}
+    ${callBtn?'<div style="margin-bottom:14px">'+callBtn+'</div>':''}
     <div style="font-size:12px;color:var(--soft);margin-bottom:8px">Pick what you hear — the score updates itself.</div>
     <details style="margin-bottom:10px" open><summary style="font-size:12px;font-weight:600;color:var(--sky-deep);cursor:pointer">📋 Call structure (editable in Settings)</summary><ol style="padding-left:20px;font-size:12.5px;line-height:1.8;color:var(--mid);margin-top:8px">${script.map(l=>'<li>'+esc(l)+'</li>').join('')}</ol></details>
     ${body}
@@ -1519,7 +1795,200 @@ function checksBlock(){
     <div style="font-size:11px;color:var(--soft);margin-top:8px">When the background-check API webhook fires, the 3rd-party status flips automatically. Required check stays pending → candidate can't be patient-matched until it clears, but the offer can still go out.</div>
   </div>`;
 }
-async function advanceWS(toStage,msg){W.stage=toStage;if(msg)logW(msg);if(toStage==='Screen invite'||toStage==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();await saveW(true);toast('→ '+toStage);renderWorkspace();}
+async function advanceWS(toStage,msg){
+  W.stage=toStage;if(msg)logW(msg);
+  if(toStage==='Screen invite'||toStage==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();
+  await saveW(true);
+  toast('→ '+toStage);
+  /* Hired → auto-export activity log to the candidate's onboarding folder */
+  if(toStage==='Hired'){uploadHiredActivityLog(W).catch(e=>console.warn('Activity log upload:',e.message));}
+  renderWorkspace();
+}
+/* ===================== email detail view + attachment upload ===================== */
+let _emailCache={}; /* messageId -> full message object (cached during session) */
+async function openEmailDetail(messageId){
+  document.getElementById('em-subject').textContent='Loading…';
+  document.getElementById('em-meta').textContent='';
+  document.getElementById('em-body').innerHTML='<div style="color:var(--soft);text-align:center;padding:40px">Fetching message…</div>';
+  document.getElementById('em-attach').style.display='none';
+  document.getElementById('email-modal').classList.add('open');
+  try{
+    let msg=_emailCache[messageId];
+    if(!msg){
+      const r=await gfetch(GR+'/me/messages/'+messageId+'?$expand=attachments&$select=id,subject,from,toRecipients,receivedDateTime,body,bodyPreview,webLink,hasAttachments');
+      if(!r.ok)throw new Error('Could not fetch ('+r.status+')');
+      msg=await r.json();_emailCache[messageId]=msg;
+    }
+    document.getElementById('em-subject').textContent=msg.subject||'(no subject)';
+    const from=((msg.from||{}).emailAddress||{});
+    const when=msg.receivedDateTime?new Date(msg.receivedDateTime).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+    document.getElementById('em-meta').innerHTML='From: <b>'+esc(from.name||from.address||'')+'</b> &lt;'+esc(from.address||'')+'&gt;<br>'+esc(when);
+    /* render body — Graph returns HTML or text. We strip <script> for safety. */
+    const body=msg.body||{};
+    let content=body.content||msg.bodyPreview||'';
+    if(body.contentType==='html'){
+      /* basic sanitize — strip script tags and inline event handlers */
+      content=content.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/\son\w+\s*=\s*"[^"]*"/gi,'').replace(/\son\w+\s*=\s*'[^']*'/gi,'');
+      document.getElementById('em-body').innerHTML=content;
+    }else{
+      document.getElementById('em-body').textContent=content;
+    }
+    document.getElementById('em-outlook').href=msg.webLink||'#';
+    /* attachments */
+    const atts=(msg.attachments||[]).filter(a=>a['@odata.type']==='#microsoft.graph.fileAttachment'||a.contentType);
+    if(atts.length){
+      document.getElementById('em-attach').style.display='block';
+      const candidateName=W?W.name:'';
+      document.getElementById('em-attach-list').innerHTML=atts.map((a,i)=>{
+        const kb=a.size?Math.round(a.size/1024):0;
+        const icon=(a.contentType||'').indexOf('pdf')>-1?'📄':(a.contentType||'').indexOf('image')>-1?'🖼':(a.contentType||'').indexOf('word')>-1?'📝':'📎';
+        return `<div class="attach-row">
+          <div class="ai">${icon}</div>
+          <div class="an">${esc(a.name||'attachment')}</div>
+          <div class="as">${kb} KB</div>
+          <button onclick="saveAttachment('${esc(messageId)}',${i})" id="att-btn-${i}">Save to folder</button>
+        </div>`;
+      }).join('');
+    }
+  }catch(e){
+    document.getElementById('em-body').innerHTML='<div style="color:var(--red);text-align:center;padding:30px">Could not load message: '+esc(e.message)+'</div>';
+  }
+}
+function closeEmailDetail(){document.getElementById('email-modal').classList.remove('open');}
+
+async function saveAttachment(messageId,attIdx){
+  const msg=_emailCache[messageId];if(!msg)return;
+  const atts=(msg.attachments||[]);const att=atts[attIdx];if(!att||!att.contentBytes){toast('No content available for this attachment');return;}
+  const btn=document.getElementById('att-btn-'+attIdx);btn.disabled=true;btn.textContent='Saving…';
+  try{
+    const candidateName=W?W.name:'';if(!candidateName){toast('No candidate context');return;}
+    const folder='caregivers/'+safeFileName(candidateName)+'/emails';
+    await ensureFolderPath(folder);
+    /* decode base64 → bytes → upload */
+    const bin=atob(att.contentBytes);const bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+    const filename=att.name||('attachment-'+today());
+    const path=folder+'/'+filename;
+    const enc=path.split('/').map(encodeURIComponent).join('/');
+    const r=await fetch(GR+'/drives/'+driveId+'/root:/'+enc+':/content',{
+      method:'PUT',
+      headers:{Authorization:'Bearer '+tok,'Content-Type':att.contentType||'application/octet-stream'},
+      body:bytes
+    });
+    if(!r.ok)throw new Error(r.status);
+    btn.textContent='✓ Saved';btn.style.background='var(--grn-pale,#EBF5EA)';btn.style.color='var(--grn)';btn.style.borderColor='var(--grn-mid,#8FCC87)';
+    /* note in candidate log */
+    if(W){logW('📎 Saved attachment "'+filename+'" from email');await saveW(true);}
+    toast('✓ Attachment saved to candidate folder');
+  }catch(e){
+    btn.disabled=false;btn.textContent='Save to folder';
+    toast('Save failed: '+e.message);
+  }
+}
+
+/* ===================== inbox polling — Option 1 (pull on refresh) ===================== */
+/* Reads recent messages from the user's inbox via Graph, matches sender email to candidates,
+   and appends to each candidate's st.emails array. Only writes back rows that changed.
+   Uses Mail.ReadWrite scope (already granted). */
+async function pollInboxForCandidateEmails(){
+  if(!pipeline.length)return;
+  /* index candidates by lowercased email for O(1) match */
+  const byEmail={};
+  pipeline.forEach(c=>{if(c.email)byEmail[c.email.toLowerCase()]=c;});
+  if(!Object.keys(byEmail).length)return;
+  try{
+    /* pull last 100 messages from primary inbox; filter to last 30 days */
+    const cutoff=new Date(Date.now()-30*86400000).toISOString();
+    const url=GR+'/me/messages?$top=100&$orderby=receivedDateTime desc&$select=id,from,subject,receivedDateTime,bodyPreview,webLink,hasAttachments&$filter=receivedDateTime ge '+cutoff;
+    const r=await gfetch(url);
+    if(!r.ok)return;
+    const msgs=((await r.json()).value)||[];
+    const changedRows=new Map(); /* excelRow -> candidate (to batch the patch) */
+    for(const m of msgs){
+      const from=((m.from||{}).emailAddress||{}).address||'';
+      if(!from)continue;
+      const c=byEmail[from.toLowerCase()];
+      if(!c)continue;
+      c.st.emails=c.st.emails||[];
+      /* dedupe by message id */
+      if(c.st.emails.some(e=>e.id===m.id))continue;
+      c.st.emails.unshift({
+        id:m.id,
+        subject:(m.subject||'').slice(0,140),
+        preview:(m.bodyPreview||'').slice(0,200),
+        from:from,
+        received:m.receivedDateTime,
+        webLink:m.webLink||'',
+        hasAttachments:!!m.hasAttachments
+      });
+      /* cap to last 20 per candidate */
+      if(c.st.emails.length>20)c.st.emails=c.st.emails.slice(0,20);
+      changedRows.set(c.excelRow,c);
+    }
+    /* batch write only changed candidates */
+    let written=0;
+    for(const [row,c] of changedRows){
+      try{await patchRange('AJ'+row,[[JSON.stringify(c.st)]]);written++;}catch(e){}
+    }
+    if(written){toast('📬 '+written+' candidate'+(written===1?'':'s')+' got new email');render();}
+  }catch(e){console.warn('Inbox poll error:',e.message);}
+}
+
+async function uploadHiredActivityLog(c){  const sc=scoreW();
+  const lines=[];
+  lines.push('# Candidate Activity Log — '+c.name);
+  lines.push('');
+  lines.push('Generated: '+new Date().toLocaleString());
+  lines.push('');
+  lines.push('## Identity');
+  lines.push('- **Name:** '+c.name);
+  lines.push('- **Phone:** '+(c.phone||'—'));
+  lines.push('- **Email:** '+(c.email||'—'));
+  lines.push('- **Source:** '+(c.source||'—'));
+  lines.push('- **Address:** '+(c.st.address||'—'));
+  lines.push('');
+  lines.push('## Scores at Hire');
+  lines.push('- **Quality:** '+sc.qScore+'/100');
+  lines.push('- **Retention:** '+sc.rScore+'/100');
+  lines.push('- **Band:** '+sc.dec.band);
+  lines.push('');
+  lines.push('## Credentials & Expertise');
+  lines.push('- **Certificates:** '+((c.st.certs||[]).join(', ')||'—'));
+  lines.push('- **Expertise:** '+((c.st.pills||[]).join(', ')||'—'));
+  lines.push('- **Driver\'s license:** '+(c.st.license||'—'));
+  lines.push('');
+  lines.push('## Background checks');
+  lines.push('- **Required state check:** '+(c.st.reqCheck||'—'));
+  lines.push('- **3rd-party check:** '+(c.st.tpCheck||'—'));
+  lines.push('');
+  lines.push('## Employers verified');
+  (c.st.employers||[]).forEach(e=>lines.push('- '+(e.name||'(blank)')+' — '+(e.v||'—')));
+  if(!(c.st.employers||[]).length)lines.push('- (none recorded)');
+  lines.push('');
+  lines.push('## References');
+  (c.st.refs||[]).forEach(r=>lines.push('- '+(r.name||'(blank)')+' — '+(r.phone||'')+' — '+(r.notes||'')));
+  if(!(c.st.refs||[]).length)lines.push('- (none recorded)');
+  lines.push('');
+  lines.push('## Full activity timeline');
+  (c.st.log||[]).forEach(l=>lines.push('- ['+(l.t||'')+'] '+(l.x||'')));
+  lines.push('');
+  const content=lines.join('\n');
+  /* upload to the candidate's onboarding folder */
+  const folder='caregivers/'+safeFileName(c.name)+'/onboarding';
+  await ensureFolderPath(folder);
+  const path=folder+'/activity-log-'+today()+'.md';
+  const enc=path.split('/').map(encodeURIComponent).join('/');
+  await gfetch(GR+'/drives/'+driveId+'/root:/'+enc+':/content',{method:'PUT',headers:{'Content-Type':'text/markdown'},body:content});
+  toast('✓ Activity log uploaded to SharePoint');
+}
+function safeFileName(s){return String(s).replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,' ').trim();}
+async function ensureFolderPath(p){const segs=p.split('/');let cur='';
+  for(const seg of segs){
+    const parent=cur?"root:/"+cur.split('/').map(encodeURIComponent).join('/')+":":"root";
+    try{await gfetch(GR+'/drives/'+driveId+'/'+parent+'/children',{method:'POST',body:JSON.stringify({name:seg,folder:{},'@microsoft.graph.conflictBehavior':'replace'})});}catch(e){}
+    cur=cur?cur+'/'+seg:seg;
+  }
+}
 
 /* ===================== documents ===================== */
 function safeName(s){return String(s).replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,' ').trim();}
@@ -1597,7 +2066,7 @@ function renderCalendar(){
     ${avPatternOpen?patternEditor():''}
     ${[0,1,2,3,4,5,6].map(off=>renderCalDay(base,off)).join('')}`;
 }
-async function manualRefresh(){const btn=document.getElementById('hdr-refresh');if(btn)btn.classList.add('spinning');toast('Refreshing…');try{await loadData();if(view==='calendar')renderCalendar();}finally{if(btn)setTimeout(()=>btn.classList.remove('spinning'),300);}}
+async function manualRefresh(){const btn=document.getElementById('hdr-refresh');if(btn)btn.classList.add('spinning');toast('Refreshing…');try{await loadData();pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();}finally{if(btn)setTimeout(()=>btn.classList.remove('spinning'),300);}}
 async function manualBookingsSync(){return manualRefresh();} /* legacy name */
 function openAddFromBooking(name,email,startISO){
   openAdd();
@@ -1661,7 +2130,53 @@ function renderSettings(){
   </div>`;
   document.getElementById('settings-view').innerHTML=`
     <div style="max-width:780px;margin:0 auto;padding:8px 4px">
-      <h2 style="font-family:'Cormorant Garamond',serif;font-size:26px;color:var(--sky-deep);font-weight:600;margin:8px 0 14px">Settings</h2>
+      <h2 style="font-family:'Cormorant Garamond',serif;font-size:26px;color:var(--sky-deep);font-weight:600;margin:8px 0 14px">Settings <span style="font-size:11px;color:var(--soft);font-weight:600;margin-left:8px">signed in as ${esc(userEmail||'—')}</span></h2>
+      <div style="background:#FEF7E8;border:1px dashed var(--gold-mid);padding:11px 16px;border-radius:10px;margin-bottom:18px;font-size:11.5px;color:var(--mid);line-height:1.55">
+        <b style="color:var(--gold)">⚐ Still coming:</b> drag-and-drop sequence editor (split / combine / reorder stages), per-row dirty-pill UX matching the lead-dashboard template editor, three-pass code-quality review.
+      </div>
+
+      <h3 style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep);font-weight:600;margin:18px 0 10px">Admin access</h3>
+      <div class="wscard" style="margin-bottom:14px">
+        <h4>Who can access Settings</h4>
+        <div style="font-size:11.5px;color:var(--soft);margin-bottom:10px"><b>${esc(SUPER_ADMINS.join(', '))}</b> is always admin. Add other Microsoft accounts below to grant them Settings access too.</div>
+        <div style="margin-bottom:10px">${((SETTINGS.config.admins||[]).length?SETTINGS.config.admins.map(e=>`<span class="added-chip" style="margin:0 6px 6px 0">${esc(e)}<button onclick="removeAdmin('${esc(e).replace(/'/g,"\\'")}')">✕</button></span>`).join(''):'<span style="font-size:12px;color:var(--soft);font-style:italic">No additional admins yet</span>')}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <input type="email" id="cfg_newAdmin" placeholder="someone@solurahomecare.com" style="flex:1;min-width:200px;padding:7px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px">
+          <button class="btn-primary bg-grn" onclick="addAdmin()" style="flex:0 0 auto;padding:7px 14px">Add admin</button>
+        </div>
+      </div>
+
+      <h3 style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep);font-weight:600;margin:18px 0 10px">Hiring config</h3>
+      <div class="wscard" style="margin-bottom:14px">
+        <h4>Pay range</h4>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <label style="font-size:11.5px;font-weight:600;color:var(--mid)">Floor ($/hr)<input type="number" step="0.25" id="cfg_payFloor" value="${SETTINGS.config.payFloor}" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:600;color:var(--mid)">Ceiling ($/hr)<input type="number" step="0.25" id="cfg_payCeil" value="${SETTINGS.config.payCeil}" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:600;color:var(--mid)">CNA/STNA premium ($/hr)<input type="number" step="0.25" id="cfg_payCnaPremium" value="${SETTINGS.config.payCnaPremium}" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:600;color:var(--mid)">Top-tier nudge ($/hr)<input type="number" step="0.25" id="cfg_payQualityNudge" value="${SETTINGS.config.payQualityNudge}" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;margin-top:4px"></label>
+        </div>
+        <h4 style="margin-top:14px">Service area ZIPs</h4>
+        <div style="font-size:11.5px;color:var(--soft);margin-bottom:6px">Comma-separated. ZIPs starting with these prefixes score full proximity points.</div>
+        <input type="text" id="cfg_serviceZips" value="${esc(SETTINGS.config.serviceZips)}" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;margin-bottom:14px">
+        <h4>Auto-reject after silence</h4>
+        <div style="font-size:11.5px;color:var(--soft);margin-bottom:6px">If a candidate hasn't responded after this many days, the action engine surfaces them for one-click rejection at the top of Pipeline. Industry benchmark: 14 days.</div>
+        <input type="number" min="3" max="60" id="cfg_autoRejectDays" value="${SETTINGS.config.autoRejectDays}" style="width:140px;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;margin-bottom:14px"> days
+        <div class="brow" style="margin-top:10px"><button class="btn-primary bg-grn" onclick="saveConfig()" style="flex:0 0 auto;padding:8px 16px">Save hiring config</button></div>
+      </div>
+
+      <h3 style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep);font-weight:600;margin:18px 0 10px">Workflow sequence</h3>
+      <div class="wscard" style="margin-bottom:14px">
+        <div style="font-size:11.5px;color:var(--soft);margin-bottom:14px;line-height:1.55">Drag stages by the <b>≡</b> handle to reorder. Click ✎ to rename the display label (the internal key stays stable, so transitions keep working). "+ Insert milestone" adds a manual checkpoint between two stages — you advance through it by hand from the candidate workspace.</div>
+        <div id="seq-list">${renderSeqList()}</div>
+        <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-sec bg-cream" onclick="seqInsertCustom()" style="flex:0 0 auto;padding:8px 14px">+ Insert milestone</button>
+          <button class="btn-sec bg-cream" onclick="seqResetDefault()" style="flex:0 0 auto;padding:8px 14px;color:var(--red)">Reset to default</button>
+          <div style="flex:1"></div>
+          <button class="btn-primary bg-grn" onclick="seqSave()" id="seq-save-btn" style="flex:0 0 auto;padding:8px 16px">Save sequence</button>
+        </div>
+        <div style="font-size:11px;color:var(--soft);margin-top:10px;line-height:1.45">⚠ Reordering doesn't rewrite the action engine. After Phone Screen, the system still advances to Ask references (regardless of position). Reorder mostly affects display order in the stepper and filter. Custom milestones are inserted in the visual flow but require manual advance.</div>
+      </div>
+
       <h3 style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep);font-weight:600;margin:18px 0 10px">Email templates</h3>
       ${tpls}
       <h3 style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep);font-weight:600;margin:24px 0 10px">Call scripts</h3>
@@ -1672,6 +2187,148 @@ function renderSettings(){
       ${renderCustomList('certificates',SETTINGS.customCerts||[],'customCerts')}
       ${renderCustomList('sources',SETTINGS.customSources||[],'customSources')}
     </div>`;
+}
+async function addAdmin(){
+  const v=document.getElementById('cfg_newAdmin').value.trim().toLowerCase();
+  if(!v||v.indexOf('@')<0){toast('Enter a valid email address');return;}
+  SETTINGS.config.admins=SETTINGS.config.admins||[];
+  if(SUPER_ADMINS.indexOf(v)>-1){toast('Already a super-admin');return;}
+  if(SETTINGS.config.admins.indexOf(v)>-1){toast('Already an admin');return;}
+  SETTINGS.config.admins.push(v);await saveSettings();renderSettings();
+}
+async function removeAdmin(email){
+  SETTINGS.config.admins=(SETTINGS.config.admins||[]).filter(e=>e!==email);
+  await saveSettings();renderSettings();
+}
+/* ===================== sequence editor ===================== */
+let _seqWorkingOrder=null,_seqWorkingLabels=null,_seqWorkingCustom=null,_seqDragIdx=null;
+function seqInit(){
+  _seqWorkingOrder=flowOrder();
+  _seqWorkingLabels=Object.assign({},(SETTINGS.flow&&SETTINGS.flow.labels)||{});
+  _seqWorkingCustom=((SETTINGS.flow&&SETTINGS.flow.custom)||[]).slice();
+}
+const CORE_LOCKED=['Applied','Hired']; /* cannot be moved or removed */
+function renderSeqList(){
+  if(!_seqWorkingOrder)seqInit();
+  return _seqWorkingOrder.map((s,i)=>{
+    const isCustom=_seqWorkingCustom.some(c=>c.key===s);
+    const isCore=CORE_LOCKED.includes(s);
+    const label=_seqWorkingLabels[s]||s;
+    const dirty=label!==s;
+    return `<div class="seq-row ${isCustom?'custom':'core'}" draggable="${isCore?'false':'true'}" data-idx="${i}" data-stage="${esc(s)}"
+        ondragstart="seqDragStart(event,${i})" ondragover="seqDragOver(event,${i})" ondragleave="seqDragLeave(event,${i})" ondrop="seqDrop(event,${i})" ondragend="seqDragEnd(event)">
+      <span class="seq-handle">${isCore?'🔒':'≡'}</span>
+      <span class="seq-num">${i+1}</span>
+      <div class="seq-label">${esc(label)}${dirty?'<span class="raw">internal: '+esc(s)+'</span>':''}</div>
+      ${isCustom?'<span class="seq-badge custom">CUSTOM</span>':(isCore?'<span class="seq-badge">LOCKED</span>':'')}
+      ${dirty?'<span class="seq-dirty">RENAMED</span>':''}
+      <div class="seq-actions">
+        ${!isCore?'<button onclick="seqRename(\''+esc(s).replace(/'/g,"\\'")+'\')" title="Rename display label">✎</button>':''}
+        ${isCustom?'<button class="del" onclick="seqDelete(\''+esc(s).replace(/'/g,"\\'")+'\')" title="Delete custom milestone">🗑</button>':''}
+      </div>
+    </div>`;
+  }).join('');
+}
+function seqRefresh(){const el=document.getElementById('seq-list');if(el)el.innerHTML=renderSeqList();}
+function seqDragStart(e,idx){_seqDragIdx=idx;e.dataTransfer.effectAllowed='move';e.currentTarget.classList.add('dragging');}
+function seqDragOver(e,idx){
+  if(_seqDragIdx===null||_seqDragIdx===idx)return;
+  /* don't allow dropping ON a locked core stage (would push it) */
+  const targetStage=_seqWorkingOrder[idx];if(CORE_LOCKED.includes(targetStage))return;
+  e.preventDefault();e.dataTransfer.dropEffect='move';e.currentTarget.classList.add('drop-target');
+}
+function seqDragLeave(e,idx){e.currentTarget.classList.remove('drop-target');}
+function seqDrop(e,idx){
+  e.preventDefault();e.currentTarget.classList.remove('drop-target');
+  if(_seqDragIdx===null||_seqDragIdx===idx)return;
+  const moved=_seqWorkingOrder.splice(_seqDragIdx,1)[0];
+  _seqWorkingOrder.splice(idx,0,moved);
+  /* keep Applied first, Hired last */
+  _seqWorkingOrder=_seqWorkingOrder.filter(x=>x!=='Applied'&&x!=='Hired');
+  if(_seqWorkingOrder.indexOf('Applied')<0)_seqWorkingOrder.unshift('Applied');
+  _seqWorkingOrder.push('Hired');
+  _seqDragIdx=null;
+  seqRefresh();
+}
+function seqDragEnd(e){if(_seqDragIdx===null)return;document.querySelectorAll('.seq-row').forEach(r=>{r.classList.remove('dragging');r.classList.remove('drop-target');});_seqDragIdx=null;}
+
+function seqRename(stage){
+  const cur=_seqWorkingLabels[stage]||stage;
+  const v=prompt('Display label for "'+stage+'":\n(internal key stays unchanged so all transitions keep working)',cur);
+  if(v===null)return;
+  const trimmed=(v||'').trim();
+  if(!trimmed||trimmed===stage)delete _seqWorkingLabels[stage];
+  else _seqWorkingLabels[stage]=trimmed;
+  seqRefresh();
+}
+function seqDelete(stage){
+  if(!confirm('Delete custom milestone "'+stage+'"?'))return;
+  _seqWorkingOrder=_seqWorkingOrder.filter(s=>s!==stage);
+  _seqWorkingCustom=_seqWorkingCustom.filter(c=>c.key!==stage);
+  delete _seqWorkingLabels[stage];
+  seqRefresh();
+}
+function seqInsertCustom(){
+  const label=prompt('Name for the new milestone:\n(it becomes a manual checkpoint — you advance through it by clicking "→ next stage" in the candidate workspace)','New milestone');
+  if(label===null||!label.trim())return;
+  const trimmed=label.trim();
+  /* generate a unique internal key */
+  let key='custom_'+trimmed.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  if(!key)key='custom_milestone';
+  let dedup=key,i=2;while(_seqWorkingOrder.includes(dedup)||_seqWorkingCustom.some(c=>c.key===dedup)){dedup=key+'_'+i++;}
+  key=dedup;
+  /* ask where to insert */
+  const choices=_seqWorkingOrder.slice(0,-1).map((s,i)=>(i+1)+'. After '+(_seqWorkingLabels[s]||s)).join('\n');
+  const pos=prompt('Insert after which stage? Enter the number:\n\n'+choices,_seqWorkingOrder.length-1);
+  if(pos===null)return;
+  const insertAfter=parseInt(pos,10);
+  if(isNaN(insertAfter)||insertAfter<1||insertAfter>=_seqWorkingOrder.length){toast('Invalid position');return;}
+  _seqWorkingOrder.splice(insertAfter,0,key);
+  _seqWorkingCustom.push({key:key,label:trimmed,manual:true});
+  _seqWorkingLabels[key]=trimmed;
+  seqRefresh();
+}
+async function seqSave(){
+  SETTINGS.flow=SETTINGS.flow||{};
+  /* only persist order if it actually differs from default */
+  const isSameAsDefault=_seqWorkingOrder.length===FLOW.length&&_seqWorkingOrder.every((s,i)=>s===FLOW[i])&&!_seqWorkingCustom.length;
+  SETTINGS.flow.order=isSameAsDefault?null:_seqWorkingOrder.slice();
+  SETTINGS.flow.labels=Object.assign({},_seqWorkingLabels);
+  SETTINGS.flow.custom=_seqWorkingCustom.slice();
+  await saveSettings();
+  /* also extend STAGEINFO at runtime for any custom milestones so the action engine has a label/color */
+  applyCustomStagesToInfo();
+  toast('✓ Sequence saved');
+  /* refresh portal renders */
+  render();renderSettings();
+}
+function seqResetDefault(){
+  if(!confirm('Reset sequence to default? Removes custom milestones and renames.'))return;
+  _seqWorkingOrder=FLOW.slice();
+  _seqWorkingLabels={};
+  _seqWorkingCustom=[];
+  seqRefresh();
+}
+function applyCustomStagesToInfo(){
+  /* runtime patch — STAGEINFO needs an entry for each custom stage so action engine doesn't crash */
+  (SETTINGS.flow&&SETTINGS.flow.custom||[]).forEach(c=>{
+    if(!STAGEINFO[c.key]){
+      STAGEINFO[c.key]={phase:'Custom',next:'Mark complete & advance',color:['#FEF7E8','#8B6500']};
+    }
+  });
+}
+/* run on load too */
+applyCustomStagesToInfo();
+
+async function saveConfig(){
+  SETTINGS.config=SETTINGS.config||{};
+  SETTINGS.config.payFloor=parseFloat(document.getElementById('cfg_payFloor').value)||14;
+  SETTINGS.config.payCeil=parseFloat(document.getElementById('cfg_payCeil').value)||18;
+  SETTINGS.config.payCnaPremium=parseFloat(document.getElementById('cfg_payCnaPremium').value)||1.25;
+  SETTINGS.config.payQualityNudge=parseFloat(document.getElementById('cfg_payQualityNudge').value)||1;
+  SETTINGS.config.serviceZips=document.getElementById('cfg_serviceZips').value.trim();
+  SETTINGS.config.autoRejectDays=parseInt(document.getElementById('cfg_autoRejectDays').value,10)||14;
+  await saveSettings();toast('Hiring config saved');
 }
 async function saveScript(k){const lines=document.getElementById('script_'+k).value.split('\n').map(s=>s.trim()).filter(Boolean);
   SETTINGS.scripts=SETTINGS.scripts||{};SETTINGS.scripts[k]=lines;await saveSettings();toast('Script saved');renderSettings();}
