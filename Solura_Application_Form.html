@@ -77,6 +77,17 @@ input:focus{border-color:var(--sky);box-shadow:0 0 0 3px var(--sky-pale)}
 .add-custom button{font-family:inherit;font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:9px;border:1px solid var(--softer);background:var(--warm);color:var(--ink);cursor:pointer}
 .add-custom button:hover{background:#fff;border-color:var(--sky)}
 
+/* live-in toggle — covers the whole schedule */
+.live-in-toggle{display:flex;align-items:center;gap:14px;padding:14px 16px;background:linear-gradient(135deg,#FEF7E8,#FFF8E7);border:1.5px solid var(--gold);border-radius:12px;margin-bottom:14px;cursor:pointer;transition:all .15s;user-select:none}
+.live-in-toggle:hover{box-shadow:0 4px 12px rgba(200,135,10,.18)}
+.live-in-toggle input{width:22px;height:22px;flex:0 0 auto;cursor:pointer;accent-color:var(--gold)}
+.live-in-toggle .live-in-icon{font-size:24px;flex:0 0 auto;color:var(--gold-deep)}
+.live-in-toggle .live-in-text{font-size:13px;color:var(--mid);line-height:1.4;flex:1}
+.live-in-toggle .live-in-text b{font-size:14.5px;color:var(--ink)}
+.live-in-toggle .live-in-text small{color:var(--soft);font-size:12px}
+.live-in-toggle:has(input:checked){background:linear-gradient(135deg,#FCE9C0,#FEF3D5);border-color:var(--gold-deep)}
+#schedSection.disabled{opacity:.35;pointer-events:none;transition:opacity .25s ease}
+
 /* mobile tightening */
 @media (max-width:520px){
   .wrap{padding:18px 12px 50px}
@@ -173,12 +184,19 @@ input:focus{border-color:var(--sky);box-shadow:0 0 0 3px var(--sky-pale)}
     <div class="card">
       <h2>Your availability</h2>
       <div class="hint">Tell us each day separately — patients have different schedules.</div>
-      <div class="sched-quick">
-        <button type="button" onclick="schedQuick('weekdays')">All weekdays, all shifts</button>
-        <button type="button" onclick="schedQuick('all')">Everything</button>
-        <button type="button" onclick="schedQuick('clear')">Clear</button>
+      <label class="live-in-toggle" id="liveInToggle">
+        <input type="checkbox" id="liveInCheck" onchange="toggleLiveIn()">
+        <span class="live-in-icon">⌂</span>
+        <span class="live-in-text"><b>Live-in availability</b><br><small>I'm available to live in the home, 24/7, all days of the week</small></span>
+      </label>
+      <div id="schedSection">
+        <div class="sched-quick">
+          <button type="button" onclick="schedQuick('weekdays')">All weekdays, all shifts</button>
+          <button type="button" onclick="schedQuick('all')">Everything</button>
+          <button type="button" onclick="schedQuick('clear')">Clear</button>
+        </div>
+        <div class="sched" id="sched-matrix"></div>
       </div>
-      <div class="sched" id="sched-matrix"></div>
     </div>
 
     <div class="card">
@@ -219,7 +237,7 @@ const Q={
 const ans={cred:[],expertise:[]};
 /* dayShifts: per-day shift selection — { Mon:["Morning","Afternoon"], Tue:["Overnight"], ... } */
 const DAYS_LIST=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-const SHIFTS_LIST=[['Morning','am'],['Afternoon','pm'],['Evening','ev'],['Overnight','noc'],['Live-in','live']];
+const SHIFTS_LIST=[['Morning','am'],['Afternoon','pm'],['Evening','ev'],['Overnight','noc']];
 const dayShifts={};
 
 /* render the day×shift matrix */
@@ -244,7 +262,7 @@ function schedQuick(kind){
   Object.keys(dayShifts).forEach(k=>delete dayShifts[k]);
   if(kind==='clear'){renderSched();updateProgress();return;}
   const days=kind==='weekdays'?['Mon','Tue','Wed','Thu','Fri']:DAYS_LIST;
-  const shifts=['Morning','Afternoon','Evening','Overnight','Live-in'];
+  const shifts=['Morning','Afternoon','Evening','Overnight'];
   days.forEach(d=>{dayShifts[d]=shifts.slice();});
   renderSched();updateProgress();
 }
@@ -301,6 +319,22 @@ function addCustom(kind){
   input.value='';updateProgress();
 }
 
+/* live-in toggle — single button covering all days */
+let liveIn=false;
+function toggleLiveIn(){
+  liveIn=document.getElementById('liveInCheck').checked;
+  const sec=document.getElementById('schedSection');
+  if(liveIn){
+    sec.classList.add('disabled');
+    Object.keys(dayShifts).forEach(k=>delete dayShifts[k]);
+    DAYS_LIST.forEach(d=>{dayShifts[d]=['Live-in'];});
+  }else{
+    sec.classList.remove('disabled');
+    Object.keys(dayShifts).forEach(k=>delete dayShifts[k]);
+  }
+  renderSched();updateProgress();
+}
+
 renderSched();
 
 function updateProgress(){
@@ -355,6 +389,7 @@ function buildPayload(){
     creds:creds,
     credential:creds[0]||'',
     expertise:ans.expertise||[],
+    liveIn:liveIn,
     dayShifts:dayShifts,
     screening:{
       age18:ans.age18, dl:ans.dl, revoked:ans.revoked, abuseFinding:ans.abuseFinding,
@@ -386,6 +421,12 @@ function fileToBase64(file){return new Promise((res,rej)=>{const r=new FileReade
 
 async function submitForm(e){
   e.preventDefault();
+  /* sanity check: did somebody forget to swap the placeholder URL? */
+  if(WEBHOOK_URL.indexOf('YOUR-CLOUDFLARE-USERNAME')>-1){
+    alert('Configuration error: the webhook URL was not set. Tell the site owner.');
+    console.error('WEBHOOK_URL still has placeholder:',WEBHOOK_URL);
+    return;
+  }
   const payload=buildPayload();
   if(!payload.name||!payload.phone){alert('Please fill in your name and phone.');return;}
 
@@ -407,7 +448,7 @@ async function submitForm(e){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({kind:'APPLICATION_SUBMITTED',applicant:payload})
     });
-    if(!r.ok){const t=await r.text().catch(()=>'');throw new Error('Server returned '+r.status+' '+t.slice(0,80));}
+    if(!r.ok){const t=await r.text().catch(()=>'');throw new Error('Server returned '+r.status+': '+t.slice(0,160));}
     document.getElementById('app').innerHTML=`<div class="done">
       <div class="ck">✓</div><h2>Thanks, ${payload.name.split(' ')[0]||'and welcome'}!</h2>
       <p>Your application is in. Someone from Solura Home Care will text or email you shortly about the next step.</p></div>`;
@@ -415,7 +456,12 @@ async function submitForm(e){
   }catch(err){
     btn.disabled=false;btn.textContent='Submit application';
     console.error('Submit error:',err);
-    alert("Sorry, something went wrong sending your application. Please try again, or email careers@solurahomecare.com directly.");
+    /* Network/CORS errors throw TypeError "Failed to fetch" — show specific message for that */
+    const isNetwork=(err&&err.name==='TypeError'&&/fetch/i.test(err.message||''));
+    const detail=isNetwork
+      ? 'The form could not reach the server. Check that the webhook URL is correct and the Worker is deployed.'
+      : (err && err.message) || 'Unknown error';
+    alert('Something went wrong:\n\n'+detail+'\n\nDetails are in the browser console (open DevTools → Console). You can also email careers@solurahomecare.com directly.');
   }
 }
 </script>
