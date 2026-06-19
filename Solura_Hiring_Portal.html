@@ -750,7 +750,17 @@ td{padding:13px 16px;vertical-align:top;}
 .iconbtn .ct{position:absolute;top:-4px;right:-4px;background:var(--gold);color:#fff;font-size:9.5px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:grid;place-items:center;padding:0 4px;}
 .iconbtn.on{background:var(--sky-deep);border-color:var(--sky-deep);color:#fff;}
 
-/* ===== Active caregivers tab ===== */
+/* ===== Application view + profile edit hub ===== */
+.app-hub{max-width:780px;margin:0 auto;}
+.app-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border-soft);}
+.app-row:last-child{border-bottom:none;}
+.app-label{flex:0 0 200px;font-size:11.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.05em;}
+.app-value{flex:1;font-size:13px;color:var(--ink);font-weight:500;word-break:break-word;}
+.app-edit-wrap{flex:1;}
+.app-edit-input{width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px;outline:none;background:#fff;color:var(--ink);transition:border-color .1s ease-out;}
+.app-edit-input:focus{border-color:var(--sky-deep);}
+select.app-edit-input{cursor:pointer;}
+@media(max-width:640px){.app-row{flex-direction:column;align-items:flex-start;gap:4px;}.app-label{flex:0 0 auto;}}
 .active-shell{max-width:1200px;margin:0 auto;padding:24px 28px 60px;}
 .active-head{display:flex;align-items:baseline;gap:12px;margin-bottom:22px;}
 .active-head h1{font-family:'Cormorant Garamond',serif;font-size:30px;color:var(--sky-deep);font-weight:600;margin:0;}
@@ -1868,6 +1878,7 @@ function renderFocusedHub(){
   }else if(kind==='verify'){block=verifyBlock();title='Verify past employers';}
   else if(kind==='refs'){block=refsBlock();title='References';}
   else if(kind==='checks'){block=checksBlock();title='Background & certificates';}
+  else if(kind==='application'){block=applicationBlock();title='Application data';}
   document.getElementById('ws-name').innerHTML='<button onclick="clearFocusedHub()" style="background:none;border:none;cursor:pointer;font-size:24px;color:var(--sky-deep);margin-right:8px;padding:0 6px;font-weight:700;vertical-align:-2px" title="Back to candidate overview">‹</button>'+esc(title);
   const info=STAGEINFO[W.stage]||STAGEINFO['Applied'];
   document.getElementById('ws-sub').innerHTML='<span style="color:var(--soft);font-size:13px">for </span><b>'+esc(W.name)+'</b> <span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-left:8px">'+esc(stageLabel(W.stage))+'</span>';
@@ -1943,6 +1954,9 @@ function renderWorkspace(){
   const logs=(W.st.log||[]).slice().reverse().map(l=>`<div class="logentry"><span class="when">${esc(l.t)}</span>${esc(l.x)}</div>`).join('')||'<div style="font-size:12px;color:var(--soft)">No activity yet.</div>';
   /* emails — pulled from inbox on refresh, matched by sender == candidate's email */
   const emailList=(W.st.emails||[]);
+  /* application snapshot — key facts + button to open full app view */
+  const _appSnap=appSnapshotCard(W);
+
   /* refs preview — small card visible at all stages once refs are on file. Distinct from the full refsBlock,
      which is the working surface at the References stage. */
   let refsPreviewCard='';
@@ -1973,7 +1987,7 @@ function renderWorkspace(){
   document.getElementById('ws-body').innerHTML=`
     ${thisStep}
     <div class="wsgrid">
-      <div>${gatesCard}${work}${docs}${refsPreviewCard}${emailsCard}${activity}</div>
+      <div>${gatesCard}${work}${_appSnap}${docs}${refsPreviewCard}${emailsCard}${activity}</div>
       <div>${identity}${scoreCard}</div>
     </div>`;
   /* sticky footer with primary action — always visible */
@@ -2117,6 +2131,190 @@ async function completeQuestions(nextStage){applyAnswers();const sc=scoreW();
   const c=pipeline.find(x=>x.excelRow===W.row);
   if(c){const a=action(c);if(a.primary&&a.primary.kind==='email-tpl'){setTimeout(()=>doEmail(a.primary.tpl,a.primary.advanceTo),250);}}
 }
+/* ===================== APPLICATION VIEW + PROFILE EDIT ===================== */
+/* Field schema — drives both the read-only render and the edit form. Each field has:
+   - label: display name
+   - path: dot-path into c (e.g. 'st.address') or top-level (e.g. 'phone')
+   - type: 'text' | 'select' | 'tags' | 'longtext'
+   - options: for select (array of [label,value])
+*/
+function _appField(c,path){
+  const parts=path.split('.');let v=c;for(const p of parts){if(v==null)return '';v=v[p];}return v==null?'':v;
+}
+function _appSet(c,path,val){
+  const parts=path.split('.');let v=c;
+  for(let i=0;i<parts.length-1;i++){if(v[parts[i]]==null)v[parts[i]]={};v=v[parts[i]];}
+  v[parts[parts.length-1]]=val;
+}
+const APP_SECTIONS=[
+  {title:'Identity',fields:[
+    {label:'Full name',path:'name',type:'text'},
+    {label:'Email',path:'email',type:'text'},
+    {label:'Phone',path:'phone',type:'text'},
+    {label:'Source',path:'source',type:'text'}
+  ]},
+  {title:'Address',fields:[
+    {label:'Street',path:'st.address',type:'text'},
+    {label:'City',path:'st.city',type:'text'},
+    {label:'State',path:'st.state',type:'text'},
+    {label:'ZIP',path:'st.zip',type:'text'}
+  ]},
+  {title:'Experience',fields:[
+    {label:'Years of experience',path:'years',type:'text'},
+    {label:'Longest tenure (at one job)',path:'st.longest',type:'text'},
+    {label:'Certifications',path:'st.certs',type:'tags'},
+    {label:'Expertise',path:'st.expertise',type:'tags',altPath:'st.pills'},
+    {label:'Languages',path:'st.screening.languages',type:'tags'}
+  ]},
+  {title:'Eligibility (screening)',fields:[
+    {label:'18+',path:'st.screening.age18',type:'select',options:[['—',''],['Yes','yes'],['No','no']]},
+    {label:'Valid driver license',path:'st.screening.dl',type:'select',options:[['—',''],['Yes','Y'],['No','N']]},
+    {label:'Credential ever revoked',path:'st.screening.revoked',type:'select',options:[['—',''],['No','no'],['Yes','yes']]},
+    {label:'Abuse finding on record',path:'st.screening.abuseFinding',type:'select',options:[['—',''],['No','no'],['Yes','yes']]},
+    {label:'Will provide personal care',path:'st.screening.personalCare',type:'select',options:[['—',''],['Yes','yes'],['No','no']]},
+    {label:'Can lift 25 lbs',path:'st.screening.lifting',type:'select',options:[['—',''],['Yes','yes'],['No','no']]},
+    {label:'Smoker',path:'st.screening.smoker',type:'select',options:[['—',''],['No','no'],['Yes','yes']]}
+  ]},
+  {title:'Availability',fields:[
+    {label:'Live-in only',path:'st.liveIn',type:'select',options:[['—',''],['No','false'],['Yes','true']]},
+    {label:'Day-by-day shifts',path:'st.dayShifts',type:'shifts'}
+  ]}
+];
+
+/* Snapshot card for the workspace overview — small summary with link to full view */
+function appSnapshotCard(c){
+  const has=c&&(c.name||c.email);
+  if(!has)return '';
+  const fromForm=!!(c.st&&c.st.hasResume!==undefined);
+  const resumeBadge=c.st&&c.st.hasResume?'<span class="pill pg" style="font-size:9px">RÉSUMÉ ✓</span>':'<span class="pill psoft" style="font-size:9px">NO RÉSUMÉ</span>';
+  const keyFacts=[
+    c.years?'<b>Experience:</b> '+esc(c.years)+' yrs':'',
+    c.st&&c.st.expertise&&c.st.expertise.length?'<b>Expertise:</b> '+esc(c.st.expertise.slice(0,3).join(', '))+(c.st.expertise.length>3?', +'+(c.st.expertise.length-3)+' more':''):'',
+    c.st&&c.st.address?'<b>Address:</b> '+esc(c.st.address)+(c.st.city?', '+esc(c.st.city):''):'',
+    c.source?'<b>Source:</b> '+esc(c.source):''
+  ].filter(Boolean).map(x=>'<div style="font-size:12px;color:var(--mid);padding:3px 0">'+x+'</div>').join('');
+  return `<div class="wscard"><h3>Application snapshot ${resumeBadge}</h3>
+    ${keyFacts||'<div style="font-size:12px;color:var(--soft);font-style:italic">Limited data on this candidate</div>'}
+    <button class="btn-sec bg-cream" style="margin-top:10px;padding:6px 12px;font-size:12px" onclick="setFocusedHub('application')">👤 Open full application →</button>
+  </div>`;
+}
+
+/* Full application hub — read + edit */
+function applicationBlock(){
+  const c=W;const editing=!!W._editingApp;
+  /* draft = the editable copy. Created on entering edit mode, committed on Save. */
+  if(editing&&!W._appDraft){W._appDraft=JSON.parse(JSON.stringify(c));}
+  const src=editing?W._appDraft:c;
+  const sections=APP_SECTIONS.map(sec=>{
+    const rows=sec.fields.map(f=>renderAppField(src,f,editing)).join('');
+    return `<div class="wscard"><h3>${esc(sec.title)}</h3>${rows}</div>`;
+  }).join('');
+  /* audit-log preview */
+  const audit=(c.st&&c.st.profileEdits)||[];
+  const auditCard=audit.length?`<div class="wscard"><h3>Edit history <span style="font-size:11px;color:var(--soft);font-weight:600">${audit.length} change${audit.length===1?'':'s'}</span></h3>
+    ${audit.slice(0,8).map(e=>`<div style="font-size:11.5px;color:var(--mid);padding:6px 0;border-bottom:1px solid var(--border-soft)"><b style="color:var(--soft);font-size:10.5px">${esc(e.t||'')}</b> · ${esc(e.field||'')}: <span style="color:var(--red);text-decoration:line-through">${esc(e.from||'(blank)')}</span> → <span style="color:var(--grn)">${esc(e.to||'(blank)')}</span> <span style="color:var(--soft);font-size:10.5px">by ${esc(e.by||'')}</span></div>`).join('')}
+    ${audit.length>8?'<div style="font-size:11px;color:var(--soft);margin-top:6px">+ '+(audit.length-8)+' older edits not shown</div>':''}</div>`:'';
+  return `<div class="app-hub">
+    <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
+      ${editing
+        ? '<button class="btn-primary bg-grn" onclick="saveAppEdits()" style="padding:9px 18px">💾 Save changes</button><button class="btn-sec bg-cream" onclick="cancelAppEdits()" style="padding:9px 16px">Cancel</button><div style="flex:1"></div><span style="font-size:11.5px;color:var(--gold-deep,#8B6500);font-weight:600">⚠ Editing — changes will be logged to activity timeline</span>'
+        : '<button class="btn-sec bg-cream" onclick="W._editingApp=true;W._appDraft=null;renderWorkspace()" style="padding:9px 16px">✎ Edit application data</button><div style="flex:1"></div>'
+      }
+    </div>
+    ${sections}
+    ${auditCard}
+  </div>`;
+}
+
+function renderAppField(src,f,editing){
+  const v=_appField(src,f.path);
+  const altV=f.altPath?_appField(src,f.altPath):'';
+  const value=v||altV;
+  if(!editing){
+    return `<div class="app-row"><span class="app-label">${esc(f.label)}</span><span class="app-value">${esc(_displayValue(value,f))}</span></div>`;
+  }
+  /* edit mode */
+  const id='app_edit_'+f.path.replace(/\./g,'_');
+  let input='';
+  if(f.type==='text'){input=`<input id="${id}" value="${esc(value||'')}" data-path="${esc(f.path)}" data-type="text" class="app-edit-input">`;}
+  else if(f.type==='longtext'){input=`<textarea id="${id}" data-path="${esc(f.path)}" data-type="longtext" class="app-edit-input" style="min-height:60px">${esc(value||'')}</textarea>`;}
+  else if(f.type==='select'){
+    input=`<select id="${id}" data-path="${esc(f.path)}" data-type="select" class="app-edit-input">${(f.options||[]).map(o=>`<option value="${esc(o[1])}" ${String(value)===String(o[1])?'selected':''}>${esc(o[0])}</option>`).join('')}</select>`;
+  }
+  else if(f.type==='tags'){
+    const arr=Array.isArray(value)?value:(value?String(value).split(',').map(s=>s.trim()):[]);
+    input=`<input id="${id}" value="${esc(arr.join(', '))}" data-path="${esc(f.path)}" data-type="tags" class="app-edit-input" placeholder="Comma-separated values">`;
+  }
+  else if(f.type==='shifts'){
+    const ds=value||{};
+    input=`<div style="font-size:11.5px;color:var(--soft)" data-path="${esc(f.path)}" data-type="shifts">${esc(JSON.stringify(ds))} <i>(not editable inline; modify via Excel)</i></div>`;
+  }
+  return `<div class="app-row"><span class="app-label">${esc(f.label)}</span><div class="app-edit-wrap">${input}</div></div>`;
+}
+function _displayValue(v,f){
+  if(v==null||v==='')return '—';
+  if(Array.isArray(v))return v.join(', ')||'—';
+  if(f&&f.type==='select'&&f.options){const found=f.options.find(o=>String(o[1])===String(v));if(found)return found[0];}
+  if(f&&f.type==='shifts'){
+    if(!v||typeof v!=='object'||!Object.keys(v).length)return '—';
+    return Object.entries(v).map(([d,shifts])=>d+': '+(Array.isArray(shifts)?shifts.join('/'):shifts)).join('; ');
+  }
+  if(typeof v==='boolean')return v?'Yes':'No';
+  return String(v);
+}
+
+async function saveAppEdits(){
+  if(!W||!W._appDraft){toast('Nothing to save');return;}
+  const draft=W._appDraft;
+  /* Diff each editable field and collect changes for audit + persistence. */
+  const inputs=document.querySelectorAll('.app-edit-input');
+  const changes=[];
+  inputs.forEach(el=>{
+    const path=el.dataset.path,type=el.dataset.type;if(!path||type==='shifts')return;
+    let newVal=el.value;
+    if(type==='tags')newVal=newVal.split(',').map(s=>s.trim()).filter(Boolean);
+    const oldVal=_appField(W,path);
+    const oldStr=Array.isArray(oldVal)?oldVal.join(', '):(oldVal==null?'':String(oldVal));
+    const newStr=Array.isArray(newVal)?newVal.join(', '):String(newVal);
+    if(oldStr!==newStr){
+      changes.push({field:path,from:oldStr,to:newStr});
+      _appSet(W,path,newVal);
+    }
+  });
+  if(!changes.length){W._editingApp=false;W._appDraft=null;renderWorkspace();toast('No changes');return;}
+  /* Append to audit log on the candidate state */
+  W.st.profileEdits=W.st.profileEdits||[];
+  const by=(window.userEmail||'unknown');
+  const ts=stamp();
+  changes.forEach(ch=>{
+    W.st.profileEdits.unshift({t:ts,field:ch.field,from:ch.from,to:ch.to,by:by});
+    /* also log to the main activity timeline */
+    logW(`✎ Profile edit: ${ch.field} "${ch.from||'(blank)'}" → "${ch.to||'(blank)'}"`);
+  });
+  W._editingApp=false;W._appDraft=null;
+  /* Save everything: top-level fields are in columns A-F (some), and st JSON in AJ */
+  await persistAppChanges(changes);
+  renderWorkspace();
+  toast('✓ '+changes.length+' change'+(changes.length===1?'':'s')+' saved');
+}
+function cancelAppEdits(){W._editingApp=false;W._appDraft=null;renderWorkspace();toast('Edits canceled');}
+
+async function persistAppChanges(changes){
+  /* Map top-level fields to sheet columns when they change. Falls back to AJ-only write otherwise. */
+  const COL_MAP={name:'C',email:'F',phone:'E',source:'I',years:'?',credential:'?'}; /* check actual cols in your sheet */
+  const row=W.row;
+  for(const ch of changes){
+    if(!ch.field.startsWith('st.')){
+      const col=COL_MAP[ch.field];
+      if(col&&col!=='?'){
+        try{await patchRange(col+row,[[ch.to]]);}catch(e){console.warn('col write failed:',e.message);}
+      }
+    }
+  }
+  /* Always rewrite AJ (state JSON) so st.* changes persist + edit log persists. */
+  await saveW(true);
+}
+
 function verifyBlock(){const emp=W.st.employers||[];
   if(!emp.length){
     return emptyCard('🏢','No past employers added','+ add employer','W.st.employers=W.st.employers||[];W.st.employers.push({name:\'\',phone:\'\',v:\'\'});renderWorkspace()')
