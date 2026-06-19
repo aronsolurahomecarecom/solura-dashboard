@@ -789,6 +789,12 @@ td{padding:13px 16px;vertical-align:top;}
 .tpl-placeholders-label{font-size:10.5px;font-weight:600;color:var(--soft);text-transform:uppercase;letter-spacing:.06em;margin-right:4px;}
 .ph-chip{font-family:'JetBrains Mono','Consolas',monospace;font-size:11px;padding:4px 9px;border-radius:5px;background:var(--sky-pale);color:var(--sky-deep);border:1px solid transparent;cursor:pointer;transition:background .12s ease-out,border-color .12s ease-out;}
 .ph-chip:hover{background:#fff;border-color:var(--sky-deep);}
+
+/* Quick-blocks row — bigger, more colorful than single-placeholder chips */
+.tpl-blocks{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 4px;padding:8px 10px;background:#FEF7E8;border:1px dashed var(--gold-mid);border-radius:8px;}
+.block-chip{font-family:inherit;font-size:11.5px;font-weight:600;padding:6px 11px;border-radius:6px;background:#fff;color:var(--gold-deep,#8B6500);border:1.5px solid var(--gold-mid);cursor:pointer;transition:background .12s ease-out,transform .08s ease-out;}
+.block-chip:hover{background:var(--gold-mid);color:#fff;}
+.block-chip:active{filter:brightness(.92);}
 @media(max-width:900px){.tpl-editor{flex-direction:column;height:auto;}.tpl-list{flex:0 0 auto;max-height:200px;}}
 
 /* fullscreen toggle — smooth solid expand, no springy curve */
@@ -1629,9 +1635,21 @@ function getEffectiveTemplate(tplKey,c){
   /* if user edited this template via Settings, use the edit; otherwise the built-in */
   const custom=SETTINGS.templates&&SETTINGS.templates[tplKey];
   if(custom){
-    /* substitute {first}, {bookLink}, {pay} placeholders */
-    const first=(c&&c.name||'there').split(' ')[0];
-    const sub=t=>t.replace(/\{first\}/g,first).replace(/\{bookLink\}/g,BOOK_LINK).replace(/\{pay\}/g,payRange()).replace(/\{missing\}/g,(c&&c.__missing||[]).map(x=>'• '+x).join('\n'));
+    const fullName=(c&&c.name)||'';
+    const first=fullName.split(' ')[0]||'there';
+    const cfg=SETTINGS.config||{};
+    const refLink=c&&c.email?'https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(c.email):'';
+    /* All supported placeholders. Order matters slightly — longer keys before shorter ones to avoid partial collisions. */
+    const sub=t=>String(t||'')
+      .replace(/\{onboardingLink\}/g,cfg.calOnboardingUrl||'')
+      .replace(/\{interviewLink\}/g,cfg.calInterviewUrl||BOOK_LINK)
+      .replace(/\{screenLink\}/g,cfg.calScreenUrl||BOOK_LINK)
+      .replace(/\{bookLink\}/g,BOOK_LINK)
+      .replace(/\{refLink\}/g,refLink)
+      .replace(/\{missing\}/g,(c&&c.__missing||[]).map(x=>'• '+x).join('\n'))
+      .replace(/\{name\}/g,fullName)
+      .replace(/\{first\}/g,first)
+      .replace(/\{pay\}/g,payRange());
     return {s:sub(custom.s||''),b:sub(custom.b||'')};
   }
   return (TEMPLATES[tplKey]||TEMPLATES.screen_invite)(c);
@@ -2469,9 +2487,26 @@ function renderSettingsWorkflow(){
 const TEMPLATE_PLACEHOLDERS={
   '{first}':'Candidate first name',
   '{name}':'Candidate full name',
-  '{pay}':'Computed pay range',
-  '{missing}':'Missing-gates list (for the "request missing info" template)'
+  '{pay}':'Computed pay range ($X–$Y/hr)',
+  '{screenLink}':'Phone screen Cal.com URL',
+  '{interviewLink}':'Interview Cal.com URL',
+  '{onboardingLink}':'Onboarding Cal.com URL',
+  '{refLink}':'References form URL (with candidate email baked in)',
+  '{missing}':'Bulleted list of missing gates (for the "request info" template)'
 };
+/* Quick blocks — multi-line snippets the user can press to insert pre-built chunks.
+   Saves them from typing the same boilerplate (Hi {first}, ... Solura Home Care) on every template. */
+const TEMPLATE_BLOCKS=[
+  {key:'greet',         label:'👋 Greeting',           text:'Hi {first},\n\n'},
+  {key:'signoff',       label:'✍ Sign-off',            text:'\n\nSolura Home Care'},
+  {key:'pay',           label:'💰 Pay range line',     text:'The pay range for this role is {pay}/hour.'},
+  {key:'screen_book',   label:'📞 Book a phone screen',text:'Pick a 15-minute time for a quick call:\n{screenLink}\n'},
+  {key:'interview_book',label:'🎯 Book an interview',  text:'Pick a 60-minute interview slot:\n{interviewLink}\n'},
+  {key:'orient_book',   label:'🎉 Book orientation',   text:'Book your 30-minute orientation:\n{onboardingLink}\n'},
+  {key:'refs_link',     label:'📋 References form link',text:'Please fill out our short references form:\n{refLink}\n'},
+  {key:'nextsteps',     label:'📨 Next-steps line',    text:"We'll be in touch with next steps within 1–2 business days.\n"},
+  {key:'thanks',        label:'🙏 Thanks line',        text:'Thanks for your interest in Solura Home Care.\n\n'}
+];
 let _activeTpl='screen_invite';
 function setActiveTpl(k){_activeTpl=k;renderSettings();}
 
@@ -2481,12 +2516,12 @@ function renderSettingsTemplates(){
   _activeTpl=cur;
   const tpl=SETTINGS.templates[cur]||defaultTplFor(cur);
   const isEdited=!!SETTINGS.templates[cur];
-  const sample={firstName:'Jane',lastName:'Doe',name:'Jane Doe',first_name:'Jane',email:'jane@example.com',phone:'(216) 555-0199'};
   const list=keys.map(k=>`<button class="tpl-list-item ${k===cur?'on':''}" onclick="setActiveTpl('${k}')">
     <span class="tpl-name">${esc(TEMPLATE_LABELS[k])}</span>
     ${SETTINGS.templates[k]?'<span class="pill pa" style="font-size:8.5px;font-weight:700">EDITED</span>':''}
   </button>`).join('');
-  const chips=Object.entries(TEMPLATE_PLACEHOLDERS).map(([k,desc])=>`<button class="ph-chip" onclick="insertPlaceholder('tpl_b_${cur}','${k}')" title="${esc(desc)}">${esc(k)}</button>`).join('');
+  const phChips=Object.entries(TEMPLATE_PLACEHOLDERS).map(([k,desc])=>`<button class="ph-chip" onclick="insertPlaceholder('tpl_b_${cur}','${k}')" title="${esc(desc)}">${esc(k)}</button>`).join('');
+  const blockChips=TEMPLATE_BLOCKS.map(b=>`<button class="block-chip" onclick="insertTemplateBlock('tpl_b_${cur}','${b.key}')" title="${esc(b.text.replace(/\n/g,' ').slice(0,80))}">${esc(b.label)}</button>`).join('');
 
   return `<div class="tpl-editor">
     <aside class="tpl-list">
@@ -2498,6 +2533,7 @@ function renderSettingsTemplates(){
         <h3>${esc(TEMPLATE_LABELS[cur])}</h3>
         ${isEdited?'<span class="pill pa" style="font-size:9px">EDITED</span>':'<span class="pill pg" style="font-size:9px">DEFAULT</span>'}
         <div style="flex:1"></div>
+        <button class="btn-sec bg-cream" onclick="loadDefaultIntoEditor('${cur}')" title="Replace the editor contents with the system default — useful as a starting point">↻ Load default</button>
         <button class="btn-sec bg-cream" onclick="previewTemplate('${cur}')">👁 Preview</button>
         ${isEdited?`<button class="btn-sec bg-cream" onclick="revertTemplate('${cur}')" style="color:var(--red)">Revert</button>`:''}
         <button class="btn-primary bg-grn" onclick="saveTemplate('${cur}')">Save</button>
@@ -2506,9 +2542,13 @@ function renderSettingsTemplates(){
       <label class="tpl-label">Subject</label>
       <input id="tpl_s_${cur}" value="${esc(tpl.s)}" class="tpl-subject-input">
 
+      <div class="tpl-blocks">
+        <span class="tpl-placeholders-label">Quick blocks (insert at cursor):</span>
+        ${blockChips}
+      </div>
       <div class="tpl-placeholders">
-        <span class="tpl-placeholders-label">Insert placeholder:</span>
-        ${chips}
+        <span class="tpl-placeholders-label">Placeholders:</span>
+        ${phChips}
       </div>
 
       <label class="tpl-label">Body</label>
@@ -2524,27 +2564,38 @@ function insertPlaceholder(textareaId,ph){
   ta.selectionStart=ta.selectionEnd=start+ph.length;
   ta.focus();
 }
+function insertTemplateBlock(textareaId,blockKey){
+  const block=TEMPLATE_BLOCKS.find(b=>b.key===blockKey);if(!block)return;
+  insertPlaceholder(textareaId,block.text);
+}
+function loadDefaultIntoEditor(key){
+  const def=defaultTplFor(key);
+  const s=document.getElementById('tpl_s_'+key),b=document.getElementById('tpl_b_'+key);
+  if(s)s.value=def.s;
+  if(b)b.value=def.b;
+  toast('Default loaded into editor (not saved yet — click Save to keep)');
+}
 
 function previewTemplate(key){
-  /* Render the template with a sample candidate to show what the recipient sees */
-  const tpl=SETTINGS.templates[key]||defaultTplFor(key);
-  /* Use whatever is currently in the editor (unsaved drafts preview too) */
+  /* Render with whatever's currently in the editor (saved or unsaved) + a sample candidate. */
   const s=document.getElementById('tpl_s_'+key);const b=document.getElementById('tpl_b_'+key);
-  const subj=(s&&s.value)||tpl.s;
-  const body=(b&&b.value)||tpl.b;
-  const sample={name:'Jane Doe',firstName:'Jane',lastName:'Doe',email:'jane@example.com',phone:'(216) 555-0199',pay:{floor:SETTINGS.config.payFloor,ceil:SETTINGS.config.payCeil},gates:{wa:'✓',cr:'✓',bg:'?',tr:'✓',av:'✓'}};
-  /* render via the template function for accurate placeholder substitution */
-  const tplFn=TEMPLATES[key];
-  let renderedS=subj,renderedB=body;
-  if(tplFn){
-    try{const rendered=tplFn(sample);renderedS=rendered.s||subj;renderedB=rendered.b||body;}catch(e){}
-  }
-  /* But if user has unsaved edits, prefer those (substitute basic placeholders manually) */
-  const substitute=(t)=>String(t||'').replace(/\{first\}/g,'Jane').replace(/\{name\}/g,'Jane Doe').replace(/\{pay\}/g,'$'+SETTINGS.config.payFloor+'–'+SETTINGS.config.payCeil).replace(/\{missing\}/g,'(none)');
-  if(s&&s.value)renderedS=substitute(subj);
-  if(b&&b.value)renderedB=substitute(body);
+  const draftS=(s&&s.value)||'';const draftB=(b&&b.value)||'';
+  /* Substitute all known placeholders against sample data, matching what live emails see. */
+  const cfg=SETTINGS.config||{};
+  const sample={name:'Jane Doe',firstName:'Jane',email:'jane@example.com'};
+  const refLink='https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(sample.email);
+  const sub=t=>String(t||'')
+    .replace(/\{onboardingLink\}/g,cfg.calOnboardingUrl||'(set in Calendars section)')
+    .replace(/\{interviewLink\}/g,cfg.calInterviewUrl||BOOK_LINK)
+    .replace(/\{screenLink\}/g,cfg.calScreenUrl||BOOK_LINK)
+    .replace(/\{bookLink\}/g,BOOK_LINK)
+    .replace(/\{refLink\}/g,refLink)
+    .replace(/\{missing\}/g,'• Work authorization\n• Reliable transport')
+    .replace(/\{name\}/g,sample.name)
+    .replace(/\{first\}/g,sample.firstName)
+    .replace(/\{pay\}/g,'$'+cfg.payFloor+'–$'+cfg.payCeil);
+  const renderedS=sub(draftS);const renderedB=sub(draftB);
 
-  /* Modal */
   let m=document.getElementById('tpl-preview-modal');
   if(!m){
     m=document.createElement('div');m.id='tpl-preview-modal';m.className='email-modal';
