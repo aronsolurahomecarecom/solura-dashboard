@@ -7,6 +7,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Solura Home Care — Hiring Portal</title>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- jsPDF for clean professional report PDFs -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{
   --gold:#C8870A;--gold-mid:#E8B84B;--gold-pale:#FEF7E8;
@@ -1809,6 +1811,7 @@ function renderWorkspace(){
     <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
       <button class="btn-sm bg-sky-l" style="cursor:pointer" onclick="openResumeInPortal()">👁 Open resume</button>
       <button class="btn-sm bg-cream" style="cursor:pointer" onclick="openFolderInSharePoint()">📁 Open folder in SharePoint</button>
+      <button class="btn-sm" style="cursor:pointer;background:var(--gold-mid);color:#fff;border:none" onclick="exportCurrentStagePdf()">📄 Generate report PDF</button>
     </div>
     <div id="ws-doclist"><div style="font-size:12px;color:var(--soft)"><span class="spin"></span> Loading…</div></div></div>`;
   const checkinList=(W.st.checkins||[]).slice().reverse().map(ci=>`<div class="checkin-entry">
@@ -1984,8 +1987,11 @@ function questionsBlock(stage,nextStage){
 function qans(id,v,stage,nextStage){W.answers[id]=W.answers[id]===v?undefined:v;renderWorkspace();}
 async function completeQuestions(nextStage){applyAnswers();const sc=scoreW();
   if(sc.dec.cls==='red'){return doEmail('reject','Declined');}
+  const completedStage=W.stage; /* capture before changing */
   W.stage=nextStage;W.st.due=today();logW('Completed step → '+nextStage+' (Q'+sc.Q+'/R'+sc.R+')');
   await saveW(true);toast('→ '+nextStage);
+  /* fire-and-forget PDF generation for the stage we just completed */
+  autoUploadStageReport(W,completedStage).catch(e=>console.warn('PDF upload bg:',e.message));
   /* auto-progression handled by advanceWS pattern: clear focus + open next email if applicable */
   W.focusedHub=null;
   renderWorkspace();
@@ -2269,52 +2275,340 @@ async function pollInboxForCandidateEmails(){
   }catch(e){console.warn('Inbox poll error:',e.message);}
 }
 
-async function uploadHiredActivityLog(c){  const sc=scoreW();
-  const lines=[];
-  lines.push('# Candidate Activity Log — '+c.name);
-  lines.push('');
-  lines.push('Generated: '+new Date().toLocaleString());
-  lines.push('');
-  lines.push('## Identity');
-  lines.push('- **Name:** '+c.name);
-  lines.push('- **Phone:** '+(c.phone||'—'));
-  lines.push('- **Email:** '+(c.email||'—'));
-  lines.push('- **Source:** '+(c.source||'—'));
-  lines.push('- **Address:** '+(c.st.address||'—'));
-  lines.push('');
-  lines.push('## Scores at Hire');
-  lines.push('- **Quality:** '+sc.qScore+'/100');
-  lines.push('- **Retention:** '+sc.rScore+'/100');
-  lines.push('- **Band:** '+sc.dec.band);
-  lines.push('');
-  lines.push('## Credentials & Expertise');
-  lines.push('- **Certificates:** '+((c.st.certs||[]).join(', ')||'—'));
-  lines.push('- **Expertise:** '+((c.st.pills||[]).join(', ')||'—'));
-  lines.push('- **Driver\'s license:** '+(c.st.license||'—'));
-  lines.push('');
-  lines.push('## Background checks');
-  lines.push('- **Required state check:** '+(c.st.reqCheck||'—'));
-  lines.push('- **3rd-party check:** '+(c.st.tpCheck||'—'));
-  lines.push('');
-  lines.push('## Employers verified');
-  (c.st.employers||[]).forEach(e=>lines.push('- '+(e.name||'(blank)')+' — '+(e.v||'—')));
-  if(!(c.st.employers||[]).length)lines.push('- (none recorded)');
-  lines.push('');
-  lines.push('## References');
-  (c.st.refs||[]).forEach(r=>lines.push('- '+(r.name||'(blank)')+' — '+(r.phone||'')+' — '+(r.notes||'')));
-  if(!(c.st.refs||[]).length)lines.push('- (none recorded)');
-  lines.push('');
-  lines.push('## Full activity timeline');
-  (c.st.log||[]).forEach(l=>lines.push('- ['+(l.t||'')+'] '+(l.x||'')));
-  lines.push('');
-  const content=lines.join('\n');
-  /* upload to the candidate's onboarding folder */
-  const folder='caregivers/'+safeFileName(c.name)+'/onboarding';
+/* ===================== PDF report generation =====================
+   Clean, professional PDFs uploaded to /caregivers/{name}/onboarding/.
+   - Phone screen report (after Phone Screen completion)
+   - Interview report (after Interview completion)
+   - Reference check summary (after References completion)
+   - Background check summary (after Offer/Onboarding)
+   - Final activity log (at Hire)
+   - On-demand export from the candidate workspace
+*/
+const PDF={
+  ML:14,MR:14,MT:18,W:210,H:297,TW:182,
+  navy:[26,63,114],sky:[30,78,140],gold:[200,135,10],muted:[120,127,139],ink:[28,36,51],paper:[250,250,247]
+};
+function _pdfHeader(doc,title,subtitle){
+  /* Solid navy block with the wordmark + subtle gold rule + title block */
+  doc.setFillColor.apply(doc,PDF.navy);
+  doc.rect(0,0,PDF.W,24,'F');
+  doc.setTextColor(255,255,255);
+  doc.setFont('helvetica','bold');doc.setFontSize(12);
+  doc.text('SOLURA HOME CARE',PDF.ML,12);
+  doc.setFont('helvetica','normal');doc.setFontSize(8.5);
+  doc.text('Cleveland Heights, OH · License 4574HHN',PDF.ML,18);
+  /* date right-aligned */
+  const dateStr=new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  doc.text(dateStr,PDF.W-PDF.MR,12,{align:'right'});
+  /* gold accent line */
+  doc.setDrawColor.apply(doc,PDF.gold);doc.setLineWidth(.7);doc.line(0,24,PDF.W,24);
+  /* title block */
+  doc.setTextColor.apply(doc,PDF.ink);
+  doc.setFont('helvetica','bold');doc.setFontSize(20);
+  doc.text(title,PDF.ML,40);
+  if(subtitle){
+    doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor.apply(doc,PDF.muted);
+    doc.text(subtitle,PDF.ML,47);
+    return 56;
+  }
+  return 50;
+}
+function _pdfSection(doc,label,y){
+  if(y>265){doc.addPage();y=24;}
+  doc.setFont('helvetica','bold');doc.setFontSize(10);
+  doc.setTextColor.apply(doc,PDF.sky);
+  doc.text(label.toUpperCase(),PDF.ML,y);
+  doc.setDrawColor.apply(doc,PDF.gold);doc.setLineWidth(.4);
+  doc.line(PDF.ML,y+1.5,PDF.ML+28,y+1.5);
+  return y+8;
+}
+function _pdfKV(doc,k,v,y){
+  if(y>275){doc.addPage();y=24;}
+  doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor.apply(doc,PDF.muted);
+  doc.text(k,PDF.ML,y);
+  doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor.apply(doc,PDF.ink);
+  const value=String(v==null||v===''?'—':v);
+  const lines=doc.splitTextToSize(value,PDF.TW-40);
+  doc.text(lines,PDF.ML+40,y);
+  return y+Math.max(5,lines.length*5);
+}
+function _pdfPara(doc,text,y){
+  if(y>270){doc.addPage();y=24;}
+  doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor.apply(doc,PDF.ink);
+  const lines=doc.splitTextToSize(String(text||''),PDF.TW);
+  /* page-break on long paragraphs */
+  for(let i=0;i<lines.length;i++){
+    if(y>275){doc.addPage();y=24;}
+    doc.text(lines[i],PDF.ML,y);
+    y+=5;
+  }
+  return y+2;
+}
+function _pdfFooter(doc){
+  const pages=doc.internal.getNumberOfPages();
+  for(let i=1;i<=pages;i++){
+    doc.setPage(i);
+    doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor.apply(doc,PDF.muted);
+    doc.text('Solura Home Care — Confidential',PDF.ML,PDF.H-8);
+    doc.text('Page '+i+' of '+pages,PDF.W-PDF.MR,PDF.H-8,{align:'right'});
+  }
+}
+function _pdfCandidateHead(doc,c,y){
+  y=_pdfSection(doc,'Candidate',y);
+  y=_pdfKV(doc,'Name',c.name||'',y);
+  y=_pdfKV(doc,'Email',c.email||'',y);
+  y=_pdfKV(doc,'Phone',c.phone||'',y);
+  if(c.st&&c.st.address)y=_pdfKV(doc,'Address',c.st.address,y);
+  if(c.source)y=_pdfKV(doc,'Source',c.source,y);
+  return y+3;
+}
+/* ----- Phone-screen / Interview Q&A formatter ----- */
+function _pdfQA(doc,c,stage,y){
+  y=_pdfSection(doc,stage==='Interview'?'Interview responses':'Phone screen responses',y);
+  const answers=(c.st&&c.st.answers)||{};
+  const qs=QBANK.filter(q=>q.st===stage);
+  if(!qs.length){y=_pdfPara(doc,'(no questions in question bank for this stage)',y);return y;}
+  qs.forEach(q=>{
+    if(y>260){doc.addPage();y=24;}
+    /* question */
+    doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor.apply(doc,PDF.ink);
+    const qLines=doc.splitTextToSize(q.q,PDF.TW);
+    doc.text(qLines,PDF.ML,y);y+=qLines.length*5+1;
+    /* answer */
+    const ans=answers[q.id];
+    let label='— not answered —';let valColor=PDF.muted;
+    if(ans!==undefined){
+      const found=(q.o||[]).find(o=>String(o[1])===String(ans));
+      label=found?found[0]:String(ans);
+      valColor=PDF.sky;
+    }
+    doc.setFont('helvetica','italic');doc.setFontSize(9.5);doc.setTextColor.apply(doc,valColor);
+    doc.text('→ '+label,PDF.ML+4,y);
+    y+=8;
+  });
+  return y;
+}
+/* ----- Scores block ----- */
+function _pdfScores(doc,c,y){
+  y=_pdfSection(doc,'Scoring & decision band',y);
+  const sc=(W&&W.row===c.excelRow)?scoreW():null;
+  if(sc){
+    y=_pdfKV(doc,'Quality (Q)',sc.qScore+' / 100',y);
+    y=_pdfKV(doc,'Retention (R)',sc.rScore+' / 100',y);
+    y=_pdfKV(doc,'Band',sc.dec.band||'—',y);
+    if(sc.dec.next)y=_pdfKV(doc,'Recommended',sc.dec.next,y);
+  }else{
+    y=_pdfPara(doc,'(scores not computable outside the candidate workspace)',y);
+  }
+  return y+3;
+}
+
+/* ===================== individual report generators ===================== */
+function _jspdfNew(){const J=(window.jspdf&&window.jspdf.jsPDF);if(!J)throw new Error('jsPDF not loaded — check internet connection');return new J({unit:'mm',format:'a4'});}
+
+function generatePhoneScreenPdf(c){
+  const doc=_jspdfNew();
+  let y=_pdfHeader(doc,'Phone Screen Report','Conducted on '+(new Date().toLocaleDateString()));
+  y=_pdfCandidateHead(doc,c,y);
+  /* eligibility gates summary */
+  y=_pdfSection(doc,'Eligibility gates',y);
+  const g=c.gates||{};const sym=v=>v==='✓'?'Pass':v==='✗'?'Fail':v==='?'?'Pending':'—';
+  y=_pdfKV(doc,'Work authorization',sym(g.wa),y);
+  y=_pdfKV(doc,'Credential',sym(g.cr),y);
+  y=_pdfKV(doc,'Background check',sym(g.bg),y);
+  y=_pdfKV(doc,'Transportation',sym(g.tr),y);
+  y=_pdfKV(doc,'Availability',sym(g.av),y);
+  y+=3;
+  y=_pdfQA(doc,c,'PhoneScreen',y);
+  y=_pdfScores(doc,c,y);
+  _pdfFooter(doc);
+  return doc.output('blob');
+}
+function generateInterviewPdf(c){
+  const doc=_jspdfNew();
+  let y=_pdfHeader(doc,'Interview Report','Conducted on '+(new Date().toLocaleDateString()));
+  y=_pdfCandidateHead(doc,c,y);
+  y=_pdfQA(doc,c,'Interview',y);
+  y=_pdfScores(doc,c,y);
+  _pdfFooter(doc);
+  return doc.output('blob');
+}
+function generateRefsPdf(c){
+  const doc=_jspdfNew();
+  let y=_pdfHeader(doc,'Reference Check Summary','Compiled '+(new Date().toLocaleDateString()));
+  y=_pdfCandidateHead(doc,c,y);
+  const REL={supervisor:'Former supervisor',coworker:'Coworker',patientFamily:'Patient family',case_manager:'Case manager',personal:'Personal',other:'Other'};
+  const OUT={strong:'Strong endorsement',mixed:'Mixed',negative:'Negative',nopickup:"Couldn't reach",bad_num:'Bad number'};
+  const refs=(c.st&&c.st.refs)||[];
+  if(!refs.length){y=_pdfPara(doc,'(no references on file)',y);}
+  else{
+    refs.forEach((r,i)=>{
+      y=_pdfSection(doc,'Reference '+(i+1)+' — '+(r.name||'(no name)'),y);
+      y=_pdfKV(doc,'Relationship',r.relationshipLabel||REL[r.relationship]||r.relationship||'—',y);
+      y=_pdfKV(doc,'Phone',r.phone||'',y);
+      if(r.email)y=_pdfKV(doc,'Email',r.email,y);
+      if(r.durationLabel)y=_pdfKV(doc,'Known for',r.durationLabel,y);
+      if(r.bestTimeLabel)y=_pdfKV(doc,'Best time',r.bestTimeLabel,y);
+      if(r.submittedAt)y=_pdfKV(doc,'Source','Submitted by candidate via form on '+new Date(r.submittedAt).toLocaleDateString(),y);
+      if(r.notes){
+        doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor.apply(doc,PDF.muted);
+        doc.text('Candidate notes:',PDF.ML,y);y+=5;
+        y=_pdfPara(doc,r.notes,y);
+      }
+      if(r.outcome){
+        y=_pdfKV(doc,'Call outcome',OUT[r.outcome]||r.outcome,y);
+      }
+      if(r.callNotes){
+        doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor.apply(doc,PDF.muted);
+        doc.text('Our notes from the call:',PDF.ML,y);y+=5;
+        y=_pdfPara(doc,r.callNotes,y);
+      }
+      y+=3;
+    });
+  }
+  _pdfFooter(doc);
+  return doc.output('blob');
+}
+function generateBackgroundPdf(c){
+  const doc=_jspdfNew();
+  let y=_pdfHeader(doc,'Background Check Summary','Compiled '+(new Date().toLocaleDateString()));
+  y=_pdfCandidateHead(doc,c,y);
+  y=_pdfSection(doc,'Overall status',y);
+  y=_pdfKV(doc,'Required state check (BCII)',c.st.reqCheck||'pending',y);
+  y=_pdfKV(doc,'3rd-party check',c.st.tpCheck||'pending',y);
+  y+=3;
+  y=_pdfSection(doc,'Registry checks',y);
+  const rc=(c.st&&c.st.registryChecks)||{};
+  REGISTRIES.forEach(reg=>{
+    const r=rc[reg.k]||{};
+    const status=r.status==='clean'?'Clean':r.status==='flag'?'FOUND — flagged':r.status==='na'?'N/A':'Not checked';
+    y=_pdfKV(doc,reg.l,status,y);
+    if(r.notes)y=_pdfPara(doc,'   '+r.notes,y);
+  });
+  _pdfFooter(doc);
+  return doc.output('blob');
+}
+function generateActivityLogPdf(c){
+  const doc=_jspdfNew();
+  let y=_pdfHeader(doc,'Candidate Activity Log','Generated '+(new Date().toLocaleString()));
+  y=_pdfCandidateHead(doc,c,y);
+  /* scores at hire */
+  y=_pdfScores(doc,c,y);
+  /* credentials & expertise */
+  y=_pdfSection(doc,'Credentials & expertise',y);
+  y=_pdfKV(doc,'Certificates',((c.st.certs||[]).join(', '))||'—',y);
+  y=_pdfKV(doc,'Expertise',((c.st.pills||[]).join(', '))||'—',y);
+  y=_pdfKV(doc,"Driver's license",c.st.license||'—',y);
+  y+=3;
+  /* background */
+  y=_pdfSection(doc,'Background',y);
+  y=_pdfKV(doc,'Required state check',c.st.reqCheck||'—',y);
+  y=_pdfKV(doc,'3rd-party check',c.st.tpCheck||'—',y);
+  y+=3;
+  /* employers */
+  y=_pdfSection(doc,'Past employers',y);
+  const emp=c.st.employers||[];
+  if(!emp.length)y=_pdfPara(doc,'(none recorded)',y);
+  else emp.forEach(e=>{y=_pdfKV(doc,e.name||'(blank)',e.v==='ok'?'Verified':e.v==='no'?'Unable to verify':'Not checked',y);});
+  y+=3;
+  /* refs */
+  y=_pdfSection(doc,'References',y);
+  const refs=c.st.refs||[];
+  if(!refs.length)y=_pdfPara(doc,'(none recorded)',y);
+  else refs.forEach(r=>{y=_pdfKV(doc,(r.name||'(blank)')+(r.phone?' · '+r.phone:''),r.outcome||(r.submittedAt?'submitted via form':'manual'),y);});
+  y+=3;
+  /* activity timeline */
+  y=_pdfSection(doc,'Full activity timeline',y);
+  const log=c.st.log||[];
+  if(!log.length)y=_pdfPara(doc,'(no log entries)',y);
+  else log.forEach(l=>{
+    if(y>270){doc.addPage();y=24;}
+    doc.setFont('helvetica','bold');doc.setFontSize(8);doc.setTextColor.apply(doc,PDF.muted);
+    doc.text(l.t||'',PDF.ML,y);
+    doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.setTextColor.apply(doc,PDF.ink);
+    const txt=doc.splitTextToSize(l.x||'',PDF.TW-32);
+    doc.text(txt,PDF.ML+32,y);
+    y+=Math.max(5,txt.length*4.5)+1;
+  });
+  _pdfFooter(doc);
+  return doc.output('blob');
+}
+
+/* ===================== upload helper ===================== */
+async function uploadPdfToOnboarding(candidateName,fileName,blob){
+  const folder='caregivers/'+safeFileName(candidateName)+'/onboarding';
   await ensureFolderPath(folder);
-  const path=folder+'/activity-log-'+today()+'.md';
+  const buffer=await blob.arrayBuffer();
+  const bytes=new Uint8Array(buffer);
+  const path=folder+'/'+fileName;
   const enc=path.split('/').map(encodeURIComponent).join('/');
-  await gfetch(GR+'/drives/'+driveId+'/root:/'+enc+':/content',{method:'PUT',headers:{'Content-Type':'text/markdown'},body:content});
-  toast('✓ Activity log uploaded to SharePoint');
+  const r=await fetch(GR+'/drives/'+driveId+'/root:/'+enc+':/content',{
+    method:'PUT',
+    headers:{Authorization:'Bearer '+tok,'Content-Type':'application/pdf'},
+    body:bytes
+  });
+  if(!r.ok)throw new Error('Upload failed: '+r.status);
+  return r.json();
+}
+
+/* Auto-generate the right report based on the stage that just completed.
+   Called from completeQuestions() and advanceWS() at the appropriate moments. */
+async function autoUploadStageReport(c,fromStage){
+  if(!c||!window.jspdf){return;}
+  try{
+    let blob,fileName;
+    const ts=today();
+    if(fromStage==='Phone Screen'||fromStage==='Screen booked'){
+      blob=generatePhoneScreenPdf(c);fileName='phone-screen-report-'+ts+'.pdf';
+    }else if(fromStage==='Interview'||fromStage==='Interview booked'){
+      blob=generateInterviewPdf(c);fileName='interview-report-'+ts+'.pdf';
+    }else if(fromStage==='References'){
+      blob=generateRefsPdf(c);fileName='references-summary-'+ts+'.pdf';
+    }else{return;}
+    await uploadPdfToOnboarding(c.name,fileName,blob);
+    toast('📄 '+fileName+' saved');
+  }catch(e){console.warn('PDF auto-upload failed:',e.message);}
+}
+
+/* On-demand: button in the workspace docs card lets the user generate the report
+   appropriate to the current stage. */
+async function exportCurrentStagePdf(){
+  if(!W){return;}
+  const stage=W.stage;
+  let blob,fileName;
+  try{
+    const ts=today();
+    if(stage==='Screen booked'||W.answers&&Object.keys(W.answers).some(k=>QBANK.find(q=>q.id===k&&q.st==='PhoneScreen'))){
+      blob=generatePhoneScreenPdf(W);fileName='phone-screen-report-'+ts+'.pdf';
+    }else if(stage==='Interview booked'||W.answers&&Object.keys(W.answers).some(k=>QBANK.find(q=>q.id===k&&q.st==='Interview'))){
+      blob=generateInterviewPdf(W);fileName='interview-report-'+ts+'.pdf';
+    }else if((W.st.refs||[]).length){
+      blob=generateRefsPdf(W);fileName='references-summary-'+ts+'.pdf';
+    }else{
+      /* fall back: full activity log */
+      blob=generateActivityLogPdf(W);fileName='activity-log-'+ts+'.pdf';
+    }
+    /* download to user AND upload to SharePoint */
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=fileName;a.click();
+    URL.revokeObjectURL(url);
+    await uploadPdfToOnboarding(W.name,fileName,blob);
+    toast('📄 '+fileName+' saved + downloaded');
+  }catch(e){
+    toast('PDF generation failed: '+e.message);
+  }
+}
+
+/* ===================== Hired activity-log (now PDF) ===================== */
+async function uploadHiredActivityLog(c){
+  try{
+    const blob=generateActivityLogPdf(c);
+    await uploadPdfToOnboarding(c.name,'activity-log-'+today()+'.pdf',blob);
+    toast('✓ Hired packet uploaded to SharePoint');
+  }catch(e){
+    console.warn('Hired log upload failed:',e.message);
+    toast('Activity log upload failed: '+e.message);
+  }
 }
 function safeFileName(s){return String(s).replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,' ').trim();}
 async function ensureFolderPath(p){const segs=p.split('/');let cur='';
