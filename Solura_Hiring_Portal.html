@@ -762,6 +762,41 @@ td{padding:13px 16px;vertical-align:top;}
 select.app-edit-input{cursor:pointer;}
 @media(max-width:640px){.app-row{flex-direction:column;align-items:flex-start;gap:4px;}.app-label{flex:0 0 auto;}}
 
+/* ===== Change-request FAB + modal ===== */
+.fb-fab{position:fixed;bottom:18px;right:18px;width:48px;height:48px;border-radius:50%;background:var(--gold);color:#fff;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(197,155,78,.35);z-index:480;display:flex;align-items:center;justify-content:center;transition:filter .08s ease-out,box-shadow .08s ease-out;}
+.fb-fab:hover{filter:brightness(1.05);box-shadow:0 6px 20px rgba(197,155,78,.5);}
+.fb-fab:active{filter:brightness(.95);}
+.fb-fab-badge{position:absolute;top:-3px;right:-3px;background:var(--sky-deep);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;padding:0 5px;display:none;align-items:center;justify-content:center;border:2px solid #fff;}
+.fb-fab.has-items .fb-fab-badge{display:inline-flex;}
+.fb-modal{position:fixed;inset:0;background:rgba(40,28,18,.5);z-index:700;display:flex;align-items:center;justify-content:center;opacity:0;visibility:hidden;transition:opacity .1s ease-out,visibility 0s linear .1s;padding:20px;}
+.fb-modal.open{opacity:1;visibility:visible;transition:opacity .1s ease-out,visibility 0s linear 0s;}
+.fb-modal-card{background:#fff;border-radius:14px;max-width:680px;width:100%;max-height:84vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.35);border:2px solid var(--gold-mid);}
+.fb-modal-head{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:12px;background:var(--cream);}
+.fb-modal-head h2{font-family:'Cormorant Garamond',serif;font-size:22px;color:var(--sky-deep);font-weight:600;margin:0;flex:1;}
+.fb-modal-head-count{font-size:11.5px;color:var(--soft);font-weight:600;text-transform:uppercase;letter-spacing:.05em;}
+.fb-modal-input-row{padding:14px 22px;border-bottom:1px solid var(--border-soft);display:flex;gap:8px;align-items:stretch;background:#FCFCFA;}
+.fb-modal-input-row textarea{flex:1;min-height:64px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;resize:vertical;background:#fff;color:var(--ink);line-height:1.5;transition:border-color .08s ease-out,box-shadow .08s ease-out;}
+.fb-modal-input-row textarea:focus{border-color:var(--sky-deep);box-shadow:0 0 0 2px rgba(58,125,201,.15);}
+.fb-modal-input-row button{padding:0 18px;background:var(--grn);color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;font-family:inherit;font-size:13px;transition:filter .08s ease-out;white-space:nowrap;}
+.fb-modal-input-row button:hover{filter:brightness(1.05);}
+.fb-modal-list{flex:1;overflow-y:auto;padding:6px 22px;}
+.fb-item{padding:13px 0;border-bottom:1px solid var(--border-soft);display:grid;grid-template-columns:130px 1fr 28px;gap:14px;align-items:start;animation:fadeIn .12s ease-out both;}
+.fb-item:last-child{border-bottom:none;}
+.fb-meta{font-size:10.5px;color:var(--soft);font-weight:700;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;padding-top:3px;}
+.fb-text{font-size:13px;color:var(--ink);line-height:1.55;white-space:pre-wrap;word-break:break-word;}
+.fb-rm{background:none;border:none;color:var(--soft);cursor:pointer;font-size:18px;padding:0;line-height:1;font-weight:300;transition:color .08s ease-out;align-self:start;margin-top:2px;}
+.fb-rm:hover{color:var(--red);}
+.fb-empty{text-align:center;padding:48px 24px;color:var(--soft);font-size:13px;font-style:italic;line-height:1.55;}
+.fb-modal-foot{padding:13px 22px;border-top:1px solid var(--border);display:flex;justify-content:space-between;gap:8px;background:#FAFAF7;align-items:center;}
+.fb-modal-foot-l{display:flex;gap:6px;}
+.fb-modal-foot button{padding:8px 16px;border-radius:7px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:#fff;color:var(--mid);transition:background .08s ease-out,border-color .08s ease-out;}
+.fb-modal-foot button:hover{background:var(--cream);}
+.fb-modal-foot button.primary{background:var(--gold);color:#fff;border-color:var(--gold);}
+.fb-modal-foot button.primary:hover{filter:brightness(1.05);}
+.fb-modal-foot button.clear{color:var(--red);border-color:transparent;}
+.fb-modal-foot button.clear:hover{background:#FEE2E2;}
+@media(max-width:600px){.fb-fab{bottom:14px;right:14px;width:44px;height:44px;}.fb-modal{padding:0;align-items:flex-end;}.fb-modal-card{max-height:90vh;border-radius:14px 14px 0 0;}.fb-item{grid-template-columns:1fr 28px;gap:8px;}.fb-meta{grid-column:1;}}
+
 /* ===== Sequence password / sensitive sections lock ===== */
 .lockwall{max-width:560px;margin:60px auto;padding:48px 40px;text-align:center;background:#fff;border:1.5px solid var(--gold-mid);border-radius:14px;box-shadow:0 4px 24px rgba(197,155,78,.08);animation:fadeIn .15s ease-out both;}
 .lockwall-icon{font-size:48px;margin-bottom:14px;opacity:.65;}
@@ -4196,7 +4231,159 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.sty
   window.addEventListener('focus',()=>{if(tok)manualRefresh();});
   /* periodic refresh while portal is active — catches Cal.com bookings without manual refresh.
      60s cadence is gentle on rate limits and enough to feel "live" for hiring workflow. */
-  setInterval(()=>{if(tok&&!document.hidden&&!_saveInFlight)manualRefresh();},60000);})();
+  setInterval(()=>{if(tok&&!document.hidden&&!_saveInFlight)manualRefresh();},60000);
+  /* Initialize the change-request FAB badge on load. */
+  setTimeout(updateFabBadge,500);
+  })();
+
+/* ===================== Change-request log =====================
+   Floating button bottom-right opens a modal where the user can jot down change requests
+   as they think of them. Persists to localStorage (private to this browser, not the sheet).
+   Exports as PDF or Word/Markdown so the user can feed a batched list to Claude in a fresh
+   session instead of pinging mid-task.
+   Bottom-up flow: each entry timestamped, stable across reloads, exportable any time. */
+function getFeedback(){try{return JSON.parse(localStorage.getItem('solura_feedback')||'[]');}catch(e){return [];}}
+function saveFeedbackList(items){localStorage.setItem('solura_feedback',JSON.stringify(items));updateFabBadge();}
+
+function feedbackToggle(){
+  const m=document.getElementById('fb-modal');
+  if(!m)return;
+  m.classList.toggle('open');
+  if(m.classList.contains('open')){
+    renderFeedback();
+    setTimeout(()=>{const inp=document.getElementById('fb-input');if(inp)inp.focus();},80);
+  }
+}
+
+function addFeedback(){
+  const input=document.getElementById('fb-input');
+  if(!input)return;
+  const text=input.value.trim();
+  if(!text)return;
+  const items=getFeedback();
+  items.unshift({id:Date.now(),t:new Date().toISOString(),text});
+  saveFeedbackList(items);
+  input.value='';
+  renderFeedback();
+}
+
+function removeFeedback(id){
+  const items=getFeedback().filter(i=>i.id!==id);
+  saveFeedbackList(items);
+  renderFeedback();
+}
+
+function clearAllFeedback(){
+  if(!confirm('Delete all change requests? Export first if you haven\'t already.'))return;
+  saveFeedbackList([]);
+  renderFeedback();
+}
+
+function renderFeedback(){
+  const items=getFeedback();
+  const list=items.length?items.map(i=>{
+    const dt=new Date(i.t);
+    const when=dt.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    return `<div class="fb-item">
+      <div class="fb-meta">${esc(when)}</div>
+      <div class="fb-text">${esc(i.text)}</div>
+      <button class="fb-rm" onclick="removeFeedback(${i.id})" title="Delete this entry">×</button>
+    </div>`;
+  }).join(''):'<div class="fb-empty">No notes yet. Add changes you want as they come to mind — they\'ll save automatically and you can export the batch when ready.</div>';
+  const listEl=document.getElementById('fb-list');if(listEl)listEl.innerHTML=list;
+  const countEl=document.getElementById('fb-count');if(countEl)countEl.textContent=items.length;
+}
+
+function updateFabBadge(){
+  const items=getFeedback();
+  const fab=document.getElementById('fb-fab');
+  const badge=document.getElementById('fb-fab-badge');
+  if(!fab||!badge)return;
+  if(items.length>0){
+    fab.classList.add('has-items');
+    badge.textContent=items.length>99?'99+':items.length;
+  }else{
+    fab.classList.remove('has-items');
+  }
+}
+
+function exportFeedbackPdf(){
+  const items=getFeedback();
+  if(!items.length){toast('No entries to export');return;}
+  if(!window.jspdf){toast('PDF library not loaded');return;}
+  const doc=_jspdfNew();
+  let y=_pdfHeader(doc,'Solura Hiring Portal — Change Requests','Compiled '+new Date().toLocaleString());
+  doc.setFontSize(9.5);doc.setTextColor(90,90,90);
+  const intro='The following are change requests collected by the user while using the portal. Each item is timestamped with when it was logged. Address them in order or by priority — the user has not pre-sorted them.';
+  const introLines=doc.splitTextToSize(intro,540);
+  doc.text(introLines,24,y);y+=introLines.length*4.5+8;
+  items.forEach((i,idx)=>{
+    const dt=new Date(i.t).toLocaleString();
+    y=_pdfSection(doc,(idx+1)+'. '+dt,y);
+    y=_pdfPara(doc,i.text,y);
+    y+=4;
+  });
+  _pdfFooter(doc);
+  doc.save('solura-changes-'+today()+'.pdf');
+  toast('PDF exported — '+items.length+' item'+(items.length===1?'':'s'));
+}
+
+function exportFeedbackDoc(){
+  const items=getFeedback();
+  if(!items.length){toast('No entries to export');return;}
+  /* Generate HTML disguised as .doc — Word opens this natively. Simple and dependency-free. */
+  let html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">';
+  html+='<head><meta charset="utf-8"><title>Change Requests</title></head>';
+  html+='<body style="font-family:Calibri,Arial,sans-serif;max-width:680px;margin:32px auto;color:#2A2622">';
+  html+='<h1 style="color:#3A7DC9;font-family:\'Cormorant Garamond\',Georgia,serif">Solura Hiring Portal — Change Requests</h1>';
+  html+='<p style="color:#888;font-size:11px"><i>Compiled '+esc(new Date().toLocaleString())+'</i></p>';
+  html+='<p style="font-size:13px;color:#555">The following are change requests collected by the user while using the portal. Each item is timestamped with when it was logged.</p>';
+  html+='<hr style="border:none;border-top:1px solid #ccc;margin:18px 0">';
+  items.forEach((i,idx)=>{
+    const dt=new Date(i.t).toLocaleString();
+    html+='<h2 style="color:#3A7DC9;font-size:15px;margin-top:24px;margin-bottom:6px">'+(idx+1)+'. '+esc(dt)+'</h2>';
+    html+='<p style="font-size:13px;line-height:1.6;white-space:pre-wrap">'+esc(i.text).replace(/\n/g,'<br>')+'</p>';
+  });
+  html+='</body></html>';
+  const blob=new Blob([html],{type:'application/msword'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='solura-changes-'+today()+'.doc';a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+
+<!-- ===================== Change-request FAB + modal ===================== -->
+<button class="fb-fab" id="fb-fab" onclick="feedbackToggle()" title="Log a change request">
+  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M11.5 2.5L13.5 4.5L5.5 12.5L2.5 13.5L3.5 10.5L11.5 2.5Z"/></svg>
+  <span class="fb-fab-badge" id="fb-fab-badge">0</span>
+</button>
+
+<div class="fb-modal" id="fb-modal" onclick="if(event.target===this)feedbackToggle()">
+  <div class="fb-modal-card">
+    <div class="fb-modal-head">
+      <h2>Change requests</h2>
+      <span class="fb-modal-head-count"><span id="fb-count">0</span> item<span id="fb-count-s">s</span></span>
+      <button onclick="feedbackToggle()" style="background:none;border:none;color:var(--soft);font-size:22px;cursor:pointer;padding:0 4px;line-height:1" title="Close">×</button>
+    </div>
+    <div class="fb-modal-input-row">
+      <textarea id="fb-input" placeholder="Type a change you want me to make, an idea, or anything to fix — saves automatically. Press Cmd/Ctrl + Enter to add." onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter')addFeedback()"></textarea>
+      <button onclick="addFeedback()">+ Add</button>
+    </div>
+    <div class="fb-modal-list" id="fb-list"></div>
+    <div class="fb-modal-foot">
+      <div class="fb-modal-foot-l">
+        <button class="primary" onclick="exportFeedbackPdf()" title="Download as PDF for Claude">↓ PDF</button>
+        <button onclick="exportFeedbackDoc()" title="Download as Word .doc for Claude">↓ Word</button>
+      </div>
+      <button class="clear" onclick="clearAllFeedback()" title="Erase all entries">Clear all</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* (post-FAB script — initialize the badge on load in case the FAB rendered after the IIFE) */
+function _fbReady(){if(typeof updateFabBadge==='function')updateFabBadge();}
+document.addEventListener('DOMContentLoaded',_fbReady);
 </script>
 </body>
 </html>
