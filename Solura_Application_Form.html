@@ -201,9 +201,12 @@ input:focus{border-color:var(--sky);box-shadow:0 0 0 3px var(--sky-pale)}
 
     <div class="card">
       <h2>Résumé</h2>
-      <div class="hint">Optional — but it helps us move faster.</div>
-      <label class="file"><input type="file" id="resume" accept=".pdf,.doc,.docx,.txt" onchange="fileChosen(this)">
-        <span class="ic">↑</span><span><span class="t" id="fileT">Upload your résumé</span><br><span class="s" id="fileS">PDF or Word · optional</span></span></label>
+      <div class="hint">PDF only — optional, but it helps us move faster.</div>
+      <label class="file"><input type="file" id="resume" accept=".pdf,application/pdf" onchange="fileChosen(this)">
+        <span class="ic">↑</span><span><span class="t" id="fileT">Upload your résumé</span><br><span class="s" id="fileS">PDF only · optional</span></span></label>
+      <div style="background:#FEF7E8;border:1px solid #E8B84B;color:#8B6500;padding:11px 14px;border-radius:9px;font-size:11.5px;margin-top:14px;line-height:1.55">
+        <b>⚠ All information is verified.</b> We check certifications, prior employers, references, and run background checks. Misrepresentation results in immediate disqualification.
+      </div>
     </div>
 
     <button class="submit" type="submit">Submit application</button>
@@ -413,8 +416,8 @@ function buildPayload(){
   };
 }
 // ---- webhook submission ----
-// Replace WEBHOOK_URL with your actual Cloudflare Worker URL after deploying.
-const WEBHOOK_URL='https://solura-hiring-webhook.meir-865.workers.dev/';
+// Cloudflare Worker URL — owner's deployed worker. If this changes, edit here AND in Solura_References_Form.html.
+const WEBHOOK_URL='https://solura-hiring-webhook.meir-865.workers.dev';
 
 function fileToBase64(file){return new Promise((res,rej)=>{const r=new FileReader();
   r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});}
@@ -434,6 +437,7 @@ async function submitForm(e){
   const resumeFile=document.getElementById('resume').files[0];
   if(resumeFile){
     if(resumeFile.size>10*1024*1024){alert('Résumé file is larger than 10MB. Please use a smaller file.');return;}
+    if(!(resumeFile.type==='application/pdf'||/\.pdf$/i.test(resumeFile.name))){alert('Résumé must be a PDF. Word documents and other formats are not accepted.');return;}
     try{
       payload.resume={name:resumeFile.name,type:resumeFile.type,data:await fileToBase64(resumeFile)};
     }catch(err){console.warn('Resume encode failed',err);}

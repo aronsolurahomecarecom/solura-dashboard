@@ -743,6 +743,49 @@ td{padding:13px 16px;vertical-align:top;}
 .attach-row button:disabled{opacity:.5;cursor:default;}
 .email-modal-foot{padding:12px 22px;border-top:1px solid var(--border);background:#FAFAF7;display:flex;justify-content:flex-end;gap:8px;}
 
+/* ===== Header icon buttons (filter + settings gear) ===== */
+.iconbtn{position:relative;background:transparent;border:1.5px solid var(--border);color:var(--mid);width:38px;height:38px;border-radius:9px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;margin-left:6px;transition:background .12s ease-out,border-color .12s ease-out,color .12s ease-out;}
+.iconbtn:hover{background:var(--cream);border-color:var(--sky-mid,#9DC4E8);color:var(--sky-deep);}
+.iconbtn svg{width:18px;height:18px;}
+.iconbtn .ct{position:absolute;top:-4px;right:-4px;background:var(--gold);color:#fff;font-size:9.5px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:grid;place-items:center;padding:0 4px;}
+.iconbtn.on{background:var(--sky-deep);border-color:var(--sky-deep);color:#fff;}
+
+/* ===== Active caregivers tab ===== */
+.active-shell{max-width:1200px;margin:0 auto;padding:24px 28px 60px;}
+.active-head{display:flex;align-items:baseline;gap:12px;margin-bottom:22px;}
+.active-head h1{font-family:'Cormorant Garamond',serif;font-size:30px;color:var(--sky-deep);font-weight:600;margin:0;}
+.active-count{font-size:12px;color:var(--soft);font-weight:600;text-transform:uppercase;letter-spacing:.08em;}
+.active-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;}
+.active-card{background:#fff;border:1.5px solid var(--border);border-radius:13px;padding:16px 18px;transition:border-color .12s ease-out,box-shadow .12s ease-out;animation:fadeUp .18s ease-out both;}
+.active-card:hover{border-color:var(--sky-mid,#9DC4E8);box-shadow:0 4px 18px rgba(58,125,201,.08);}
+.active-card-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:13px;}
+.active-name{font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600;color:var(--dark);}
+.active-meta{font-size:11.5px;color:var(--soft);margin-top:2px;}
+.active-info{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;margin-bottom:14px;padding:12px 0;border-top:1px solid var(--border-soft);border-bottom:1px solid var(--border-soft);}
+.kv-mini{display:flex;flex-direction:column;gap:1px;}
+.kv-mini span{font-size:9.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.06em;}
+.kv-mini b{font-size:12px;color:var(--ink);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.active-actions{display:flex;gap:6px;flex-wrap:wrap;}
+
+/* ===== Stiffer animations — replace previous "solid" with "stiff" =====
+   Shorter durations, no translateY, opacity-only entries. */
+.workspace{position:fixed;top:40px;left:60px;right:60px;bottom:40px;background:var(--warm);border-radius:18px;z-index:501;box-shadow:0 30px 80px rgba(0,0,0,.42);overflow:hidden;display:flex;flex-direction:column;border:2px solid var(--gold-mid);opacity:0;visibility:hidden;transition:opacity .15s ease-out,visibility 0s linear .15s !important;}
+.workspace.open{opacity:1 !important;visibility:visible !important;transition:opacity .15s ease-out,visibility 0s linear 0s !important;}
+.workspace{transition:opacity .15s ease-out,visibility 0s linear .15s,top .2s ease-out,left .2s ease-out,right .2s ease-out,bottom .2s ease-out,border-radius .2s ease-out,width .2s ease-out,height .2s ease-out !important;}
+.email-modal{transition:opacity .12s ease-out;}
+.email-modal-card{transition:max-width .2s ease-out,max-height .2s ease-out,width .2s ease-out,height .2s ease-out,border-radius .15s ease-out;}
+@keyframes fadeUp{from{opacity:0}to{opacity:1}}
+.wscard{animation:fadeUp .15s ease-out both;}
+.wscard:nth-child(2){animation-delay:20ms;}
+.wscard:nth-child(3){animation-delay:40ms;}
+.wscard:nth-child(4){animation-delay:60ms;}
+.wscard:nth-child(5){animation-delay:80ms;}
+.btn-primary,.btn-sec{transition:background .1s ease-out,box-shadow .1s ease-out,border-color .1s ease-out,color .1s ease-out;}
+.btn-primary:active,.btn-sec:active{filter:brightness(.92);}
+.meet-btn{transition:box-shadow .1s ease-out,filter .1s ease-out;}
+.meet-btn:hover{filter:brightness(1.03);}
+.meet-btn:active{filter:brightness(.9);}
+
 /* ===== Settings shell — sidebar + content layout ===== */
 .set-shell{display:flex;gap:0;min-height:calc(100vh - 130px);max-width:1200px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 20px rgba(20,40,80,.05);}
 .set-sidebar{width:240px;flex:0 0 auto;background:linear-gradient(to bottom,#FAFAF7,#fff);border-right:1px solid var(--border);padding:22px 14px;}
@@ -876,11 +919,17 @@ td{padding:13px 16px;vertical-align:top;}
     <div class="tabs-bar" id="tabsbar">
       <button class="tab-btn on" id="tab-pipe" onclick="setView('pipeline')">Pipeline</button>
       <button class="tab-btn" id="tab-cal" onclick="setView('calendar')">Calendar</button>
-      <button class="tab-btn" id="tab-set" onclick="setView('settings')">Settings</button>
+      <button class="tab-btn" id="tab-active" onclick="setView('active')">Active caregivers</button>
     </div>
-    <button class="filterbtn" id="btn-filter" style="display:none" onclick="toggleFilterPanel()">⚙ Filter <span class="ct" id="filterct" style="display:none">0</span></button>
+    <button class="iconbtn" id="btn-filter" style="display:none" onclick="toggleFilterPanel()" title="Filter">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h12M4 8h8M6 13h4"/></svg>
+      <span class="ct" id="filterct" style="display:none">0</span>
+    </button>
     <button class="refresh-btn" id="hdr-refresh" style="display:none" onclick="manualRefresh()" title="Refresh data from sheet">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8a6 6 0 0 1 10.243-4.243M14 8a6 6 0 0 1-10.243 4.243"/><path d="M12 3v3h-3M4 13v-3h3"/></svg>
+    </button>
+    <button class="iconbtn" id="tab-set" style="display:none" onclick="setView('settings')" title="Settings">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M1 8h2M13 8h2M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/></svg>
     </button>
     <div class="sync-pill"><div class="sdot" id="sdot"></div><span id="slabel">Not connected</span></div>
     <button class="hbtn hbtn-gold" id="btn-add" style="display:none" onclick="openAdd()">+ Add</button>
@@ -923,6 +972,7 @@ td{padding:13px 16px;vertical-align:top;}
     <div class="sw sw-all collapsed" id="sw-4" style="margin-top:8px"><div class="shdr" onclick="toggleBucket(4)"><div class="sdot2 soft"></div><div class="stitle">All candidates in pipeline</div><div class="scnt" id="c4">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t4"></tbody></table></div></div>
   </div>
   <div id="calendar-view" style="display:none"></div>
+  <div id="active-view" style="display:none"></div>
   <div id="settings-view" style="display:none"></div>
 </div>
 
@@ -1307,6 +1357,16 @@ function predictedQuality(c){
 function action(c){
   const s=c.stage,st=c.st,info=STAGEINFO[s]||STAGEINFO['Applied'];
   if(s==='Declined')return{bucket:'closed',info};
+  /* Email-as-action: if candidate sent us mail since we last opened their workspace,
+     surface them as Action with primary = open the most recent unread.
+     This overrides whatever stage-driven primary would otherwise apply. */
+  const emails=(st.emails||[]);
+  const unread=emails.filter(e=>!e.seen);
+  if(unread.length){
+    const newest=unread[0];
+    const subj=(newest.subject||'(no subject)').slice(0,60);
+    return{bucket:'action',timing:{txt:'New email from candidate',pill:'pa',date:subj},info,primary:{kind:'open-email',emailId:newest.id,label:'✉ Open new email ('+unread.length+')',cls:'sky'}};
+  }
   const sc=scoreRow(c),gatesIncomplete=sc.gateStatus==='partial';
   const m=st.booking?minsUntil(st.booking):null;
   const dn=(txt,pill,date)=>({txt:txt,pill:pill||'pnew',date:date||''});
@@ -1319,6 +1379,7 @@ function action(c){
     primary={kind:'checkin',label:'Log check-in',cls:'grn'};}
   else if(s==='Applied'){
     const pq=predictedQuality(c);
+    const hasResume=!!(c.st&&c.st.hasResume);
     if(sc.dec.cls==='red'||pq.tier==='decline'){
       const reasons=pq.tier==='decline'?pq.reasons:['Score below bar'];
       bucket='action';
@@ -1328,6 +1389,10 @@ function action(c){
       bucket='action';
       timing=dn('Review first — '+pq.reasons.slice(0,2).join(', '),'pa');
       primary={kind:'open',label:'Review before inviting',cls:'gold'};
+    }else if(!hasResume){
+      bucket='action';
+      timing=dn('No résumé on file','pnew');
+      primary={kind:'email-tpl',tpl:'request_resume',label:'Request résumé',cls:'gold'};
     }else{
       bucket='action';
       timing=dn('Send screen invite','pnew');
@@ -1444,21 +1509,73 @@ function setView(v){
   view=v;
   document.getElementById('tab-pipe').classList.toggle('on',v==='pipeline');
   document.getElementById('tab-cal').classList.toggle('on',v==='calendar');
+  document.getElementById('tab-active').classList.toggle('on',v==='active');
   document.getElementById('tab-set').classList.toggle('on',v==='settings');
   document.getElementById('pipeline-view').style.display=v==='pipeline'?'block':'none';
   document.getElementById('calendar-view').style.display=v==='calendar'?'block':'none';
+  document.getElementById('active-view').style.display=v==='active'?'block':'none';
   document.getElementById('settings-view').style.display=v==='settings'?'block':'none';
   document.getElementById('sync-bar').style.display=v==='pipeline'?'flex':'none';
   if(v==='settings'){seqInit();renderSettings();}
+  if(v==='active')renderActiveCaregivers();
   render();
 }
-function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return renderCalendar();
-  const B={action:[],awaiting:[],checks:[],hired:[]},all=[];
-  pipeline.forEach(c=>{if(!matchFilters(c))return;const a=action(c);if(a.bucket==='closed')return;all.push(c);(B[a.bucket]||B.action).push(c);});
+
+/* ===================== Active caregivers tab ===================== */
+function renderActiveCaregivers(){
+  const hired=pipeline.filter(c=>c.stage==='Hired').sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const container=document.getElementById('active-view');
+  if(!hired.length){
+    container.innerHTML=`<div style="max-width:680px;margin:80px auto;padding:40px;text-align:center;background:#fff;border:1px solid var(--border);border-radius:14px">
+      <div style="font-size:42px;margin-bottom:14px;opacity:.5">👥</div>
+      <h2 style="font-family:'Cormorant Garamond',serif;font-size:24px;color:var(--sky-deep);font-weight:600;margin-bottom:8px">No active caregivers yet</h2>
+      <p style="color:var(--soft);font-size:13.5px;line-height:1.5">Once a candidate completes orientation and is marked Hired, they'll appear here with their schedule, status, and contact info.</p>
+    </div>`;
+    return;
+  }
+  const cards=hired.map(c=>{
+    const reqClear=c.st.reqCheck==='clear';
+    const statusPill=reqClear?'<span class="pill pg">Patient-matchable</span>':'<span class="pill pa">Required check pending</span>';
+    const lastCheckin=(c.st.checkins||[])[0];
+    const lastCheckinAge=lastCheckin?Math.floor((Date.now()-new Date(lastCheckin.t).getTime())/(1000*60*60*24)):null;
+    const phoneClean=(c.phone||'').replace(/[^0-9]/g,'');
+    const gvUrl='https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent('+1'+phoneClean.replace(/^1/,''));
+    return `<div class="active-card">
+      <div class="active-card-head">
+        <div style="flex:1;min-width:0">
+          <div class="active-name">${esc(c.name)}</div>
+          <div class="active-meta">${esc(c.phone||'')}${c.email?' · '+esc(c.email):''}</div>
+        </div>
+        ${statusPill}
+      </div>
+      <div class="active-info">
+        <div class="kv-mini"><span>Hired</span><b>${esc(c.st.hiredDate||c.st.due||'—')}</b></div>
+        <div class="kv-mini"><span>Background</span><b>${reqClear?'Clear':'Pending'}</b></div>
+        <div class="kv-mini"><span>Certifications</span><b>${esc((c.st.certs||[]).join(', ')||'—')}</b></div>
+        <div class="kv-mini"><span>Last check-in</span><b>${lastCheckinAge!=null?(lastCheckinAge+'d ago'):'never'}</b></div>
+      </div>
+      <div class="active-actions">
+        <button class="btn-sm bg-sky-l" onclick="openWorkspace(${c.excelRow})">Open profile</button>
+        ${phoneClean?'<button class="btn-sm" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer" onclick="openLinkPopup(\''+gvUrl+'\',\'gvoice\',420,640)">☎ Call</button>':''}
+        ${c.email?'<button class="btn-sm bg-cream" onclick="quickEmailCaregiver('+c.excelRow+')">✉ Email</button>':''}
+      </div>
+    </div>`;
+  }).join('');
+  container.innerHTML=`<div class="active-shell">
+    <div class="active-head"><h1>Active caregivers</h1><span class="active-count">${hired.length} caregiver${hired.length===1?'':'s'}</span></div>
+    <div class="active-grid">${cards}</div>
+  </div>`;
+}
+function quickEmailCaregiver(row){loadW(row);openCustomEmail();}
+function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return renderCalendar();if(view==='active')return renderActiveCaregivers();
+  const B={action:[],awaiting:[],checks:[]},all=[];
+  /* Hired candidates moved entirely to the Active caregivers tab — don't show in pipeline buckets. */
+  pipeline.forEach(c=>{if(c.stage==='Hired'||!matchFilters(c))return;const a=action(c);if(a.bucket==='closed'||a.bucket==='hired')return;all.push(c);(B[a.bucket]||B.action).push(c);});
   document.getElementById('kv0').textContent=B.action.length;
   document.getElementById('kv1').textContent=B.awaiting.length;
   document.getElementById('kv2').textContent=B.checks.length;
-  document.getElementById('kv3').textContent=B.hired.length;
+  const hiredCount=pipeline.filter(c=>c.stage==='Hired').length;
+  document.getElementById('kv3').textContent=hiredCount;
   document.getElementById('kv4').textContent=all.length;
   /* auto-reject surfacer — banner above the buckets */
   renderAutoRejectBanner();
@@ -1468,10 +1585,10 @@ function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return
   fillBucket(0,B.action.sort(byStage));
   fillBucket(1,B.awaiting.sort(byTime));
   fillBucket(2,B.checks.sort(byStage));
-  fillBucket(3,B.hired.sort((a,b)=>(a.name<b.name?-1:1)));
+  fillBucket(3,[]); /* hired bucket emptied — they're on the Active caregivers tab */
   fillBucket(4,all.sort((a,b)=>ord(b)-ord(a)||(a.name<b.name?-1:1)));
   /* Auto-collapse buckets that are empty (unless user explicitly expanded them this session) */
-  const counts=[B.action.length,B.awaiting.length,B.checks.length,B.hired.length,all.length];
+  const counts=[B.action.length,B.awaiting.length,B.checks.length,0,all.length];
   for(let i=0;i<5;i++){
     const wasManuallyOpened=collapsed[i]===false; /* explicit open */
     const isEmpty=counts[i]===0;
@@ -1585,6 +1702,7 @@ function doPrimary(r){const c=pipeline.find(x=>x.excelRow===r);if(!c)return;cons
   if(p.kind==='checks'){openWorkspace(r);W.focusedHub='checks';renderWorkspace();return;}
   if(p.kind==='checkin')return openCheckin();
   if(p.kind==='decline')return doEmail('reject','Declined');
+  if(p.kind==='open-email'){openWorkspace(r);return setTimeout(()=>openEmailDetail(p.emailId),300);}
   if(p.kind==='custom-advance'){openWorkspace(r);return setTimeout(()=>{if(confirm('Mark "'+stageLabel(W.stage)+'" complete and advance to '+stageLabel(p.nextStage)+'?')){advanceWS(p.nextStage,'Custom milestone "'+stageLabel(W.stage)+'" complete');}},100);}
   return openWorkspace(r);
 }
@@ -1627,7 +1745,8 @@ const TEMPLATES={
  onboarding:c=>{const url=(SETTINGS.config&&SETTINGS.config.calOnboardingUrl)||'https://cal.com/meir-schwimer-juktct/caregiver-onboarding';
    return {s:'Welcome to Solura — book your orientation',b:`Hi ${first(c)},\n\nWelcome to the Solura Home Care team! 🎉\n\nThe last step before your first shift is a 30-minute orientation call where we'll go over policies, paperwork, and your schedule. Please pick a time that works for you:\n\n${url}\n\nYou'll get a confirmation with the meeting link as soon as you book. Looking forward to it!\n\nSolura Home Care`};},
  reject:c=>({s:'Update on your application',b:`Hi ${first(c)},\n\nThank you for your interest in Solura Home Care. After careful review we won't be moving forward at this time. We appreciate the time you invested and wish you the very best.\n\nSolura Home Care`}),
- missing:c=>({s:'A few details to complete your application',b:`Hi ${first(c)},\n\nThanks for your interest in Solura Home Care. To move forward we still need a few details:\n\n${(c.__missing||[]).map(x=>'• '+x).join('\n')}\n\nPlease reply with these and we'll get back to you quickly.\n\nSolura Home Care`})
+ missing:c=>({s:'A few details to complete your application',b:`Hi ${first(c)},\n\nThanks for your interest in Solura Home Care. To move forward we still need a few details:\n\n${(c.__missing||[]).map(x=>'• '+x).join('\n')}\n\nPlease reply with these and we'll get back to you quickly.\n\nSolura Home Care`}),
+ request_resume:c=>({s:'Could you send us your résumé? — Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying to Solura Home Care. Before we set up a phone screen, could you send us your résumé as a PDF? Just reply to this email with the file attached.\n\nIf you don't have a written résumé, no worries — just reply with a quick summary: where you've worked, when, and what your role was at each place.\n\nThanks!\nSolura Home Care`})
 };
 function first(c){return (c.name||'there').split(' ')[0];}
 function payRange(){const floor=14,ceil=18;let base=15.5;if(W&&(W.st.certs||[]).some(x=>/CNA|STNA/i.test(x)))base+=1.25;const sc=W?scoreW():{Q:null};if(W&&(W.q.cmp>=4||(sc.Q&&sc.Q>=85)))base+=1;
@@ -2148,6 +2267,17 @@ async function advanceWS(toStage,msg){
 /* ===================== email detail view + attachment upload ===================== */
 let _emailCache={}; /* messageId -> full message object (cached during session) */
 async function openEmailDetail(messageId){
+  /* Mark this email as seen on the candidate (across any candidates that have it) so
+     the "new email" action surfacer clears once user opens it. */
+  pipeline.forEach(c=>{
+    const e=(c.st.emails||[]).find(x=>x.id===messageId);
+    if(e&&!e.seen){
+      e.seen=true;
+      /* persist the seen flag back to the sheet for this row */
+      const stCol=JSON.stringify(c.st);
+      patchRange('AJ'+c.excelRow,stCol).catch(err=>console.warn('seen persist:',err.message));
+    }
+  });
   document.getElementById('em-subject').textContent='Loading…';
   document.getElementById('em-meta').textContent='';
   document.getElementById('em-body').innerHTML='<div style="color:var(--soft);text-align:center;padding:40px">Fetching message…</div>';
@@ -2565,8 +2695,10 @@ async function autoUploadStageReport(c,fromStage){
     }else if(fromStage==='References'){
       blob=generateRefsPdf(c);fileName='references-summary-'+ts+'.pdf';
     }else{return;}
-    await uploadPdfToOnboarding(c.name,fileName,blob);
+    const uploaded=await uploadPdfToOnboarding(c.name,fileName,blob);
     toast('📄 '+fileName+' saved');
+    /* Open the report in popup so user can review immediately. */
+    if(uploaded&&uploaded.webUrl)setTimeout(()=>openLinkPopup(uploaded.webUrl,'pdfReport',1100,800),300);
   }catch(e){console.warn('PDF auto-upload failed:',e.message);}
 }
 
@@ -2588,12 +2720,15 @@ async function exportCurrentStagePdf(){
       /* fall back: full activity log */
       blob=generateActivityLogPdf(W);fileName='activity-log-'+ts+'.pdf';
     }
-    /* download to user AND upload to SharePoint */
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=fileName;a.click();
-    URL.revokeObjectURL(url);
-    await uploadPdfToOnboarding(W.name,fileName,blob);
-    toast('📄 '+fileName+' saved + downloaded');
+    toast('📄 Generating + uploading…');
+    /* Upload only — no local download. Open the uploaded file in SharePoint after. */
+    const uploaded=await uploadPdfToOnboarding(W.name,fileName,blob);
+    if(uploaded&&uploaded.webUrl){
+      openLinkPopup(uploaded.webUrl,'pdfReport',1100,800);
+      toast('📄 '+fileName+' saved & opened');
+    }else{
+      toast('📄 '+fileName+' saved to onboarding folder');
+    }
   }catch(e){
     toast('PDF generation failed: '+e.message);
   }
@@ -2713,7 +2848,8 @@ const TEMPLATE_LABELS={
  ask_references:'Ask for references',
  interview_invite:'Interview invite + BG',bg_request:'BG consent request',
  offer:'Offer',onboarding:'Onboarding',
- reject:'Rejection',missing:'Request missing info'
+ reject:'Rejection',missing:'Request missing info',
+ request_resume:'Request résumé'
 };
 function defaultTplFor(k){const dummy={name:'John Smith',email:'',phone:'',source:'',st:{},__missing:['Work authorization']};return (TEMPLATES[k]||TEMPLATES.screen_invite)(dummy);}
 /* ===================== SETTINGS — sidebar-driven page ===================== */
