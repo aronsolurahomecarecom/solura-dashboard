@@ -493,12 +493,13 @@ td{padding:13px 16px;vertical-align:top;}
 .fpinput{font-family:inherit;font-size:12.5px;padding:7px 11px;border:1.5px solid var(--border);border-radius:7px;outline:none;width:100%;background:#fff;transition:border-color .08s ease-out,box-shadow .08s ease-out;}
 .fpinput:focus{border-color:var(--sky-deep);box-shadow:0 0 0 2px rgba(58,125,201,.15);}
 
-/* Flag toggles (checkbox + label + hint) */
-.ff-toggle{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:7px;cursor:pointer;margin-bottom:4px;transition:background .08s ease-out;}
+/* Flag toggles (checkbox + label + hint stacked inside a flex div) */
+.ff-toggle{display:flex;align-items:flex-start;gap:9px;padding:7px 10px;border-radius:7px;cursor:pointer;margin-bottom:3px;transition:background .08s ease-out;}
 .ff-toggle:hover{background:rgba(255,255,255,.6);}
 .ff-toggle input[type="checkbox"]{margin:1px 0 0;width:15px;height:15px;cursor:pointer;accent-color:var(--sky-deep);flex-shrink:0;}
-.ff-toggle-label{font-size:13px;color:var(--ink);font-weight:500;}
-.ff-toggle-hint{display:block;font-size:11px;color:var(--soft);margin-top:2px;line-height:1.4;}
+.ff-toggle > div{flex:1;min-width:0;}
+.ff-toggle-label{display:block;font-size:13px;color:var(--ink);font-weight:500;line-height:1.3;}
+.ff-toggle-hint{display:block;font-size:11px;color:var(--soft);margin-top:1px;line-height:1.4;}
 
 /* Schedule grid — 7×4 checkbox table, much more scannable than 28 chips */
 .sched-grid{border-collapse:separate;border-spacing:3px;font-family:inherit;}
@@ -1251,11 +1252,25 @@ let tok='',driveId='',itemId='',pipeline=[],nextRow=null;
 let workbookSessionId=null,workbookSessionExpiresAt=0; /* Excel workbook session: batched writes, dramatically faster */
 let collapsed={0:false,1:true,2:true,3:true,4:true};
 let F={
+  /* Existing core filters */
   stage:new Set(),band:new Set(),source:new Set(),cert:new Set(),expertise:new Set(),
-  languages:new Set(),schedule:new Set(),
-  zip:'',
-  liveIn:false,minYears:0,
-  gatesPass:false,hasResume:false,noDenied:false,hasUnread:false
+  languages:new Set(),schedule:new Set(),workSettings:new Set(),
+  zip:'',workedAt:'',
+  /* Availability flags */
+  liveIn:false,availWeekdays:false,availWeekends:false,availOvernight:false,
+  /* Profile */
+  minYears:0,
+  /* Transportation & eligibility (screening + gate fields from application) */
+  hasDL:false,hasTransport:false,nonSmoker:false,
+  willPersonalCare:false,canLift:false,age18:false,
+  noAbuseFinding:false,noRevoked:false,workAuthed:false,
+  /* Past experience */
+  hasVerifiedEmployer:false,allEmployersVerified:false,has2Refs:false,has3Refs:false,
+  /* Communication & completion */
+  hasPhone:false,hasEmail:false,hasUnread:false,
+  phoneScreenDone:false,interviewDone:false,bgClean:false,
+  /* Quality flags */
+  gatesPass:false,hasResume:false,noDenied:false
 };
 let view='pipeline',calOffset=0,wsRow=null;
 let AVAIL={pattern:{},slots:[],offs:[]}; /* pattern={Mon:["Morning","Afternoon"]}; slots=specific ISO datetimes; offs=specific dates removed from pattern */
@@ -1681,51 +1696,126 @@ function action(c){
 function matchFilters(c){
   const t=(document.getElementById('search').value||'').toLowerCase();
   if(t&&(c.name+' '+c.email+' '+(c.st.pills||[]).join(' ')+' '+(c.st.certs||[]).join(' ')+' '+c.stage).toLowerCase().indexOf(t)<0)return false;
+  const s=c.st||{},sc=s.screening||{},g=s.gates||{};
+
+  /* Pipeline */
   if(F.stage.size&&!F.stage.has(c.stage))return false;
   if(F.band.size){const b=scoreRow(c).dec.band;let ok=false;F.band.forEach(x=>{if(b===x||b.indexOf(x)===0)ok=true;});if(!ok)return false;}
   if(F.source.size&&!F.source.has(c.source||'—'))return false;
-  if(F.cert.size){const certs=(c.st.certs||[]).map(x=>x.toUpperCase());let ok=false;F.cert.forEach(x=>{if(certs.indexOf(x.toUpperCase())>-1)ok=true;});if(!ok)return false;}
-  if(F.expertise.size){const px=(c.st.pills||[]).map(x=>x.toLowerCase());let ok=false;F.expertise.forEach(x=>{if(px.indexOf(x.toLowerCase())>-1)ok=true;});if(!ok)return false;}
-  if(F.languages.size){const langs=((c.st.screening||{}).languages||[]).map(x=>String(x).toLowerCase());let ok=false;F.languages.forEach(x=>{if(langs.indexOf(x.toLowerCase())>-1)ok=true;});if(!ok)return false;}
-  /* Schedule = "find candidates who cover ALL the selected day×shift slots" — AND mode is the
-     useful semantics for matching against a real client's needed shifts. Anyone missing even one
-     selected slot drops out of results. */
+
+  /* Profile */
+  if(F.cert.size){const certs=(s.certs||[]).map(x=>x.toUpperCase());let ok=false;F.cert.forEach(x=>{if(certs.indexOf(x.toUpperCase())>-1)ok=true;});if(!ok)return false;}
+  if(F.expertise.size){const px=(s.pills||[]).map(x=>x.toLowerCase());let ok=false;F.expertise.forEach(x=>{if(px.indexOf(x.toLowerCase())>-1)ok=true;});if(!ok)return false;}
+  if(F.languages.size){const langs=(sc.languages||[]).map(x=>String(x).toLowerCase());let ok=false;F.languages.forEach(x=>{if(langs.indexOf(x.toLowerCase())>-1)ok=true;});if(!ok)return false;}
+  if(F.minYears>0){const yrs=parseInt(c.years)||0;if(yrs<F.minYears)return false;}
+
+  /* Availability — schedule grid is AND mode (must cover ALL selected slots) */
   if(F.schedule.size){
-    const ds=c.st.dayShifts||{};
+    const ds=s.dayShifts||{};
     let ok=true;
     F.schedule.forEach(key=>{const [day,shift]=key.split('-');if(!(ds[day]||[]).includes(shift))ok=false;});
     if(!ok)return false;
   }
-  if(F.zip){if(!(c.st.zip||'').startsWith(F.zip))return false;}
-  if(F.liveIn&&!c.st.liveIn)return false;
-  if(F.minYears>0){const yrs=parseInt(c.years)||0;if(yrs<F.minYears)return false;}
-  if(F.gatesPass){const sc=scoreRow(c);if(sc.gateStatus!=='complete')return false;}
-  if(F.hasResume&&!c.st.hasResume)return false;
-  if(F.noDenied){const emp=c.st.employers||[];if(emp.some(e=>e.v==='denied'))return false;}
-  if(F.hasUnread){const emails=c.st.emails||[];if(!emails.some(e=>!e.seen&&e.direction!=='out'))return false;}
+  if(F.liveIn&&!s.liveIn)return false;
+  if(F.availWeekdays||F.availWeekends||F.availOvernight){
+    const ds=s.dayShifts||{};
+    const weekdays=['Mon','Tue','Wed','Thu','Fri'];
+    const weekends=['Sat','Sun'];
+    if(F.availWeekdays&&!weekdays.some(d=>(ds[d]||[]).length))return false;
+    if(F.availWeekends&&!weekends.some(d=>(ds[d]||[]).length))return false;
+    if(F.availOvernight&&!Object.values(ds).some(arr=>(arr||[]).includes('Overnight')))return false;
+  }
+
+  /* Location */
+  if(F.zip&&!(s.zip||'').startsWith(F.zip))return false;
+
+  /* Past work settings (where they've worked: home/ALF/SNF/hospital/etc) */
+  if(F.workSettings.size){
+    const settings=(s.facts&&s.facts.settings)||s.settings||[];
+    const settArr=Array.isArray(settings)?settings:[];
+    let ok=false;
+    F.workSettings.forEach(x=>{if(settArr.includes(x))ok=true;});
+    if(!ok)return false;
+  }
+
+  /* Worked-at text search across past employer names */
+  if(F.workedAt){
+    const needle=F.workedAt.toLowerCase();
+    const emp=s.employers||[];
+    if(!emp.some(e=>(e.name||'').toLowerCase().includes(needle)))return false;
+  }
+
+  /* Transportation & eligibility — derived from screening + gates */
+  if(F.hasDL&&!(sc.dl==='Y'||sc.dl==='yes'))return false;
+  if(F.hasTransport&&!(g.tr==='Y'||g.tr==='yes'))return false;
+  if(F.nonSmoker&&sc.smoker!=='no')return false;
+  if(F.willPersonalCare&&sc.personalCare!=='yes')return false;
+  if(F.canLift&&sc.lifting!=='yes')return false;
+  if(F.age18&&sc.age18!=='yes')return false;
+  if(F.noAbuseFinding&&sc.abuseFinding!=='no')return false;
+  if(F.noRevoked&&sc.revoked!=='no')return false;
+  if(F.workAuthed&&!(g.wa==='Y'||g.wa==='yes'))return false;
+
+  /* Past experience quality */
+  if(F.hasVerifiedEmployer){if(!(s.employers||[]).some(e=>e.v==='ok'))return false;}
+  if(F.allEmployersVerified){
+    const emp=s.employers||[];
+    if(!emp.length||emp.some(e=>e.v!=='ok'))return false;
+  }
+  if(F.has2Refs&&(s.refs||[]).length<2)return false;
+  if(F.has3Refs&&(s.refs||[]).length<3)return false;
+
+  /* Communication & completion */
+  if(F.hasPhone&&!(c.phone||'').trim())return false;
+  if(F.hasEmail&&!(c.email||'').trim())return false;
+  if(F.hasUnread){const emails=s.emails||[];if(!emails.some(e=>!e.seen&&e.direction!=='out'))return false;}
+  if(F.phoneScreenDone&&!(s.sent&&(s.sent.phone_screen_complete||s.sent.screen_complete)))return false;
+  if(F.interviewDone&&!(s.sent&&s.sent.interview_complete))return false;
+  if(F.bgClean&&s.reqCheck!=='clear')return false;
+
+  /* Quality flags */
+  if(F.gatesPass){const sr=scoreRow(c);if(sr.gateStatus!=='complete')return false;}
+  if(F.hasResume&&!s.hasResume)return false;
+  if(F.noDenied){if((s.employers||[]).some(e=>e.v==='denied'))return false;}
+
   return true;
 }
+
 function filterCount(){
-  let c=F.stage.size+F.band.size+F.source.size+F.cert.size+F.expertise.size+F.languages.size+F.schedule.size;
+  let c=F.stage.size+F.band.size+F.source.size+F.cert.size+F.expertise.size+F.languages.size+F.schedule.size+F.workSettings.size;
   if(F.zip)c++;
-  if(F.liveIn)c++;
+  if(F.workedAt)c++;
   if(F.minYears>0)c++;
-  if(F.gatesPass)c++;
-  if(F.hasResume)c++;
-  if(F.noDenied)c++;
-  if(F.hasUnread)c++;
+  /* Sum all the boolean flags */
+  ['liveIn','availWeekdays','availWeekends','availOvernight',
+   'hasDL','hasTransport','nonSmoker','willPersonalCare','canLift','age18',
+   'noAbuseFinding','noRevoked','workAuthed',
+   'hasVerifiedEmployer','allEmployersVerified','has2Refs','has3Refs',
+   'hasPhone','hasEmail','hasUnread',
+   'phoneScreenDone','interviewDone','bgClean',
+   'gatesPass','hasResume','noDenied'].forEach(k=>{if(F[k])c++;});
   return c;
 }
+
 function toggleFilter(cat,val){F[cat].has(val)?F[cat].delete(val):F[cat].add(val);render();renderFilterPanel();}
 function toggleFlag(flag){F[flag]=!F[flag];render();renderFilterPanel();}
 function setZip(v){F.zip=v.trim();render();updateFilterCount();}
+function setWorkedAt(v){F.workedAt=v.trim();render();updateFilterCount();}
 function setMinYears(v){F.minYears=parseInt(v)||0;render();renderFilterPanel();}
 function clearFilters(){
   F={
     stage:new Set(),band:new Set(),source:new Set(),cert:new Set(),expertise:new Set(),
-    languages:new Set(),schedule:new Set(),
-    zip:'',liveIn:false,minYears:0,
-    gatesPass:false,hasResume:false,noDenied:false,hasUnread:false
+    languages:new Set(),schedule:new Set(),workSettings:new Set(),
+    zip:'',workedAt:'',
+    liveIn:false,availWeekdays:false,availWeekends:false,availOvernight:false,
+    minYears:0,
+    hasDL:false,hasTransport:false,nonSmoker:false,
+    willPersonalCare:false,canLift:false,age18:false,
+    noAbuseFinding:false,noRevoked:false,workAuthed:false,
+    hasVerifiedEmployer:false,allEmployersVerified:false,has2Refs:false,has3Refs:false,
+    hasPhone:false,hasEmail:false,hasUnread:false,
+    phoneScreenDone:false,interviewDone:false,bgClean:false,
+    gatesPass:false,hasResume:false,noDenied:false
   };
   document.getElementById('search').value='';
   render();renderFilterPanel();
@@ -1734,34 +1824,42 @@ function updateFilterCount(){const ct=filterCount();const el=document.getElement
 function toggleFilterPanel(){const p=document.getElementById('filterpanel');p.classList.toggle('open');if(p.classList.contains('open'))renderFilterPanel();}
 function chip(cat,val,label){return '<button class="fchip'+(F[cat].has(val)?' on':'')+'" onclick="toggleFilter(\''+cat+'\',\''+val.replace(/'/g,"\\'")+'\')">'+esc(label||val)+'</button>';}
 function flagToggle(flag,label,hint){
-  return `<label class="ff-toggle"><input type="checkbox" ${F[flag]?'checked':''} onchange="toggleFlag('${flag}')"><span class="ff-toggle-label">${esc(label)}</span>${hint?'<span class="ff-toggle-hint">'+esc(hint)+'</span>':''}</label>`;
+  return `<label class="ff-toggle"><input type="checkbox" ${F[flag]?'checked':''} onchange="toggleFlag('${flag}')"><div><span class="ff-toggle-label">${esc(label)}</span>${hint?'<span class="ff-toggle-hint">'+esc(hint)+'</span>':''}</div></label>`;
 }
+
 function renderFilterPanel(){
-  /* Sectioned + collapsible filter system. Each section is a <details> so users can collapse
-     groups they don't care about. State is persisted in localStorage so collapsed sections stay
-     collapsed across sessions. */
   const sources=Array.from(new Set([...SOURCES.filter(s=>s!=='Other'),...(SETTINGS.customSources||[])])).sort();
   const expertises=Array.from(new Set([...EXPERTISE_COMMON,...EXPERTISE_MORE,...(SETTINGS.customExpertise||[])])).sort();
   const certs=Array.from(new Set([...CERT_COMMON,...CERT_MORE,...(SETTINGS.customCerts||[])])).sort();
   const stages=FLOW;
   const bands=['HIRE TRACK','CONDITIONAL','HOLD / DEVELOP','DECLINE','In progress'];
-  /* Languages — pulled from candidates' application data + common ones */
-  const langSet=new Set(['English','Spanish','Russian','Hebrew','Yiddish']);
+
+  /* Languages — pulled from candidates' application data + common ones for home care in OH */
+  const langSet=new Set(['English','Spanish','Russian','Hebrew','Yiddish','Arabic']);
   pipeline.forEach(c=>((c.st.screening||{}).languages||[]).forEach(l=>{if(l)langSet.add(l);}));
   const languages=Array.from(langSet).sort();
-  /* Schedule grid: 7 days × 4 shifts. Real checkboxes in a proper table — much cleaner than chips */
+
+  /* Past work settings — auto-discovered from candidates + common labels */
+  const settingSet=new Set();
+  pipeline.forEach(c=>{const ws=(c.st.facts&&c.st.facts.settings)||c.st.settings||[];if(Array.isArray(ws))ws.forEach(x=>{if(x)settingSet.add(x);});});
+  /* Add the standard ones so they show up even if no candidate has them yet */
+  ['Private home','Assisted living','Nursing home (SNF)','Hospital','Memory care','Hospice'].forEach(x=>settingSet.add(x));
+  const workSettingOptions=Array.from(settingSet).sort();
+
+  /* Schedule grid */
   const schedDays=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   const schedShifts=[['Morning','AM'],['Afternoon','PM'],['Evening','EVE'],['Overnight','NT']];
   const schedTable=`<table class="sched-grid">
     <thead><tr><th></th>${schedDays.map(d=>'<th>'+d+'</th>').join('')}</tr></thead>
     <tbody>${schedShifts.map(([sh,short])=>`<tr>
       <th>${short}</th>
-      ${schedDays.map(d=>{const key=d+'-'+sh;const isOn=F.schedule.has(key);return `<td class="${isOn?'on':''}" onclick="toggleFilter('schedule','${key}')"><div class="sched-cell"></div></td>`;}).join('')}
+      ${schedDays.map(d=>{const key=d+'-'+sh;const isOn=F.schedule.has(key);return `<td class="${isOn?'on':''}" onclick="toggleFilter('schedule','${key}')"></td>`;}).join('')}
     </tr>`).join('')}</tbody>
   </table>`;
-  /* Open state for sections — defaults to availability + profile open (most-used) */
+
   const openSections=JSON.parse(localStorage.getItem('solura_filter_open')||'["availability","profile"]');
   const isOpen=k=>openSections.includes(k)?'open':'';
+
   document.getElementById('filterpanel').innerHTML=`
     <div class="fp-shell">
       <div class="fp-head">
@@ -1773,7 +1871,10 @@ function renderFilterPanel(){
       <details class="fp-section" ${isOpen('availability')} ontoggle="_saveFilterOpen('availability',this.open)">
         <summary><span class="fp-label">Availability</span></summary>
         <div class="fp-content">
-          ${flagToggle('liveIn','Live-in only','Show only caregivers willing to do live-in shifts')}
+          ${flagToggle('liveIn','Live-in only','Caregivers willing to do live-in shifts')}
+          ${flagToggle('availWeekdays','Available any weekday shift','At least one shift Mon-Fri')}
+          ${flagToggle('availWeekends','Available any weekend shift','At least one shift Sat-Sun')}
+          ${flagToggle('availOvernight','Available any overnight shift','Any day with overnight (10pm-6am) availability')}
           <div class="fp-subheader">Must cover these shifts (AND match):</div>
           ${schedTable}
         </div>
@@ -1788,6 +1889,33 @@ function renderFilterPanel(){
           <div class="fp-group"><label>Minimum years of experience: <b id="min-years-display">${F.minYears===0?'any':F.minYears+(F.minYears>=10?'+':'')}</b></label>
             <input type="range" min="0" max="10" value="${F.minYears}" class="fp-slider" oninput="document.getElementById('min-years-display').textContent=this.value==='0'?'any':this.value+(this.value>='10'?'+':'')" onchange="setMinYears(this.value)">
           </div>
+        </div>
+      </details>
+
+      <details class="fp-section" ${isOpen('eligibility')} ontoggle="_saveFilterOpen('eligibility',this.open)">
+        <summary><span class="fp-label">Transportation & eligibility</span></summary>
+        <div class="fp-content">
+          ${flagToggle('hasDL','Has driver license','Confirmed valid DL in screening')}
+          ${flagToggle('hasTransport','Has reliable transportation','Transportation gate passed')}
+          ${flagToggle('willPersonalCare','Will provide personal care','Bathing, toileting, dressing')}
+          ${flagToggle('canLift','Can lift 25+ lbs','Physical lift capability confirmed')}
+          ${flagToggle('nonSmoker','Non-smoker','No tobacco use')}
+          ${flagToggle('age18','Confirmed 18+','Age requirement met')}
+          ${flagToggle('workAuthed','Work-authorized in US','Work authorization gate passed')}
+          ${flagToggle('noAbuseFinding','No abuse finding on record','Clear of prior abuse findings')}
+          ${flagToggle('noRevoked','No revoked credentials','License/cert never revoked')}
+        </div>
+      </details>
+
+      <details class="fp-section" ${isOpen('experience')} ontoggle="_saveFilterOpen('experience',this.open)">
+        <summary><span class="fp-label">Past experience</span></summary>
+        <div class="fp-content">
+          <div class="fp-group"><label>Worked at (search past employer names)</label><input class="fpinput" placeholder="e.g. Cleveland Clinic" value="${esc(F.workedAt)}" oninput="setWorkedAt(this.value)"></div>
+          <div class="fp-group"><label>Past work settings</label><div class="fp-chips">${workSettingOptions.map(x=>chip('workSettings',x)).join('')}</div></div>
+          ${flagToggle('hasVerifiedEmployer','Has any verified past employer','At least 1 employer marked verified')}
+          ${flagToggle('allEmployersVerified','All past employers verified','Every employer marked verified')}
+          ${flagToggle('has2Refs','Has 2+ references on file','References form submitted with 2+ entries')}
+          ${flagToggle('has3Refs','Has 3+ references on file','References form submitted with 3+ entries')}
         </div>
       </details>
 
@@ -1807,13 +1935,24 @@ function renderFilterPanel(){
         </div>
       </details>
 
+      <details class="fp-section" ${isOpen('communication')} ontoggle="_saveFilterOpen('communication',this.open)">
+        <summary><span class="fp-label">Communication & process</span></summary>
+        <div class="fp-content">
+          ${flagToggle('hasUnread','Has unread inbound email','Candidate waiting on your response')}
+          ${flagToggle('hasPhone','Has phone number on file','Can be called')}
+          ${flagToggle('hasEmail','Has email address on file','Can be emailed')}
+          ${flagToggle('phoneScreenDone','Phone screen completed','Initial screen call done')}
+          ${flagToggle('interviewDone','Interview completed','Full interview done')}
+          ${flagToggle('bgClean','Background check clean','Clear on required BG check')}
+        </div>
+      </details>
+
       <details class="fp-section" ${isOpen('quality')} ontoggle="_saveFilterOpen('quality',this.open)">
         <summary><span class="fp-label">Quality flags</span></summary>
         <div class="fp-content">
-          ${flagToggle('gatesPass','All gates pass','5 hard gates: work-auth, credential, BG-clearable, transport, availability')}
-          ${flagToggle('hasResume','Has résumé on file','Skip candidates without a PDF résumé uploaded')}
-          ${flagToggle('noDenied','No denied past employers','Hide anyone with an employer who denied employment')}
-          ${flagToggle('hasUnread','Has unread inbound email','Surface candidates waiting on your response')}
+          ${flagToggle('gatesPass','All 5 hard gates pass','work-auth, credential, BG-clearable, transport, availability')}
+          ${flagToggle('hasResume','Has résumé on file','PDF résumé uploaded or detected in folder')}
+          ${flagToggle('noDenied','No denied past employers','Hide anyone whose employer denied employment')}
         </div>
       </details>
     </div>`;
