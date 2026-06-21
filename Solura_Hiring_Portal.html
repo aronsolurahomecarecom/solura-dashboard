@@ -830,6 +830,10 @@ select.app-edit-input{cursor:pointer;}
 .inbox-item.unread{background:linear-gradient(to right,var(--sky-pale),#fff 40%);}
 .inbox-item.unread:hover{background:linear-gradient(to right,#DCEBF7,var(--cream) 40%);}
 .inbox-item.unread .inbox-subject{font-weight:700;color:var(--ink);}
+.inbox-item.outgoing{background:#FCFBF7;}
+.inbox-item.outgoing:hover{background:var(--cream);}
+.inbox-item.outgoing .inbox-subject{color:var(--soft);font-weight:500;}
+.inbox-item.outgoing .inbox-from > div:first-child{color:var(--mid);}
 .inbox-status{text-align:center;line-height:1;}
 .inbox-from{overflow:hidden;}
 .inbox-from > div:first-child{font-weight:600;color:var(--ink);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px;}
@@ -861,9 +865,11 @@ select.app-edit-input{cursor:pointer;}
 .active-actions{display:flex;gap:6px;flex-wrap:wrap;}
 
 /* ===== STIFF animations — 80ms ease-out everywhere, no transforms, opacity only ===== */
-/* Workspace open/close */
-.workspace{position:fixed;top:40px;left:60px;right:60px;bottom:40px;background:var(--warm);border-radius:18px;z-index:501;box-shadow:0 30px 80px rgba(0,0,0,.42);overflow:hidden;display:flex;flex-direction:column;border:2px solid var(--gold-mid);opacity:0;visibility:hidden;transition:opacity .1s ease-out,visibility 0s linear .1s,top .15s ease-out,left .15s ease-out,right .15s ease-out,bottom .15s ease-out,border-radius .15s ease-out,width .15s ease-out,height .15s ease-out !important;}
-.workspace.open{opacity:1 !important;visibility:visible !important;transition:opacity .1s ease-out,visibility 0s linear 0s,top .15s ease-out,left .15s ease-out,right .15s ease-out,bottom .15s ease-out,border-radius .15s ease-out,width .15s ease-out,height .15s ease-out !important;}
+/* Workspace open/close — slight opacity fade only. NO transitions on top/left/right/bottom/
+   width/height/border-radius — the user noted the resize-between-fullscreen "silly animation"
+   came from animating geometric properties simultaneously. Fullscreen toggle is now instant. */
+.workspace{position:fixed;top:40px;left:60px;right:60px;bottom:40px;background:var(--warm);border-radius:18px;z-index:501;box-shadow:0 30px 80px rgba(0,0,0,.42);overflow:hidden;display:flex;flex-direction:column;border:2px solid var(--gold-mid);opacity:0;visibility:hidden;transition:opacity .14s ease-out,visibility 0s linear .14s !important;}
+.workspace.open{opacity:1 !important;visibility:visible !important;transition:opacity .14s ease-out,visibility 0s linear 0s !important;}
 .workspace.fullscreen{top:0 !important;left:0 !important;right:0 !important;bottom:0 !important;width:100vw !important;height:100vh !important;max-width:none !important;border-radius:0 !important;border:none !important;}
 
 /* Backdrop overlay */
@@ -1091,7 +1097,7 @@ select.app-edit-input{cursor:pointer;}
   <div class="kv"><div class="kv-label">Action needed</div><div class="kv-num red" id="kv0">0</div><div class="kv-sub">your move</div></div>
   <div class="kv"><div class="kv-label">Awaiting candidate</div><div class="kv-num gold" id="kv1">0</div><div class="kv-sub">their move</div></div>
   <div class="kv"><div class="kv-label">Checks running</div><div class="kv-num sky" id="kv2">0</div><div class="kv-sub">gates pending</div></div>
-  <div class="kv"><div class="kv-label">Hired</div><div class="kv-num grn" id="kv3">0</div><div class="kv-sub">match status</div></div>
+  <div class="kv"><div class="kv-label">Active caregivers</div><div class="kv-num grn" id="kv3" style="cursor:pointer" onclick="setView('active')">0</div><div class="kv-sub">click to view</div></div>
   <div class="kv"><div class="kv-label">In Pipeline</div><div class="kv-num soft" id="kv4">0</div><div class="kv-sub">active total</div></div>
 </div>
 
@@ -1106,7 +1112,6 @@ select.app-edit-input{cursor:pointer;}
     <div class="sw" id="sw-0"><div class="shdr" onclick="toggleBucket(0)"><div class="sdot2 red"></div><div class="stitle">Action needed — your move</div><div class="scnt" id="c0">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t0"></tbody></table></div></div>
     <div class="sw" id="sw-1"><div class="shdr" onclick="toggleBucket(1)"><div class="sdot2 gold"></div><div class="stitle">Awaiting candidate</div><div class="scnt" id="c1">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t1"></tbody></table></div></div>
     <div class="sw" id="sw-2"><div class="shdr" onclick="toggleBucket(2)"><div class="sdot2 sky"></div><div class="stitle">Checks running</div><div class="scnt" id="c2">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t2"></tbody></table></div></div>
-    <div class="sw collapsed" id="sw-3"><div class="shdr" onclick="toggleBucket(3)"><div class="sdot2 grn"></div><div class="stitle">Hired</div><div class="scnt" id="c3">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Match status</th><th>Sequence</th><th></th></tr></thead><tbody id="t3"></tbody></table></div></div>
     <div class="sw sw-all collapsed" id="sw-4" style="margin-top:8px"><div class="shdr" onclick="toggleBucket(4)"><div class="sdot2 soft"></div><div class="stitle">All candidates in pipeline</div><div class="scnt" id="c4">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t4"></tbody></table></div></div>
   </div>
   <div id="calendar-view" style="display:none"></div>
@@ -1707,12 +1712,16 @@ function renderInbox(){
   allEmails.sort((a,b)=>(b.received||'').localeCompare(a.received||''));
 
   const total=allEmails.length;
-  const unreadCount=allEmails.filter(e=>!e.seen).length;
+  const inboundTotal=allEmails.filter(e=>e.direction!=='out').length;
+  const outboundTotal=allEmails.filter(e=>e.direction==='out').length;
+  const unreadCount=allEmails.filter(e=>!e.seen&&e.direction!=='out').length;
 
   /* Filtered view */
   const search=_inboxSearch.toLowerCase();
   const filtered=allEmails.filter(e=>{
-    if(_inboxFilter==='unread'&&e.seen)return false;
+    if(_inboxFilter==='unread'&&(e.seen||e.direction==='out'))return false;
+    if(_inboxFilter==='in'&&e.direction==='out')return false;
+    if(_inboxFilter==='out'&&e.direction!=='out')return false;
     if(_inboxCandidateFilter&&e.candidateRow!==_inboxCandidateFilter)return false;
     if(search){
       const haystack=((e.subject||'')+' '+(e.candidateName||'')+' '+(e.preview||'')+' '+(e.candidateEmail||'')).toLowerCase();
@@ -1740,6 +1749,8 @@ function renderInbox(){
       <div class="inbox-toolbar">
         <button class="${_inboxFilter==='all'?'on':''}" onclick="setInboxFilter('all')">All (${total})</button>
         <button class="${_inboxFilter==='unread'?'on':''}" onclick="setInboxFilter('unread')">Unread (${unreadCount})</button>
+        <button class="${_inboxFilter==='in'?'on':''}" onclick="setInboxFilter('in')">📥 Inbound (${inboundTotal})</button>
+        <button class="${_inboxFilter==='out'?'on':''}" onclick="setInboxFilter('out')">📤 Sent (${outboundTotal})</button>
         <input id="inbox-search" placeholder="Search subject, sender, body…" value="${esc(_inboxSearch)}" oninput="setInboxSearch(this.value)" autocomplete="off">
       </div>
       ${candFilterChip}
@@ -1752,14 +1763,18 @@ function renderInboxItem(e){
   const when=dt?relativeWhen(dt):'';
   const info=STAGEINFO[e.candidateStage]||{color:['#FAFAF7','#9CA3AF']};
   const clip=e.hasAttachments?'<span style="color:var(--gold);font-size:11px;margin-right:4px">📎</span>':'';
-  return `<div class="inbox-item ${e.seen?'':'unread'}" onclick="openInboxItem('${esc(e.id)}',${e.candidateRow})">
-    <div class="inbox-status">${e.seen?'<span style="color:var(--soft);font-size:9px">○</span>':'<span style="color:var(--sky-deep);font-size:14px">●</span>'}</div>
+  /* Outgoing emails (sent by us via careers@) tagged with a soft "Sent" arrow + de-emphasized */
+  const isOut=e.direction==='out';
+  const dirBadge=isOut?'<span style="font-size:9.5px;font-weight:700;color:var(--soft);background:var(--cream);padding:1px 6px;border-radius:4px;margin-right:6px;letter-spacing:.04em">SENT ↗</span>':'';
+  const statusDot=isOut?'<span style="color:var(--soft);font-size:9px">↗</span>':(e.seen?'<span style="color:var(--soft);font-size:9px">○</span>':'<span style="color:var(--sky-deep);font-size:14px">●</span>');
+  return `<div class="inbox-item ${e.seen?'':'unread'} ${isOut?'outgoing':''}" onclick="openInboxItem('${esc(e.id)}',${e.candidateRow})">
+    <div class="inbox-status">${statusDot}</div>
     <div class="inbox-from">
       <div>${esc(e.candidateName||'(unknown)')}</div>
       <div class="inbox-stage"><span class="sbadge" style="background:${info.color[0]};color:${info.color[1]};font-size:9px;padding:1px 7px">${esc(stageLabel(e.candidateStage))}</span></div>
     </div>
     <div class="inbox-content">
-      <div class="inbox-subject">${clip}${esc(e.subject||'(no subject)')}</div>
+      <div class="inbox-subject">${dirBadge}${clip}${esc(e.subject||'(no subject)')}</div>
       <div class="inbox-preview">${esc((e.preview||'').slice(0,140))}</div>
     </div>
     <div class="inbox-meta">
@@ -1854,12 +1869,15 @@ function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return
   /* auto-reject surfacer — banner above the buckets */
   renderAutoRejectBanner();
   const ord=c=>{const i=flowOrder().indexOf(c.stage);return i<0?999:i;};
-  const byStage=(a,b)=>ord(a)-ord(b)||(a.name<b.name?-1:1);
+  /* Sort within Action bucket: live calls (Screen booked / Interview booked / Onboarding booked)
+     drop to the bottom so the email/decision-making actions sit at top where you scan them first.
+     The booked calls have a fixed time and will sit at the bottom as a separate "today/upcoming" group. */
+  const isBooked=c=>/booked$/i.test(c.stage||'');
+  const byStage=(a,b)=>{const ab=isBooked(a),bb=isBooked(b);if(ab!==bb)return ab?1:-1;return ord(a)-ord(b)||(a.name<b.name?-1:1);};
   const byTime=(a,b)=>((a.st.booking||a.st.due||'~')<(b.st.booking||b.st.due||'~')?-1:1);
   fillBucket(0,B.action.sort(byStage));
   fillBucket(1,B.awaiting.sort(byTime));
   fillBucket(2,B.checks.sort(byStage));
-  fillBucket(3,[]); /* hired bucket emptied — they're on the Active caregivers tab */
   fillBucket(4,all.sort((a,b)=>ord(b)-ord(a)||(a.name<b.name?-1:1)));
   /* Auto-collapse buckets that are empty (unless user explicitly expanded them this session) */
   const counts=[B.action.length,B.awaiting.length,B.checks.length,0,all.length];
@@ -2182,7 +2200,11 @@ function renderFocusedHub(){
   const info=STAGEINFO[W.stage]||STAGEINFO['Applied'];
   document.getElementById('ws-sub').innerHTML='<span style="color:var(--soft);font-size:13px">for </span><b>'+esc(W.name)+'</b> <span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-left:8px">'+esc(stageLabel(W.stage))+'</span>';
   document.getElementById('ws-body').innerHTML=`<div style="max-width:760px;margin:0 auto">${block}</div>`;
-  document.getElementById('ws-action-bar').innerHTML='<button class="btn-sec bg-cream" onclick="clearFocusedHub()" style="padding:10px 18px">← Back to overview</button>';
+  /* Bottom action bar always has Back. For non-application hubs, add an Edit application button
+     so user can correct candidate-supplied facts from inside the screening / interview / refs / checks flows
+     without losing context. */
+  const editAppBtn=kind!=='application'?'<button class="btn-sec bg-cream" onclick="setFocusedHub(\'application\')" style="padding:10px 18px">✎ Edit application data</button>':'';
+  document.getElementById('ws-action-bar').innerHTML='<button class="btn-sec bg-cream" onclick="clearFocusedHub()" style="padding:10px 18px">← Back to overview</button>'+editAppBtn;
 }
 function renderWorkspace(){
   if(!W)return;
@@ -2879,8 +2901,6 @@ function closeEmailDetail(){
 function replyToCurrentEmail(){
   const msg=_currentEmailMsgId&&_emailCache[_currentEmailMsgId];
   if(!msg){toast('No message loaded');return;}
-  /* The composer (emailModal) writes to W.email — make sure we have a candidate context.
-     If not, try to find the candidate associated with this email. */
   if(!W){
     const fromAddr=((msg.from||{}).emailAddress||{}).address||'';
     const candidate=pipeline.find(c=>(c.email||'').toLowerCase()===fromAddr.toLowerCase());
@@ -2889,15 +2909,19 @@ function replyToCurrentEmail(){
   }
   const subj=msg.subject||'';
   const replySubj=/^re:/i.test(subj)?subj:'Re: '+subj;
-  /* Build a plain-text quoted reply (HTML body would be safer but the composer is plain-text) */
+  /* Format the quoted original cleanly — visual divider, sender name + date header, indented body.
+     Reads like a normal email reply, not a technical dump. */
   const from=((msg.from||{}).emailAddress||{});
-  const when=msg.receivedDateTime?new Date(msg.receivedDateTime).toLocaleString():'';
+  const senderName=from.name||from.address||'them';
+  const when=msg.receivedDateTime?new Date(msg.receivedDateTime).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}):'';
   const origText=(msg.body&&msg.body.content)||msg.bodyPreview||'';
-  /* Strip HTML tags from origText for the quote */
-  const stripped=String(origText).replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim();
-  const quoted='\n\n— On '+when+', '+(from.name||from.address||'they')+' wrote:\n> '+stripped.slice(0,800).split('\n').join('\n> ');
+  /* Strip HTML, collapse whitespace, then re-introduce paragraph breaks where there were double-newlines */
+  const stripped=String(origText).replace(/<br\s*\/?>/gi,'\n').replace(/<\/p>/gi,'\n\n').replace(/<[^>]+>/g,'').replace(/\n{3,}/g,'\n\n').replace(/[ \t]+/g,' ').trim();
+  /* Indent each line of the original with a soft prefix so it visually separates from the new reply */
+  const quotedBody=stripped.slice(0,1200).split('\n').map(l=>l.trim()?'    '+l:'').join('\n');
+  const composedBody='\n\n\n────────────────────\nOn '+when+', '+senderName+' wrote:\n────────────────────\n\n'+quotedBody;
   closeEmailDetail();
-  setTimeout(()=>emailModal('reply',replySubj,quoted,null),120);
+  setTimeout(()=>emailModal('reply',replySubj,composedBody,null),120);
 }
 
 async function saveAttachment(messageId,attIdx){
@@ -2941,40 +2965,67 @@ async function pollInboxForCandidateEmails(){
   pipeline.forEach(c=>{if(c.email)byEmail[c.email.toLowerCase()]=c;});
   if(!Object.keys(byEmail).length)return;
   try{
-    /* pull last 100 messages from primary inbox; filter to last 30 days */
     const cutoff=new Date(Date.now()-30*86400000).toISOString();
-    const url=GR+'/me/messages?$top=100&$orderby=receivedDateTime desc&$select=id,from,subject,receivedDateTime,bodyPreview,webLink,hasAttachments&$filter=receivedDateTime ge '+cutoff;
-    const r=await gfetch(url);
-    if(!r.ok)return;
-    const msgs=((await r.json()).value)||[];
     const changedRows=new Map(); /* excelRow -> candidate (to batch the patch) */
-    for(const m of msgs){
-      const from=((m.from||{}).emailAddress||{}).address||'';
-      if(!from)continue;
-      const c=byEmail[from.toLowerCase()];
-      if(!c)continue;
-      c.st.emails=c.st.emails||[];
-      /* dedupe by message id */
-      if(c.st.emails.some(e=>e.id===m.id))continue;
-      c.st.emails.unshift({
-        id:m.id,
-        subject:(m.subject||'').slice(0,140),
-        preview:(m.bodyPreview||'').slice(0,200),
-        from:from,
-        received:m.receivedDateTime,
-        webLink:m.webLink||'',
-        hasAttachments:!!m.hasAttachments
-      });
-      /* cap to last 20 per candidate */
-      if(c.st.emails.length>20)c.st.emails=c.st.emails.slice(0,20);
-      changedRows.set(c.excelRow,c);
+
+    /* ───── INBOUND: messages received from candidates ───── */
+    const inUrl=GR+'/me/messages?$top=100&$orderby=receivedDateTime desc&$select=id,from,subject,receivedDateTime,bodyPreview,webLink,hasAttachments&$filter=receivedDateTime ge '+cutoff;
+    const inR=await gfetch(inUrl);
+    if(inR.ok){
+      const msgs=((await inR.json()).value)||[];
+      for(const m of msgs){
+        const from=((m.from||{}).emailAddress||{}).address||'';
+        if(!from)continue;
+        const c=byEmail[from.toLowerCase()];if(!c)continue;
+        c.st.emails=c.st.emails||[];
+        if(c.st.emails.some(e=>e.id===m.id))continue;
+        c.st.emails.unshift({
+          id:m.id,direction:'in',
+          subject:(m.subject||'').slice(0,140),
+          preview:(m.bodyPreview||'').slice(0,200),
+          from:from,received:m.receivedDateTime,
+          webLink:m.webLink||'',hasAttachments:!!m.hasAttachments
+        });
+        if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
+        changedRows.set(c.excelRow,c);
+      }
     }
+
+    /* ───── OUTBOUND: sent items from careers@ to candidates ─────
+       Same data shape, just direction:'out'. Stored together so the inbox panel can show
+       both sides as a unified thread per-candidate. */
+    const outUrl=GR+"/me/mailFolders/SentItems/messages?$top=100&$orderby=sentDateTime desc&$select=id,toRecipients,subject,sentDateTime,bodyPreview,webLink,hasAttachments&$filter=sentDateTime ge "+cutoff;
+    const outR=await gfetch(outUrl);
+    if(outR.ok){
+      const msgs=((await outR.json()).value)||[];
+      for(const m of msgs){
+        const toList=(m.toRecipients||[]).map(t=>((t.emailAddress||{}).address||'').toLowerCase()).filter(Boolean);
+        /* Match the FIRST recipient that maps to a candidate (most emails go to one person anyway) */
+        const matchedAddr=toList.find(addr=>byEmail[addr]);
+        if(!matchedAddr)continue;
+        const c=byEmail[matchedAddr];
+        c.st.emails=c.st.emails||[];
+        if(c.st.emails.some(e=>e.id===m.id))continue;
+        c.st.emails.unshift({
+          id:m.id,direction:'out',
+          subject:(m.subject||'').slice(0,140),
+          preview:(m.bodyPreview||'').slice(0,200),
+          to:matchedAddr,received:m.sentDateTime,
+          webLink:m.webLink||'',hasAttachments:!!m.hasAttachments,
+          seen:true /* outgoing emails are "self-read" — don't surface as unread */
+        });
+        if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
+        changedRows.set(c.excelRow,c);
+      }
+    }
+
     /* batch write only changed candidates */
-    let written=0;
+    let inboundCount=0;
     for(const [row,c] of changedRows){
-      try{await patchRange('AJ'+row,[[JSON.stringify(c.st)]]);written++;}catch(e){}
+      try{await patchRange('AJ'+row,[[JSON.stringify(c.st)]]);}catch(e){}
+      if((c.st.emails||[]).some(e=>e.direction==='in'&&!e.seen))inboundCount++;
     }
-    if(written){toast('📬 '+written+' candidate'+(written===1?'':'s')+' got new email');render();}
+    if(inboundCount){toast('📬 '+inboundCount+' candidate'+(inboundCount===1?'':'s')+' got new email');render();}
   }catch(e){console.warn('Inbox poll error:',e.message);}
 }
 
@@ -3366,7 +3417,7 @@ async function loadDocs(){
     if(!r.ok){el.innerHTML='<div style="font-size:12px;color:var(--soft)">Couldn\'t load ('+r.status+').</div>';return;}
     const items=((await r.json()).value)||[];
     if(!items.length){el.innerHTML='<div style="font-size:12px;color:var(--soft);padding:6px 0">Folder ready — no files yet.</div>';return;}
-    el.innerHTML=items.map(f=>'<div class="docrow"><a href="'+esc(f.webUrl)+'" target="_blank">'+(f.folder?'📁':'📄')+' '+esc(f.name)+'</a><span class="sz">'+fmtSize(f.size)+'</span></div>').join('');
+    el.innerHTML=items.map(f=>'<div class="docrow"><a href="'+esc(f.webUrl)+'" onclick="event.preventDefault();openLinkPopup(\''+esc(f.webUrl).replace(/'/g,"\\'")+'\',\'docfile\',1100,800)">'+(f.folder?'📁':'📄')+' '+esc(f.name)+'</a><span class="sz">'+fmtSize(f.size)+'</span></div>').join('');
   }catch(e){el.innerHTML='<div style="font-size:12px;color:var(--soft)">Documents unavailable.</div>';}
 }
 async function ensureFolder(){const segs=['caregivers',safeName(W.name),'onboarding'];let cur='';
@@ -3429,7 +3480,11 @@ function renderCalendar(){
     ${avPatternOpen?patternEditor():''}
     ${[0,1,2,3,4,5,6].map(off=>renderCalDay(base,off)).join('')}`;
 }
-async function manualRefresh(){const btn=document.getElementById('hdr-refresh');if(btn)btn.classList.add('spinning');toast('Refreshing…');try{await loadData();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();if(view==='inbox')renderInbox();updateInboxBadge();}finally{if(btn)setTimeout(()=>btn.classList.remove('spinning'),300);}}
+async function manualRefresh(){const btn=document.getElementById('hdr-refresh');if(btn)btn.classList.add('spinning');try{await loadData();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();if(view==='inbox')renderInbox();updateInboxBadge();}finally{if(btn)setTimeout(()=>btn.classList.remove('spinning'),300);}}
+/* Background refresh path — fully silent. No toast, no spin, no visible signal at all.
+   Used by the 60-second interval and window-focus listener so the portal feels "live"
+   without flashing UI artifacts every minute. */
+async function backgroundRefresh(){try{await loadData();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();if(view==='inbox')renderInbox();updateInboxBadge();}catch(e){console.warn('Background refresh:',e.message);}}
 async function manualBookingsSync(){return manualRefresh();} /* legacy name */
 function openAddFromBooking(name,email,startISO){
   openAdd();
@@ -3798,7 +3853,7 @@ function renderSettingsBgChecks(){
   return `<div class="wscard"><h3>Background-check registries</h3>
     <p class="set-help">These registries appear in the candidate workspace at the Offer stage. The list is hard-coded in this version — editable registries are a future round.</p>
     ${REGISTRIES.map(r=>`<div class="reg-row">
-      <div><b>${esc(r.l)}</b><div style="font-size:11px;color:var(--soft)"><a href="${esc(r.u)}" target="_blank" style="color:var(--sky-deep)">${esc(r.u)}</a></div></div>
+      <div><b>${esc(r.l)}</b><div style="font-size:11px;color:var(--soft)"><a href="${esc(r.u)}" onclick="event.preventDefault();openLinkPopup('${esc(r.u).replace(/'/g,"\\'")}','bgreg',1100,800)" style="color:var(--sky-deep);cursor:pointer">${esc(r.u)}</a></div></div>
       <span class="pill ${r.req==='required'?'pa':r.req==='recommended'?'psoft':'pg'}" style="font-size:9px">${esc(r.req.toUpperCase())}</span>
     </div>`).join('')}
   </div>
@@ -4228,10 +4283,10 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.sty
   if(await handleAuthCallback())return;
   if(tok||await refreshToken())await onSignedIn();else setConn(false);
   /* re-sync bookings when window regains focus */
-  window.addEventListener('focus',()=>{if(tok)manualRefresh();});
+  window.addEventListener('focus',()=>{if(tok)backgroundRefresh();});
   /* periodic refresh while portal is active — catches Cal.com bookings without manual refresh.
      60s cadence is gentle on rate limits and enough to feel "live" for hiring workflow. */
-  setInterval(()=>{if(tok&&!document.hidden&&!_saveInFlight)manualRefresh();},60000);
+  setInterval(()=>{if(tok&&!document.hidden&&!_saveInFlight)backgroundRefresh();},60000);
   /* Initialize the change-request FAB badge on load. */
   setTimeout(updateFabBadge,500);
   })();
