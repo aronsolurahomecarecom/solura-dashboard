@@ -158,6 +158,13 @@ input:focus{border-color:var(--sky);box-shadow:0 0 0 3px var(--sky-pale)}
     </div>
 
     <div class="card">
+      <h2>Past employers</h2>
+      <div class="hint">List the places you've worked as a caregiver. We may contact them to verify your experience. <b>Optional, but it speeds up your hire.</b></div>
+      <div id="employers-list" style="margin-top:14px"></div>
+      <button type="button" class="more-btn" onclick="addEmployer()" style="margin-top:8px">+ Add employer</button>
+    </div>
+
+    <div class="card">
       <h2>Your expertise</h2>
       <div class="hint">Helps us match you with the right patient. Pick everything you've actually done.</div>
       <div class="q">
@@ -369,7 +376,18 @@ function rateCompetence(years,settings,creds){
   if(!hasCred&&base>3)base=3;
   return base;
 }
-function rateTenure(longest){return {u6:1,u12:2,y12:3,y23:4,y3p:5}[longest] ?? null;}
+function rateTenure(longest,employers){
+  /* Base: longest single tenure (1-5 scale from the question) */
+  const base = {u6:1,u12:2,y12:3,y23:4,y3p:5}[longest] ?? null;
+  if(!employers||!employers.length||base==null)return base;
+  /* Total years summed across all employers */
+  const totalYears = employers.reduce((s,e)=>s+(e.years||0),0);
+  /* Bonus for total experience: +0.5 per 3 years beyond first 3, capped at +1.5 */
+  const totalBonus = Math.min(1.5, Math.max(0, (totalYears-3)/3 * 0.5));
+  /* Penalty for job-hopping: if avg tenure < 1.5 years across 3+ jobs, drop by 0.5 */
+  const jobHopPenalty = (employers.length>=3 && (totalYears/employers.length)<1.5) ? 0.5 : 0;
+  return Math.max(1, Math.min(5, base + totalBonus - jobHopPenalty));
+}
 function rateAvailability(dayShifts){
   const days=Object.keys(dayShifts);
   if(!days.length)return null;
@@ -407,14 +425,62 @@ function buildPayload(){
       av:Object.keys(dayShifts).length?'Y':''
     },
     facts:{zip:f.zip.value.trim(), years:ans.years, settings:ans.settings, longest:ans.longest},
+    employers:collectEmployers(),
     derived:{
       proximity:rateProximity(f.zip.value.trim()),
       competence:rateCompetence(ans.years,ans.settings,creds),
-      tenure:rateTenure(ans.longest),
+      tenure:rateTenure(ans.longest,collectEmployers()),
       availability:rateAvailability(dayShifts)
     }
   };
 }
+
+/* ── Past employers section ──
+   Candidate adds rows: company + start year + end year (or "Present"). We collect them as
+   {name, startYear, endYear, current} so the worker can store and the score can use them. */
+let _employers = [];
+function addEmployer(){
+  _employers.push({name:'',startYear:'',endYear:'',current:false});
+  renderEmployers();
+  /* focus the newly added row's name input */
+  setTimeout(()=>{const inputs=document.querySelectorAll('.emp-row input[data-field="name"]');if(inputs.length)inputs[inputs.length-1].focus();},50);
+}
+function removeEmployer(i){_employers.splice(i,1);renderEmployers();}
+function setEmployerField(i,field,val){
+  _employers[i][field]=val;
+  if(field==='current'){_employers[i].endYear='';}
+}
+function renderEmployers(){
+  const list=document.getElementById('employers-list');if(!list)return;
+  if(!_employers.length){list.innerHTML='<div style="font-size:12.5px;color:var(--soft);font-style:italic;padding:8px 0">No employers added yet — click + Add employer below.</div>';return;}
+  const currentYear=new Date().getFullYear();
+  /* year options: current year down to 50 years ago */
+  const years=[];for(let y=currentYear;y>=currentYear-50;y--)years.push(y);
+  const yearOpts=years.map(y=>'<option value="'+y+'">'+y+'</option>').join('');
+  list.innerHTML=_employers.map((e,i)=>`<div class="emp-row" style="background:#FAFAF7;border:1px solid #E4DDD0;border-radius:9px;padding:11px 12px;margin-bottom:8px;display:flex;flex-direction:column;gap:8px">
+    <input type="text" data-field="name" placeholder="Company name (e.g. Cleveland Clinic)" value="${e.name.replace(/"/g,'&quot;')}" oninput="setEmployerField(${i},'name',this.value)" style="padding:8px 10px;border:1.5px solid #E4DDD0;border-radius:6px;font-family:inherit;font-size:13px;outline:none">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select onchange="setEmployerField(${i},'startYear',this.value)" style="flex:1;min-width:100px;padding:7px 9px;border:1.5px solid #E4DDD0;border-radius:6px;font-family:inherit;font-size:12.5px"><option value="">Start year</option>${yearOpts.replace('value="'+e.startYear+'"','value="'+e.startYear+'" selected')}</select>
+      <span style="color:var(--soft);font-size:12px">to</span>
+      ${e.current
+        ? '<span style="flex:1;padding:7px 11px;background:#E8F5E9;color:#2E7D32;border-radius:6px;font-size:12.5px;font-weight:600;text-align:center">Present</span>'
+        : '<select onchange="setEmployerField('+i+',\'endYear\',this.value)" style="flex:1;min-width:100px;padding:7px 9px;border:1.5px solid #E4DDD0;border-radius:6px;font-family:inherit;font-size:12.5px"><option value="">End year</option>'+yearOpts.replace('value="'+e.endYear+'"','value="'+e.endYear+'" selected')+'</select>'
+      }
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;color:var(--mid)"><input type="checkbox" ${e.current?'checked':''} onchange="setEmployerField(${i},'current',this.checked);renderEmployers()" style="margin:0"> Current</label>
+      <button type="button" onclick="removeEmployer(${i})" style="background:none;border:none;color:#C0392B;cursor:pointer;font-size:18px;padding:0 4px;line-height:1" title="Remove">×</button>
+    </div>
+  </div>`).join('');
+}
+function collectEmployers(){
+  return _employers.filter(e=>e.name.trim()).map(e=>{
+    const start=parseInt(e.startYear)||null;
+    const end=e.current?(new Date().getFullYear()):(parseInt(e.endYear)||null);
+    const years=(start&&end)?Math.max(0,end-start):0;
+    return {name:e.name.trim(),startYear:start,endYear:e.current?'present':end,current:!!e.current,years:years};
+  });
+}
+/* Initialize the empty-state message so the section reads cleanly even before adding any. */
+document.addEventListener('DOMContentLoaded',()=>setTimeout(renderEmployers,50));
 // ---- webhook submission ----
 // Cloudflare Worker URL — owner's deployed worker. If this changes, edit here AND in Solura_References_Form.html.
 const WEBHOOK_URL='https://solura-hiring-webhook.meir-865.workers.dev';

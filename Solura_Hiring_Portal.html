@@ -567,6 +567,14 @@ td{padding:13px 16px;vertical-align:top;}
 .lrow .vbtns button{font-family:inherit;font-size:10.5px;font-weight:600;padding:5px 9px;border-radius:6px;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--mid);}
 .lrow .vbtns button.ok.on{background:var(--grn);color:#fff;border-color:var(--grn);}
 .lrow .vbtns button.no.on{background:var(--soft);color:#fff;border-color:var(--soft);}
+/* Verify hub employer-row variant + 3rd state ("didn't work here") */
+.vbtns button{font-family:inherit;font-size:10.5px;font-weight:600;padding:5px 9px;border-radius:6px;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--mid);transition:background .08s ease-out,border-color .08s ease-out,color .08s ease-out;white-space:nowrap;}
+.vbtns button:hover{background:var(--cream);}
+.vbtns button.ok.on{background:var(--grn);color:#fff;border-color:var(--grn);}
+.vbtns button.no.on{background:var(--soft);color:#fff;border-color:var(--soft);}
+.vbtns button.denied{color:#7B1F1F;border-color:#E4B0B0;}
+.vbtns button.denied:hover{background:#FEE2E2;}
+.vbtns button.denied.on{background:var(--red);color:#fff;border-color:var(--red);}
 
 .docrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-soft);font-size:13px;}
 .docrow a{color:var(--sky-deep);text-decoration:none;font-weight:600;flex:1;}
@@ -2291,6 +2299,7 @@ function renderWorkspace(){
   const emailList=(W.st.emails||[]);
   /* application snapshot — key facts + button to open full app view */
   const _appSnap=appSnapshotCard(W);
+  const _empPrev=employersPreviewCard(W);
 
   /* refs preview — small card visible at all stages once refs are on file. Distinct from the full refsBlock,
      which is the working surface at the References stage. */
@@ -2322,7 +2331,7 @@ function renderWorkspace(){
   document.getElementById('ws-body').innerHTML=`
     ${thisStep}
     <div class="wsgrid">
-      <div>${gatesCard}${work}${_appSnap}${docs}${refsPreviewCard}${emailsCard}${activity}</div>
+      <div>${gatesCard}${work}${_appSnap}${_empPrev}${docs}${refsPreviewCard}${emailsCard}${activity}</div>
       <div>${identity}${scoreCard}</div>
     </div>`;
   /* sticky footer with primary action — always visible */
@@ -2516,6 +2525,34 @@ const APP_SECTIONS=[
   ]}
 ];
 
+/* Compact summary of past employers — visible on the overview from every stage so candidate
+   verification status is one glance away regardless of which hub you're in. */
+function employersPreviewCard(c){
+  const emp=(c&&c.st&&c.st.employers)||[];
+  if(!emp.length)return '';
+  const counts={ok:0,no:0,denied:0,unverified:0};
+  emp.forEach(e=>{const k=e.v==='ok'?'ok':e.v==='no'?'no':e.v==='denied'?'denied':'unverified';counts[k]++;});
+  const summary=[];
+  if(counts.ok)summary.push(`<span class="pill pg" style="font-size:9px">${counts.ok} verified</span>`);
+  if(counts.no)summary.push(`<span class="pill psoft" style="font-size:9px">${counts.no} unable</span>`);
+  if(counts.denied)summary.push(`<span class="pill pr" style="font-size:9px">${counts.denied} denied ⚠</span>`);
+  if(counts.unverified)summary.push(`<span class="pill pa" style="font-size:9px">${counts.unverified} unverified</span>`);
+  const rows=emp.slice(0,5).map(e=>{
+    const vIcon=e.v==='ok'?'<span style="color:var(--grn)">✓</span>':e.v==='no'?'<span style="color:var(--soft)">○</span>':e.v==='denied'?'<span style="color:var(--red)" title="Denied">⚠</span>':'<span style="color:var(--gold)">?</span>';
+    const dur=e.years?' · '+esc(String(e.years))+'y':'';
+    return `<div style="font-size:12px;color:var(--mid);padding:3px 0;display:flex;gap:8px;align-items:center">${vIcon}<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.name||'(unnamed)')}${dur}</span></div>`;
+  }).join('');
+  const more=emp.length>5?`<div style="font-size:11px;color:var(--soft);font-style:italic;margin-top:4px">+ ${emp.length-5} more</div>`:'';
+  const warn=counts.denied?`<div style="background:#FEE2E2;border-left:3px solid var(--red);padding:7px 11px;border-radius:4px;font-size:11.5px;color:#7B1F1F;font-weight:600;margin-bottom:10px">⚠ ${counts.denied} employer${counts.denied===1?'':'s'} denied employment — major red flag.</div>`:'';
+  return `<div class="wscard"><h3>Past employers <span style="font-size:11px;color:var(--soft);font-weight:600">${emp.length} listed</span></h3>
+    ${warn}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${summary.join('')}</div>
+    ${rows}
+    ${more}
+    <button class="btn-sec bg-cream" style="margin-top:10px;padding:6px 12px;font-size:12px" onclick="setFocusedHub('verify')">🏢 Open verify hub →</button>
+  </div>`;
+}
+
 /* Snapshot card for the workspace overview — small summary with link to full view */
 function appSnapshotCard(c){
   const has=c&&(c.name||c.email);
@@ -2681,32 +2718,54 @@ function verifyBlock(){const emp=W.st.employers||[];
     const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
     const gvUrl=num?'https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164):'';
     const callBtn=num?`<button class="btn-sm" onclick="openLinkPopup('${esc(gvUrl)}','gvoice',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Call via Google Voice">☎</button>`:'';
-    /* ZoomInfo lookup button — only shows if employer name is entered. Calls our worker, which proxies
-       to ZoomInfo Company Search. Returns matches in a modal for the user to pick from. */
     const ziBtn=(e.name||'').trim().length>2?`<button class="btn-sm" onclick="ziLookupEmployer(${i})" style="background:linear-gradient(135deg,#E8B84B,#C59B4E);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Look up this employer in ZoomInfo">🔍 ZI</button>`:'';
-    /* If we've already done a ZI lookup, show the matched data inline */
     const ziInfo=e.zi?`<div style="grid-column:1/-1;font-size:11px;color:var(--soft);padding:6px 0 0;border-top:1px dashed var(--border-soft);margin-top:4px"><b style="color:var(--gold-deep,#8B6500)">ZoomInfo:</b> ${esc(e.zi.name||'')}${e.zi.website?' · <a href="https://'+esc(e.zi.website)+'" onclick="event.preventDefault();openLinkPopup(\'https://'+esc(e.zi.website).replace(/'/g,"\\'")+'\',\'website\',1100,800)" style="color:var(--sky-deep)">'+esc(e.zi.website)+'</a>':''}${e.zi.address?' · '+esc(e.zi.address):''}${e.zi.employees?' · '+esc(e.zi.employees)+' employees':''}</div>`:'';
-    return `<div class="emp-row" style="background:#fff;border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:8px;animation:fadeUp .3s ease both;animation-delay:${i*40}ms">
+    /* "From application" badge + tenure dates if candidate self-reported */
+    const fromApp=e.source==='application';
+    const dateRange=(e.startYear||e.endYear||e.current)?`${e.startYear||'?'} → ${e.current?'<b style="color:var(--grn)">Present</b>':(e.endYear||'?')}`:'';
+    const yearsCount=e.years?` <b>${esc(String(e.years))} yr${e.years===1?'':'s'}</b>`:'';
+    const tenureLine=(dateRange||yearsCount||fromApp)?`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--soft);margin-bottom:6px">
+      ${fromApp?'<span class="pill psoft" style="font-size:9px;padding:2px 6px">FROM APPLICATION</span>':''}
+      ${dateRange?'<span>'+dateRange+'</span>':''}
+      ${yearsCount?'<span>'+yearsCount+'</span>':''}
+    </div>`:'';
+    /* 3-state verification: verified / unable to verify / didn't work there */
+    const vBtns=`<span class="vbtns" style="flex:0 0 auto;display:flex;gap:3px">
+      <button class="ok ${e.v==='ok'?'on':''}" onclick="vset(${i},'ok')" title="Confirmed they worked here">verified</button>
+      <button class="no ${e.v==='no'?'on':''}" onclick="vset(${i},'no')" title="Couldn't reach anyone to verify">unable</button>
+      <button class="denied ${e.v==='denied'?'on':''}" onclick="vset(${i},'denied')" title="Employer says candidate never worked here — RED FLAG">didn't work here</button>
+    </span>`;
+    /* When marked "didn't work there", show a prominent red warning banner */
+    const deniedBanner=e.v==='denied'?`<div style="grid-column:1/-1;background:#FEE2E2;border-left:3px solid var(--red);padding:7px 11px;margin-top:6px;border-radius:4px;font-size:11.5px;color:#7B1F1F;font-weight:600">⚠ Employer denies candidate worked here. Major red flag — consider declining.</div>`:'';
+    return `<div class="emp-row" style="background:#fff;border:1px solid ${e.v==='denied'?'var(--red)':'var(--border)'};border-radius:9px;padding:10px 12px;margin-bottom:8px;animation:fadeIn .15s ease-out both;animation-delay:${i*30}ms">
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
         <input value="${esc(e.name||'')}" placeholder="Employer / supervisor name" oninput="W.st.employers[${i}].name=this.value" onblur="saveW(true);renderWorkspace()" style="flex:1;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
         ${ziBtn}
       </div>
+      ${tenureLine}
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <input value="${esc(e.phone||'')}" placeholder="Phone number" oninput="W.st.employers[${i}].phone=this.value;renderWorkspace()" onblur="saveW(true)" style="flex:1;min-width:130px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
         ${callBtn}
-        <span class="vbtns" style="flex:0 0 auto"><button class="ok ${e.v==='ok'?'on':''}" onclick="vset(${i},'ok')">verified</button><button class="no ${e.v==='no'?'on':''}" onclick="vset(${i},'no')">unable</button></span>
+        ${vBtns}
         <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;flex:0 0 auto" onclick="if(confirm('Remove this employer?')){W.st.employers.splice(${i},1);saveW(true);renderWorkspace();}">×</button>
       </div>
+      ${deniedBanner}
       ${ziInfo}
     </div>`;
   }).join('');
+  const fromAppCount=emp.filter(e=>e.source==='application').length;
+  const deniedCount=emp.filter(e=>e.v==='denied').length;
+  const headerNote=fromAppCount?`<div style="font-size:12px;color:var(--mid);background:var(--sky-pale);padding:8px 12px;border-radius:7px;margin-bottom:12px;border-left:3px solid var(--sky-deep)"><b>${fromAppCount} employer${fromAppCount===1?'':'s'} from application</b> ready to verify. Call each and mark the result.</div>`:'';
+  const warningNote=deniedCount?`<div style="font-size:12px;color:#7B1F1F;background:#FEE2E2;padding:8px 12px;border-radius:7px;margin-bottom:12px;border-left:3px solid var(--red);font-weight:600">⚠ ${deniedCount} employer${deniedCount===1?'':'s'} denied this candidate ever worked there. Consider declining the application.</div>`:'';
   return `<div class="wscard" id="ws-verify"><h3>Verify past employers <span style="font-size:11px;color:var(--soft);font-weight:600">${emp.length} on file</span></h3>
-    <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Call each prior employer and mark verified or unable. Builds a confidence flag; does not gate.</div>
+    <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Call each prior employer and mark the result. <b>"Didn't work there"</b> is a major red flag — the candidate fabricated employment.</div>
+    ${headerNote}
+    ${warningNote}
     ${list}
-    <button class="btn-sec bg-cream" style="margin-top:10px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:''});renderWorkspace()">+ add employer</button>
+    <button class="btn-sec bg-cream" style="margin-top:10px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:'',source:'manual'});renderWorkspace()">+ add employer</button>
     <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Employers verified')">Done → references →</button></div></div>`;
 }
-function vset(i,v){W.st.employers[i].v=W.st.employers[i].v===v?'':v;renderWorkspace();}
+function vset(i,v){W.st.employers[i].v=W.st.employers[i].v===v?'':v;saveW(true);renderWorkspace();}
 function refsBlock(){
   const refs=W.st.refs||[];
   const REL={supervisor:'Former supervisor',coworker:'Coworker',patientFamily:'Patient family',case_manager:'Case manager',personal:'Personal',other:'Other'};
