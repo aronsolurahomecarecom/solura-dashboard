@@ -1261,7 +1261,7 @@ let F={
   /* Profile */
   minYears:0,
   /* Transportation & eligibility (screening + gate fields from application) */
-  hasDL:false,hasTransport:false,nonSmoker:false,
+  hasDL:false,hasTransport:false,hasOwnCar:false,nonSmoker:false,
   willPersonalCare:false,canLift:false,age18:false,
   noAbuseFinding:false,noRevoked:false,workAuthed:false,
   /* Past experience */
@@ -1748,6 +1748,13 @@ function matchFilters(c){
   /* Transportation & eligibility — derived from screening + gates */
   if(F.hasDL&&!(sc.dl==='Y'||sc.dl==='yes'))return false;
   if(F.hasTransport&&!(g.tr==='Y'||g.tr==='yes'))return false;
+  /* Has own car — checks the application's transport question for "car" answer (their primary transport).
+     Also accepts the older "Own car" / "yes" variants for backward compat with legacy candidates. */
+  if(F.hasOwnCar){
+    const tr=(s.facts&&s.facts.transport)||sc.transport||'';
+    const trStr=String(tr).toLowerCase();
+    if(trStr!=='car'&&trStr!=='own car'&&trStr!=='yes')return false;
+  }
   if(F.nonSmoker&&sc.smoker!=='no')return false;
   if(F.willPersonalCare&&sc.personalCare!=='yes')return false;
   if(F.canLift&&sc.lifting!=='yes')return false;
@@ -1788,7 +1795,7 @@ function filterCount(){
   if(F.minYears>0)c++;
   /* Sum all the boolean flags */
   ['liveIn','availWeekdays','availWeekends','availOvernight',
-   'hasDL','hasTransport','nonSmoker','willPersonalCare','canLift','age18',
+   'hasDL','hasTransport','hasOwnCar','nonSmoker','willPersonalCare','canLift','age18',
    'noAbuseFinding','noRevoked','workAuthed',
    'hasVerifiedEmployer','allEmployersVerified','has2Refs','has3Refs',
    'hasPhone','hasEmail','hasUnread',
@@ -1809,7 +1816,7 @@ function clearFilters(){
     zip:'',workedAt:'',
     liveIn:false,availWeekdays:false,availWeekends:false,availOvernight:false,
     minYears:0,
-    hasDL:false,hasTransport:false,nonSmoker:false,
+    hasDL:false,hasTransport:false,hasOwnCar:false,nonSmoker:false,
     willPersonalCare:false,canLift:false,age18:false,
     noAbuseFinding:false,noRevoked:false,workAuthed:false,
     hasVerifiedEmployer:false,allEmployersVerified:false,has2Refs:false,has3Refs:false,
@@ -1896,7 +1903,8 @@ function renderFilterPanel(){
         <summary><span class="fp-label">Transportation & eligibility</span></summary>
         <div class="fp-content">
           ${flagToggle('hasDL','Has driver license','Confirmed valid DL in screening')}
-          ${flagToggle('hasTransport','Has reliable transportation','Transportation gate passed')}
+          ${flagToggle('hasOwnCar','Has own car','Owns a vehicle they can use for shifts — critical for many client visits')}
+          ${flagToggle('hasTransport','Has reliable transportation','Transportation gate passed (car, transit, rides, etc.)')}
           ${flagToggle('willPersonalCare','Will provide personal care','Bathing, toileting, dressing')}
           ${flagToggle('canLift','Can lift 25+ lbs','Physical lift capability confirmed')}
           ${flagToggle('nonSmoker','Non-smoker','No tobacco use')}
