@@ -762,6 +762,20 @@ td{padding:13px 16px;vertical-align:top;}
 select.app-edit-input{cursor:pointer;}
 @media(max-width:640px){.app-row{flex-direction:column;align-items:flex-start;gap:4px;}.app-label{flex:0 0 auto;}}
 
+/* ===== ZoomInfo lookup modal + match cards ===== */
+.zi-modal{position:fixed;inset:0;background:rgba(40,28,18,.5);z-index:680;display:flex;align-items:center;justify-content:center;opacity:0;visibility:hidden;transition:opacity .1s ease-out,visibility 0s linear .1s;padding:20px;}
+.zi-modal.open{opacity:1;visibility:visible;transition:opacity .1s ease-out,visibility 0s linear 0s;}
+.zi-modal-card{background:#fff;border-radius:14px;max-width:680px;width:100%;max-height:84vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.35);border:2px solid var(--gold-mid);}
+.zi-modal-head{padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:12px;background:linear-gradient(135deg,#FEF7E8,#FAFAF7);}
+.zi-modal-head h2{font-family:'Cormorant Garamond',serif;font-size:21px;color:var(--gold-deep,#8B6500);font-weight:600;margin:0;flex:1;}
+.zi-modal-body{flex:1;overflow-y:auto;}
+.zi-match{padding:14px 16px;border:1px solid var(--border);border-radius:10px;cursor:pointer;margin-bottom:8px;transition:background .08s ease-out,border-color .08s ease-out;display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;animation:fadeIn .12s ease-out both;}
+.zi-match:hover{background:var(--cream);border-color:var(--gold-mid);}
+.zi-match-name{font-weight:600;color:var(--ink);font-size:14px;grid-column:1;}
+.zi-match-meta{font-size:11.5px;color:var(--soft);grid-column:1;display:flex;flex-wrap:wrap;gap:10px;margin-top:3px;}
+.zi-match-meta span{display:inline-flex;align-items:center;}
+.zi-match-pick{grid-column:2;grid-row:1/3;color:var(--gold-deep,#8B6500);font-weight:700;font-size:13px;white-space:nowrap;}
+
 /* ===== Change-request FAB + modal ===== */
 .fb-fab{position:fixed;bottom:18px;right:18px;width:48px;height:48px;border-radius:50%;background:var(--gold);color:#fff;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(197,155,78,.35);z-index:480;display:flex;align-items:center;justify-content:center;transition:filter .08s ease-out,box-shadow .08s ease-out;}
 .fb-fab:hover{filter:brightness(1.05);box-shadow:0 6px 20px rgba(197,155,78,.5);}
@@ -2667,9 +2681,15 @@ function verifyBlock(){const emp=W.st.employers||[];
     const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
     const gvUrl=num?'https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164):'';
     const callBtn=num?`<button class="btn-sm" onclick="openLinkPopup('${esc(gvUrl)}','gvoice',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Call via Google Voice">☎</button>`:'';
+    /* ZoomInfo lookup button — only shows if employer name is entered. Calls our worker, which proxies
+       to ZoomInfo Company Search. Returns matches in a modal for the user to pick from. */
+    const ziBtn=(e.name||'').trim().length>2?`<button class="btn-sm" onclick="ziLookupEmployer(${i})" style="background:linear-gradient(135deg,#E8B84B,#C59B4E);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Look up this employer in ZoomInfo">🔍 ZI</button>`:'';
+    /* If we've already done a ZI lookup, show the matched data inline */
+    const ziInfo=e.zi?`<div style="grid-column:1/-1;font-size:11px;color:var(--soft);padding:6px 0 0;border-top:1px dashed var(--border-soft);margin-top:4px"><b style="color:var(--gold-deep,#8B6500)">ZoomInfo:</b> ${esc(e.zi.name||'')}${e.zi.website?' · <a href="https://'+esc(e.zi.website)+'" onclick="event.preventDefault();openLinkPopup(\'https://'+esc(e.zi.website).replace(/'/g,"\\'")+'\',\'website\',1100,800)" style="color:var(--sky-deep)">'+esc(e.zi.website)+'</a>':''}${e.zi.address?' · '+esc(e.zi.address):''}${e.zi.employees?' · '+esc(e.zi.employees)+' employees':''}</div>`:'';
     return `<div class="emp-row" style="background:#fff;border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:8px;animation:fadeUp .3s ease both;animation-delay:${i*40}ms">
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
-        <input value="${esc(e.name||'')}" placeholder="Employer / supervisor name" oninput="W.st.employers[${i}].name=this.value" onblur="saveW(true)" style="flex:1;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
+        <input value="${esc(e.name||'')}" placeholder="Employer / supervisor name" oninput="W.st.employers[${i}].name=this.value" onblur="saveW(true);renderWorkspace()" style="flex:1;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
+        ${ziBtn}
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <input value="${esc(e.phone||'')}" placeholder="Phone number" oninput="W.st.employers[${i}].phone=this.value;renderWorkspace()" onblur="saveW(true)" style="flex:1;min-width:130px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
@@ -2677,6 +2697,7 @@ function verifyBlock(){const emp=W.st.employers||[];
         <span class="vbtns" style="flex:0 0 auto"><button class="ok ${e.v==='ok'?'on':''}" onclick="vset(${i},'ok')">verified</button><button class="no ${e.v==='no'?'on':''}" onclick="vset(${i},'no')">unable</button></span>
         <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;flex:0 0 auto" onclick="if(confirm('Remove this employer?')){W.st.employers.splice(${i},1);saveW(true);renderWorkspace();}">×</button>
       </div>
+      ${ziInfo}
     </div>`;
   }).join('');
   return `<div class="wscard" id="ws-verify"><h3>Verify past employers <span style="font-size:11px;color:var(--soft);font-weight:600">${emp.length} on file</span></h3>
@@ -3517,6 +3538,7 @@ const SETTINGS_SECTIONS=[
   {key:'pipeline',  label:'Pipeline config',      icon:'⚙'},
   {key:'calendars', label:'Cal.com booking URLs', icon:'📅'},
   {key:'bgchecks',  label:'Background registries',icon:'🛡'},
+  {key:'zoominfo',  label:'ZoomInfo integration', icon:'🔍'},
   {key:'lists',     label:'Custom lists',         icon:'📋'},
   {key:'access',    label:'Access & lock',        icon:'🔒'},
   {key:'data',      label:'Import / export',      icon:'⬆'}
@@ -3619,6 +3641,7 @@ function renderSettings(){
   else if(settingsSection==='pipeline') body=renderSettingsPipeline();
   else if(settingsSection==='calendars') body=renderSettingsCalendars();
   else if(settingsSection==='bgchecks') body=renderSettingsBgChecks();
+  else if(settingsSection==='zoominfo') body=renderSettingsZoomInfo();
   else if(settingsSection==='lists') body=renderSettingsLists();
   else if(settingsSection==='access') body=renderSettingsAccess();
   else if(settingsSection==='data') body=renderSettingsData();
@@ -3874,6 +3897,184 @@ function renderSettingsLists(){
     renderList('certificates',SETTINGS.customCerts||[],'customCerts')+
     renderList('sources',SETTINGS.customSources||[],'customSources');
 }
+
+/* ===================== ZoomInfo integration =====================
+   Architecture: portal → Cloudflare Worker → ZoomInfo API. The worker holds the ZoomInfo
+   credentials in env vars; portal only needs the worker's shared-secret token (configurable
+   in Settings). Workflow:
+     1. User clicks "Look up on ZoomInfo" against an employer
+     2. Portal calls worker /zi/company-search with employer name (free, no credits)
+     3. Worker returns ranked matches; portal shows them
+     4. User picks the right company → portal calls /zi/company-enrich (1 credit)
+     5. Phone/website/address populate on the employer record */
+
+const ZI_WORKER_URL='https://solura-hiring-webhook.meir-865.workers.dev';
+
+async function ziCall(path,payload){
+  const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
+  if(!tok){throw new Error('ZoomInfo token not configured. Go to Settings → ZoomInfo integration.');}
+  const r=await fetch(ZI_WORKER_URL+path,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-Solura-Token':tok},
+    body:JSON.stringify(payload||{})
+  });
+  const data=await r.json();
+  if(!r.ok)throw new Error(data.error||('HTTP '+r.status));
+  return data;
+}
+
+function renderSettingsZoomInfo(){
+  const tok=(SETTINGS.config&&SETTINGS.config.ziToken)||'';
+  const enabled=!!tok;
+  return `<div class="wscard"><h3>ZoomInfo integration ${enabled?'<span class="pill pg" style="font-size:9px;margin-left:6px">CONFIGURED</span>':'<span class="pill psoft" style="font-size:9px;margin-left:6px">NOT SET UP</span>'}</h3>
+    <p class="set-help">When configured, you can look up candidates' past employers directly inside the Verify hub: automatically pull company phone, website, address, and HR contacts for reference calls. Eliminates manual digging.</p>
+    <div class="set-row" style="margin-top:14px">
+      <label style="flex:1">
+        <div style="font-size:11.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Worker shared token</div>
+        <input type="password" id="cfg_ziToken" class="tpl-subject-input" value="${esc(tok)}" placeholder="paste your shared secret here" autocomplete="off" style="font-family:monospace">
+      </label>
+    </div>
+    <div class="set-row" style="margin-top:10px">
+      <button class="btn-primary bg-grn" onclick="saveZiToken()">Save token</button>
+      <button class="btn-sec bg-cream" onclick="testZiConnection()">Test connection</button>
+    </div>
+    <details style="margin-top:18px;font-size:11.5px;color:var(--soft)">
+      <summary style="cursor:pointer;font-weight:600">Setup instructions</summary>
+      <div style="margin-top:10px;line-height:1.6">
+        <p><b>1.</b> In the Cloudflare dashboard, open the <code>solura-hiring-webhook</code> Worker → Settings → Variables and add three secrets:</p>
+        <pre style="background:var(--cream);padding:10px;border-radius:6px;font-size:11px;margin:6px 0">ZI_USERNAME            your ZoomInfo login email
+ZI_PASSWORD            your ZoomInfo password
+SOLURA_INTERNAL_TOKEN  a random string (32+ chars) — generate one</pre>
+        <p><b>2.</b> Redeploy the worker.</p>
+        <p><b>3.</b> Copy the same <code>SOLURA_INTERNAL_TOKEN</code> value into the field above and click <b>Save token</b>.</p>
+        <p><b>4.</b> Click <b>Test connection</b> to verify everything works without consuming any ZoomInfo credits.</p>
+        <p style="margin-top:10px;padding:10px;background:#FEF7E8;border-left:3px solid var(--gold);border-radius:0 6px 6px 0">
+          <b>Credit usage:</b> Searches are free. Enriching a company costs <b>1 credit per new record</b> and is then free for 12 months. The portal previews matches via search first; enrichment only happens when you explicitly click "Pull full details".
+        </p>
+      </div>
+    </details>
+  </div>`;
+}
+
+async function saveZiToken(){
+  const tok=document.getElementById('cfg_ziToken').value.trim();
+  SETTINGS.config=SETTINGS.config||{};
+  SETTINGS.config.ziToken=tok;
+  await saveSettings();
+  toast('ZoomInfo token saved');
+  renderSettings();
+}
+
+async function testZiConnection(){
+  toast('Testing connection…');
+  try{
+    const r=await ziCall('/zi/test',{});
+    if(r.ok)toast('✓ '+r.message);
+    else toast('Test response: '+JSON.stringify(r).slice(0,80));
+  }catch(e){toast('✗ '+e.message);}
+}
+
+/* ===================== ZoomInfo lookup UI in Verify hub ===================== */
+async function ziLookupEmployer(empIndex){
+  const emp=W.st.employers[empIndex];if(!emp)return;
+  const name=(emp.name||'').trim();
+  if(!name){toast('No company name on this employer');return;}
+  /* Open the lookup modal in loading state */
+  openZiModal(empIndex,'<div style="text-align:center;padding:40px;color:var(--soft)">🔍 Searching ZoomInfo for "'+esc(name)+'"…</div>');
+  try{
+    const r=await ziCall('/zi/company-search',{name});
+    const matches=(r.data||r.companies||r.results||[]).slice(0,10);
+    if(!matches.length){
+      openZiModal(empIndex,'<div style="padding:20px"><p style="color:var(--soft)">No matches found for "<b>'+esc(name)+'</b>".</p><p style="font-size:12px;color:var(--soft);margin-top:8px">Try a more specific name (e.g. include "Inc." or the city) or check for typos.</p></div>');
+      return;
+    }
+    renderZiMatches(empIndex,matches);
+  }catch(e){
+    openZiModal(empIndex,'<div style="padding:20px;color:var(--red)">Lookup failed: '+esc(e.message)+'</div>');
+  }
+}
+
+function renderZiMatches(empIndex,matches){
+  const rows=matches.map((m,i)=>{
+    const id=m.id||m.companyId||m.zoominfoId||'';
+    return `<div class="zi-match" onclick="ziPickCompany(${empIndex},${i})" data-row="${i}">
+      <div class="zi-match-name">${esc(m.name||m.companyName||'(no name)')}</div>
+      <div class="zi-match-meta">
+        ${m.website?'<span>🌐 '+esc(m.website)+'</span>':''}
+        ${m.city||m.state?'<span>📍 '+esc([m.city,m.state].filter(Boolean).join(', '))+'</span>':''}
+        ${m.employeeCount?'<span>👥 '+esc(String(m.employeeCount))+' employees</span>':''}
+        ${m.industry?'<span>'+esc(m.industry)+'</span>':''}
+      </div>
+      <div class="zi-match-pick">Pick →</div>
+    </div>`;
+  }).join('');
+  const html=`<div style="padding:16px 20px"><p style="font-size:12px;color:var(--soft);margin-bottom:14px"><b>${matches.length}</b> match${matches.length===1?'':'es'} found. Pick the right company — this is free (no credits used). Pulling full details costs <b>1 credit</b>.</p>${rows}</div>`;
+  /* stash matches on window so ziPickCompany can read by index */
+  window._ziMatches=matches;
+  openZiModal(empIndex,html);
+}
+
+async function ziPickCompany(empIndex,i){
+  const m=(window._ziMatches||[])[i];if(!m){toast('Lost match data');return;}
+  const id=m.id||m.companyId||m.zoominfoId||'';
+  if(!confirm('Pull full details for "'+(m.name||m.companyName)+'"?\n\nThis costs 1 ZoomInfo credit (free for the next 12 months once pulled).'))return;
+  openZiModal(empIndex,'<div style="text-align:center;padding:40px;color:var(--soft)">⏳ Enriching "'+esc(m.name||m.companyName)+'"…</div>');
+  try{
+    const r=await ziCall('/zi/company-enrich',{companyId:id});
+    /* Response shape (from /enrich/company): {success, data: [{...company...}]} or similar */
+    const company=(r.data&&r.data[0])||(r.result&&r.result[0])||r.company||m;
+    /* Populate employer record on candidate state */
+    const emp=W.st.employers[empIndex];
+    emp.ziCompanyId=id;
+    emp.ziCompanyName=company.name||company.companyName||'';
+    emp.phone=company.phone||emp.phone||'';
+    emp.website=company.website||emp.website||'';
+    emp.address=[company.street,company.city,company.state,company.zipCode].filter(Boolean).join(', ')||emp.address||'';
+    emp.ziEnrichedAt=new Date().toISOString();
+    logW('🔍 ZoomInfo enriched: '+(emp.ziCompanyName||emp.name)+' — phone, website, address added');
+    await saveW(true);
+    closeZiModal();
+    toast('✓ Filled in details for '+(emp.ziCompanyName||emp.name));
+    renderWorkspace();
+  }catch(e){
+    openZiModal(empIndex,'<div style="padding:20px;color:var(--red)">Enrich failed: '+esc(e.message)+'</div>');
+  }
+}
+
+async function ziFindHrContacts(empIndex){
+  const emp=W.st.employers[empIndex];if(!emp)return;
+  if(!emp.ziCompanyId){toast('Look up & pull full details for this company first');return;}
+  openZiModal(empIndex,'<div style="text-align:center;padding:40px;color:var(--soft)">🔍 Searching for HR contacts at '+esc(emp.ziCompanyName||emp.name)+'…</div>');
+  try{
+    const r=await ziCall('/zi/contact-search',{companyId:emp.ziCompanyId,jobFunction:'Human Resources'});
+    const contacts=(r.data||r.contacts||r.results||[]).slice(0,15);
+    if(!contacts.length){
+      openZiModal(empIndex,'<div style="padding:20px"><p style="color:var(--soft)">No HR contacts found at this company.</p></div>');
+      return;
+    }
+    const rows=contacts.map(c=>`<div class="zi-match">
+      <div class="zi-match-name">${esc(c.firstName||'')} ${esc(c.lastName||'')}</div>
+      <div class="zi-match-meta">
+        ${c.jobTitle?'<span>'+esc(c.jobTitle)+'</span>':''}
+        ${c.managementLevel?'<span>'+esc(c.managementLevel)+'</span>':''}
+      </div>
+    </div>`).join('');
+    openZiModal(empIndex,'<div style="padding:16px 20px"><p style="font-size:12px;color:var(--soft);margin-bottom:14px">Found <b>'+contacts.length+'</b> HR contact'+(contacts.length===1?'':'s')+'. Direct phone numbers require enrichment (1 credit each — not auto-pulled).</p>'+rows+'</div>');
+  }catch(e){
+    openZiModal(empIndex,'<div style="padding:20px;color:var(--red)">Contact search failed: '+esc(e.message)+'</div>');
+  }
+}
+
+function openZiModal(empIndex,html){
+  let m=document.getElementById('zi-modal');
+  if(!m){
+    document.body.insertAdjacentHTML('beforeend','<div class="zi-modal" id="zi-modal" onclick="if(event.target===this)closeZiModal()"><div class="zi-modal-card"><div class="zi-modal-head"><h2>ZoomInfo lookup</h2><button onclick="closeZiModal()" style="background:none;border:none;color:var(--soft);font-size:22px;cursor:pointer;padding:0 4px;line-height:1">×</button></div><div class="zi-modal-body" id="zi-modal-body"></div></div></div>');
+    m=document.getElementById('zi-modal');
+  }
+  document.getElementById('zi-modal-body').innerHTML=html;
+  m.classList.add('open');
+}
+function closeZiModal(){const m=document.getElementById('zi-modal');if(m)m.classList.remove('open');}
 
 /* ----- ACCESS section ----- */
 function renderSettingsAccess(){
