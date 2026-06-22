@@ -528,6 +528,30 @@ td{padding:13px 16px;vertical-align:top;}
 .cbadge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:7px;display:inline-block;background:var(--gold-pale);color:#9A6100;border:1px solid var(--gold-mid);}
 .dlbadge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:7px;display:inline-block;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);}
 .xpill{font-size:10px;font-weight:600;padding:3px 8px;border-radius:999px;display:inline-block;background:#EFEAFC;color:#5B4BAA;border:1px solid #D9D2F3;}
+.giftpill{font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;display:inline-block;letter-spacing:.02em;}
+.giftpill.caregiver{background:linear-gradient(135deg,#FEF3DC,#FAF6EE);color:#8B6500;border:1px solid #C59B4E;}
+.giftpill.customer{background:linear-gradient(135deg,#E8F5E9,#F0F8E8);color:#2E7D32;border:1px solid #70A54D;}
+
+/* Referrals tab */
+.ref-shell{max-width:1200px;margin:0 auto;padding:24px 26px;}
+.ref-head{margin-bottom:24px;}
+.ref-head h1{font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:600;color:var(--sky-deep);margin:0 0 16px;display:flex;align-items:center;gap:6px;}
+.ref-stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
+.ref-stat{background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,.03);}
+.ref-stat .lab{font-size:11px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.06em;}
+.ref-stat .num{font-size:28px;font-weight:700;color:var(--ink);margin-top:4px;font-family:'Cormorant Garamond',serif;}
+.ref-stat .sub{font-size:11px;color:var(--soft);margin-top:2px;}
+.ref-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px;}
+.ref-table th{font-size:10.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.06em;text-align:left;padding:9px 10px;border-bottom:1.5px solid var(--border);background:var(--cream);user-select:none;}
+.ref-table th:hover{background:#F0EADB;color:var(--ink);}
+.ref-table td{padding:11px 10px;border-bottom:1px solid var(--border-soft);vertical-align:middle;}
+.ref-table tbody tr:hover{background:linear-gradient(180deg,#FFFEFB 0%,#FAF6EE 100%);}
+.ref-table tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--gold);}
+@media(max-width:700px){
+  .ref-stats-row{grid-template-columns:repeat(2,1fr);}
+  .ref-table th:nth-child(3),.ref-table td:nth-child(3),
+  .ref-table th:nth-child(4),.ref-table td:nth-child(4){display:none;}
+}
 .matchbadge{font-size:10px;font-weight:800;padding:3px 9px;border-radius:7px;display:inline-block;margin-top:5px;}
 .match-ok{background:var(--grn-pale);color:var(--grn);border:1px solid var(--grn-mid);}
 .match-no{background:var(--red-pale);color:var(--red);border:1px solid #EFC4C0;}
@@ -1090,6 +1114,11 @@ select.app-edit-input{cursor:pointer;}
 .set-field{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:600;color:var(--mid);margin-bottom:10px;}
 .set-field input{padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;background:#fff;transition:border-color .12s ease-out;}
 .set-field input:focus{border-color:var(--sky-deep);}
+.set-toggle-row{padding:10px 0;border-top:1px solid var(--border-soft);}
+.set-toggle-row:first-of-type{border-top:none;padding-top:4px;}
+.set-toggle{display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px;font-weight:600;color:var(--ink);}
+.set-toggle input[type="checkbox"]{width:17px;height:17px;cursor:pointer;accent-color:var(--sky-deep);margin:0;}
+.set-toggle-hint{font-size:11.5px;color:var(--soft);margin-top:4px;margin-left:26px;line-height:1.45;}
 .reg-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-soft);}
 .reg-row:last-child{border-bottom:none;}
 .reg-row b{font-size:13px;color:var(--ink);}
@@ -1201,6 +1230,7 @@ select.app-edit-input{cursor:pointer;}
       <button class="tab-btn" id="tab-inbox" onclick="setView('inbox')">Inbox <span class="tab-badge" id="inbox-badge" style="display:none">0</span></button>
       <button class="tab-btn" id="tab-cal" onclick="setView('calendar')">Calendar</button>
       <button class="tab-btn" id="tab-active" onclick="setView('active')">Active caregivers</button>
+      <button class="tab-btn" id="tab-refs" onclick="setView('referrals')">Referrals</button>
     </div>
     <button class="iconbtn" id="btn-filter" style="display:none" onclick="toggleFilterPanel()" title="Filter">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h12M4 8h8M6 13h4"/></svg>
@@ -1255,6 +1285,7 @@ select.app-edit-input{cursor:pointer;}
   <div id="calendar-view" style="display:none"></div>
   <div id="active-view" style="display:none"></div>
   <div id="inbox-view" style="display:none"></div>
+  <div id="referrals-view" style="display:none"></div>
   <div id="settings-view" style="display:none"></div>
 </div>
 
@@ -1340,7 +1371,16 @@ let F={
 };
 let view='pipeline',calOffset=0,wsRow=null;
 let AVAIL={pattern:{},slots:[],offs:[]}; /* pattern={Mon:["Morning","Afternoon"]}; slots=specific ISO datetimes; offs=specific dates removed from pattern */
-let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{},scripts:{},config:{payFloor:14,payCeil:18,payCnaPremium:1.25,payQualityNudge:1,autoRejectDays:14,nudgeDays:3,serviceZips:'44118,44106,44120,44121,44122,44104,44112',admins:[],calScreenUrl:'',calInterviewUrl:'',calOnboardingUrl:'https://cal.com/meir-schwimer-juktct/caregiver-onboarding'},flow:{order:null,labels:{},custom:[]}}; /* flow.order = user-edited stage order; flow.labels = display overrides; flow.custom = user-added milestone stages (manual advance only) */
+let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{},scripts:{},config:{payFloor:14,payCeil:18,payCnaPremium:1.25,payQualityNudge:1,autoRejectDays:14,nudgeDays:3,serviceZips:'44118,44106,44120,44121,44122,44104,44112',admins:[],calScreenUrl:'',calInterviewUrl:'',calOnboardingUrl:'https://cal.com/meir-schwimer-juktct/caregiver-onboarding',
+  /* Referral program — caregiver side: priority points per funnel step. Customer side: cash payout
+     after a retention period. All toggleable: master switch (program enabled), separate rewards
+     switch (continue tracking but freeze rewards — useful for testing), and per-event point/$ values. */
+  referralEnabled:true,referralAwardPoints:true,
+  referralPtsSubmit:1,referralPtsScreen:2,referralPtsHired:5,
+  customerReferralEnabled:true,customerReferralPayoutEnabled:true,
+  customerReferralAmount:100,customerReferralRetentionDays:30,
+  showLeaderboardPills:true,referralInConfirmEmail:true
+},flow:{order:null,labels:{},custom:[]}}; /* flow.order = user-edited stage order; flow.labels = display overrides; flow.custom = user-added milestone stages (manual advance only) */
 
 /* Effective flow: user-edited order if present, else default FLOW. Custom milestone stages are inserted at saved positions. */
 function flowOrder(){
@@ -2096,16 +2136,19 @@ function setView(v){
   document.getElementById('tab-inbox').classList.toggle('on',v==='inbox');
   document.getElementById('tab-cal').classList.toggle('on',v==='calendar');
   document.getElementById('tab-active').classList.toggle('on',v==='active');
+  document.getElementById('tab-refs').classList.toggle('on',v==='referrals');
   document.getElementById('tab-set').classList.toggle('on',v==='settings');
   document.getElementById('pipeline-view').style.display=v==='pipeline'?'block':'none';
   document.getElementById('inbox-view').style.display=v==='inbox'?'block':'none';
   document.getElementById('calendar-view').style.display=v==='calendar'?'block':'none';
   document.getElementById('active-view').style.display=v==='active'?'block':'none';
+  document.getElementById('referrals-view').style.display=v==='referrals'?'block':'none';
   document.getElementById('settings-view').style.display=v==='settings'?'block':'none';
   document.getElementById('sync-bar').style.display=v==='pipeline'?'flex':'none';
   if(v==='settings'){seqInit();renderSettings();}
   if(v==='active')renderActiveCaregivers();
   if(v==='inbox')renderInbox();
+  if(v==='referrals')renderReferralsView();
   render();
   updateInboxBadge();
 }
@@ -2290,7 +2333,230 @@ function renderActiveCaregivers(){
   </div>`;
 }
 function quickEmailCaregiver(row){loadW(row);openCustomEmail();}
-function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return renderCalendar();if(view==='active')return renderActiveCaregivers();
+
+/* ===================== Referrals view ===================== */
+/* Two-pane view: caregiver leaderboard on the top, customer-referral ledger below.
+   Both fully sortable; ledger has "Mark paid" action that flips payoutStatus + logs to the
+   referrer's activity. Recalculates total points + cash on every render so it always reflects
+   the current SETTINGS point values (changing point values in settings doesn't break history —
+   it just re-prices everyone live). */
+let _refSortKey='points',_refSortDir='desc';
+let _refLedgerSortKey='eligibleDate',_refLedgerSortDir='asc';
+
+function renderReferralsView(){
+  const container=document.getElementById('referrals-view');if(!container)return;
+  const enabled=SETTINGS.config.referralEnabled;
+  const awardOn=SETTINGS.config.referralAwardPoints;
+  const ptsSub=SETTINGS.config.referralPtsSubmit||1;
+  const ptsScr=SETTINGS.config.referralPtsScreen||2;
+  const ptsHir=SETTINGS.config.referralPtsHired||5;
+  const cashAmt=SETTINGS.config.customerReferralAmount||100;
+  const retDays=SETTINGS.config.customerReferralRetentionDays||30;
+
+  /* Build leaderboard rows from every candidate who has referred at least one person */
+  const leaderRows=pipeline.filter(c=>{
+    const refs=(c.st&&c.st.referrals)||[];
+    return refs.length>0;
+  }).map(c=>{
+    const rc=c.st.referralCount||{submitted:0,screened:0,hired:0};
+    const points=(rc.submitted||0)*ptsSub+(rc.screened||0)*ptsScr+(rc.hired||0)*ptsHir;
+    return {c,rc,points,refs:(c.st.referrals||[]).length};
+  });
+  /* Sort */
+  const sortLeader=(a,b)=>{
+    let av,bv;
+    switch(_refSortKey){
+      case 'name':av=a.c.name.toLowerCase();bv=b.c.name.toLowerCase();break;
+      case 'submitted':av=a.rc.submitted||0;bv=b.rc.submitted||0;break;
+      case 'screened':av=a.rc.screened||0;bv=b.rc.screened||0;break;
+      case 'hired':av=a.rc.hired||0;bv=b.rc.hired||0;break;
+      case 'stage':av=a.c.stage||'';bv=b.c.stage||'';break;
+      default:av=a.points;bv=b.points;
+    }
+    if(av<bv)return _refSortDir==='asc'?-1:1;
+    if(av>bv)return _refSortDir==='asc'?1:-1;
+    return 0;
+  };
+  leaderRows.sort(sortLeader);
+
+  /* Totals */
+  const totalReferrals=leaderRows.reduce((s,r)=>s+r.refs,0);
+  const totalSubmitted=leaderRows.reduce((s,r)=>s+(r.rc.submitted||0),0);
+  const totalScreened=leaderRows.reduce((s,r)=>s+(r.rc.screened||0),0);
+  const totalHired=leaderRows.reduce((s,r)=>s+(r.rc.hired||0),0);
+
+  /* Build customer ledger entries flattened from every candidate's customerReferrals array.
+     Each entry: { caregiver, name, signedUpAt, eligibleDate, payoutStatus, amount, index } */
+  const ledgerEntries=[];
+  pipeline.forEach(c=>{
+    ((c.st&&c.st.customerReferrals)||[]).forEach((r,idx)=>{
+      ledgerEntries.push({
+        caregiver:c,
+        idx,
+        name:r.name||'(unnamed)',
+        signedUpAt:r.signedUpAt||'',
+        eligibleDate:r.eligibleDate||(r.signedUpAt?_addDays(r.signedUpAt,retDays):''),
+        payoutStatus:r.payoutStatus||'pending',
+        amount:r.amount||cashAmt
+      });
+    });
+  });
+  const sortLedger=(a,b)=>{
+    let av,bv;
+    switch(_refLedgerSortKey){
+      case 'caregiver':av=a.caregiver.name.toLowerCase();bv=b.caregiver.name.toLowerCase();break;
+      case 'customer':av=a.name.toLowerCase();bv=b.name.toLowerCase();break;
+      case 'signedUpAt':av=a.signedUpAt;bv=b.signedUpAt;break;
+      case 'payoutStatus':av=a.payoutStatus;bv=b.payoutStatus;break;
+      case 'amount':av=a.amount;bv=b.amount;break;
+      default:av=a.eligibleDate;bv=b.eligibleDate;
+    }
+    if(av<bv)return _refLedgerSortDir==='asc'?-1:1;
+    if(av>bv)return _refLedgerSortDir==='asc'?1:-1;
+    return 0;
+  };
+  ledgerEntries.sort(sortLedger);
+  const totalCashEarned=ledgerEntries.filter(e=>e.payoutStatus==='paid').reduce((s,e)=>s+e.amount,0);
+  const totalCashEligible=ledgerEntries.filter(e=>e.payoutStatus==='eligible').reduce((s,e)=>s+e.amount,0);
+  const totalCashPending=ledgerEntries.filter(e=>e.payoutStatus==='pending').reduce((s,e)=>s+e.amount,0);
+
+  const arrow=(key,curKey,dir)=>key===curKey?(dir==='asc'?' ↑':' ↓'):'';
+  const programBadge=!enabled
+    ?'<span class="pill pr" style="margin-left:8px">DISABLED</span>'
+    :!awardOn?'<span class="pill pa" style="margin-left:8px">REWARDS PAUSED</span>'
+    :'<span class="pill pg" style="margin-left:8px">ACTIVE</span>';
+
+  const leaderTable=leaderRows.length?`
+    <table class="ref-table">
+      <thead><tr>
+        <th onclick="_refSort('name')" style="cursor:pointer">Caregiver${arrow('name',_refSortKey,_refSortDir)}</th>
+        <th onclick="_refSort('points')" style="cursor:pointer;text-align:right">Points${arrow('points',_refSortKey,_refSortDir)}</th>
+        <th onclick="_refSort('submitted')" style="cursor:pointer;text-align:right">Submitted${arrow('submitted',_refSortKey,_refSortDir)}</th>
+        <th onclick="_refSort('screened')" style="cursor:pointer;text-align:right">Screened${arrow('screened',_refSortKey,_refSortDir)}</th>
+        <th onclick="_refSort('hired')" style="cursor:pointer;text-align:right">Hired${arrow('hired',_refSortKey,_refSortDir)}</th>
+        <th onclick="_refSort('stage')" style="cursor:pointer">Their stage${arrow('stage',_refSortKey,_refSortDir)}</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        ${leaderRows.map((r,i)=>{
+          const stageCol=STAGEINFO[r.c.stage]||STAGEINFO['Applied'];
+          const rank=i+1;
+          let rankBadge;
+          if(rank===1)rankBadge=`<span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#FFD700;color:#5C4500;font-size:11px;font-weight:800;text-align:center;line-height:22px;margin-right:8px">1</span>`;
+          else if(rank===2)rankBadge=`<span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#C0C0C0;color:#3C3C3C;font-size:11px;font-weight:800;text-align:center;line-height:22px;margin-right:8px">2</span>`;
+          else if(rank===3)rankBadge=`<span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#CD7F32;color:#3C2210;font-size:11px;font-weight:800;text-align:center;line-height:22px;margin-right:8px">3</span>`;
+          else rankBadge=`<span style="display:inline-block;width:22px;text-align:center;color:var(--soft);font-size:11px;font-weight:600;margin-right:8px">${rank}</span>`;
+          return `<tr style="cursor:pointer" onclick="openWorkspace(${r.c.excelRow})">
+            <td>${rankBadge}<b>${esc(r.c.name)}</b><div style="font-size:11px;color:var(--soft);margin-top:2px">code <code style="background:#F4F0E5;padding:1px 5px;border-radius:3px">${esc((r.c.st&&r.c.st.refCode)||'—')}</code></div></td>
+            <td style="text-align:right;font-weight:700;color:var(--gold-deep,#8B6500);font-size:16px">${r.points}</td>
+            <td style="text-align:right">${r.rc.submitted||0}</td>
+            <td style="text-align:right">${r.rc.screened||0}</td>
+            <td style="text-align:right;font-weight:600;color:var(--grn)">${r.rc.hired||0}</td>
+            <td><span class="sbadge" style="background:${stageCol.color[0]};color:${stageCol.color[1]}">${esc(stageLabel(r.c.stage))}</span></td>
+            <td><button class="btn-sm bg-sky-l" onclick="event.stopPropagation();openWorkspace(${r.c.excelRow})">Open →</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `:'<div style="padding:30px;text-align:center;color:var(--soft);font-style:italic">No caregiver referrals yet. As candidates start using their referral links, they will appear here ranked by points.</div>';
+
+  const ledgerTable=ledgerEntries.length?`
+    <table class="ref-table">
+      <thead><tr>
+        <th onclick="_refLedgerSort('caregiver')" style="cursor:pointer">Caregiver${arrow('caregiver',_refLedgerSortKey,_refLedgerSortDir)}</th>
+        <th onclick="_refLedgerSort('customer')" style="cursor:pointer">Customer${arrow('customer',_refLedgerSortKey,_refLedgerSortDir)}</th>
+        <th onclick="_refLedgerSort('signedUpAt')" style="cursor:pointer">Signed up${arrow('signedUpAt',_refLedgerSortKey,_refLedgerSortDir)}</th>
+        <th onclick="_refLedgerSort('eligibleDate')" style="cursor:pointer">Eligible${arrow('eligibleDate',_refLedgerSortKey,_refLedgerSortDir)}</th>
+        <th onclick="_refLedgerSort('payoutStatus')" style="cursor:pointer">Status${arrow('payoutStatus',_refLedgerSortKey,_refLedgerSortDir)}</th>
+        <th onclick="_refLedgerSort('amount')" style="cursor:pointer;text-align:right">$${arrow('amount',_refLedgerSortKey,_refLedgerSortDir)}</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        ${ledgerEntries.map(e=>{
+          const statusCol=e.payoutStatus==='paid'?'pg':e.payoutStatus==='eligible'?'pa':'psoft';
+          const daysUntil=e.eligibleDate?Math.ceil((new Date(e.eligibleDate)-new Date())/86400000):null;
+          const eligibleNote=daysUntil!=null&&daysUntil>0?` <span style="font-size:10px;color:var(--soft)">(${daysUntil}d)</span>`:daysUntil!=null&&daysUntil<=0&&e.payoutStatus==='pending'?` <span style="font-size:10px;color:var(--grn);font-weight:600">✓ ready</span>`:'';
+          const actionBtn=e.payoutStatus==='pending'&&daysUntil!=null&&daysUntil<=0
+            ?`<button class="btn-sm bg-grn" onclick="event.stopPropagation();markPayoutEligible(${e.caregiver.excelRow},${e.idx})">Mark eligible</button>`
+            :e.payoutStatus==='eligible'
+            ?`<button class="btn-sm bg-grn" onclick="event.stopPropagation();markPayoutPaid(${e.caregiver.excelRow},${e.idx})">Mark paid</button>`
+            :e.payoutStatus==='paid'
+            ?`<span style="font-size:11px;color:var(--soft);font-style:italic">paid</span>`
+            :'';
+          return `<tr style="cursor:pointer" onclick="openWorkspace(${e.caregiver.excelRow})">
+            <td><b>${esc(e.caregiver.name)}</b></td>
+            <td>${esc(e.name)}</td>
+            <td style="font-size:12px">${e.signedUpAt?new Date(e.signedUpAt).toLocaleDateString():'—'}</td>
+            <td style="font-size:12px">${e.eligibleDate?new Date(e.eligibleDate).toLocaleDateString():'—'}${eligibleNote}</td>
+            <td><span class="pill ${statusCol}">${esc(e.payoutStatus)}</span></td>
+            <td style="text-align:right;font-weight:700;color:var(--grn)">$${e.amount}</td>
+            <td>${actionBtn}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `:'<div style="padding:30px;text-align:center;color:var(--soft);font-style:italic">No customer referrals yet. Caregivers can earn $'+cashAmt+' for each customer they bring in (after '+retDays+' days of retention).</div>';
+
+  container.innerHTML=`
+    <div class="ref-shell">
+      <div class="ref-head">
+        <h1>Referrals & rewards ${programBadge}</h1>
+        <div class="ref-stats-row">
+          <div class="ref-stat"><div class="lab">Caregiver referrals</div><div class="num">${totalReferrals}</div><div class="sub">${totalSubmitted} sub · ${totalScreened} scr · ${totalHired} hired</div></div>
+          <div class="ref-stat"><div class="lab">Customer referrals</div><div class="num">${ledgerEntries.length}</div><div class="sub">total tracked</div></div>
+          <div class="ref-stat"><div class="lab">Cash paid out</div><div class="num" style="color:var(--grn)">$${totalCashEarned}</div><div class="sub">to date</div></div>
+          <div class="ref-stat"><div class="lab">Cash pending</div><div class="num" style="color:var(--gold-deep,#8B6500)">$${totalCashPending+totalCashEligible}</div><div class="sub">$${totalCashEligible} ready · $${totalCashPending} accruing</div></div>
+        </div>
+      </div>
+
+      <div class="wscard"><h3>🎁 Caregiver leaderboard <span style="font-size:11px;color:var(--soft);font-weight:600">${leaderRows.length} caregivers earning points · ${ptsSub}/${ptsScr}/${ptsHir} pts per submit/screen/hire</span></h3>
+        ${leaderTable}
+      </div>
+
+      <div class="wscard"><h3>💰 Customer referral ledger <span style="font-size:11px;color:var(--soft);font-weight:600">$${cashAmt} per customer after ${retDays} days · click "Mark paid" once you cut the check</span></h3>
+        ${ledgerTable}
+      </div>
+    </div>`;
+}
+
+function _refSort(key){
+  if(_refSortKey===key)_refSortDir=_refSortDir==='asc'?'desc':'asc';
+  else{_refSortKey=key;_refSortDir=['name','stage'].includes(key)?'asc':'desc';}
+  renderReferralsView();
+}
+function _refLedgerSort(key){
+  if(_refLedgerSortKey===key)_refLedgerSortDir=_refLedgerSortDir==='asc'?'desc':'asc';
+  else{_refLedgerSortKey=key;_refLedgerSortDir=['eligibleDate','signedUpAt'].includes(key)?'asc':'desc';}
+  renderReferralsView();
+}
+
+/* Date math for retention calc — adds N days to an ISO date string. */
+function _addDays(iso,days){
+  try{const d=new Date(iso);d.setDate(d.getDate()+days);return d.toISOString();}catch(e){return '';}
+}
+
+/* Payout state machine — pending → eligible → paid. Each transition logs to the caregiver's
+   activity timeline + writes to the sheet. */
+async function markPayoutEligible(row,idx){
+  const c=pipeline.find(x=>x.excelRow===row);if(!c||!c.st.customerReferrals||!c.st.customerReferrals[idx])return;
+  const r=c.st.customerReferrals[idx];
+  r.payoutStatus='eligible';r.eligibleAt=new Date().toISOString();
+  c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'💰 Customer referral eligible: '+(r.name||'unnamed')+' · $'+(r.amount||SETTINGS.config.customerReferralAmount)});
+  try{await patchRange('AJ'+row,[[JSON.stringify(sanitizeState(c.st))]]);await refreshRow(row);toast('✓ Marked eligible');renderReferralsView();}
+  catch(e){toast('Save failed: '+e.message);}
+}
+async function markPayoutPaid(row,idx){
+  const c=pipeline.find(x=>x.excelRow===row);if(!c||!c.st.customerReferrals||!c.st.customerReferrals[idx])return;
+  const r=c.st.customerReferrals[idx];
+  if(!SETTINGS.config.customerReferralPayoutEnabled){
+    if(!confirm('Payouts are PAUSED in Settings. Mark this as paid anyway?\\n\\nThis will record the payment but the rewards program is currently in tracking-only mode.'))return;
+  }
+  r.payoutStatus='paid';r.paidAt=new Date().toISOString();
+  c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'💰 Customer referral PAID: '+(r.name||'unnamed')+' · $'+(r.amount||SETTINGS.config.customerReferralAmount)});
+  try{await patchRange('AJ'+row,[[JSON.stringify(sanitizeState(c.st))]]);await refreshRow(row);toast('✓ Marked paid');renderReferralsView();}
+  catch(e){toast('Save failed: '+e.message);}
+}
+function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return renderCalendar();if(view==='active')return renderActiveCaregivers();if(view==='referrals')return renderReferralsView();
   const B={action:[],scheduled:[],awaiting:[],checks:[]},all=[];
   pipeline.forEach(c=>{if(c.stage==='Hired'||!matchFilters(c))return;const a=action(c);if(a.bucket==='closed'||a.bucket==='hired')return;all.push(c);(B[a.bucket]||B.action).push(c);});
   /* KV counter flash on value change — gives a brief visual ping when a count moves. */
@@ -2315,17 +2581,33 @@ function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return
   renderAutoRejectBanner();
   renderNudgeBanner();
   const ord=c=>{const i=flowOrder().indexOf(c.stage);return i<0?999:i;};
-  /* Action bucket: sort by stage (early stages first), with "Call now" (overdue + within-30-min)
-     bookings rising to top by countdown time since they're time-critical. */
+  /* Referral priority points — only used as tiebreaker within same-urgency bucket.
+     Stage urgency dominates (overdue calls beat new applications regardless of points). */
+  const refPoints=c=>{
+    if(!SETTINGS.config.referralEnabled||!SETTINGS.config.referralAwardPoints)return 0;
+    const rc=(c.st&&c.st.referralCount)||{};
+    return (rc.submitted||0)*(SETTINGS.config.referralPtsSubmit||1)
+         + (rc.screened||0)*(SETTINGS.config.referralPtsScreen||2)
+         + (rc.hired||0)*(SETTINGS.config.referralPtsHired||5);
+  };
+  /* Action bucket: sort by stage urgency first, then referral points DESC, then name */
   const byUrgency=(a,b)=>{
     const am=minsUntil(a.st.booking),bm=minsUntil(b.st.booking);
     const aUrgent=am!=null&&!isNaN(am)&&am<=30,bUrgent=bm!=null&&!isNaN(bm)&&bm<=30;
     if(aUrgent&&!bUrgent)return -1;
     if(!aUrgent&&bUrgent)return 1;
     if(aUrgent&&bUrgent)return am-bm;
-    return ord(a)-ord(b)||(a.name<b.name?-1:1);
+    const stageDiff=ord(a)-ord(b);
+    if(stageDiff!==0)return stageDiff;
+    /* Same stage → referral points tiebreaker */
+    const ptDiff=refPoints(b)-refPoints(a);
+    if(ptDiff!==0)return ptDiff;
+    return a.name<b.name?-1:1;
   };
-  const byTime=(a,b)=>((a.st.booking||a.st.due||'~')<(b.st.booking||b.st.due||'~')?-1:1);
+  const byTime=(a,b)=>{
+    const t=(a.st.booking||a.st.due||'~')<(b.st.booking||b.st.due||'~')?-1:1;
+    return t;
+  };
   fillBucket(0,B.action.sort(byUrgency));
   fillBucket('scheduled',B.scheduled.sort(byTime));
   fillBucket(1,B.awaiting.sort(byTime));
@@ -2453,7 +2735,17 @@ function rowHtml(c){
   const certs=(c.st.certs||[]).slice(0,2).map(x=>'<span class="cbadge">'+esc(x)+'</span>').join('');
   const dl=c.st.licenseNum||c.st.license?'<span class="dlbadge">DL</span>':'';
   const pills=(c.st.pills||[]).slice(0,3).map(p=>'<span class="xpill">'+esc(p)+'</span>').join('');
-  const idline='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">'+band+certs+dl+pills+'</div>';
+  /* Referral gift pill — gold for caregiver points earned, green for cash earned from customer
+     referrals. Only shows when leaderboard pills setting is on and there are actual referrals. */
+  let giftPill='';
+  if(SETTINGS.config.showLeaderboardPills){
+    const rc=(c.st&&c.st.referralCount)||{};
+    const totalRefs=(rc.submitted||0)+(rc.screened||0)+(rc.hired||0);
+    const custRefs=((c.st&&c.st.customerReferrals)||[]).length;
+    if(totalRefs>0)giftPill+='<span class="giftpill caregiver" title="'+totalRefs+' caregiver referral'+(totalRefs===1?'':'s')+'">🎁 '+totalRefs+'</span>';
+    if(custRefs>0)giftPill+='<span class="giftpill customer" title="'+custRefs+' customer referral'+(custRefs===1?'':'s')+'">💰 '+custRefs+'</span>';
+  }
+  const idline='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">'+band+certs+dl+pills+giftPill+'</div>';
   const sub='<div class="dm-tag" style="margin-top:5px">'+(c.source?esc(c.source)+' · ':'')+'Q <span>'+(sc.Q==null?'—':sc.Q)+'</span> · R <span>'+(sc.R==null?'—':sc.R)+'</span></div>';
   const sci=a.info.color;
   const stageBadge='<span class="sbadge" style="background:'+sci[0]+';color:'+sci[1]+';border-color:'+sci[1]+'33">'+esc(stageLabel(c.stage))+'</span>';
@@ -2769,6 +3061,7 @@ function renderFocusedHub(){
   else if(kind==='refs'){block=refsBlock();title='References';}
   else if(kind==='checks'){block=checksBlock();title='Background & certificates';}
   else if(kind==='application'){block=applicationBlock();title='Application data';}
+  else if(kind==='rewards'){block=rewardsBlock(c);title='Referrals & rewards';}
   document.getElementById('ws-name').innerHTML='<button onclick="clearFocusedHub()" style="background:none;border:none;cursor:pointer;font-size:24px;color:var(--sky-deep);margin-right:8px;padding:0 6px;font-weight:700;vertical-align:-2px" title="Back to candidate overview">‹</button>'+esc(title);
   const info=STAGEINFO[W.stage]||STAGEINFO['Applied'];
   document.getElementById('ws-sub').innerHTML='<span style="color:var(--soft);font-size:13px">for </span><b>'+esc(W.name)+'</b> <span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-left:8px">'+esc(stageLabel(W.stage))+'</span>';
@@ -2906,6 +3199,7 @@ function renderWorkspace(){
   /* application snapshot — key facts + button to open full app view */
   const _appSnap=appSnapshotCard(W);
   const _empPrev=employersPreviewCard(W);
+  const _refPrev=referralsPreviewCard(W);
 
   /* refs preview — small card visible at all stages once refs are on file. Distinct from the full refsBlock,
      which is the working surface at the References stage. */
@@ -2937,7 +3231,7 @@ function renderWorkspace(){
   document.getElementById('ws-body').innerHTML=`
     ${thisStep}
     <div class="wsgrid">
-      <div>${gatesCard}${work}${_appSnap}${_empPrev}${docs}${refsPreviewCard}${emailsCard}${activity}</div>
+      <div>${gatesCard}${work}${_appSnap}${_empPrev}${_refPrev}${docs}${refsPreviewCard}${emailsCard}${activity}</div>
       <div>${identity}${scoreCard}</div>
     </div>`;
   /* sticky footer with primary action — always visible */
@@ -3131,8 +3425,38 @@ const APP_SECTIONS=[
   ]}
 ];
 
-/* Compact summary of past employers — visible on the overview from every stage so candidate
-   verification status is one glance away regardless of which hub you're in. */
+/* Compact rewards summary on overview — visible from every stage. Shows points + counts + a
+   quick-copy link box + a button to open the full Rewards hub. */
+function referralsPreviewCard(c){
+  if(!SETTINGS.config.referralEnabled)return '';
+  if(!c||!c.st)return '';
+  const refCode=c.st.refCode;
+  const rc=c.st.referralCount||{submitted:0,screened:0,hired:0};
+  const refs=c.st.referrals||[];
+  const custRefs=c.st.customerReferrals||[];
+  /* Skip rendering for candidates with NO referral activity AND no code yet — keeps overview clean */
+  if(!refCode&&!refs.length&&!custRefs.length)return '';
+  const ptsSub=SETTINGS.config.referralPtsSubmit||1;
+  const ptsScr=SETTINGS.config.referralPtsScreen||2;
+  const ptsHir=SETTINGS.config.referralPtsHired||5;
+  const totalPoints=(rc.submitted||0)*ptsSub+(rc.screened||0)*ptsScr+(rc.hired||0)*ptsHir;
+  const cashEarned=custRefs.filter(r=>r.payoutStatus==='paid'||r.payoutStatus==='eligible').reduce((s,r)=>s+(r.amount||SETTINGS.config.customerReferralAmount||0),0);
+  const summary=[];
+  if(totalPoints>0)summary.push(`<span class="pill pa" style="font-size:9px">🎁 ${totalPoints} pts</span>`);
+  if(refs.length)summary.push(`<span class="pill psoft" style="font-size:9px">${refs.length} caregiver ref${refs.length===1?'':'s'}</span>`);
+  if(custRefs.length)summary.push(`<span class="pill pg" style="font-size:9px">💰 ${custRefs.length} customer ref${custRefs.length===1?'':'s'} · $${cashEarned}</span>`);
+  if(!summary.length)summary.push(`<span class="pill psoft" style="font-size:9px">No activity yet</span>`);
+  const refLink=refCode?'https://apply.solurahomecare.com/?ref='+refCode:'';
+  return `<div class="wscard"><h3>Referrals & rewards <span style="font-size:11px;color:var(--soft);font-weight:600">code ${esc(refCode||'—')}</span></h3>
+    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">${summary.join('')}</div>
+    ${refLink?`<div style="background:#FAF6EE;border:1px solid var(--gold-mid);border-radius:7px;padding:7px 10px;display:flex;gap:6px;align-items:center;margin-bottom:8px">
+      <input type="text" readonly value="${esc(refLink)}" style="flex:1;border:none;outline:none;background:transparent;font-family:'Courier New',monospace;font-size:11px;color:var(--sky-deep);min-width:0" onclick="this.select()">
+      <button class="btn-sm bg-gold" style="padding:4px 9px;font-size:11px;white-space:nowrap" onclick="copyToClipboard('${esc(refLink)}');toast('✓ Link copied')">📋</button>
+    </div>`:''}
+    <button class="btn-sec bg-cream" style="padding:6px 12px;font-size:12px;width:100%" onclick="setFocusedHub('rewards')">🎁 Open referrals hub →</button>
+  </div>`;
+}
+
 function employersPreviewCard(c){
   const emp=(c&&c.st&&c.st.employers)||[];
   if(!emp.length)return '';
@@ -3197,6 +3521,119 @@ function appSnapshotCard(c){
 }
 async function markResumeReceived(){if(!W)return;W.st.hasResume=true;logW('✓ Résumé received (manually marked)');await saveW(true);renderWorkspace();toast('Marked received — screen invite available');}
 async function skipResumeRequirement(){if(!W)return;if(!confirm('Skip the résumé requirement and continue without one?'))return;W.st.hasResume=true;W.st.resumeSkipped=true;logW('→ Résumé requirement skipped');await saveW(true);renderWorkspace();toast('Skipped — proceed with screen invite');}
+
+/* ===================== Referrals & rewards hub ===================== */
+function rewardsBlock(c){
+  if(!c)return '<div class="wscard">No candidate loaded.</div>';
+  const enabled=SETTINGS.config.referralEnabled;
+  const awardOn=SETTINGS.config.referralAwardPoints;
+  const refCode=c.st&&c.st.refCode;
+  const refLink=refCode?'https://apply.solurahomecare.com/?ref='+refCode:'';
+  const rc=(c.st&&c.st.referralCount)||{submitted:0,screened:0,hired:0};
+  const refs=(c.st&&c.st.referrals)||[];
+  const custRefs=(c.st&&c.st.customerReferrals)||[];
+  const ptsSub=SETTINGS.config.referralPtsSubmit||1;
+  const ptsScr=SETTINGS.config.referralPtsScreen||2;
+  const ptsHir=SETTINGS.config.referralPtsHired||5;
+  const totalPoints=(rc.submitted||0)*ptsSub+(rc.screened||0)*ptsScr+(rc.hired||0)*ptsHir;
+  const cashEarned=custRefs.filter(r=>r.payoutStatus==='paid'||r.payoutStatus==='eligible').reduce((s,r)=>s+(r.amount||SETTINGS.config.customerReferralAmount||0),0);
+  const cashPending=custRefs.filter(r=>r.payoutStatus==='pending').reduce((s,r)=>s+(r.amount||SETTINGS.config.customerReferralAmount||0),0);
+
+  /* Referred-by context: if this candidate was brought in by someone, surface that */
+  const referredBy=c.st&&c.st.referredBy;
+  let referredByCard='';
+  if(referredBy){
+    const referrer=pipeline.find(x=>x.st&&x.st.refCode===referredBy);
+    referredByCard=`<div class="wscard" style="background:#FAF6EE;border-left:3px solid var(--gold)"><h3>Referred by</h3>
+      <div style="font-size:13px;color:var(--mid)">${referrer?'<b>'+esc(referrer.name)+'</b> · code '+esc(referredBy):'Code '+esc(referredBy)+' <span style="color:var(--soft)">(referrer no longer in pipeline)</span>'}</div>
+      ${referrer?'<button class="btn-sec bg-cream" style="margin-top:8px;padding:6px 12px;font-size:12px" onclick="openWorkspace('+referrer.excelRow+')">Open referrer →</button>':''}
+    </div>`;
+  }
+
+  /* Funnel summary card */
+  const funnelCard=`<div class="wscard"><h3>Caregiver referrals <span style="font-size:11px;color:var(--soft);font-weight:600">${totalPoints} pts</span></h3>
+    <div class="scorebig" style="margin:0">
+      <div class="blk"><div class="lab">Submitted</div><div class="num">${rc.submitted||0}</div><div style="font-size:10px;color:var(--soft);margin-top:2px">${ptsSub} pt ea.</div></div>
+      <div class="blk"><div class="lab">Screened</div><div class="num">${rc.screened||0}</div><div style="font-size:10px;color:var(--soft);margin-top:2px">${ptsScr} pts ea.</div></div>
+      <div class="blk"><div class="lab">Hired</div><div class="num">${rc.hired||0}</div><div style="font-size:10px;color:var(--soft);margin-top:2px">${ptsHir} pts ea.</div></div>
+    </div>
+    ${!enabled?'<div style="margin-top:10px;font-size:11.5px;color:var(--soft);font-style:italic">Program disabled in Settings — tracking continues, no points awarded.</div>':!awardOn?'<div style="margin-top:10px;font-size:11.5px;color:var(--soft);font-style:italic">Rewards frozen in Settings — tracking continues, no points awarded.</div>':''}
+  </div>`;
+
+  /* Cash summary card */
+  const cashCard=`<div class="wscard"><h3>Customer referrals <span style="font-size:11px;color:var(--soft);font-weight:600">$${cashEarned} earned · $${cashPending} pending</span></h3>
+    <div class="scorebig" style="margin:0">
+      <div class="blk"><div class="lab">Total customers</div><div class="num">${custRefs.length}</div></div>
+      <div class="blk"><div class="lab">Cash earned</div><div class="num" style="color:var(--grn)">$${cashEarned}</div></div>
+      <div class="blk"><div class="lab">Pending</div><div class="num" style="color:var(--gold-deep,#8B6500)">$${cashPending}</div></div>
+    </div>
+    <div style="font-size:11.5px;color:var(--soft);margin-top:10px">$${SETTINGS.config.customerReferralAmount||100} per customer after ${SETTINGS.config.customerReferralRetentionDays||30} days of retention.</div>
+  </div>`;
+
+  /* Personal link card */
+  const linkCard=refLink?`<div class="wscard"><h3>Personal referral link</h3>
+    <div style="background:#FAF6EE;border:1.5px solid var(--gold);border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <input id="rwd-link" type="text" readonly value="${esc(refLink)}" style="flex:1;border:none;outline:none;background:transparent;font-family:'Courier New',monospace;font-size:12px;color:var(--sky-deep);min-width:0">
+      <button class="btn-sm bg-gold" onclick="copyToClipboard(document.getElementById('rwd-link').value);toast('✓ Link copied')" style="white-space:nowrap">📋 Copy</button>
+    </div>
+    <div style="font-size:11.5px;color:var(--soft)">Code <code style="background:#F4F0E5;padding:2px 6px;border-radius:4px;font-weight:600;color:var(--gold-deep,#8B6500)">${esc(refCode)}</code> — share this link by text, email, or any messaging app.</div>
+  </div>`:'<div class="wscard"><h3>Personal referral link</h3><div style="font-size:12px;color:var(--soft);font-style:italic">No referral code on file. Older applicant — code will be generated on next stage advance.</div></div>';
+
+  /* Caregiver referral activity list */
+  const refsList=refs.length?`<div class="wscard"><h3>Caregivers referred</h3>
+    ${refs.map(r=>{
+      const candidate=pipeline.find(c2=>c2.st&&c2.st.refCode===r.refCode);
+      const status=r.status||'submitted';
+      const statusCol=status==='hired'?'pg':status==='screened'?'psoft':'pa';
+      const submittedDate=r.submittedAt?new Date(r.submittedAt).toLocaleDateString():'';
+      const earned=(status==='submitted'?ptsSub:status==='screened'?ptsSub+ptsScr:status==='hired'?ptsSub+ptsScr+ptsHir:0);
+      return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--border-soft);font-size:13px">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;color:var(--ink)">${esc(r.name)}</div>
+          <div style="font-size:11px;color:var(--soft);margin-top:1px">${esc(r.email||'')} · referred ${submittedDate}</div>
+        </div>
+        <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+          <span class="pill ${statusCol}">${esc(status)}</span>
+          <span style="font-size:11px;color:var(--gold-deep,#8B6500);font-weight:700">+${earned} pts</span>
+        </div>
+        ${candidate?'<button class="btn-sm bg-sky-l" onclick="openWorkspace('+candidate.excelRow+')" style="white-space:nowrap">Open →</button>':''}
+      </div>`;
+    }).join('')}
+  </div>`:'<div class="wscard"><h3>Caregivers referred</h3><div style="font-size:12px;color:var(--soft);font-style:italic">No referrals yet. Share the link above to start earning priority points.</div></div>';
+
+  /* Customer referral activity */
+  const custList=custRefs.length?`<div class="wscard"><h3>Customers referred</h3>
+    ${custRefs.map(r=>{
+      const submittedDate=r.signedUpAt?new Date(r.signedUpAt).toLocaleDateString():'';
+      const eligibleDate=r.eligibleDate?new Date(r.eligibleDate).toLocaleDateString():'';
+      const amount=r.amount||SETTINGS.config.customerReferralAmount||100;
+      const statusCol=r.payoutStatus==='paid'?'pg':r.payoutStatus==='eligible'?'pa':'psoft';
+      return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--border-soft);font-size:13px">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;color:var(--ink)">${esc(r.name||'(unnamed)')}</div>
+          <div style="font-size:11px;color:var(--soft);margin-top:1px">Signed up ${submittedDate} · eligible ${eligibleDate}</div>
+        </div>
+        <div style="text-align:right">
+          <span class="pill ${statusCol}">${esc(r.payoutStatus||'pending')}</span>
+          <div style="font-size:13px;color:var(--grn);font-weight:700;margin-top:3px">$${amount}</div>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`:'';
+
+  return referredByCard+funnelCard+cashCard+linkCard+refsList+custList;
+}
+
+/* Copy any string to clipboard. Fallback to execCommand if navigator.clipboard unavailable. */
+function copyToClipboard(text){
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).catch(()=>{
+      const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);
+    });
+  }else{
+    const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);
+  }
+}
 
 /* Full application hub — read + edit */
 function applicationBlock(){
@@ -3472,11 +3909,17 @@ function checksBlock(){
 }
 function setRegistryResult(key,field,val){W.st.registryChecks=W.st.registryChecks||{};W.st.registryChecks[key]=W.st.registryChecks[key]||{};W.st.registryChecks[key][field]=val;if(field==='status')saveW(true);}
 async function advanceWS(toStage,msg){
+  const fromStage=W.stage;
   W.stage=toStage;if(msg)logW(msg);
   if(toStage==='Screen invite'||toStage==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();
   await saveW(true);
   toast('→ '+toStage);
   if(toStage==='Hired'){uploadHiredActivityLog(W).catch(e=>console.warn('Activity log upload:',e.message));}
+  /* Referral funnel — if this candidate was referred by someone, advance the referrer's counters
+     when their referred candidate reaches the appropriate funnel milestone.
+     - Phone screen completed (any stage past 'Screen booked') → "screened" credit
+     - Hired → "hired" credit */
+  await maybeAdvanceReferrer(fromStage,toStage);
   /* clear any focused hub — the prior task is done. User returns to overview by default. */
   W.focusedHub=null;
   renderWorkspace();
@@ -3488,6 +3931,59 @@ async function advanceWS(toStage,msg){
     if(a.primary&&a.primary.kind==='email-tpl'){
       setTimeout(()=>doEmail(a.primary.tpl,a.primary.advanceTo),250);
     }
+  }
+}
+
+/* Walk the funnel for this candidate (W) and check if any referral milestones just triggered.
+   "screened" milestone = candidate advanced past Phone Screen (i.e. fromStage was Screen booked
+   and toStage is Ask references or beyond). "hired" milestone = toStage===Hired.
+   Idempotent: each referral entry tracks which milestones have already been credited so a
+   re-advance (rare but possible) doesn't double-count. */
+async function maybeAdvanceReferrer(fromStage,toStage){
+  if(!SETTINGS.config.referralEnabled)return;
+  if(!W.st.referredBy)return;
+  const referrerCode=W.st.referredBy;
+  const referrer=pipeline.find(x=>x.st&&x.st.refCode===referrerCode);
+  if(!referrer)return;
+  /* Find the referral entry on the referrer's record matching THIS candidate's refCode */
+  const myCode=W.st.refCode;
+  referrer.st.referrals=referrer.st.referrals||[];
+  let entry=referrer.st.referrals.find(r=>r.refCode===myCode);
+  if(!entry){
+    /* Defensive: should exist from worker submission, but recreate if missing */
+    entry={refCode:myCode,name:W.name,email:W.email,status:'submitted',submittedAt:new Date().toISOString(),history:[{event:'submitted',at:new Date().toISOString()}]};
+    referrer.st.referrals.push(entry);
+  }
+  let updated=false;
+  /* Screen credit: candidate passed Screen booked → next stage */
+  const screenedAlready=entry.history&&entry.history.some(h=>h.event==='screened');
+  if(!screenedAlready&&(fromStage==='Screen booked'||fromStage==='Screen invite')&&(toStage==='Ask references'||toStage==='References'||toStage==='Verify employers'||toStage==='Interview invite'||toStage==='Interview booked'||toStage==='Offer'||toStage==='Onboarding'||toStage==='Onboarding booked'||toStage==='Hired')){
+    entry.status='screened';
+    entry.history=entry.history||[];
+    entry.history.push({event:'screened',at:new Date().toISOString()});
+    referrer.st.referralCount=referrer.st.referralCount||{submitted:0,screened:0,hired:0};
+    referrer.st.referralCount.screened=(referrer.st.referralCount.screened||0)+1;
+    referrer.st.log=referrer.st.log||[];
+    referrer.st.log.push({t:stamp(),x:'🎁 Referral milestone: '+W.name+' completed phone screen'});
+    updated=true;
+  }
+  /* Hired credit */
+  const hiredAlready=entry.history&&entry.history.some(h=>h.event==='hired');
+  if(!hiredAlready&&toStage==='Hired'){
+    entry.status='hired';
+    entry.history=entry.history||[];
+    entry.history.push({event:'hired',at:new Date().toISOString()});
+    referrer.st.referralCount=referrer.st.referralCount||{submitted:0,screened:0,hired:0};
+    referrer.st.referralCount.hired=(referrer.st.referralCount.hired||0)+1;
+    referrer.st.log=referrer.st.log||[];
+    referrer.st.log.push({t:stamp(),x:'🎁 Referral milestone: '+W.name+' was hired!'});
+    updated=true;
+  }
+  if(updated){
+    try{
+      await patchRange('AJ'+referrer.excelRow,[[JSON.stringify(sanitizeState(referrer.st))]]);
+      await refreshRow(referrer.excelRow);
+    }catch(e){console.warn('Referrer credit failed:',e.message);}
   }
 }
 /* ===================== email detail view + attachment upload ===================== */
@@ -4182,6 +4678,7 @@ const SETTINGS_SECTIONS=[
   {key:'templates', label:'Email templates',      icon:'✉'},
   {key:'scripts',   label:'Call scripts',         icon:'☎'},
   {key:'pipeline',  label:'Pipeline config',      icon:'⚙'},
+  {key:'referrals', label:'Referral program',     icon:'🎁'},
   {key:'calendars', label:'Cal.com booking URLs', icon:'📅'},
   {key:'bgchecks',  label:'Background registries',icon:'🛡'},
   {key:'zoominfo',  label:'ZoomInfo integration', icon:'🔍'},
@@ -4285,6 +4782,7 @@ function renderSettings(){
   else if(settingsSection==='templates') body=renderSettingsTemplates();
   else if(settingsSection==='scripts') body=renderSettingsScripts();
   else if(settingsSection==='pipeline') body=renderSettingsPipeline();
+  else if(settingsSection==='referrals') body=renderSettingsReferrals();
   else if(settingsSection==='calendars') body=renderSettingsCalendars();
   else if(settingsSection==='bgchecks') body=renderSettingsBgChecks();
   else if(settingsSection==='zoominfo') body=renderSettingsZoomInfo();
@@ -4508,6 +5006,60 @@ function renderSettingsPipeline(){
   </div>
 
   <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveConfig()">Save pipeline config</button></div>`;
+}
+
+/* ----- REFERRAL PROGRAM section ----- */
+function renderSettingsReferrals(){
+  const c=SETTINGS.config;
+  /* Two parallel sub-programs (caregiver + customer), each with master toggle and reward toggle */
+  return `
+  <div class="wscard"><h3>🎁 Caregiver referral program</h3>
+    <p class="set-help">When a candidate refers another candidate via their personal link, they earn priority points. Points sort tied candidates within the same urgency bucket — higher-point referrers get worked first. Does NOT bump anyone past time-sensitive items (e.g. scheduled calls).</p>
+    <div class="set-toggle-row">
+      <label class="set-toggle"><input type="checkbox" id="cfg_referralEnabled" ${c.referralEnabled?'checked':''}><span>Program enabled</span></label>
+      <div class="set-toggle-hint">Master switch. Off = no link in confirmation email, no leaderboard, no points awarded.</div>
+    </div>
+    <div class="set-toggle-row">
+      <label class="set-toggle"><input type="checkbox" id="cfg_referralAwardPoints" ${c.referralAwardPoints?'checked':''}><span>Award priority points</span></label>
+      <div class="set-toggle-hint">When off, tracking continues but no points awarded — useful for testing, soft-launching, or pausing rewards while keeping data.</div>
+    </div>
+    <div class="set-row" style="gap:12px;margin-top:16px">
+      <label class="set-field" style="flex:1">Points per application submit<input type="number" min="0" max="100" id="cfg_referralPtsSubmit" value="${c.referralPtsSubmit||1}"></label>
+      <label class="set-field" style="flex:1">Points per phone screen<input type="number" min="0" max="100" id="cfg_referralPtsScreen" value="${c.referralPtsScreen||2}"></label>
+      <label class="set-field" style="flex:1">Points per hire<input type="number" min="0" max="100" id="cfg_referralPtsHired" value="${c.referralPtsHired||5}"></label>
+    </div>
+    <p class="set-help" style="margin-top:6px">Total earned per successful referral: <b>${(c.referralPtsSubmit||1)+(c.referralPtsScreen||2)+(c.referralPtsHired||5)} pts</b> (submit + screen + hire, cumulative).</p>
+  </div>
+
+  <div class="wscard"><h3>💰 Customer referral program</h3>
+    <p class="set-help">When a caregiver refers a paying customer who reaches the retention threshold, they earn a cash payout. Payout is tracked in the portal — you cut the check manually through your normal payroll flow.</p>
+    <div class="set-toggle-row">
+      <label class="set-toggle"><input type="checkbox" id="cfg_customerReferralEnabled" ${c.customerReferralEnabled?'checked':''}><span>Program enabled</span></label>
+      <div class="set-toggle-hint">Master switch. Off = no customer-referral link generated, no ledger.</div>
+    </div>
+    <div class="set-toggle-row">
+      <label class="set-toggle"><input type="checkbox" id="cfg_customerReferralPayoutEnabled" ${c.customerReferralPayoutEnabled?'checked':''}><span>Pay out rewards</span></label>
+      <div class="set-toggle-hint">When off, customer referrals are tracked but the ledger shows "PAUSED" — you can still mark eligible/paid manually, but the system warns first.</div>
+    </div>
+    <div class="set-row" style="gap:12px;margin-top:16px">
+      <label class="set-field" style="flex:1">Payout amount ($)<input type="number" min="0" max="10000" step="5" id="cfg_customerReferralAmount" value="${c.customerReferralAmount||100}"></label>
+      <label class="set-field" style="flex:1">Retention threshold (days)<input type="number" min="0" max="365" id="cfg_customerReferralRetentionDays" value="${c.customerReferralRetentionDays||30}"></label>
+    </div>
+    <p class="set-help" style="margin-top:6px">Customer must remain a paying client for ${c.customerReferralRetentionDays||30} days before the $${c.customerReferralAmount||100} payout becomes eligible.</p>
+  </div>
+
+  <div class="wscard"><h3>Display options</h3>
+    <div class="set-toggle-row">
+      <label class="set-toggle"><input type="checkbox" id="cfg_showLeaderboardPills" ${c.showLeaderboardPills!==false?'checked':''}><span>Show 🎁 referral pills on candidate rows</span></label>
+      <div class="set-toggle-hint">Compact badges in the pipeline list showing each candidate's referral count.</div>
+    </div>
+    <div class="set-toggle-row">
+      <label class="set-toggle"><input type="checkbox" id="cfg_referralInConfirmEmail" ${c.referralInConfirmEmail!==false?'checked':''}><span>Include referral link in application confirmation email</span></label>
+      <div class="set-toggle-hint">When a new candidate submits, the auto-confirmation email includes their personal referral link with a copy-style fallback.</div>
+    </div>
+  </div>
+
+  <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveConfig()">Save referral program</button></div>`;
 }
 
 /* ----- CALENDARS section ----- */
@@ -4940,6 +5492,18 @@ async function saveConfig(){
   if(get('cfg_calScreenUrl'))SETTINGS.config.calScreenUrl=get('cfg_calScreenUrl').value.trim();
   if(get('cfg_calInterviewUrl'))SETTINGS.config.calInterviewUrl=get('cfg_calInterviewUrl').value.trim();
   if(get('cfg_calOnboardingUrl'))SETTINGS.config.calOnboardingUrl=get('cfg_calOnboardingUrl').value.trim();
+  /* Referral program fields — checkboxes use .checked, numeric fields parse with sensible defaults */
+  if(get('cfg_referralEnabled'))SETTINGS.config.referralEnabled=get('cfg_referralEnabled').checked;
+  if(get('cfg_referralAwardPoints'))SETTINGS.config.referralAwardPoints=get('cfg_referralAwardPoints').checked;
+  if(get('cfg_referralPtsSubmit'))SETTINGS.config.referralPtsSubmit=parseInt(get('cfg_referralPtsSubmit').value,10)||0;
+  if(get('cfg_referralPtsScreen'))SETTINGS.config.referralPtsScreen=parseInt(get('cfg_referralPtsScreen').value,10)||0;
+  if(get('cfg_referralPtsHired'))SETTINGS.config.referralPtsHired=parseInt(get('cfg_referralPtsHired').value,10)||0;
+  if(get('cfg_customerReferralEnabled'))SETTINGS.config.customerReferralEnabled=get('cfg_customerReferralEnabled').checked;
+  if(get('cfg_customerReferralPayoutEnabled'))SETTINGS.config.customerReferralPayoutEnabled=get('cfg_customerReferralPayoutEnabled').checked;
+  if(get('cfg_customerReferralAmount'))SETTINGS.config.customerReferralAmount=parseInt(get('cfg_customerReferralAmount').value,10)||0;
+  if(get('cfg_customerReferralRetentionDays'))SETTINGS.config.customerReferralRetentionDays=parseInt(get('cfg_customerReferralRetentionDays').value,10)||30;
+  if(get('cfg_showLeaderboardPills'))SETTINGS.config.showLeaderboardPills=get('cfg_showLeaderboardPills').checked;
+  if(get('cfg_referralInConfirmEmail'))SETTINGS.config.referralInConfirmEmail=get('cfg_referralInConfirmEmail').checked;
   await saveSettings();toast('✓ Config saved');
 }
 async function saveScript(k){const lines=document.getElementById('script_'+k).value.split('\n').map(s=>s.trim()).filter(Boolean);
