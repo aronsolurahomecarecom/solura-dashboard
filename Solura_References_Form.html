@@ -79,7 +79,7 @@ textarea{min-height:62px;resize:vertical;font-family:inherit}
 </div>
 
 <script>
-// Replace WEBHOOK_URL with your actual Cloudflare Worker URL after deploying.
+// Cloudflare Worker URL — owner's deployed worker. If this changes, edit here AND in Solura_Application_Form.html.
 const WEBHOOK_URL='https://solura-hiring-webhook.meir-865.workers.dev';
 
 const RELATIONSHIPS=[
@@ -183,6 +183,13 @@ async function submitRefs(){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({kind:'REFERENCES_SUBMITTED',submission:payload})
     });
+    /* 400 = validation error (often suspicious reference). Parse and show the worker's message. */
+    if(r.status===400){
+      let msg='One or more of your references could not be accepted.';
+      try{const j=await r.json();if(j&&j.message)msg=j.message;}catch(e){}
+      btn.disabled=false;btn.textContent='Submit references';
+      alert(msg);return;
+    }
     if(!r.ok){const t=await r.text().catch(()=>'');throw new Error('Server returned '+r.status+' '+t.slice(0,80));}
     document.getElementById('app').innerHTML=`<div class="done">
       <div class="ck">✓</div><h2>Thanks!</h2>

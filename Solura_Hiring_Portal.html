@@ -1379,7 +1379,11 @@ let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{},sc
   referralPtsSubmit:1,referralPtsScreen:2,referralPtsHired:5,
   customerReferralEnabled:true,customerReferralPayoutEnabled:true,
   customerReferralAmount:100,customerReferralRetentionDays:30,
-  showLeaderboardPills:true,referralInConfirmEmail:true
+  showLeaderboardPills:true,referralInConfirmEmail:true,
+  /* Admin number watchlist — phone numbers (any format) that should NEVER appear as candidate
+     references. If a reference's phone matches one of these, the worker rejects the submission
+     and the portal flags it as suspicious if it somehow makes it through (e.g., manually entered). */
+  adminPhones:'2167704886,9295454507,6469370249'
 },flow:{order:null,labels:{},custom:[]}}; /* flow.order = user-edited stage order; flow.labels = display overrides; flow.custom = user-added milestone stages (manual advance only) */
 
 /* Effective flow: user-edited order if present, else default FLOW. Custom milestone stages are inserted at saved positions. */
@@ -1533,15 +1537,40 @@ async function loadAvailability(){
 }
 async function saveAvailability(){try{await patchRange('AK1',[[JSON.stringify(AVAIL)]]);}catch(e){toast('Could not save availability');}}
 
-/* settings stored in cell AL1: custom expertise/cert/source adds + edited templates */
+/* settings stored in cell AL1: custom expertise/cert/source adds + edited templates.
+   Also mirrored to localStorage as a fallback so settings survive transient sheet failures
+   (network blip, eventual-consistency, locked workbook) without the user losing their work. */
 async function loadSettings(){
+  let sheetLoaded=false;
   try{const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AL1')?$select=values");
-    if(!r.ok)return;const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{
+    if(r.ok){const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{
       const saved=JSON.parse(v[0][0]);
       SETTINGS=Object.assign({},SETTINGS,saved);
       SETTINGS.config=Object.assign({},SETTINGS.config,saved.config||{});
       SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},saved.flow||{});
-    }catch(e){}}}catch(e){}
+      sheetLoaded=true;
+      /* Mirror the freshly-loaded settings to localStorage so subsequent loads from local
+         backup are consistent with what's in the sheet. */
+      try{localStorage.setItem('solura_settings',JSON.stringify(SETTINGS));}catch(e){}
+    }catch(e){console.warn('Settings parse failed:',e.message);}}}
+  }catch(e){console.warn('Settings load failed:',e.message);}
+
+  /* If sheet load failed for any reason, fall back to the local backup. This is why
+     settings appear to "reset" — the sheet read returned nothing usable so SETTINGS was the
+     pristine defaults. Restoring from local lets the user keep working. */
+  if(!sheetLoaded){
+    try{
+      const localSettings=localStorage.getItem('solura_settings');
+      if(localSettings){
+        const saved=JSON.parse(localSettings);
+        SETTINGS=Object.assign({},SETTINGS,saved);
+        SETTINGS.config=Object.assign({},SETTINGS.config,saved.config||{});
+        SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},saved.flow||{});
+        toast('⚠ Restored settings from local backup — sheet save may have failed earlier');
+      }
+    }catch(e){console.warn('Local settings restore failed:',e.message);}
+  }
+
   /* Restore ZI token from localStorage if the sheet doesn't have it. This handles cases where
      the AL1 write failed previously (token expired, sheet locked, etc.) so the token survives
      across sessions even if it never made it to Excel. */
@@ -1554,7 +1583,31 @@ async function loadSettings(){
   }catch(e){}
   applyCustomStagesToInfo();
 }
-async function saveSettings(){try{await patchRange('AL1',[[JSON.stringify(SETTINGS)]]);}catch(e){toast('Could not save settings');}}
+
+async function saveSettings(){
+  const json=JSON.stringify(SETTINGS);
+  /* Always write to localStorage FIRST — this guarantees survival even if the sheet write fails.
+     The next page load will restore from local if AL1 is empty/stale. */
+  try{localStorage.setItem('solura_settings',json);}catch(e){console.warn('localStorage save failed:',e.message);}
+
+  /* Excel cell limit is 32,767 chars. If we exceed it, the patchRange will return 400 and
+     the toast below will fire — but localStorage already has the changes, so on next load
+     the user's settings come back. The user can also see WHY in the explicit toast. */
+  if(json.length>32000){
+    toast('⚠ Settings too large ('+json.length+' chars) — saved locally only. Consider shortening custom templates or removing unused ones.');
+    console.error('SETTINGS size:',json.length,'chars');
+    return;
+  }
+
+  try{
+    await patchRange('AL1',[[json]]);
+  }catch(e){
+    /* Make this LOUD — silent settings failures are exactly why the user has been seeing
+       "settings reset" behavior. Tell them it saved locally and we'll retry on reload. */
+    toast('⚠ Settings saved locally only — could not reach Excel sheet. Will retry on next reload. ('+(e.message||'unknown error')+')');
+    console.error('saveSettings sheet write failed:',e);
+  }
+}
 
 /* ===================== Microsoft Bookings sync ===================== */
 /* Cal.com is the source of truth for bookings — appointments flow in via the Cloudflare Worker webhook (writes directly to the sheet). The portal's permanent schedule is a visual record only; set actual hours in Cal.com → Availability. */
@@ -3842,7 +3895,18 @@ function refsBlock(){
   const refs=W.st.refs||[];
   const REL={supervisor:'Former supervisor',coworker:'Coworker',patientFamily:'Patient family',case_manager:'Case manager',personal:'Personal',other:'Other'};
   const TIME={morning:'Mornings',afternoon:'Afternoons',evening:'Evenings',any:'Any time'};
+  /* Build the normalized admin-phone watchlist once. Numbers compared as digits-only. */
+  const adminDigits=String(SETTINGS.config.adminPhones||'').split(',').map(s=>s.replace(/\D/g,'')).filter(x=>x.length>=7);
+  const isSuspicious=phone=>{
+    const d=String(phone||'').replace(/\D/g,'');
+    if(d.length<7)return false;
+    /* Compare last 10 digits to handle "+1" vs "1" vs no-country-code variants */
+    const last10=d.slice(-10);
+    return adminDigits.some(a=>a.slice(-10)===last10);
+  };
+  const suspiciousRefs=refs.map((rf,i)=>isSuspicious(rf.phone)?i:-1).filter(i=>i>=0);
   const list=refs.map((rf,i)=>{
+    const sus=isSuspicious(rf.phone);
     const num=(rf.phone||'').replace(/[^0-9+]/g,'');
     const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
     const gvUrl=num?'https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164):'';
@@ -3866,7 +3930,8 @@ function refsBlock(){
         <input value="${esc(rf.email||'')}" placeholder="Email (optional)" oninput="W.st.refs[${i}].email=this.value" onblur="saveW(true)" style="flex:1;min-width:130px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
         ${num?`<button class="btn-sm" onclick="openLinkPopup('${esc(gvUrl)}','gvoice',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Call via Google Voice">☎ Call</button>`:''}
       </div>`;
-    return `<div class="ref-card" style="background:#fff;border:1.5px solid ${fromForm?'var(--gold-mid)':'var(--border)'};border-radius:11px;padding:13px 14px;margin-bottom:10px;animation:fadeUp .3s ease both;animation-delay:${i*40}ms">
+    return `<div class="ref-card" style="background:${sus?'#FFF5F4':'#fff'};border:1.5px solid ${sus?'var(--red)':fromForm?'var(--gold-mid)':'var(--border)'};border-radius:11px;padding:13px 14px;margin-bottom:10px;animation:fadeUp .3s ease both;animation-delay:${i*40}ms">
+      ${sus?'<div style="background:linear-gradient(135deg,#FFEEEE,#FFE0E0);border:1px solid var(--red);color:#8B1A1A;padding:7px 10px;border-radius:7px;margin-bottom:9px;font-size:11.5px;font-weight:700;display:flex;gap:6px;align-items:center"><span style="font-size:14px">🚨</span><span>SUSPICIOUS — phone matches an internal Solura number on the admin watchlist. Likely fraudulent reference. Recommend removing.</span></div>':''}
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px">
         ${header}
         ${fromForm?'<span class="pill pa" style="font-size:9px;font-weight:700;flex:0 0 auto">FROM FORM · '+esc(submitted)+'</span>':'<span class="pill psoft" style="font-size:9px;font-weight:700;flex:0 0 auto">MANUAL</span>'}
@@ -3889,6 +3954,11 @@ function refsBlock(){
   }).join('');
   const qs=QBANK.filter(x=>x.st==='Reference').map(it=>`<div class="qrow"><div class="qq">${esc(it.q)}</div><div class="qopts">${it.o.map(o=>`<button class="${W.answers[it.id]===o[1]?'on':''}" onclick="qans('${it.id}',${o[1]},'Reference','Background')">${esc(o[0])}</button>`).join('')}</div></div>`).join('');
   return `<div class="wscard" id="ws-refs"><h3>Reference checks <span style="font-size:11px;color:var(--soft);font-weight:600">${refs.length} on file</span></h3>
+    ${suspiciousRefs.length?`<div style="background:linear-gradient(135deg,#FFE0E0,#FFEEEE);border:2px solid var(--red);border-radius:10px;padding:12px 14px;margin-bottom:14px;animation:fadeUp .3s ease both">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:18px">🚨</span><b style="color:#8B1A1A;font-size:14px">${suspiciousRefs.length} suspicious reference${suspiciousRefs.length===1?'':'s'} detected</b></div>
+      <div style="font-size:12px;color:#6B1212;line-height:1.45;margin-bottom:8px">${suspiciousRefs.length===1?'A reference phone number matches an internal Solura contact on the admin watchlist. This is almost certainly fraudulent.':'Reference phone numbers match internal Solura contacts on the admin watchlist. These are almost certainly fraudulent.'} Recommend removing and flagging this candidate.</div>
+      <button class="btn-sm" style="background:var(--red);color:#fff;border:none;cursor:pointer;font-weight:600" onclick="if(confirm('Remove all ${suspiciousRefs.length} suspicious reference${suspiciousRefs.length===1?'':'s'}?')){W.st.refs=W.st.refs.filter((_,j)=>!${JSON.stringify(suspiciousRefs)}.includes(j));saveW(true);renderWorkspace();}">Remove all suspicious refs</button>
+    </div>`:''}
     <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Refs with a <span class="pill pa" style="font-size:9px">FROM FORM</span> badge came from the candidate's own submission. Call each, then record the outcome below.</div>
     ${list||'<div style="font-size:12.5px;color:var(--soft);padding:14px;background:var(--cream);border-radius:8px;text-align:center">No references yet. Either the candidate hasn\'t submitted the form, or you can add them manually below.</div>'}
     <button class="btn-sec bg-cream" style="margin:6px 0 14px;width:auto;padding:7px 13px" onclick="W.st.refs=W.st.refs||[];W.st.refs.push({name:'',phone:'',relationship:'other'});renderWorkspace()">+ add reference manually</button>
@@ -5090,6 +5160,12 @@ function renderSettingsReferrals(){
     </div>
   </div>
 
+  <div class="wscard"><h3>🛡 Reference fraud protection</h3>
+    <p class="set-help">Phone numbers listed here will be <b>rejected</b> if a candidate enters them as a reference. This catches applicants who try to game the system by listing internal Solura contacts (you, family, staff) as their "references." Comma-separated; format doesn't matter (the worker normalizes to digits only).</p>
+    <label class="set-field">Admin phone watchlist<textarea id="cfg_adminPhones" rows="3" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;background:#fff;width:100%;resize:vertical" placeholder="216-770-4886, 555-123-4567">${esc(SETTINGS.config.adminPhones||'')}</textarea></label>
+    <p class="set-help" style="margin-top:6px">Currently flagging: <b>${(SETTINGS.config.adminPhones||'').split(',').filter(x=>x.trim()).length} numbers</b>. Any reference whose phone matches will be rejected at submission AND flagged with a red warning if it slipped through.</p>
+  </div>
+
   <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveConfig()">Save referral program</button></div>`;
 }
 
@@ -5535,6 +5611,7 @@ async function saveConfig(){
   if(get('cfg_customerReferralRetentionDays'))SETTINGS.config.customerReferralRetentionDays=parseInt(get('cfg_customerReferralRetentionDays').value,10)||30;
   if(get('cfg_showLeaderboardPills'))SETTINGS.config.showLeaderboardPills=get('cfg_showLeaderboardPills').checked;
   if(get('cfg_referralInConfirmEmail'))SETTINGS.config.referralInConfirmEmail=get('cfg_referralInConfirmEmail').checked;
+  if(get('cfg_adminPhones'))SETTINGS.config.adminPhones=get('cfg_adminPhones').value.trim();
   await saveSettings();toast('✓ Config saved');
 }
 async function saveScript(k){const lines=document.getElementById('script_'+k).value.split('\n').map(s=>s.trim()).filter(Boolean);
