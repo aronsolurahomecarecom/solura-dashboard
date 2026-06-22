@@ -1640,16 +1640,34 @@ const SHIFTS=['Morning','Afternoon','Evening','Overnight'];
 
 /* ===================== load ===================== */
 function pState(row){let s={};try{if(row[35])s=JSON.parse(row[35]);}catch(e){}
-  s=Object.assign({due:null,booking:null,zip:'',address:'',pills:[],certs:[],licenseState:'OH',licenseNum:'',license:'',reqCheck:'',tpCheck:'',employers:[],refs:[],log:[],sent:{},checkins:[],dayShifts:{}},s);
+  s=Object.assign({
+    due:null,booking:null,zip:'',address:'',addressLine:'',city:'',state:'',firstName:'',lastName:'',
+    pills:[],certs:[],licenseState:'OH',licenseNum:'',license:'',
+    reqCheck:'',tpCheck:'',employers:[],refs:[],log:[],sent:{},checkins:[],
+    dayShifts:{},facts:{},screening:{},gates:{},liveIn:false,
+    emails:[],hasResume:false,hasApplicationPdf:false,resumeFile:'',appliedDate:'',
+    refCode:'',referredBy:'',referralCount:{submitted:0,screened:0,hired:0},referrals:[],customerReferrals:[]
+  },s);
   /* Auto-heal bloat on every read so candidates whose state was poisoned by earlier buggy
-     code (full email bodies stored in st.emails) recover transparently. Cost: one shallow
-     pass over each candidate's emails array; cheap. */
+     code (full email bodies stored in st.emails) recover transparently. */
   if(typeof sanitizeState==='function')s=sanitizeState(s);
   return s;
 }
 function pAns(row){let a={};try{if(row[34])a=JSON.parse(row[34]);}catch(e){}return a;}
-function cardOf(i,row){return {excelRow:i+1,row:row,name:String(row[2]),phone:String(row[3]||''),email:String(row[4]||''),
-  source:String(row[5]||''),stage:String(row[6]||'Applied'),notes:String(row[33]||''),st:pState(row),answers:pAns(row)};}
+function cardOf(i,row){
+  const st=pState(row);
+  /* Pull commonly-referenced facts onto the top-level card for fast access without drilling
+     into st.facts every time. The portal references c.years in many places (filters, snapshot
+     cards, workspace display) — without this populated, none of those work. */
+  const facts=st.facts||{};
+  return {excelRow:i+1,row:row,
+    name:String(row[2]),phone:String(row[3]||''),email:String(row[4]||''),
+    source:String(row[5]||''),stage:String(row[6]||'Applied'),notes:String(row[33]||''),
+    years:facts.years||st.years||'',
+    settings:facts.settings||st.settings||[],
+    longest:facts.longest||st.longest||'',
+    st:st,answers:pAns(row)};
+}
 async function loadData(){
   const sid=await getWorkbookSession();const h=sid?{'workbook-session-id':sid}:{};
   const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+'/usedRange?$select=values',{headers:h});
@@ -2851,16 +2869,19 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
     W.st=sanitizeState(W.st);
     const stJson=JSON.stringify(W.st||{});
     /* Defensive size check — Excel's cell limit is 32,767. Bail with a useful message if we'd
-       exceed it (something we didn't sanitize must be causing it). */
+       exceed it (something we didn't sanitize must be causing it). This ALWAYS toasts even when
+       silent, because a silent failure to save means the user clicks "advance" and the candidate
+       appears to move but actually didn't — symptom of the "candidates don't move forward" bug. */
     if(stJson.length>32000){
-      if(!silent)toast('⚠ State too large ('+stJson.length+' chars) — open the workspace and run sanitize from console: W.st=sanitizeState(W.st);saveW()');
+      toast('⚠ Save aborted — state too large ('+stJson.length+' chars). Open browser console and run: W.st=sanitizeState(W.st);saveW()');
+      console.error('State size exceeded 32k:',stJson.length,'chars for row',row);
       return;
     }
     await patchRange('G'+row+':L'+row,[[W.stage,bl(W.gates.wa),bl(W.gates.cr),bl(W.gates.bg),bl(W.gates.tr),bl(W.gates.av)]]);
     await patchRange('N'+row+':Y'+row,[[bl(W.q.rel),bl(W.q.com),bl(W.q.jud),bl(W.q.doc),bl(W.q.ref),bl(W.q.cmp),bl(W.q.phn),'',bl(W.r.ten),bl(W.r.prx),bl(W.r.ava),bl(W.r.exp)]]);
     await patchRange('AI'+row+':AJ'+row,[[JSON.stringify(W.answers||{}),stJson]]);
     await refreshRow(row);render();if(!silent)toast('Saved');
-  }catch(e){toast('Save failed: '+e.message);}}
+  }catch(e){toast('Save failed: '+e.message);console.error('saveW error:',e);}}
 
 /* ===================== email ===================== */
 /* BOOK_LINK is the public Cal.com URL — replace with your actual Cal.com event URL after setup.
@@ -3102,7 +3123,8 @@ function questionsHubSideRail(c){
   const recentEmails=emails.slice(0,3);
   const commsCard=recentEmails.length?`<div class="wscard"><h3>Recent communication <span style="font-size:11px;color:var(--soft);font-weight:600">${emails.length} total</span></h3>
     ${recentEmails.map(e=>{
-      const time=e.receivedAt?new Date(e.receivedAt).toLocaleDateString():'';
+      const ts=e.received||e.receivedAt;
+      const time=ts?new Date(ts).toLocaleDateString():'';
       const dir=e.direction==='out'?'→ sent':'← received';
       const subj=esc(e.subject||'(no subject)').slice(0,60);
       const dot=e.seen?'':'<span style="color:var(--sky-deep);margin-right:4px">●</span>';
@@ -3393,21 +3415,28 @@ function _appSet(c,path,val){
 const APP_SECTIONS=[
   {title:'Identity',fields:[
     {label:'Full name',path:'name',type:'text'},
+    {label:'First name',path:'st.firstName',type:'text'},
+    {label:'Last name',path:'st.lastName',type:'text'},
     {label:'Email',path:'email',type:'text'},
     {label:'Phone',path:'phone',type:'text'},
+    {label:'Secondary phone',path:'st.phone2',type:'text'},
     {label:'Source',path:'source',type:'text'}
   ]},
   {title:'Address',fields:[
-    {label:'Street',path:'st.address',type:'text'},
+    /* Street uses addressLine (raw street from form). Falls back to st.address for older records
+       that only stored the joined string. */
+    {label:'Street',path:'st.addressLine',type:'text',altPath:'st.address'},
     {label:'City',path:'st.city',type:'text'},
     {label:'State',path:'st.state',type:'text'},
-    {label:'ZIP',path:'st.zip',type:'text'}
+    {label:'ZIP',path:'st.zip',type:'text',altPath:'st.facts.zip'}
   ]},
   {title:'Experience',fields:[
-    {label:'Years of experience',path:'years',type:'text'},
-    {label:'Longest tenure (at one job)',path:'st.longest',type:'text'},
+    /* Top-level c.years is populated from st.facts.years in cardOf; longest comes from facts.longest */
+    {label:'Years of experience',path:'years',altPath:'st.facts.years',type:'text'},
+    {label:'Longest tenure (at one job)',path:'st.facts.longest',altPath:'st.longest',type:'text'},
+    {label:'Where worked',path:'st.facts.settings',altPath:'st.settings',type:'tags'},
     {label:'Certifications',path:'st.certs',type:'tags'},
-    {label:'Expertise',path:'st.expertise',type:'tags',altPath:'st.pills'},
+    {label:'Expertise',path:'st.pills',type:'tags'},
     {label:'Languages',path:'st.screening.languages',type:'tags'}
   ]},
   {title:'Eligibility (screening)',fields:[
@@ -3417,7 +3446,7 @@ const APP_SECTIONS=[
     {label:'Abuse finding on record',path:'st.screening.abuseFinding',type:'select',options:[['—',''],['No','no'],['Yes','yes']]},
     {label:'Will provide personal care',path:'st.screening.personalCare',type:'select',options:[['—',''],['Yes','yes'],['No','no']]},
     {label:'Can lift 25 lbs',path:'st.screening.lifting',type:'select',options:[['—',''],['Yes','yes'],['No','no']]},
-    {label:'Smoker',path:'st.screening.smoker',type:'select',options:[['—',''],['No','no'],['Yes','yes']]}
+    {label:'Smoker',path:'st.screening.smoker',type:'select',options:[['—',''],['No','N'],['Yes','Y']]}
   ]},
   {title:'Availability',fields:[
     {label:'Live-in only',path:'st.liveIn',type:'select',options:[['—',''],['No','false'],['Yes','true']]},
@@ -3509,8 +3538,8 @@ function appSnapshotCard(c){
   }
   const keyFacts=[
     c.years?'<b>Experience:</b> '+esc(c.years)+' yrs':'',
-    c.st&&c.st.expertise&&c.st.expertise.length?'<b>Expertise:</b> '+esc(c.st.expertise.slice(0,3).join(', '))+(c.st.expertise.length>3?', +'+(c.st.expertise.length-3)+' more':''):'',
-    c.st&&c.st.address?'<b>Address:</b> '+esc(c.st.address)+(c.st.city?', '+esc(c.st.city):''):'',
+    c.st&&c.st.pills&&c.st.pills.length?'<b>Expertise:</b> '+esc(c.st.pills.slice(0,3).join(', '))+(c.st.pills.length>3?', +'+(c.st.pills.length-3)+' more':''):'',
+    c.st&&c.st.address?'<b>Address:</b> '+esc(c.st.address):'',
     c.source?'<b>Source:</b> '+esc(c.source):''
   ].filter(Boolean).map(x=>'<div style="font-size:12px;color:var(--mid);padding:3px 0">'+x+'</div>').join('');
   return `<div class="wscard"><h3>Application snapshot ${resumeStatus}</h3>
@@ -4562,7 +4591,9 @@ function safeFileName(s){return String(s).replace(/[\\/:*?"<>|]+/g,'').replace(/
 async function ensureFolderPath(p){const segs=p.split('/');let cur='';
   for(const seg of segs){
     const parent=cur?"root:/"+cur.split('/').map(encodeURIComponent).join('/')+":":"root";
-    try{await gfetch(GR+'/drives/'+driveId+'/'+parent+'/children',{method:'POST',body:JSON.stringify({name:seg,folder:{},'@microsoft.graph.conflictBehavior':'replace'})});}catch(e){}
+    /* 'fail' conflict behavior is safe — if folder exists we get 409 which the try/catch swallows.
+       'replace' could (depending on Graph's behavior) nuke folder contents. Never worth the risk. */
+    try{await gfetch(GR+'/drives/'+driveId+'/'+parent+'/children',{method:'POST',body:JSON.stringify({name:seg,folder:{},'@microsoft.graph.conflictBehavior':'fail'})});}catch(e){}
     cur=cur?cur+'/'+seg:seg;
   }
 }
@@ -4586,7 +4617,7 @@ async function loadDocs(){
 async function ensureFolder(){const segs=['caregivers',safeName(W.name),'onboarding'];let cur='';
   for(const seg of segs){
     const parent=cur?('root:/'+cur.split('/').map(encodeURIComponent).join('/')+':'):'root';
-    await gfetch(GR+'/drives/'+driveId+'/'+parent+'/children',{method:'POST',body:JSON.stringify({name:seg,folder:{},'@microsoft.graph.conflictBehavior':'replace'})}).catch(()=>{});
+    await gfetch(GR+'/drives/'+driveId+'/'+parent+'/children',{method:'POST',body:JSON.stringify({name:seg,folder:{},'@microsoft.graph.conflictBehavior':'fail'})}).catch(()=>{});
     cur=cur?(cur+'/'+seg):seg;}
   return cur;
 }
