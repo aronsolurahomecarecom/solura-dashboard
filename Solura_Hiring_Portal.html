@@ -1350,7 +1350,6 @@ function flowOrder(){
 }
 function stageLabel(s){return (SETTINGS.flow&&SETTINGS.flow.labels&&SETTINGS.flow.labels[s])||s;}
 function isCustomStage(s){return (SETTINGS.flow&&SETTINGS.flow.custom||[]).some(c=>c.key===s);}
-function customStageInfo(s){return (SETTINGS.flow&&SETTINGS.flow.custom||[]).find(c=>c.key===s);}
 let avPatternOpen=false;
 
 async function genPKCE(){const v=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -2312,8 +2311,8 @@ function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return
   /* Action bucket: sort by stage (early stages first), with "Call now" (overdue + within-30-min)
      bookings rising to top by countdown time since they're time-critical. */
   const byUrgency=(a,b)=>{
-    const am=minsTo(a.st.booking),bm=minsTo(b.st.booking);
-    const aUrgent=am!=null&&am<=30,bUrgent=bm!=null&&bm<=30;
+    const am=minsUntil(a.st.booking),bm=minsUntil(b.st.booking);
+    const aUrgent=am!=null&&!isNaN(am)&&am<=30,bUrgent=bm!=null&&!isNaN(bm)&&bm<=30;
     if(aUrgent&&!bUrgent)return -1;
     if(!aUrgent&&bUrgent)return 1;
     if(aUrgent&&bUrgent)return am-bm;
@@ -3862,25 +3861,6 @@ function generateRefsPdf(c){
   _pdfFooter(doc);
   return doc.output('blob');
 }
-function generateBackgroundPdf(c){
-  const doc=_jspdfNew();
-  let y=_pdfHeader(doc,'Background Check Summary','Compiled '+(new Date().toLocaleDateString()));
-  y=_pdfCandidateHead(doc,c,y);
-  y=_pdfSection(doc,'Overall status',y);
-  y=_pdfKV(doc,'Required state check (BCII)',c.st.reqCheck||'pending',y);
-  y=_pdfKV(doc,'3rd-party check',c.st.tpCheck||'pending',y);
-  y+=3;
-  y=_pdfSection(doc,'Registry checks',y);
-  const rc=(c.st&&c.st.registryChecks)||{};
-  REGISTRIES.forEach(reg=>{
-    const r=rc[reg.k]||{};
-    const status=r.status==='clean'?'Clean':r.status==='flag'?'FOUND — flagged':r.status==='na'?'N/A':'Not checked';
-    y=_pdfKV(doc,reg.l,status,y);
-    if(r.notes)y=_pdfPara(doc,'   '+r.notes,y);
-  });
-  _pdfFooter(doc);
-  return doc.output('blob');
-}
 function generateApplicationPdf(c){
   /* Renders the full application — all sections defined in APP_SECTIONS — as a clean PDF.
      Used as the canonical "what they said on the form" artifact in the onboarding folder. */
@@ -5248,10 +5228,10 @@ function exportFeedbackDoc(){
    gets buried. */
 function _autoResetAfterExport(count,kind){
   setTimeout(()=>{
-    try{localStorage.removeItem('solura_change_requests');}catch(e){}
+    try{localStorage.removeItem('solura_feedback');}catch(e){}
     if(typeof updateFabBadge==='function')updateFabBadge();
     /* If modal is open, refresh the list view */
-    if(typeof renderFeedbackList==='function')renderFeedbackList();
+    if(typeof renderFeedback==='function')renderFeedback();
     toast('✓ '+kind+' exported ('+count+' item'+(count===1?'':'s')+') — list cleared');
   },400);
 }
