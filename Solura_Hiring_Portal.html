@@ -4147,11 +4147,11 @@ function renderCalendar(){
     ${avPatternOpen?patternEditor():''}
     ${[0,1,2,3,4,5,6].map(off=>renderCalDay(base,off)).join('')}`;
 }
-async function manualRefresh(){const btn=document.getElementById('hdr-refresh');if(btn)btn.classList.add('spinning');try{await loadData();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();if(view==='inbox')renderInbox();updateInboxBadge();}finally{if(btn)setTimeout(()=>btn.classList.remove('spinning'),300);}}
+async function manualRefresh(){const btn=document.getElementById('hdr-refresh');if(btn)btn.classList.add('spinning');try{await loadData();await loadAvailability();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();if(view==='inbox')renderInbox();updateInboxBadge();}finally{if(btn)setTimeout(()=>btn.classList.remove('spinning'),300);}}
 /* Background refresh path — fully silent. No toast, no spin, no visible signal at all.
-   Used by the 60-second interval and window-focus listener so the portal feels "live"
-   without flashing UI artifacts every minute. */
-async function backgroundRefresh(){try{await loadData();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();if(view==='inbox')renderInbox();updateInboxBadge();}catch(e){console.warn('Background refresh:',e.message);}}
+   Refreshes data + availability + inbox so calendar stays in sync with Cal.com bookings landing
+   via webhook (which writes to the candidate's AJ cell and may touch AK1 for slot consumption). */
+async function backgroundRefresh(){try{await loadData();await loadAvailability();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();if(view==='inbox')renderInbox();updateInboxBadge();}catch(e){console.warn('Background refresh:',e.message);}}
 async function manualBookingsSync(){return manualRefresh();} /* legacy name */
 function openAddFromBooking(name,email,startISO){
   openAdd();
