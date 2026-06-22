@@ -111,7 +111,7 @@ input:focus{border-color:var(--sky);box-shadow:0 0 0 3px var(--sky-pale)}
         <div><label>First name <span class="req">*</span></label><input type="text" name="firstName" required autocomplete="given-name"></div>
         <div><label>Last name <span class="req">*</span></label><input type="text" name="lastName" required autocomplete="family-name"></div>
       </div>
-      <div class="q"><label>Mobile number <span class="req">*</span></label><input type="tel" name="phone" required placeholder="(216) 000-0000" autocomplete="tel"></div>
+      <div class="q"><label>Mobile number <span class="req">*</span></label><input type="tel" name="phone" required placeholder="(216) 000-0000" autocomplete="tel" oninput="formatPhone(this)" maxlength="14"></div>
       <div class="q"><label>Email <span class="req">*</span></label><input type="email" name="email" required placeholder="you@example.com" autocomplete="email"></div>
       <div class="q"><label>Street address <span class="hint" style="display:inline">optional, helps with distance</span></label><input type="text" name="address" autocomplete="street-address"></div>
       <div class="q" style="display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:10px">
@@ -183,7 +183,11 @@ input:focus{border-color:var(--sky);box-shadow:0 0 0 3px var(--sky-pale)}
       <div class="q"><label>Can you lift / transfer up to 50 lbs? <span class="req">*</span></label>
         <div class="opts" data-q="lifting" data-single></div></div>
       <div class="q"><label>Languages you speak fluently <span class="hint" style="display:inline">English assumed; pick any others</span></label>
-        <div class="opts" data-q="languages" data-multi></div></div>
+        <div class="opts" data-q="languages" data-multi></div>
+        <div class="more-row"><button type="button" class="more-btn" id="lang-more-btn" onclick="toggleMore('lang')">+ more languages</button></div>
+        <div class="opts" data-q="languages" data-multi id="lang-more" style="display:none;margin-top:8px"></div>
+        <div class="add-custom"><input type="text" id="lang-custom" placeholder="Add another language…"><button type="button" onclick="addCustom('lang')">Add</button></div>
+        <div id="lang-added" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div></div>
       <div class="q"><label>Smoker? <span class="req">*</span></label>
         <div class="opts" data-q="smoker" data-single></div></div>
     </div>
@@ -241,10 +245,11 @@ const Q={
   longest:[["Under 6 mo","u6"],["6–12 mo","u12"],["1–2 yr","y12"],["2–3 yr","y23"],["3+ yr","y3p"]],
   personalCare:[["Yes","Y"],["No","N"]],
   lifting:[["Yes","Y"],["No","N"]],
-  languages:[["Spanish","Spanish"],["Russian","Russian"],["Arabic","Arabic"],["Mandarin","Mandarin"],["Vietnamese","Vietnamese"],["Sign language","Sign language"]],
+  languages:[["Spanish","Spanish"],["Russian","Russian"],["Hebrew","Hebrew"],["Yiddish","Yiddish"],["Arabic","Arabic"],["ASL / Sign language","ASL"]],
+  languagesMore:[["Mandarin","Mandarin"],["Vietnamese","Vietnamese"],["Polish","Polish"],["Ukrainian","Ukrainian"],["French","French"],["Portuguese","Portuguese"],["Italian","Italian"],["Greek","Greek"],["Korean","Korean"],["Japanese","Japanese"],["Hindi","Hindi"],["Bengali","Bengali"],["Urdu","Urdu"],["Tagalog","Tagalog"],["Somali","Somali"],["Amharic","Amharic"],["Swahili","Swahili"],["Romanian","Romanian"],["German","German"],["Farsi / Persian","Farsi"],["Turkish","Turkish"],["Pashto","Pashto"],["Nepali","Nepali"],["Burmese","Burmese"]],
   smoker:[["No","N"],["Yes","Y"]]
 };
-const ans={cred:[],expertise:[]};
+const ans={cred:[],expertise:[],languages:[]};
 /* dayShifts: per-day shift selection — { Mon:["Morning","Afternoon"], Tue:["Overnight"], ... } */
 const DAYS_LIST=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const SHIFTS_LIST=[['Morning','am'],['Afternoon','pm'],['Evening','ev'],['Overnight','noc']];
@@ -301,6 +306,8 @@ paintOpts(document.getElementById('cred-more'),Q.credMore,'cred',true);
 /* paint expertise common + more */
 paintOpts(document.getElementById('exp-common'),Q.expCommon,'expertise',true);
 paintOpts(document.getElementById('exp-more'),Q.expMore,'expertise',true);
+/* paint language more (primary list painted by data-q="languages" loop above) */
+paintOpts(document.getElementById('lang-more'),Q.languagesMore,'languages',true);
 
 /* "+ more" toggles */
 function toggleMore(kind){
@@ -308,14 +315,17 @@ function toggleMore(kind){
   const btn=document.getElementById(kind+'-more-btn');
   const open=more.style.display==='none';
   more.style.display=open?'flex':'none';
-  btn.textContent=open?'– hide extra':'+ more '+(kind==='cred'?'credentials':'expertise');
+  const labels={cred:'credentials',exp:'expertise',lang:'languages'};
+  btn.textContent=open?'– hide extra':'+ more '+(labels[kind]||kind);
 }
 
-/* custom adds — append to ans + visible chip list */
+/* custom adds — append to ans + visible chip list. Maps the UI kind ("cred"/"exp"/"lang")
+   to the data key ("cred"/"expertise"/"languages") since labels and data keys diverge. */
 function addCustom(kind){
   const input=document.getElementById(kind+'-custom');
   const val=input.value.trim();if(!val)return;
-  const key=kind==='cred'?'cred':'expertise';
+  const keyMap={cred:'cred',exp:'expertise',lang:'languages'};
+  const key=keyMap[kind]||kind;
   ans[key]=ans[key]||[];
   if(ans[key].indexOf(val)<0){
     ans[key].push(val);
@@ -484,6 +494,19 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(renderEmployers,50))
 // ---- webhook submission ----
 // Cloudflare Worker URL — owner's deployed worker. If this changes, edit here AND in Solura_References_Form.html.
 const WEBHOOK_URL='https://solura-hiring-webhook.meir-865.workers.dev';
+
+/* Live-format phone as (xxx) xxx-xxxx while the candidate types. Strips non-digits, then rebuilds
+   the formatted string. Works with paste, backspace, and any cursor position because we always
+   reformat from the raw digits. Caps at 10 digits (US numbers); ignores anything past that. */
+function formatPhone(input){
+  const digits=input.value.replace(/\D/g,'').slice(0,10);
+  let out='';
+  if(digits.length===0)out='';
+  else if(digits.length<=3)out='('+digits;
+  else if(digits.length<=6)out='('+digits.slice(0,3)+') '+digits.slice(3);
+  else out='('+digits.slice(0,3)+') '+digits.slice(3,6)+'-'+digits.slice(6);
+  input.value=out;
+}
 
 function fileToBase64(file){return new Promise((res,rej)=>{const r=new FileReader();
   r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});}

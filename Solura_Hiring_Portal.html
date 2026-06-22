@@ -556,7 +556,57 @@ td{padding:13px 16px;vertical-align:top;}
 .wscard.warm{background:var(--cream);}
 .wscard h3{font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600;color:var(--sky-deep);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;}
 .wscard h4{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--soft);margin-bottom:10px;}
+/* Phone Screen / Interview hub — 2-column layout with main flow on left + context side rail on right */
+.qhub-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;max-width:1100px;margin:0 auto;align-items:start;}
+.qhub-main{min-width:0;}
+.qhub-side{position:sticky;top:80px;max-height:calc(100vh - 110px);overflow-y:auto;padding-right:4px;}
+.qhub-side .wscard{padding:14px 16px;}
+.qhub-side .wscard h3{font-size:14px;margin-bottom:10px;}
+.qhub-side .scorebig{gap:14px;}
+.qhub-side .scorebig .num{font-size:32px;}
+.qhub-side::-webkit-scrollbar{width:6px;}
+.qhub-side::-webkit-scrollbar-thumb{background:rgba(108,76,20,.2);border-radius:3px;}
+@media(max-width:900px){
+  .qhub-grid{grid-template-columns:1fr;}
+  .qhub-side{position:static;max-height:none;overflow:visible;}
+}
+
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
+/* ── Tasteful animation upgrade — kept short, opacity-led, no bounce ── */
+/* Pipeline row: lift on hover (1.5px) + cream tint + soft shadow */
+.dr{transition:background .14s ease-out,box-shadow .14s ease-out,transform .14s ease-out;}
+.dr:hover{background:linear-gradient(180deg,#FFFEFB 0%,#FAF6EE 100%);transform:translateY(-1.5px);box-shadow:0 4px 12px -4px rgba(108,76,20,.15);}
+/* Buttons feel "pressable" — quick 0.97 squeeze on active, no scale-up on hover */
+.btn-primary,.btn-sec,.btn-sm,.hbtn{transition:filter .1s ease-out,background-color .1s ease-out,transform .08s ease-out;}
+.btn-primary:active,.btn-sec:active,.btn-sm:active,.hbtn:active{transform:scale(.97);}
+/* Modals: scale-up from 0.97 + fade, with subtle easing — no bounce */
+@keyframes modalIn{from{opacity:0;transform:scale(.97);}to{opacity:1;transform:scale(1);}}
+/* KV count flash — when number changes, brief glow ring */
+@keyframes kvPulse{0%{box-shadow:0 0 0 0 rgba(58,125,201,.0);}30%{box-shadow:0 0 0 8px rgba(58,125,201,.18);}100%{box-shadow:0 0 0 14px rgba(58,125,201,0);}}
+.kv-num.flash{animation:kvPulse .6s ease-out;}
+/* Toast: slide down from top, no bounce */
+@keyframes toastIn{from{opacity:0;transform:translate(-50%,-12px);}to{opacity:1;transform:translate(-50%,0);}}
+/* Pipeline row stagger on render (capped delay so the bottom doesn't take forever) */
+.dr{animation:fadeUp .18s ease-out both;}
+.dr:nth-child(1){animation-delay:0ms;}
+.dr:nth-child(2){animation-delay:30ms;}
+.dr:nth-child(3){animation-delay:60ms;}
+.dr:nth-child(4){animation-delay:90ms;}
+.dr:nth-child(5){animation-delay:120ms;}
+.dr:nth-child(6){animation-delay:150ms;}
+.dr:nth-child(n+7){animation-delay:170ms;}
+/* Bucket header chevron — smooth rotation when collapsed */
+.bucket-arrow{transition:transform .18s cubic-bezier(.4,0,.2,1);}
+.sw.collapsed .bucket-arrow{transform:rotate(-90deg);}
+/* Filter chip + flag-toggle hover: faster, no transform — already tight, just smooth color shift */
+.fchip{transition:background .1s ease-out,border-color .1s ease-out,color .1s ease-out;}
+/* Workspace card subtle fade-in (already had it; just confirming no scale weirdness) */
+.wscard{animation:fadeUp .22s ease-out both;}
+.wscard:nth-child(2){animation-delay:40ms;}
+.wscard:nth-child(3){animation-delay:80ms;}
+.wscard:nth-child(4){animation-delay:120ms;}
+.wscard:nth-child(n+5){animation-delay:140ms;}
 .kvrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-soft);font-size:13px;}
 .kvrow:last-child{border-bottom:none;}
 .kvrow .lbl{color:var(--soft);font-size:11.5px;font-weight:600;}
@@ -772,6 +822,21 @@ td{padding:13px 16px;vertical-align:top;}
 
 /* auto-reject surfacer banner */
 .ar-box{background:linear-gradient(135deg,#FFF8E7,#FEF7E8);border:1.5px solid var(--gold-mid);border-radius:12px;padding:11px 14px;box-shadow:0 2px 10px rgba(200,135,10,.15);animation:fadeUp .3s ease both;}
+
+/* nudge surfacer banner — sky blue to distinguish from auto-reject's gold */
+.nudge-box{background:linear-gradient(135deg,#EBF3FB,#F5FAFE);border:1.5px solid var(--sky-mid);border-radius:12px;padding:11px 14px;box-shadow:0 2px 10px rgba(58,125,201,.12);animation:fadeUp .3s ease both;}
+.nudge-head{display:flex;align-items:center;gap:8px;}
+.nudge-icon{font-size:16px;}
+.nudge-title{flex:1;font-weight:700;color:var(--sky-deep);font-size:13.5px;}
+.nudge-toggle{font-family:inherit;font-size:11px;font-weight:600;color:var(--sky-deep);background:none;border:none;cursor:pointer;padding:2px 6px;}
+.nudge-list{display:none;}
+.nudge-list.open{display:block;}
+.nudge-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid rgba(58,125,201,.2);font-size:12.5px;}
+.nudge-row:first-child{margin-top:8px;}
+.nudge-name{font-weight:600;color:var(--ink);}
+.nudge-stage{flex:1;color:var(--soft);}
+.nudge-btn{font-family:inherit;font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:6px;border:1px solid var(--sky-deep);background:#fff;color:var(--sky-deep);cursor:pointer;transition:background .08s ease-out,color .08s ease-out;}
+.nudge-btn:hover{background:var(--sky-deep);color:#fff;}
 
 /* email cards in candidate workspace */
 .email-card{border-bottom:1px solid var(--border);padding:10px 0;cursor:pointer;transition:background .12s;}
@@ -1145,7 +1210,7 @@ select.app-edit-input{cursor:pointer;}
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8a6 6 0 0 1 10.243-4.243M14 8a6 6 0 0 1-10.243 4.243"/><path d="M12 3v3h-3M4 13v-3h3"/></svg>
     </button>
     <button class="iconbtn" id="tab-set" style="display:none" onclick="setView('settings')" title="Settings">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M1 8h2M13 8h2M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
     <div class="sync-pill"><div class="sdot" id="sdot"></div><span id="slabel">Not connected</span></div>
     <button class="hbtn hbtn-gold" id="btn-add" style="display:none" onclick="openAdd()">+ Add</button>
@@ -1182,6 +1247,7 @@ select.app-edit-input{cursor:pointer;}
   </div>
   <div id="pipeline-view">
     <div class="sw" id="sw-0"><div class="shdr" onclick="toggleBucket(0)"><div class="sdot2 red"></div><div class="stitle">Action needed — your move</div><div class="scnt" id="c0">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t0"></tbody></table></div></div>
+    <div class="sw" id="sw-scheduled"><div class="shdr" onclick="toggleBucket('scheduled')"><div class="sdot2 grn"></div><div class="stitle">Scheduled — upcoming calls</div><div class="scnt" id="cscheduled">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>When</th><th>Sequence</th><th></th></tr></thead><tbody id="tscheduled"></tbody></table></div></div>
     <div class="sw" id="sw-1"><div class="shdr" onclick="toggleBucket(1)"><div class="sdot2 gold"></div><div class="stitle">Awaiting candidate</div><div class="scnt" id="c1">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t1"></tbody></table></div></div>
     <div class="sw" id="sw-2"><div class="shdr" onclick="toggleBucket(2)"><div class="sdot2 sky"></div><div class="stitle">Checks running</div><div class="scnt" id="c2">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t2"></tbody></table></div></div>
     <div class="sw sw-all collapsed" id="sw-4" style="margin-top:8px"><div class="shdr" onclick="toggleBucket(4)"><div class="sdot2 soft"></div><div class="stitle">All candidates in pipeline</div><div class="scnt" id="c4">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t4"></tbody></table></div></div>
@@ -1274,7 +1340,7 @@ let F={
 };
 let view='pipeline',calOffset=0,wsRow=null;
 let AVAIL={pattern:{},slots:[],offs:[]}; /* pattern={Mon:["Morning","Afternoon"]}; slots=specific ISO datetimes; offs=specific dates removed from pattern */
-let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{},scripts:{},config:{payFloor:14,payCeil:18,payCnaPremium:1.25,payQualityNudge:1,autoRejectDays:14,serviceZips:'44118,44106,44120,44121,44122,44104,44112',admins:[],calScreenUrl:'',calInterviewUrl:'',calOnboardingUrl:'https://cal.com/meir-schwimer-juktct/caregiver-onboarding'},flow:{order:null,labels:{},custom:[]}}; /* flow.order = user-edited stage order; flow.labels = display overrides; flow.custom = user-added milestone stages (manual advance only) */
+let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{},scripts:{},config:{payFloor:14,payCeil:18,payCnaPremium:1.25,payQualityNudge:1,autoRejectDays:14,nudgeDays:3,serviceZips:'44118,44106,44120,44121,44122,44104,44112',admins:[],calScreenUrl:'',calInterviewUrl:'',calOnboardingUrl:'https://cal.com/meir-schwimer-juktct/caregiver-onboarding'},flow:{order:null,labels:{},custom:[]}}; /* flow.order = user-edited stage order; flow.labels = display overrides; flow.custom = user-added milestone stages (manual advance only) */
 
 /* Effective flow: user-edited order if present, else default FLOW. Custom milestone stages are inserted at saved positions. */
 function flowOrder(){
@@ -1437,6 +1503,16 @@ async function loadSettings(){
       SETTINGS.config=Object.assign({},SETTINGS.config,saved.config||{});
       SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},saved.flow||{});
     }catch(e){}}}catch(e){}
+  /* Restore ZI token from localStorage if the sheet doesn't have it. This handles cases where
+     the AL1 write failed previously (token expired, sheet locked, etc.) so the token survives
+     across sessions even if it never made it to Excel. */
+  try{
+    const localTok=localStorage.getItem('solura_zi_token');
+    if(localTok&&(!SETTINGS.config||!SETTINGS.config.ziToken)){
+      SETTINGS.config=SETTINGS.config||{};
+      SETTINGS.config.ziToken=localTok;
+    }
+  }catch(e){}
   applyCustomStagesToInfo();
 }
 async function saveSettings(){try{await patchRange('AL1',[[JSON.stringify(SETTINGS)]]);}catch(e){toast('Could not save settings');}}
@@ -1649,12 +1725,39 @@ function action(c){
   else if(s==='Screen booked'||s==='Interview booked'){
     const d=st.booking?st.booking.slice(0,10):null;
     const isScreen=s==='Screen booked';
-    /* All booked candidates live in Action bucket — the user wants to see them as something to prep for,
-       not buried in Awaiting. The timing text + label distinguish urgency. */
-    if(m!=null&&m<=60&&m>-150){bucket='action';timing=dn('Call now','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
-    else if(d===today()){bucket='action';timing=dn('Call today','pa',fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}
-    else if(d&&d>today()){bucket='action';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Prep & open phone screen':'Prep & open interview',cls:'sky'};}
-    else{bucket='action';timing=dn('Overdue call','pr2','');primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};}}
+    /* Time-based bucket assignment:
+       - Within 30 min of call (or in-progress) → action bucket with countdown
+       - Same day but more than 30 min away → scheduled bucket
+       - Future day → scheduled bucket
+       - Overdue (past) → action bucket (need to deal with no-show or run late)
+       m = minutes until booking (negative = past) */
+    if(m!=null&&m<=30&&m>-150){
+      /* ≤30 min away or in-progress: action bucket, button shows countdown */
+      const cd=m>0?Math.ceil(m)+'m':'now';
+      bucket='action';timing=dn('Call now','pr2',fmtTime(st.booking)+' · in '+cd);
+      primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:(isScreen?'📞 Run phone screen':'🎥 Run interview')+' · '+cd,cls:'sky'};
+    }
+    else if(m!=null&&m<=-150){
+      /* Overdue (>2.5h past start) → flag for resolution */
+      bucket='action';timing=dn('Overdue call — log result','pr2',fmtTime(st.booking));
+      primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};
+    }
+    else if(d===today()){
+      /* Today, but more than 30 min away → scheduled bucket with prep button */
+      bucket='scheduled';timing=dn('Today','pg',fmtTime(st.booking));
+      primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Prep phone screen':'Prep interview',cls:'sky'};
+    }
+    else if(d&&d>today()){
+      /* Future day → scheduled bucket */
+      bucket='scheduled';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));
+      primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Prep phone screen':'Prep interview',cls:'sky'};
+    }
+    else{
+      /* No date or other unusual case */
+      bucket='action';timing=dn('Booking time unknown','pa','');
+      primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};
+    }
+  }
   else if(s==='Ask references'){
     const sent=st.sent&&st.sent.ask_references;
     if(!sent){bucket='action';timing=dn('Send references request','pnew');primary={kind:'email-tpl',tpl:'ask_references',advanceTo:'Verify employers',label:'Send references request',cls:'gold'};}
@@ -1678,10 +1781,16 @@ function action(c){
     else{bucket='awaiting';timing=dn('Awaiting orientation booking','psoft',st.due?('nudge '+fmtDay(st.due)):'');primary={kind:'email-tpl',tpl:'onboarding',label:'Send nudge',cls:'gold'};}}
   else if(s==='Onboarding booked'){
     const d=st.booking?st.booking.slice(0,10):null;
-    if(m!=null&&m<=60&&m>-150){bucket='action';timing=dn('Orientation now','pa',fmtTime(st.booking));primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'Run orientation',cls:'grn'};}
-    else if(d===today()){bucket='action';timing=dn('Orientation today','pa',fmtTime(st.booking));primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'Run orientation',cls:'grn'};}
-    else if(d&&d>today()){bucket='action';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'Prep & open orientation',cls:'grn'};}
-    else{bucket='action';timing=dn('Overdue orientation','pr2','');primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'Run orientation',cls:'grn'};}}
+    if(m!=null&&m<=30&&m>-150){
+      const cd=m>0?Math.ceil(m)+'m':'now';
+      bucket='action';timing=dn('Orientation now','pr2',fmtTime(st.booking)+' · in '+cd);
+      primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'🎬 Run orientation · '+cd,cls:'grn'};
+    }
+    else if(m!=null&&m<=-150){bucket='action';timing=dn('Overdue orientation — log result','pr2',fmtTime(st.booking));primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'Run orientation',cls:'grn'};}
+    else if(d===today()){bucket='scheduled';timing=dn('Today','pg',fmtTime(st.booking));primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'Prep orientation',cls:'grn'};}
+    else if(d&&d>today()){bucket='scheduled';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'Prep orientation',cls:'grn'};}
+    else{bucket='action';timing=dn('Booking time unknown','pa','');primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'Run orientation',cls:'grn'};}
+  }
   else if(isCustomStage(s)){
     /* user-inserted milestone — manual advance only */
     const eff=flowOrder();const idx=eff.indexOf(s);const next=idx>=0&&idx<eff.length-1?eff[idx+1]:'Hired';
@@ -2176,27 +2285,45 @@ function renderActiveCaregivers(){
 }
 function quickEmailCaregiver(row){loadW(row);openCustomEmail();}
 function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return renderCalendar();if(view==='active')return renderActiveCaregivers();
-  const B={action:[],awaiting:[],checks:[]},all=[];
-  /* Hired candidates moved entirely to the Active caregivers tab — don't show in pipeline buckets. */
+  const B={action:[],scheduled:[],awaiting:[],checks:[]},all=[];
   pipeline.forEach(c=>{if(c.stage==='Hired'||!matchFilters(c))return;const a=action(c);if(a.bucket==='closed'||a.bucket==='hired')return;all.push(c);(B[a.bucket]||B.action).push(c);});
-  document.getElementById('kv0').textContent=B.action.length;
-  document.getElementById('kv1').textContent=B.awaiting.length;
-  document.getElementById('kv2').textContent=B.checks.length;
+  /* KV counter flash on value change — gives a brief visual ping when a count moves. */
+  const setKv=(id,val)=>{
+    const el=document.getElementById(id);if(!el)return;
+    const prev=el.textContent;
+    if(String(prev)!==String(val)){
+      el.textContent=val;
+      el.classList.remove('flash');
+      /* force reflow so re-adding the class re-triggers the animation */
+      void el.offsetWidth;
+      el.classList.add('flash');
+    }
+  };
+  setKv('kv0',B.action.length);
+  setKv('kv1',B.awaiting.length);
+  setKv('kv2',B.checks.length);
   const hiredCount=pipeline.filter(c=>c.stage==='Hired').length;
-  document.getElementById('kv3').textContent=hiredCount;
-  document.getElementById('kv4').textContent=all.length;
+  setKv('kv3',hiredCount);
+  setKv('kv4',all.length);
   /* auto-reject surfacer — banner above the buckets */
   renderAutoRejectBanner();
+  renderNudgeBanner();
   const ord=c=>{const i=flowOrder().indexOf(c.stage);return i<0?999:i;};
-  /* Sort within Action bucket: live calls (Screen booked / Interview booked / Onboarding booked)
-     drop to the bottom so the email/decision-making actions sit at top where you scan them first.
-     The booked calls have a fixed time and will sit at the bottom as a separate "today/upcoming" group. */
-  const isBooked=c=>/booked$/i.test(c.stage||'');
-  const byStage=(a,b)=>{const ab=isBooked(a),bb=isBooked(b);if(ab!==bb)return ab?1:-1;return ord(a)-ord(b)||(a.name<b.name?-1:1);};
+  /* Action bucket: sort by stage (early stages first), with "Call now" (overdue + within-30-min)
+     bookings rising to top by countdown time since they're time-critical. */
+  const byUrgency=(a,b)=>{
+    const am=minsTo(a.st.booking),bm=minsTo(b.st.booking);
+    const aUrgent=am!=null&&am<=30,bUrgent=bm!=null&&bm<=30;
+    if(aUrgent&&!bUrgent)return -1;
+    if(!aUrgent&&bUrgent)return 1;
+    if(aUrgent&&bUrgent)return am-bm;
+    return ord(a)-ord(b)||(a.name<b.name?-1:1);
+  };
   const byTime=(a,b)=>((a.st.booking||a.st.due||'~')<(b.st.booking||b.st.due||'~')?-1:1);
-  fillBucket(0,B.action.sort(byStage));
+  fillBucket(0,B.action.sort(byUrgency));
+  fillBucket('scheduled',B.scheduled.sort(byTime));
   fillBucket(1,B.awaiting.sort(byTime));
-  fillBucket(2,B.checks.sort(byStage));
+  fillBucket(2,B.checks.sort(byTime));
   fillBucket(4,all.sort((a,b)=>ord(b)-ord(a)||(a.name<b.name?-1:1)));
   /* Auto-collapse buckets that are empty (unless user explicitly expanded them this session) */
   const counts=[B.action.length,B.awaiting.length,B.checks.length,0,all.length];
@@ -2219,6 +2346,37 @@ function computeIdleDays(c){
     const diff=Math.floor((Date.now()-d.getTime())/86400000);
     return diff<0?0:diff;}catch(e){return 0;}
 }
+/* Stages where the system has sent a form/email and the candidate is expected to respond.
+   These are the stages where nudging makes sense — auto-reject lives at the far end of the
+   same continuum but uses only the highest-stakes invitation stages. */
+const NUDGE_STAGES=['Screen invite','Ask references','Verify employers','Interview invite','Onboarding','Applied'];
+
+/* Match nudge-template to stage so a single "Send nudge" works contextually */
+function _nudgeTplFor(stage){
+  if(stage==='Screen invite')return 'screen_nudge';
+  if(stage==='Interview invite')return 'interview_invite';
+  if(stage==='Ask references'||stage==='Verify employers')return 'ask_references';
+  if(stage==='Onboarding')return 'onboarding';
+  if(stage==='Applied')return 'request_resume';
+  return null;
+}
+
+/* A candidate "needs nudge" once they've been idle past the configured threshold but BEFORE the
+   auto-reject threshold. Also requires the candidate is at a nudge-applicable stage and we've
+   already done our part (sent something — they just haven't responded). */
+function needsNudge(c){
+  const ndays=(SETTINGS.config&&SETTINGS.config.nudgeDays)||3;
+  const rdays=(SETTINGS.config&&SETTINGS.config.autoRejectDays)||14;
+  if(!NUDGE_STAGES.includes(c.stage))return false;
+  const idle=computeIdleDays(c);
+  if(idle<ndays)return false;
+  if(idle>=rdays)return false; /* past nudge → auto-reject candidate, not nudge */
+  /* Make sure we actually sent something to nudge about. If sent is empty, it's on us. */
+  const sent=c.st&&c.st.sent;
+  if(!sent||!Object.keys(sent).length)return false;
+  return true;
+}
+
 function findStaleCandidates(){
   const threshold=(SETTINGS.config&&SETTINGS.config.autoRejectDays)||14;
   const awaitingStages=['Screen invite','Ask references','Interview invite'];
@@ -2227,6 +2385,31 @@ function findStaleCandidates(){
     if((c.st.tpCheck==='clear'||c.st.tpCheck==='pending'))return false; /* checks are in flight, don't auto-reject */
     return computeIdleDays(c)>=threshold;
   });
+}
+function findNudgeCandidates(){
+  return pipeline.filter(needsNudge);
+}
+function renderNudgeBanner(){
+  let banner=document.getElementById('nudge-banner');
+  if(!banner){banner=document.createElement('div');banner.id='nudge-banner';banner.style.cssText='margin:8px 0 10px 0';
+    const pipe=document.getElementById('pipeline-view');if(pipe)pipe.insertBefore(banner,pipe.firstChild);}
+  const nudges=findNudgeCandidates();
+  if(!nudges.length){banner.innerHTML='';return;}
+  const ndays=(SETTINGS.config&&SETTINGS.config.nudgeDays)||3;
+  const items=nudges.slice(0,10).map(c=>{
+    const days=computeIdleDays(c);
+    return `<div class="nudge-row"><span class="nudge-name">${esc(c.name)}</span><span class="nudge-stage">${esc(c.stage)} · idle ${days}d</span><button class="nudge-btn" onclick="sendNudge(${c.excelRow})">Send nudge →</button></div>`;
+  }).join('');
+  const more=nudges.length>10?`<div style="font-size:11px;color:var(--soft);margin-top:6px">+ ${nudges.length-10} more — adjust threshold in Settings</div>`:'';
+  banner.innerHTML=`<div class="nudge-box">
+    <div class="nudge-head"><span class="nudge-icon">🔔</span><span class="nudge-title">${nudges.length} candidate${nudges.length===1?'':'s'} ready to nudge — idle ${ndays}+ days</span><button class="nudge-toggle" onclick="document.getElementById('nudge-list').classList.toggle('open')">review ▾</button></div>
+    <div class="nudge-list" id="nudge-list">${items}${more}</div>
+  </div>`;
+}
+function sendNudge(row){
+  const c=pipeline.find(x=>x.excelRow===row);if(!c)return;
+  const tpl=_nudgeTplFor(c.stage)||'request_resume';
+  loadW(row);doEmail(tpl);
 }
 function renderAutoRejectBanner(){
   let banner=document.getElementById('autoreject-banner');
@@ -2409,10 +2592,30 @@ async function reallySend(tpl,advanceTo){
   try{
     await sendMailViaGraph(W.email,subj,body);
     W.st.sent=W.st.sent||{};W.st.sent[tpl]=today();
+    /* Also push the sent email into the candidate's local emails array immediately, so it shows in
+       the inbox panel without waiting for the 60s polling cycle to pick it up from Sent folder.
+       The polling will eventually overwrite this with the canonical version from Graph (with the real
+       messageId etc.), but in the meantime the user sees their sent message right away. */
+    W.st.emails=W.st.emails||[];
+    W.st.emails.unshift({
+      direction:'out',
+      from:'careers@solurahomecare.com',
+      to:W.email,
+      subject:subj,
+      body:body,
+      bodyType:'text',
+      receivedAt:new Date().toISOString(),
+      seen:true,
+      messageId:'local-'+Date.now()
+    });
     logW('Sent: '+tpl.replace(/_/g,' ')+' → '+W.email);
     if(advanceTo){W.stage=advanceTo;if(advanceTo==='Screen invite'||advanceTo==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();logW('Advanced to '+advanceTo);}
     await saveW(true);closeModal();toast('Email sent — watching for delivery');
     watchForBounce(W.email,W.row);
+    /* Re-render the pipeline immediately so the candidate moves to their new bucket
+       (e.g., Applied without résumé → Awaiting once request_resume is sent). Without this,
+       the bucket move only became visible on the next 60s background refresh. */
+    render();
     if(wsRow===W.row)renderWorkspace();
   }catch(e){toast('Send failed: '+e.message);b.disabled=false;b.innerHTML='✉ Send via Outlook';}
 }
@@ -2505,12 +2708,16 @@ function renderFocusedHub(){
   /* render just the focused hub + a tall header with back arrow — single-purpose task view */
   const kind=W.focusedHub;
   const c=pipeline.find(x=>x.excelRow===W.row);const a=action(c);
-  let block='';let title='';
+  let block='';let title='';let layoutMode='single';
   if(kind==='questions'){
     const stage=(W.stage==='Screen booked')?'Phone Screen':'Interview';
     const next=(stage==='Phone Screen')?'Ask references':'Offer';
     block=questionsBlock(stage,next);
     title=stage==='Interview'?'Interview':'Phone screen';
+    /* The screening + interview hub has the most context-dependence — Meir wants every relevant
+       fact about the candidate within glance. Render a 2-column grid: questions on the left,
+       context cards (score, application, employers, refs, notes, comms) on the right. */
+    layoutMode='split';
   }else if(kind==='verify'){block=verifyBlock();title='Verify past employers';}
   else if(kind==='refs'){block=refsBlock();title='References';}
   else if(kind==='checks'){block=checksBlock();title='Background & certificates';}
@@ -2518,12 +2725,67 @@ function renderFocusedHub(){
   document.getElementById('ws-name').innerHTML='<button onclick="clearFocusedHub()" style="background:none;border:none;cursor:pointer;font-size:24px;color:var(--sky-deep);margin-right:8px;padding:0 6px;font-weight:700;vertical-align:-2px" title="Back to candidate overview">‹</button>'+esc(title);
   const info=STAGEINFO[W.stage]||STAGEINFO['Applied'];
   document.getElementById('ws-sub').innerHTML='<span style="color:var(--soft);font-size:13px">for </span><b>'+esc(W.name)+'</b> <span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-left:8px">'+esc(stageLabel(W.stage))+'</span>';
-  document.getElementById('ws-body').innerHTML=`<div style="max-width:760px;margin:0 auto">${block}</div>`;
-  /* Bottom action bar always has Back. For non-application hubs, add an Edit application button
-     so user can correct candidate-supplied facts from inside the screening / interview / refs / checks flows
-     without losing context. */
+  if(layoutMode==='split'){
+    /* Build context side-rail. Score card top, then snapshot, employers, refs, comms, notes. */
+    const sidebar=questionsHubSideRail(c);
+    document.getElementById('ws-body').innerHTML=`<div class="qhub-grid"><div class="qhub-main">${block}</div><div class="qhub-side">${sidebar}</div></div>`;
+  }else{
+    document.getElementById('ws-body').innerHTML=`<div style="max-width:760px;margin:0 auto">${block}</div>`;
+  }
   const editAppBtn=kind!=='application'?'<button class="btn-sec bg-cream" onclick="setFocusedHub(\'application\')" style="padding:10px 18px">✎ Edit application data</button>':'';
   document.getElementById('ws-action-bar').innerHTML='<button class="btn-sec bg-cream" onclick="clearFocusedHub()" style="padding:10px 18px">← Back to overview</button>'+editAppBtn;
+}
+
+/* Side rail for Phone Screen / Interview hub — collects everything Meir might want to glance at
+   while on the call. Cards stack vertically; on narrow screens the sidebar drops below the main. */
+function questionsHubSideRail(c){
+  if(!c)return '';
+  const sc=scoreW(),col=BANDCSS[sc.dec.cls];
+  /* Quick score recap */
+  const scoreCard=`<div class="wscard"><h3>Score</h3>
+    <div class="scorebig" style="margin:0">
+      <div class="blk"><div class="lab">Quality</div><div class="num">${sc.Q==null?'—':sc.Q}</div></div>
+      <div class="blk"><div class="lab">Retention</div><div class="num">${sc.R==null?'—':sc.R}</div></div>
+    </div>
+    <div style="margin-top:6px"><span class="bandpill" style="background:${col[0]};color:${col[1]}">${sc.dec.band}</span></div>
+    ${sc.dec.why?'<div style="font-size:12px;color:var(--mid);margin-top:8px;line-height:1.45">'+esc(sc.dec.why)+'</div>':''}
+  </div>`;
+
+  /* In-call note pad — saves to W.st.notes on blur. Helpful during live interviews. */
+  const notes=(c.st&&c.st.notes)||'';
+  const notesCard=`<div class="wscard"><h3>Notes during call</h3>
+    <textarea id="qhub-notes" placeholder="Type observations during the call — auto-saves on blur." onblur="W.st.notes=this.value;saveW(true);" style="width:100%;min-height:120px;padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;resize:vertical;outline:none;background:#FFFEFB">${esc(notes)}</textarea>
+  </div>`;
+
+  /* Recent communication — last 3 emails to give context on what's been said */
+  const emails=(c.st&&c.st.emails)||[];
+  const recentEmails=emails.slice(0,3);
+  const commsCard=recentEmails.length?`<div class="wscard"><h3>Recent communication <span style="font-size:11px;color:var(--soft);font-weight:600">${emails.length} total</span></h3>
+    ${recentEmails.map(e=>{
+      const time=e.receivedAt?new Date(e.receivedAt).toLocaleDateString():'';
+      const dir=e.direction==='out'?'→ sent':'← received';
+      const subj=esc(e.subject||'(no subject)').slice(0,60);
+      const dot=e.seen?'':'<span style="color:var(--sky-deep);margin-right:4px">●</span>';
+      return `<div style="font-size:12px;padding:5px 0;border-bottom:1px solid var(--border-soft);display:flex;justify-content:space-between;gap:8px"><span>${dot}<b style="color:var(--mid);font-weight:600">${dir}</b> · ${subj}</span><span style="color:var(--soft);font-size:11px;white-space:nowrap">${time}</span></div>`;
+    }).join('')}
+    ${emails.length>3?'<div style="font-size:11px;color:var(--soft);margin-top:5px">+ '+(emails.length-3)+' more — see Inbox tab</div>':''}
+  </div>`:'';
+
+  /* Quick edit pencils for the most-referenced fields during a call */
+  const yrs=c.years||'—';
+  const exp=(c.st&&c.st.pills||[]).slice(0,3).join(', ')||'—';
+  const certs=(c.st&&c.st.certs||[]).join(', ')||'—';
+  const addr=(c.st&&c.st.address)||'—';
+  const quickFactsCard=`<div class="wscard"><h3>Quick facts</h3>
+    <div class="kvrow"><span class="lbl">Years</span><span class="val">${esc(String(yrs))}</span></div>
+    <div class="kvrow"><span class="lbl">Expertise</span><span class="val" style="text-align:right;font-size:12px">${esc(exp)}</span></div>
+    <div class="kvrow"><span class="lbl">Certs</span><span class="val" style="text-align:right;font-size:12px">${esc(certs)}</span></div>
+    <div class="kvrow"><span class="lbl">Address</span><span class="val" style="text-align:right;font-size:11.5px">${esc(addr)}</span></div>
+    <div class="kvrow"><span class="lbl">Source</span><span class="val">${esc(c.source||'—')}</span></div>
+    <button class="btn-sec bg-cream" style="margin-top:8px;padding:6px 12px;font-size:12px;width:100%" onclick="setFocusedHub('application')">✎ Edit application data</button>
+  </div>`;
+
+  return scoreCard+notesCard+quickFactsCard+employersPreviewCard(c)+appSnapshotCard(c)+commsCard;
 }
 function renderWorkspace(){
   if(!W)return;
@@ -4207,6 +4469,11 @@ function renderSettingsPipeline(){
     <input type="text" id="cfg_serviceZips" value="${esc(SETTINGS.config.serviceZips)}" class="tpl-subject-input">
   </div>
 
+  <div class="wscard"><h3>Nudge reminders</h3>
+    <p class="set-help">After this many days without response, the candidate appears in the "🔔 Ready to nudge" banner at the top of Pipeline with a one-click resend button. Should be less than the auto-reject threshold.</p>
+    <label class="set-field" style="max-width:200px">Days before nudge<input type="number" min="1" max="30" id="cfg_nudgeDays" value="${SETTINGS.config.nudgeDays||3}"></label>
+  </div>
+
   <div class="wscard"><h3>Auto-reject after silence</h3>
     <p class="set-help">If a candidate hasn't responded after this many days, the action engine surfaces them at the top of Pipeline for one-click rejection. Industry benchmark: 14 days.</p>
     <label class="set-field" style="max-width:200px">Days of silence<input type="number" min="3" max="60" id="cfg_autoRejectDays" value="${SETTINGS.config.autoRejectDays}"></label>
@@ -4316,8 +4583,18 @@ async function saveZiToken(){
   const tok=document.getElementById('cfg_ziToken').value.trim();
   SETTINGS.config=SETTINGS.config||{};
   SETTINGS.config.ziToken=tok;
-  await saveSettings();
-  toast('ZoomInfo token saved');
+  /* Also persist to localStorage as a backup. If the AL1 sheet write fails for any reason
+     (token expired, sheet open in Excel, transient network), this keeps working locally. */
+  try{localStorage.setItem('solura_zi_token',tok);}catch(e){}
+  let saveOk=false;
+  try{
+    await patchRange('AL1',[[JSON.stringify(SETTINGS)]]);
+    saveOk=true;
+  }catch(e){
+    /* Don't silently swallow — tell the user it's local-only so they don't lose the token. */
+    toast('⚠ Saved locally only — could not reach Excel sheet. Will retry on next page load.');
+  }
+  if(saveOk)toast('✓ ZoomInfo token saved (sheet + local backup)');
   renderSettings();
 }
 
@@ -4631,6 +4908,7 @@ async function saveConfig(){
   if(get('cfg_payQualityNudge'))SETTINGS.config.payQualityNudge=parseFloat(get('cfg_payQualityNudge').value)||1;
   if(get('cfg_serviceZips'))SETTINGS.config.serviceZips=get('cfg_serviceZips').value.trim();
   if(get('cfg_autoRejectDays'))SETTINGS.config.autoRejectDays=parseInt(get('cfg_autoRejectDays').value,10)||14;
+  if(get('cfg_nudgeDays'))SETTINGS.config.nudgeDays=parseInt(get('cfg_nudgeDays').value,10)||3;
   if(get('cfg_calScreenUrl'))SETTINGS.config.calScreenUrl=get('cfg_calScreenUrl').value.trim();
   if(get('cfg_calInterviewUrl'))SETTINGS.config.calInterviewUrl=get('cfg_calInterviewUrl').value.trim();
   if(get('cfg_calOnboardingUrl'))SETTINGS.config.calOnboardingUrl=get('cfg_calOnboardingUrl').value.trim();
@@ -4937,7 +5215,8 @@ function exportFeedbackPdf(){
   });
   _pdfFooter(doc);
   doc.save('solura-changes-'+today()+'.pdf');
-  toast('PDF exported — '+items.length+' item'+(items.length===1?'':'s'));
+  /* Auto-clear after successful export — these have been "sent" so they shouldn't pile up locally. */
+  _autoResetAfterExport(items.length,'PDF');
 }
 
 function exportFeedbackDoc(){
@@ -4961,6 +5240,20 @@ function exportFeedbackDoc(){
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download='solura-changes-'+today()+'.doc';a.click();
   URL.revokeObjectURL(url);
+  _autoResetAfterExport(items.length,'Word doc');
+}
+
+/* After PDF/Word export, the change requests have effectively been "shipped" — wipe the list so the
+   next session starts clean. Brief delay lets the download dialog appear first, otherwise the toast
+   gets buried. */
+function _autoResetAfterExport(count,kind){
+  setTimeout(()=>{
+    try{localStorage.removeItem('solura_change_requests');}catch(e){}
+    if(typeof updateFabBadge==='function')updateFabBadge();
+    /* If modal is open, refresh the list view */
+    if(typeof renderFeedbackList==='function')renderFeedbackList();
+    toast('✓ '+kind+' exported ('+count+' item'+(count===1?'':'s')+') — list cleared');
+  },400);
 }
 </script>
 
