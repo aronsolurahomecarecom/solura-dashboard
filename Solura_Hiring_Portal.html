@@ -1599,7 +1599,14 @@ const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const SHIFTS=['Morning','Afternoon','Evening','Overnight'];
 
 /* ===================== load ===================== */
-function pState(row){let s={};try{if(row[35])s=JSON.parse(row[35]);}catch(e){}return Object.assign({due:null,booking:null,zip:'',address:'',pills:[],certs:[],licenseState:'OH',licenseNum:'',license:'',reqCheck:'',tpCheck:'',employers:[],refs:[],log:[],sent:{},checkins:[],dayShifts:{}},s);}
+function pState(row){let s={};try{if(row[35])s=JSON.parse(row[35]);}catch(e){}
+  s=Object.assign({due:null,booking:null,zip:'',address:'',pills:[],certs:[],licenseState:'OH',licenseNum:'',license:'',reqCheck:'',tpCheck:'',employers:[],refs:[],log:[],sent:{},checkins:[],dayShifts:{}},s);
+  /* Auto-heal bloat on every read so candidates whose state was poisoned by earlier buggy
+     code (full email bodies stored in st.emails) recover transparently. Cost: one shallow
+     pass over each candidate's emails array; cheap. */
+  if(typeof sanitizeState==='function')s=sanitizeState(s);
+  return s;
+}
 function pAns(row){let a={};try{if(row[34])a=JSON.parse(row[34]);}catch(e){}return a;}
 function cardOf(i,row){return {excelRow:i+1,row:row,name:String(row[2]),phone:String(row[3]||''),email:String(row[4]||''),
   source:String(row[5]||''),stage:String(row[6]||'Applied'),notes:String(row[33]||''),st:pState(row),answers:pAns(row)};}
@@ -2515,11 +2522,51 @@ function scoreW(){const Q=progressive(W.q,QW),R=progressive(W.r,RW),gs=gateState
 function logW(x){W.st.log=W.st.log||[];W.st.log.push({t:stamp(),x:x});}
 function setFocusedHub(kind){if(!W)return;W.focusedHub=kind;renderWorkspace();}
 function clearFocusedHub(){if(!W)return;W.focusedHub=null;renderWorkspace();}
+/* Excel cells have a hard 32,767-char limit. When state JSON exceeds it, every save for that
+   candidate fails until the bloat is trimmed. This sanitizer is run before every save: it strips
+   any extra-long fields that shouldn't be there (full email bodies — only `preview` belongs),
+   caps the emails array, and truncates oversized logs/notes. Heals candidates whose state got
+   bloated by earlier buggy versions. */
+function sanitizeState(st){
+  if(!st||typeof st!=='object')return st;
+  /* Emails: drop any `body` or `bodyType` fields, cap to 40 entries */
+  if(Array.isArray(st.emails)){
+    st.emails=st.emails.slice(0,40).map(e=>{
+      if(!e||typeof e!=='object')return e;
+      const cleaned={};
+      ['id','direction','subject','preview','from','to','received','receivedAt','sentAt','seen','webLink','hasAttachments'].forEach(k=>{if(e[k]!==undefined)cleaned[k]=e[k];});
+      if(cleaned.subject)cleaned.subject=String(cleaned.subject).slice(0,140);
+      if(cleaned.preview)cleaned.preview=String(cleaned.preview).slice(0,200);
+      return cleaned;
+    });
+  }
+  /* Log: cap to last 200 entries; truncate any single entry past 500 chars */
+  if(Array.isArray(st.log)){
+    if(st.log.length>200)st.log=st.log.slice(-200);
+    st.log=st.log.map(l=>{
+      if(!l||typeof l!=='object')return l;
+      if(l.x&&l.x.length>500)return Object.assign({},l,{x:l.x.slice(0,500)+'…'});
+      return l;
+    });
+  }
+  /* Notes: cap at 4000 chars (more than enough for interview notes) */
+  if(typeof st.notes==='string'&&st.notes.length>4000)st.notes=st.notes.slice(0,4000);
+  return st;
+}
+
 async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
   try{
+    W.st=sanitizeState(W.st);
+    const stJson=JSON.stringify(W.st||{});
+    /* Defensive size check — Excel's cell limit is 32,767. Bail with a useful message if we'd
+       exceed it (something we didn't sanitize must be causing it). */
+    if(stJson.length>32000){
+      if(!silent)toast('⚠ State too large ('+stJson.length+' chars) — open the workspace and run sanitize from console: W.st=sanitizeState(W.st);saveW()');
+      return;
+    }
     await patchRange('G'+row+':L'+row,[[W.stage,bl(W.gates.wa),bl(W.gates.cr),bl(W.gates.bg),bl(W.gates.tr),bl(W.gates.av)]]);
     await patchRange('N'+row+':Y'+row,[[bl(W.q.rel),bl(W.q.com),bl(W.q.jud),bl(W.q.doc),bl(W.q.ref),bl(W.q.cmp),bl(W.q.phn),'',bl(W.r.ten),bl(W.r.prx),bl(W.r.ava),bl(W.r.exp)]]);
-    await patchRange('AI'+row+':AJ'+row,[[JSON.stringify(W.answers||{}),JSON.stringify(W.st||{})]]);
+    await patchRange('AI'+row+':AJ'+row,[[JSON.stringify(W.answers||{}),stJson]]);
     await refreshRow(row);render();if(!silent)toast('Saved');
   }catch(e){toast('Save failed: '+e.message);}}
 
@@ -2591,22 +2638,23 @@ async function reallySend(tpl,advanceTo){
   try{
     await sendMailViaGraph(W.email,subj,body);
     W.st.sent=W.st.sent||{};W.st.sent[tpl]=today();
-    /* Also push the sent email into the candidate's local emails array immediately, so it shows in
-       the inbox panel without waiting for the 60s polling cycle to pick it up from Sent folder.
-       The polling will eventually overwrite this with the canonical version from Graph (with the real
-       messageId etc.), but in the meantime the user sees their sent message right away. */
+    /* Push a lightweight copy into the candidate's local emails array so the user sees their sent
+       message immediately instead of waiting for the 60s Sent-folder polling cycle. Schema MUST
+       match the polling code at line ~3171 (id, direction, subject, preview, received) — earlier
+       versions stored the full body here, which bloated the AJ cell past Excel's 32KB limit and
+       broke every subsequent save for that candidate. */
     W.st.emails=W.st.emails||[];
     W.st.emails.unshift({
+      id:'local-'+Date.now(),
       direction:'out',
+      subject:(subj||'').slice(0,140),
+      preview:(body||'').slice(0,200),
       from:'careers@solurahomecare.com',
       to:W.email,
-      subject:subj,
-      body:body,
-      bodyType:'text',
-      receivedAt:new Date().toISOString(),
-      seen:true,
-      messageId:'local-'+Date.now()
+      received:new Date().toISOString(),
+      seen:true
     });
+    if(W.st.emails.length>40)W.st.emails=W.st.emails.slice(0,40);
     logW('Sent: '+tpl.replace(/_/g,' ')+' → '+W.email);
     if(advanceTo){W.stage=advanceTo;if(advanceTo==='Screen invite'||advanceTo==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();logW('Advanced to '+advanceTo);}
     await saveW(true);closeModal();toast('Email sent — watching for delivery');
