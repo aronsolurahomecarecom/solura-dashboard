@@ -29,8 +29,8 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--cream);color:va
 /* Header */
 .hdr{background:linear-gradient(135deg,#1A3F72 0%,var(--sky-deep) 60%,#1E5094 100%);border-bottom:2px solid var(--gold);padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 16px rgba(0,0,0,.18);}
 .hdr-l{display:flex;align-items:center;gap:12px;}
-.logo-wrap{width:40px;height:40px;border-radius:50%;overflow:hidden;border:2px solid var(--gold);background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px rgba(200,135,10,.25);}
-.logo-wrap img{width:100%;height:100%;object-fit:cover;}
+.logo-wrap{width:52px;height:52px;border-radius:50%;overflow:hidden;border:2px solid var(--gold);background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px rgba(200,135,10,.25);flex-shrink:0;aspect-ratio:1/1;}
+.logo-wrap img{width:100%;height:100%;object-fit:cover;display:block;border-radius:50%;}
 .logo-s{width:36px;height:36px;background:linear-gradient(135deg,var(--gold),#E8A020);border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:600;color:#fff;}
 .brand{font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:500;color:var(--gold);letter-spacing:.01em;}
 .hdr-r{display:flex;align-items:center;gap:8px;}
@@ -529,6 +529,8 @@ td{padding:13px 16px;vertical-align:top;}
 .dlbadge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:7px;display:inline-block;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);}
 .xpill{font-size:10px;font-weight:600;padding:3px 8px;border-radius:999px;display:inline-block;background:#EFEAFC;color:#5B4BAA;border:1px solid #D9D2F3;}
 .giftpill{font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;display:inline-block;letter-spacing:.02em;}
+.ws-quick{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
+.ws-quick .btn-sm{font-size:11.5px;padding:5px 10px;}
 .giftpill.caregiver{background:linear-gradient(135deg,#FEF3DC,#FAF6EE);color:#8B6500;border:1px solid #C59B4E;}
 .giftpill.customer{background:linear-gradient(135deg,#E8F5E9,#F0F8E8);color:#2E7D32;border:1px solid #70A54D;}
 
@@ -1380,9 +1382,15 @@ let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{},sc
   customerReferralEnabled:true,customerReferralPayoutEnabled:true,
   customerReferralAmount:100,customerReferralRetentionDays:30,
   showLeaderboardPills:true,referralInConfirmEmail:true,
+  /* Required certifications for hire eligibility — fully editable in Settings. Each entry in
+     requiredCerts is a label that must appear in st.certs (case-insensitive substring match, so
+     "CPR" matches "CPR/BLS" or "Adult CPR"). requiredCertGroups is for "must have at least one of"
+     scenarios — like "must have HHA OR higher (STNA, CNA, RN)". */
+  requiredCerts:['CPR','First Aid'],
+  requiredCertGroups:[{label:'Care credential (one minimum)',options:['HHA','STNA','CNA','RN','LPN']}],
+  certFailEnabled:true,
   /* Admin number watchlist — phone numbers (any format) that should NEVER appear as candidate
-     references. If a reference's phone matches one of these, the worker rejects the submission
-     and the portal flags it as suspicious if it somehow makes it through (e.g., manually entered). */
+     references. */
   adminPhones:'2167704886,9295454507,6469370249'
 },flow:{order:null,labels:{},custom:[]}}; /* flow.order = user-edited stage order; flow.labels = display overrides; flow.custom = user-added milestone stages (manual advance only) */
 
@@ -1624,14 +1632,39 @@ function qComplete(q){return ['rel','com','jud','doc','ref','cmp','phn'].every(k
 function rComplete(r){return ['ten','prx','ava','exp'].every(k=>r[k]);}
 function gateState(g){const set=GATES.filter(([k])=>g[k]).length;if(set<5)return'partial';return GATES.every(([k])=>g[k]==='Y')?'PASS':'FAIL';}
 function missingGateLabels(g){return GATES.filter(([k])=>!g[k]).map(([,l])=>l);}
-function decide(Q,R,q,r,gs){if(gs==='FAIL')return{band:'DECLINE (gate)',cls:'red'};
+/* Check if a candidate's certs satisfy the required-certs config. Returns array of missing items
+   (empty array = all required certs present). Case-insensitive substring match — "CPR" matches
+   any cert label containing "CPR" like "CPR/BLS" or "Adult CPR". */
+function missingRequiredCerts(certs){
+  if(!SETTINGS.config.certFailEnabled)return [];
+  const have=(certs||[]).map(c=>String(c||'').toLowerCase());
+  const missing=[];
+  (SETTINGS.config.requiredCerts||[]).forEach(req=>{
+    const r=String(req||'').toLowerCase();
+    if(!have.some(c=>c.includes(r)))missing.push(req);
+  });
+  (SETTINGS.config.requiredCertGroups||[]).forEach(g=>{
+    const opts=(g.options||[]).map(o=>String(o||'').toLowerCase());
+    if(!opts.some(o=>have.some(c=>c.includes(o))))missing.push(g.label||opts.join(' or '));
+  });
+  return missing;
+}
+function decide(Q,R,q,r,gs,certs){
+  /* Required-cert check is a hard gate, independent of Q/R scores. If missing, force DECLINE. */
+  if(certs!==undefined){
+    const missing=missingRequiredCerts(certs);
+    if(missing.length)return{band:'DECLINE (missing cert)',cls:'red',certMissing:missing};
+  }
+  if(gs==='FAIL')return{band:'DECLINE (gate)',cls:'red'};
   if(gs!=='PASS'||!qComplete(q)||!rComplete(r))return{band:'In progress',cls:'grey'};
   if(Q>=70&&R>=70)return{band:'HIRE TRACK',cls:'grn'};if(Q>=70&&R>=55)return{band:'CONDITIONAL',cls:'sky'};
-  if(Q>=55&&R>=70)return{band:'HOLD / DEVELOP',cls:'gold'};return{band:'DECLINE',cls:'red'};}
+  if(Q>=55&&R>=70)return{band:'HOLD / DEVELOP',cls:'gold'};return{band:'DECLINE',cls:'red'};
+}
 function n(x){return(x===''||x==null)?undefined:Number(x);}
 function scoreRow(c){const row=c.row,q={rel:n(row[13]),com:n(row[14]),jud:n(row[15]),doc:n(row[16]),ref:n(row[17]),cmp:n(row[18]),phn:n(row[19])};
   const r={ten:n(row[21]),prx:n(row[22]),ava:n(row[23]),exp:n(row[24])},g={wa:row[7],cr:row[8],bg:row[9],tr:row[10],av:row[11]};
-  const Q=progressive(q,QW),R=progressive(r,RW);return{Q,R,q,r,g,dec:decide(Q,R,q,r,gateState(g)),gateStatus:gateState(g),missingGates:missingGateLabels(g)};}
+  const Q=progressive(q,QW),R=progressive(r,RW);
+  return{Q,R,q,r,g,dec:decide(Q,R,q,r,gateState(g),(c.st&&c.st.certs)||[]),gateStatus:gateState(g),missingGates:missingGateLabels(g)};}
 
 /* ===================== question bank ===================== */
 const QBANK=[
@@ -1787,6 +1820,23 @@ function predictedQuality(c){
 function action(c){
   const s=c.stage,st=c.st,info=STAGEINFO[s]||STAGEINFO['Applied'];
   if(s==='Declined')return{bucket:'closed',info};
+  /* Manual awaiting flag — user can park a candidate in Awaiting from any non-closed stage to keep
+     them out of Action while waiting on external follow-up (e.g., candidate said "call me Tuesday").
+     Cleared via "Move out of awaiting" button in the workspace. New email arrival auto-clears it
+     so the user is alerted when the candidate responds. */
+  if(st.manualAwaiting&&s!=='Hired'&&s!=='Declined'){
+    /* Auto-release on new unread email (request #8 — surface advance option when they respond) */
+    const emails=(st.emails||[]);
+    const unread=emails.filter(e=>!e.seen);
+    if(unread.length){
+      /* Don't clear the flag here — that's a write. Just route to action bucket so the candidate
+         surfaces, and the workspace will offer a "they responded — clear awaiting & advance" button. */
+      const newest=unread[0];
+      const subj=(newest.subject||'(no subject)').slice(0,60);
+      return{bucket:'action',timing:{txt:'Responded while awaiting',pill:'pa',date:subj},info,primary:{kind:'open-email',emailId:newest.id,label:'✉ Open response ('+unread.length+')',cls:'sky'},manuallyAwaiting:true};
+    }
+    return{bucket:'awaiting',timing:{txt:st.awaitingReason||'Manually parked',pill:'psoft',date:st.awaitingUntil?('until '+fmtDay(st.awaitingUntil)):''},info,primary:{kind:'release-awaiting',label:'Move out of awaiting',cls:'sky'},manuallyAwaiting:true};
+  }
   /* Email-as-action: if candidate sent us mail since we last opened their workspace,
      surface them as Action with primary = open the most recent unread.
      This overrides whatever stage-driven primary would otherwise apply. */
@@ -2405,6 +2455,57 @@ function renderActiveCaregivers(){
 }
 function quickEmailCaregiver(row){loadW(row);openCustomEmail();}
 
+/* ===================== Manual awaiting controls ===================== */
+function parkInAwaiting(){
+  /* Small inline modal: reason (optional, free text) + follow-up date (optional date input).
+     Both saved to st.awaitingReason / st.awaitingUntil so the awaiting card shows context. */
+  const today=new Date().toISOString().slice(0,10);
+  emailModal('park_awaiting','','',null); /* reuse the modal shell, we'll override its content */
+  document.getElementById('m-title').textContent='Park candidate in awaiting';
+  document.getElementById('m-body').innerHTML=`
+    <div style="font-size:13px;color:var(--mid);margin-bottom:14px;line-height:1.5">
+      Pauses this candidate — they leave the Action bucket and sit in Awaiting until you manually move them back, or until they email you (which auto-surfaces them again).
+    </div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Reason (optional)</div>
+    <input id="park-reason" placeholder="e.g., Said to call Tuesday, waiting on docs, considering counter-offer..." style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;margin-bottom:12px">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Follow-up date (optional)</div>
+    <input id="park-until" type="date" min="${today}" style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+    <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+      <button class="btn-sec" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary bg-gold" onclick="commitPark()">Park in awaiting</button>
+    </div>`;
+}
+async function commitPark(){
+  const reason=(document.getElementById('park-reason').value||'').trim();
+  const until=document.getElementById('park-until').value;
+  W.st.manualAwaiting=true;
+  if(reason)W.st.awaitingReason=reason;
+  if(until)W.st.awaitingUntil=until;
+  logW('Manually parked in awaiting'+(reason?' · '+reason:'')+(until?' · follow up '+until:''));
+  closeModal();
+  await saveW(true);
+  toast('⏸ Parked in awaiting');
+  renderWorkspace();
+}
+async function releaseAwaiting(){
+  delete W.st.manualAwaiting;
+  delete W.st.awaitingReason;
+  delete W.st.awaitingUntil;
+  logW('Resumed from awaiting');
+  await saveW(true);
+  toast('▶ Resumed');
+  renderWorkspace();
+}
+async function declineCandidate(){
+  if(!confirm('Decline this candidate? They will move to the Declined bucket and be removed from active pipeline. You can manually reverse this later via the workspace.'))return;
+  W.stage='Declined';
+  delete W.st.manualAwaiting;
+  logW('Manually declined');
+  await saveW(true);
+  toast('✕ Declined');
+  renderWorkspace();
+}
+
 /* ===================== Referrals view ===================== */
 /* Two-pane view: caregiver leaderboard on the top, customer-referral ledger below.
    Both fully sortable; ledger has "Mark paid" action that flips payoutStatus + logs to the
@@ -2842,6 +2943,15 @@ function rowHtml(c){
 function doPrimary(r){const c=pipeline.find(x=>x.excelRow===r);if(!c)return;const a=action(c),p=a.primary;loadW(r);
   if(p.kind==='email-info')return doEmailMissing();
   if(p.kind==='email-tpl')return doEmail(p.tpl,p.advanceTo);
+  if(p.kind==='release-awaiting'){
+    /* Clear the manual-awaiting flag and reload the workspace so the normal action shows. */
+    delete W.st.manualAwaiting;
+    delete W.st.awaitingReason;
+    delete W.st.awaitingUntil;
+    logW('Manually moved out of awaiting');
+    saveW(true).then(()=>{openWorkspace(r);toast('Moved out of awaiting');});
+    return;
+  }
   if(p.kind==='questions'){
     /* open the candidate workspace, then enter focused-hub mode for the questions block */
     openWorkspace(r);
@@ -2881,7 +2991,8 @@ function loadW(r){const p=pipeline.find(x=>x.excelRow===r);if(!p)return;const ro
     answers:Object.assign({},p.answers),st:JSON.parse(JSON.stringify(p.st))};return W;}
 function applyAnswers(){const by={};QBANK.forEach(it=>{const v=W.answers[it.id];if(v)(by[it.dim]=by[it.dim]||[]).push(v);});
   Object.keys(by).forEach(d=>{const a=by[d],avg=Math.round(a.reduce((x,y)=>x+y)/a.length);if(['ten','exp','prx','ava'].includes(d))W.r[d]=avg;else W.q[d]=avg;});}
-function scoreW(){const Q=progressive(W.q,QW),R=progressive(W.r,RW),gs=gateState(W.gates);return{Q,R,gs,dec:decide(Q,R,W.q,W.r,gs),missingGates:missingGateLabels(W.gates)};}
+function scoreW(){const Q=progressive(W.q,QW),R=progressive(W.r,RW),gs=gateState(W.gates);
+  return{Q,R,gs,dec:decide(Q,R,W.q,W.r,gs,(W.st&&W.st.certs)||[]),missingGates:missingGateLabels(W.gates)};}
 function logW(x){W.st.log=W.st.log||[];W.st.log.push({t:stamp(),x:x});}
 function setFocusedHub(kind){if(!W)return;W.focusedHub=kind;renderWorkspace();}
 function clearFocusedHub(){if(!W)return;W.focusedHub=null;renderWorkspace();}
@@ -2986,11 +3097,16 @@ function doEmailMissing(){const sc=scoreW();W.__missing=sc.missingGates;const t=
 function emailModal(tpl,subj,body,advanceTo){
   document.getElementById('m-title').textContent=tpl==='reject'?'Send rejection email':'Send email';
   document.getElementById('mbox').style.maxWidth='640px';
+  /* Don't show the park option for the park modal itself, the missing-info request (where the
+     candidate's expected to respond imminently — auto-awaiting via stage logic handles that),
+     or rejection emails. For everything else, show the option. */
+  const showParkOpt=!['park_awaiting','missing','reject'].includes(tpl)&&!(W.st&&W.st.manualAwaiting);
   document.getElementById('m-body').innerHTML=`<div style="font-size:12px;color:var(--soft);margin-bottom:10px">To: ${esc(W.email||'(no email on file)')}</div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Subject</div>
     <input id="e-sub" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none;margin-bottom:12px" value="${esc(subj)}">
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Message</div>
     <textarea id="e-body" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;min-height:200px;resize:vertical;outline:none">${esc(body)}</textarea>
+    ${showParkOpt?`<label style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:9px 12px;background:#FAF6EE;border:1px solid var(--gold-mid);border-radius:8px;cursor:pointer;font-size:13px;color:var(--mid)"><input type="checkbox" id="e-park" style="cursor:pointer;width:16px;height:16px;accent-color:#8B6500;margin:0"><span>⏸ <b>Park in awaiting</b> after sending — pause this candidate until they respond or you resume them manually</span></label>`:''}
     <div class="brow" style="margin-top:14px;gap:8px">
       <button class="btn-primary bg-grn" id="sendbtn" onclick="reallySend('${tpl}','${advanceTo||''}')">✉ Send via Outlook</button>
       <button class="btn-sec bg-cream" style="flex:0 0 auto" onclick="closeModal()">Cancel</button>
@@ -3022,6 +3138,13 @@ async function reallySend(tpl,advanceTo){
     });
     if(W.st.emails.length>40)W.st.emails=W.st.emails.slice(0,40);
     logW('Sent: '+tpl.replace(/_/g,' ')+' → '+W.email);
+    /* Honor the "park in awaiting after send" checkbox from the modal */
+    const parkCheckbox=document.getElementById('e-park');
+    if(parkCheckbox&&parkCheckbox.checked){
+      W.st.manualAwaiting=true;
+      W.st.awaitingReason='Awaiting reply to "'+(subj||'email').slice(0,60)+'"';
+      logW('Parked in awaiting after send');
+    }
     if(advanceTo){W.stage=advanceTo;if(advanceTo==='Screen invite'||advanceTo==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();logW('Advanced to '+advanceTo);}
     await saveW(true);closeModal();toast('Email sent — watching for delivery');
     watchForBounce(W.email,W.row);
@@ -3212,6 +3335,7 @@ function renderWorkspace(){
   document.getElementById('ws-name').textContent=W.name;
   document.getElementById('ws-sub').innerHTML=
     '<span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-right:8px">'+esc(stageLabel(W.stage))+'</span>'
+    +(W.st.manualAwaiting?'<span class="sbadge" style="background:#FAF6EE;color:#8B6500;border:1px solid var(--gold);margin-right:8px" title="'+esc(W.st.awaitingReason||'Manually parked')+'">⏸ AWAITING</span>':'')
     +'<span class="bandpill" style="background:'+col[0]+';color:'+col[1]+';margin-right:10px">'+sc.dec.band+'</span>'
     +(W.phone?'<a href="tel:'+telify(W.phone)+'">📞 '+esc(W.phone)+'</a>  ':'')
     +(W.email?'<a href="mailto:'+esc(W.email)+'">✉ '+esc(W.email)+'</a>':'');
@@ -3220,11 +3344,24 @@ function renderWorkspace(){
   const p=a.primary||{kind:'open',label:'Open',cls:'sky'};
   const cls=p.cls==='gold'?'gold':p.cls==='grn'?'grn':p.cls==='lock'?'lock':'';
   const primBtn=p.kind==='lock'?'<button class="ws-pri lock" disabled>'+esc(p.label)+'</button>':'<button class="ws-pri '+cls+'" onclick="doPrimary('+W.row+')">'+esc(p.label)+' →</button>';
+  /* Quick-action mini buttons under the primary — Park in Awaiting, Decline, Resume Awaiting.
+     Visible at any stage except Hired/Declined. The Park button pops a small modal to enter an
+     optional reason + optional follow-up date. Resume button only shows when currently parked. */
+  const isParked=!!W.st.manualAwaiting;
+  let quickActions='';
+  if(W.stage!=='Hired'&&W.stage!=='Declined'){
+    if(isParked){
+      quickActions=`<div class="ws-quick"><button class="btn-sm bg-sky-l" onclick="releaseAwaiting()" title="Move out of awaiting">▶ Resume from awaiting</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
+    }else{
+      quickActions=`<div class="ws-quick"><button class="btn-sm bg-cream" onclick="parkInAwaiting()" title="Move this candidate to Awaiting bucket — pause for follow-up">⏸ Park in awaiting</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
+    }
+  }
   const thisStep=`<div class="ws-this">
     <h3>This step</h3>
     <div class="label">${esc(a.info.next||'Open')}</div>
     <div class="why">${esc(why)}</div>
-    ${primBtn}</div>`;
+    ${primBtn}
+    ${quickActions}</div>`;
   const eff=flowOrder();
   const stepper=eff.map(s=>{const cur=s===W.stage,done=eff.indexOf(s)<eff.indexOf(W.stage);const lbl=FLOW_SHORT[s]||stageLabel(s);return `<span class="step ${cur?'cur':done?'done':''}">${esc(lbl)}</span>`;}).join('');
   const pills=(W.st.pills||[]).map(p=>'<span class="xpill" style="margin:0 4px 4px 0">'+esc(p)+'</span>').join('');
@@ -5096,6 +5233,17 @@ function renderSettingsPipeline(){
     <input type="text" id="cfg_serviceZips" value="${esc(SETTINGS.config.serviceZips)}" class="tpl-subject-input">
   </div>
 
+  <div class="wscard"><h3>🪪 Required certifications (auto-fail)</h3>
+    <p class="set-help">Candidates missing any of these certifications are automatically flagged as DECLINE regardless of their Q/R scores. Strict — protects against accidentally advancing candidates who can't legally work as caregivers. The match is case-insensitive substring (so "CPR" matches "CPR/BLS", "Adult CPR", etc.).</p>
+    <div class="set-toggle-row">
+      <label class="set-toggle"><input type="checkbox" id="cfg_certFailEnabled" ${SETTINGS.config.certFailEnabled?'checked':''}><span>Enable certification auto-fail</span></label>
+      <div class="set-toggle-hint">When off, candidates can advance regardless of certifications listed below.</div>
+    </div>
+    <label class="set-field" style="margin-top:14px">Required certs (every candidate must have ALL of these — comma-separated)<input type="text" id="cfg_requiredCerts" value="${esc((SETTINGS.config.requiredCerts||[]).join(', '))}" placeholder="CPR, First Aid"></label>
+    <label class="set-field">Minimum care credential (candidate must have AT LEAST ONE of these — comma-separated)<input type="text" id="cfg_requiredCertGroup" value="${esc(((SETTINGS.config.requiredCertGroups||[])[0]||{}).options ? (SETTINGS.config.requiredCertGroups[0].options.join(', ')) : '')}" placeholder="HHA, STNA, CNA, RN, LPN"></label>
+    <p class="set-help" style="margin-top:6px"><b>Current rule:</b> Candidate must have ${(SETTINGS.config.requiredCerts||[]).length?'<b>'+esc((SETTINGS.config.requiredCerts||[]).join('</b>, <b>'))+'</b>':'(no specific certs)'} AND at least one of ${((SETTINGS.config.requiredCertGroups||[])[0]||{}).options?'<b>'+esc((SETTINGS.config.requiredCertGroups[0].options).join('</b>, <b>'))+'</b>':'(no minimum specified)'}.</p>
+  </div>
+
   <div class="wscard"><h3>Nudge reminders</h3>
     <p class="set-help">After this many days without response, the candidate appears in the "🔔 Ready to nudge" banner at the top of Pipeline with a one-click resend button. Should be less than the auto-reject threshold.</p>
     <label class="set-field" style="max-width:200px">Days before nudge<input type="number" min="1" max="30" id="cfg_nudgeDays" value="${SETTINGS.config.nudgeDays||3}"></label>
@@ -5612,6 +5760,13 @@ async function saveConfig(){
   if(get('cfg_showLeaderboardPills'))SETTINGS.config.showLeaderboardPills=get('cfg_showLeaderboardPills').checked;
   if(get('cfg_referralInConfirmEmail'))SETTINGS.config.referralInConfirmEmail=get('cfg_referralInConfirmEmail').checked;
   if(get('cfg_adminPhones'))SETTINGS.config.adminPhones=get('cfg_adminPhones').value.trim();
+  /* Required-cert settings — comma-separated → array, trimmed of whitespace */
+  if(get('cfg_certFailEnabled'))SETTINGS.config.certFailEnabled=get('cfg_certFailEnabled').checked;
+  if(get('cfg_requiredCerts'))SETTINGS.config.requiredCerts=get('cfg_requiredCerts').value.split(',').map(s=>s.trim()).filter(Boolean);
+  if(get('cfg_requiredCertGroup')){
+    const opts=get('cfg_requiredCertGroup').value.split(',').map(s=>s.trim()).filter(Boolean);
+    SETTINGS.config.requiredCertGroups=opts.length?[{label:'Care credential (one minimum)',options:opts}]:[];
+  }
   await saveSettings();toast('✓ Config saved');
 }
 async function saveScript(k){const lines=document.getElementById('script_'+k).value.split('\n').map(s=>s.trim()).filter(Boolean);
