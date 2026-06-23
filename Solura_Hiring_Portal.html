@@ -1492,12 +1492,98 @@ async function closeWorkbookSession(){if(!workbookSessionId)return;
 /* SEND_AS: the shared mailbox to send from. Empty string = send from the signed-in user's own mailbox. */
 /* PREREQUISITE for non-empty value: signed-in account must have "Send As" permission on the mailbox in Exchange. */
 const SEND_AS='careers@solurahomecare.com';
-async function sendMailViaGraph(to,subject,bodyText){
-  const html='<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#111;white-space:pre-wrap">'+esc(bodyText)+'</div>';
+/* Send via Graph. bodyContent can be plain text (auto-wrapped in HTML) or HTML if isHtml=true.
+   attachments is an optional array of {name, contentType, contentBase64} objects.
+   Files >3MB get uploaded via createUploadSession; smaller ones go inline. */
+async function sendMailViaGraph(to,subject,bodyContent,isHtml,attachments){
+  const html=isHtml
+    ?bodyContent
+    :'<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#111;white-space:pre-wrap">'+esc(bodyContent)+'</div>';
   const msg={subject:subject,body:{contentType:'HTML',content:html},toRecipients:[{emailAddress:{address:to}}]};
   if(SEND_AS){msg.from={emailAddress:{address:SEND_AS}};msg.sender={emailAddress:{address:SEND_AS}};}
+  /* Small attachments (<3MB total): inline via the message.attachments array. Microsoft Graph
+     accepts up to ~4MB per single sendMail call, so we keep this small to be safe. */
+  const atts=Array.isArray(attachments)?attachments:[];
+  const smallAtts=[];
+  const largeAtts=[];
+  let inlineTotalBytes=0;
+  atts.forEach(a=>{
+    const sz=Math.floor((a.contentBase64||'').length*0.75); /* base64 → bytes */
+    if(sz<3*1024*1024&&inlineTotalBytes+sz<3*1024*1024){
+      inlineTotalBytes+=sz;
+      smallAtts.push({
+        '@odata.type':'#microsoft.graph.fileAttachment',
+        name:a.name,
+        contentType:a.contentType||'application/octet-stream',
+        contentBytes:a.contentBase64
+      });
+    }else{
+      largeAtts.push(a);
+    }
+  });
+
+  if(largeAtts.length){
+    /* For large attachments we need to create a DRAFT, upload each via chunked sessions, then SEND.
+       This handles up to 150MB per file. */
+    return sendMailWithLargeAttachments(to,subject,html,smallAtts,largeAtts);
+  }
+
+  if(smallAtts.length)msg.attachments=smallAtts;
   const r=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:msg,saveToSentItems:true})});
   if(!(r.ok||r.status===202)){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||('Send failed '+r.status));}
+}
+
+/* Large-attachment path: create draft → upload each large file via 3.2MB chunked PUT → send draft.
+   Required scope: Mail.ReadWrite + Mail.Send. */
+async function sendMailWithLargeAttachments(to,subject,html,smallAtts,largeAtts){
+  /* 1. Create draft message */
+  const draftBody={subject,body:{contentType:'HTML',content:html},toRecipients:[{emailAddress:{address:to}}]};
+  if(smallAtts.length)draftBody.attachments=smallAtts;
+  if(SEND_AS){draftBody.from={emailAddress:{address:SEND_AS}};draftBody.sender={emailAddress:{address:SEND_AS}};}
+  const dr=await gfetch(GR+'/me/messages',{method:'POST',body:JSON.stringify(draftBody)});
+  if(!dr.ok){const e=await dr.json().catch(()=>({}));throw new Error('Draft create failed: '+((e.error&&e.error.message)||dr.status));}
+  const draft=await dr.json();
+  const draftId=draft.id;
+
+  /* 2. For each large attachment, create an upload session + upload in 3.2MB chunks
+     (must be exact multiple of 320KB per Graph spec) */
+  const CHUNK=3276800; /* 3.2 MB = 10 × 320KB — exact multiple required by Graph */
+  for(const a of largeAtts){
+    const bytes=_base64ToBytes(a.contentBase64);
+    const total=bytes.length;
+    const sessReq=await gfetch(GR+'/me/messages/'+draftId+'/attachments/createUploadSession',{
+      method:'POST',
+      body:JSON.stringify({AttachmentItem:{attachmentType:'file',name:a.name,size:total,contentType:a.contentType||'application/octet-stream'}})
+    });
+    if(!sessReq.ok){const e=await sessReq.json().catch(()=>({}));throw new Error('Upload session: '+((e.error&&e.error.message)||sessReq.status));}
+    const sess=await sessReq.json();
+    let offset=0;
+    while(offset<total){
+      const end=Math.min(offset+CHUNK,total)-1;
+      const chunk=bytes.subarray(offset,end+1);
+      const cr=await fetch(sess.uploadUrl,{
+        method:'PUT',
+        headers:{
+          'Content-Length':String(chunk.length),
+          'Content-Range':'bytes '+offset+'-'+end+'/'+total
+        },
+        body:chunk
+      });
+      if(!cr.ok&&cr.status!==201&&cr.status!==202){throw new Error('Chunk PUT failed at byte '+offset+': '+cr.status);}
+      offset=end+1;
+    }
+  }
+
+  /* 3. Send the draft */
+  const sr=await gfetch(GR+'/me/messages/'+draftId+'/send',{method:'POST'});
+  if(!(sr.ok||sr.status===202)){const e=await sr.json().catch(()=>({}));throw new Error('Send draft: '+((e.error&&e.error.message)||sr.status));}
+}
+
+function _base64ToBytes(b64){
+  const bin=atob(b64);
+  const out=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);
+  return out;
 }
 
 /* delivery watcher — checks Inbox 60s after send for bounce/undeliverable notifications */
@@ -1590,6 +1676,8 @@ async function loadSettings(){
     }
   }catch(e){}
   applyCustomStagesToInfo();
+  /* Apply question-text overrides immediately so customized questions show in the workspace */
+  if(typeof applyQuestionOverrides==='function')applyQuestionOverrides();
 }
 
 async function saveSettings(){
@@ -1624,7 +1712,22 @@ async function syncToBookings(){/* no-op — Cal.com manages availability via th
 async function syncFromBookings(){/* no-op — bookings arrive via Cloudflare webhook → sheet → loadData() */}
 
 /* ===================== scoring engine ===================== */
-const QW={rel:15,com:12,jud:12,doc:11,ref:20,cmp:20,phn:10},RW={ten:40,prx:20,ava:15,exp:25};
+/* Quality + Retention dimension weights. The DEFAULTS below kick in when SETTINGS.config doesn't
+   override. Each weight is a relative number — what matters is the ratio, not absolute. The
+   `progressive()` math normalizes to a 0-100 score regardless of weight totals. Anything Meir
+   edits in Settings → Scoring engine flows through here. */
+const QW_DEFAULTS={rel:15,com:12,jud:12,doc:11,ref:20,cmp:20,phn:10};
+const RW_DEFAULTS={ten:40,prx:20,ava:15,exp:25};
+const QW_LABELS={rel:'Reliability',com:'Communication',jud:'Judgment',doc:'Documentation',ref:'References',cmp:'Competence',phn:'Phone responsiveness'};
+const RW_LABELS={ten:'Tenure history',prx:'Proximity to service area',ava:'Availability',exp:'Experience match'};
+const QW=new Proxy({},{get:(_,k)=>{
+  const cfg=(SETTINGS&&SETTINGS.config&&SETTINGS.config.qualityWeights)||{};
+  return cfg[k]!=null?cfg[k]:QW_DEFAULTS[k];
+},ownKeys:()=>Object.keys(QW_DEFAULTS),getOwnPropertyDescriptor:()=>({enumerable:true,configurable:true})});
+const RW=new Proxy({},{get:(_,k)=>{
+  const cfg=(SETTINGS&&SETTINGS.config&&SETTINGS.config.retentionWeights)||{};
+  return cfg[k]!=null?cfg[k]:RW_DEFAULTS[k];
+},ownKeys:()=>Object.keys(RW_DEFAULTS),getOwnPropertyDescriptor:()=>({enumerable:true,configurable:true})});
 const GATES=[["wa","Work authorization"],["cr","Credential"],["bg","Background clearable"],["tr","Transport"],["av","Availability"]];
 const BANDCSS={grn:["#EBF5EA","#3D7A34"],sky:["#EBF3FB","#1E4E8C"],gold:["#FEF7E8","#9A6100"],red:["#FDECEA","#B03025"],grey:["#F2EDE4","#9CA3AF"]};
 function progressive(s,w){let n=0,t=0;for(const k in w){if(s[k]){n+=s[k]/5*w[k];t+=w[k];}}return t===0?null:Math.round(n/t*100);}
@@ -1657,8 +1760,17 @@ function decide(Q,R,q,r,gs,certs){
   }
   if(gs==='FAIL')return{band:'DECLINE (gate)',cls:'red'};
   if(gs!=='PASS'||!qComplete(q)||!rComplete(r))return{band:'In progress',cls:'grey'};
-  if(Q>=70&&R>=70)return{band:'HIRE TRACK',cls:'grn'};if(Q>=70&&R>=55)return{band:'CONDITIONAL',cls:'sky'};
-  if(Q>=55&&R>=70)return{band:'HOLD / DEVELOP',cls:'gold'};return{band:'DECLINE',cls:'red'};
+  /* Band thresholds — editable in Settings → Scoring engine. The defaults are calibrated for
+     Solura's hiring volume; loosening them risks lower-quality hires, tightening them risks
+     missing acceptable candidates. */
+  const bt=(SETTINGS&&SETTINGS.config&&SETTINGS.config.bandThresholds)||{};
+  const hireQ=bt.hireQ!=null?bt.hireQ:70, hireR=bt.hireR!=null?bt.hireR:70;
+  const condR=bt.condR!=null?bt.condR:55;
+  const holdQ=bt.holdQ!=null?bt.holdQ:55;
+  if(Q>=hireQ&&R>=hireR)return{band:'HIRE TRACK',cls:'grn'};
+  if(Q>=hireQ&&R>=condR)return{band:'CONDITIONAL',cls:'sky'};
+  if(Q>=holdQ&&R>=hireR)return{band:'HOLD / DEVELOP',cls:'gold'};
+  return{band:'DECLINE',cls:'red'};
 }
 function n(x){return(x===''||x==null)?undefined:Number(x);}
 function scoreRow(c){const row=c.row,q={rel:n(row[13]),com:n(row[14]),jud:n(row[15]),doc:n(row[16]),ref:n(row[17]),cmp:n(row[18]),phn:n(row[19])};
@@ -3052,6 +3164,10 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
    Example: https://cal.com/solura-hiring/phone-screen (use the screen URL since it goes out first) */
 const BOOK_LINK='https://cal.com/solura-hiring/phone-screen';
 const TEMPLATES={
+ /* Auto-sent by the worker on application submission. Edit in Settings → Email templates.
+    Placeholders: {first}, {name}, {refLink}, {refCode}. If unedited, the worker uses its
+    built-in branded HTML version instead of this plain text. */
+ application_confirmation:c=>({s:'We received your application — Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying with Solura Home Care. Your application is in and someone from our team will reach out shortly about the next step.\n\nIf you don't hear from us within a few business days, feel free to reply to this email.\n\n🎁 Refer a friend, get priority — share your personal link with other caregivers:\n{refLink}\n\nMeir Schwimer\nSolura Home Care\n(216) 770-4886`}),
  screen_invite:c=>{const url=(SETTINGS.config&&SETTINGS.config.calScreenUrl)||BOOK_LINK;return {s:'Next step with Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying. Let's set up a quick 15-minute call — pick a time here:\n${url}\n\nSolura Home Care Hiring`};},
  screen_nudge:c=>({s:'Still interested? — Solura Home Care',b:`Hi ${first(c)},\n\nJust following up — pick a 15-minute slot whenever it's convenient:\n${BOOK_LINK}\n\nSolura Home Care`}),
  ask_references:c=>{const refLink='https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(c.email||'');
@@ -3096,16 +3212,26 @@ function doEmail(tpl,advanceTo){const t=getEffectiveTemplate(tpl,W);emailModal(t
 function doEmailMissing(){const sc=scoreW();W.__missing=sc.missingGates;const t=getEffectiveTemplate('missing',W);emailModal('missing',t.s,t.b);}
 function emailModal(tpl,subj,body,advanceTo){
   document.getElementById('m-title').textContent=tpl==='reject'?'Send rejection email':'Send email';
-  document.getElementById('mbox').style.maxWidth='640px';
-  /* Don't show the park option for the park modal itself, the missing-info request (where the
-     candidate's expected to respond imminently — auto-awaiting via stage logic handles that),
-     or rejection emails. For everything else, show the option. */
+  document.getElementById('mbox').style.maxWidth='720px';
+  /* Reset the pending-attachments collection on each open. */
+  window._emailAttachments=[];
   const showParkOpt=!['park_awaiting','missing','reject'].includes(tpl)&&!(W.st&&W.st.manualAwaiting);
   document.getElementById('m-body').innerHTML=`<div style="font-size:12px;color:var(--soft);margin-bottom:10px">To: ${esc(W.email||'(no email on file)')}</div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Subject</div>
     <input id="e-sub" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none;margin-bottom:12px" value="${esc(subj)}">
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Message</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft)">Message</div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--soft);cursor:pointer">
+        <input type="checkbox" id="e-html" style="width:14px;height:14px;cursor:pointer;accent-color:var(--sky-deep);margin:0"><span>HTML mode</span>
+      </label>
+    </div>
     <textarea id="e-body" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;min-height:200px;resize:vertical;outline:none">${esc(body)}</textarea>
+    <div style="margin-top:10px">
+      <label for="e-attach-input" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:var(--cream);border:1.5px solid var(--border);border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;color:var(--mid)">📎 Add attachment</label>
+      <input type="file" id="e-attach-input" multiple style="display:none" onchange="_attachFiles(this.files)">
+      <span style="font-size:11px;color:var(--soft);margin-left:8px">Up to 150MB total · PDFs, images, docs</span>
+      <div id="e-attach-list" style="margin-top:8px"></div>
+    </div>
     ${showParkOpt?`<label style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:9px 12px;background:#FAF6EE;border:1px solid var(--gold-mid);border-radius:8px;cursor:pointer;font-size:13px;color:var(--mid)"><input type="checkbox" id="e-park" style="cursor:pointer;width:16px;height:16px;accent-color:#8B6500;margin:0"><span>⏸ <b>Park in awaiting</b> after sending — pause this candidate until they respond or you resume them manually</span></label>`:''}
     <div class="brow" style="margin-top:14px;gap:8px">
       <button class="btn-primary bg-grn" id="sendbtn" onclick="reallySend('${tpl}','${advanceTo||''}')">✉ Send via Outlook</button>
@@ -3113,12 +3239,36 @@ function emailModal(tpl,subj,body,advanceTo){
     </div>`;
   document.getElementById('modal').classList.add('open');
 }
+
+/* Attach files to the pending email. Each file is read as base64 once and held in
+   window._emailAttachments until send. Size displayed inline; remove button next to each. */
+async function _attachFiles(fileList){
+  if(!fileList||!fileList.length)return;
+  const list=window._emailAttachments=window._emailAttachments||[];
+  for(const f of fileList){
+    if(f.size>150*1024*1024){toast('"'+f.name+'" exceeds 150MB — skipped');continue;}
+    try{
+      const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(f);});
+      list.push({name:f.name,contentType:f.type||'application/octet-stream',contentBase64:b64,size:f.size});
+    }catch(e){toast('Failed to read "'+f.name+'"');}
+  }
+  _renderAttachList();
+}
+function _renderAttachList(){
+  const el=document.getElementById('e-attach-list');if(!el)return;
+  const list=window._emailAttachments||[];
+  if(!list.length){el.innerHTML='';return;}
+  el.innerHTML=list.map((a,i)=>`<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:#FAF6EE;border:1px solid var(--border);border-radius:6px;font-size:11.5px;margin-bottom:4px"><span style="flex:1">📎 ${esc(a.name)} <span style="color:var(--soft)">· ${_fmtSize(a.size)}</span></span><button onclick="window._emailAttachments.splice(${i},1);_renderAttachList()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px;padding:0 4px">×</button></div>`).join('');
+}
+function _fmtSize(n){if(n<1024)return n+' B';if(n<1024*1024)return Math.round(n/1024)+' KB';return (n/(1024*1024)).toFixed(1)+' MB';}
 async function reallySend(tpl,advanceTo){
   if(!W.email){toast('No email on file');return;}
   const subj=document.getElementById('e-sub').value,body=document.getElementById('e-body').value;
+  const isHtml=!!(document.getElementById('e-html')&&document.getElementById('e-html').checked);
+  const atts=(window._emailAttachments||[]).slice();
   const b=document.getElementById('sendbtn');b.disabled=true;b.innerHTML='<span class="spin"></span> Sending…';
   try{
-    await sendMailViaGraph(W.email,subj,body);
+    await sendMailViaGraph(W.email,subj,body,isHtml,atts);
     W.st.sent=W.st.sent||{};W.st.sent[tpl]=today();
     /* Push a lightweight copy into the candidate's local emails array so the user sees their sent
        message immediately instead of waiting for the 60s Sent-folder polling cycle. Schema MUST
@@ -4376,6 +4526,10 @@ async function saveAttachment(messageId,attIdx){
 /* Reads recent messages from the user's inbox via Graph, matches sender email to candidates,
    and appends to each candidate's st.emails array. Only writes back rows that changed.
    Uses Mail.ReadWrite scope (already granted). */
+/* Tracks consecutive poll failures so we can show a persistent "syncing failed" indicator
+   instead of silently swallowing every error. Surfaced after 3 consecutive fails. */
+let _pollFailCount=0;
+let _pollLastError='';
 async function pollInboxForCandidateEmails(){
   if(!pipeline.length)return;
   /* index candidates by lowercased email for O(1) match */
@@ -4389,24 +4543,27 @@ async function pollInboxForCandidateEmails(){
     /* ───── INBOUND: messages received from candidates ───── */
     const inUrl=GR+'/me/messages?$top=100&$orderby=receivedDateTime desc&$select=id,from,subject,receivedDateTime,bodyPreview,webLink,hasAttachments&$filter=receivedDateTime ge '+cutoff;
     const inR=await gfetch(inUrl);
-    if(inR.ok){
-      const msgs=((await inR.json()).value)||[];
-      for(const m of msgs){
-        const from=((m.from||{}).emailAddress||{}).address||'';
-        if(!from)continue;
-        const c=byEmail[from.toLowerCase()];if(!c)continue;
-        c.st.emails=c.st.emails||[];
-        if(c.st.emails.some(e=>e.id===m.id))continue;
-        c.st.emails.unshift({
-          id:m.id,direction:'in',
-          subject:(m.subject||'').slice(0,140),
-          preview:(m.bodyPreview||'').slice(0,200),
-          from:from,received:m.receivedDateTime,
-          webLink:m.webLink||'',hasAttachments:!!m.hasAttachments
-        });
-        if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
-        changedRows.set(c.excelRow,c);
-      }
+    if(!inR.ok){
+      /* Detailed error so we know WHY — auth vs throttle vs forbidden */
+      const errBody=await inR.text().catch(()=>'');
+      throw new Error('Inbox fetch returned '+inR.status+(errBody?' · '+errBody.slice(0,140):''));
+    }
+    const msgs=((await inR.json()).value)||[];
+    for(const m of msgs){
+      const from=((m.from||{}).emailAddress||{}).address||'';
+      if(!from)continue;
+      const c=byEmail[from.toLowerCase()];if(!c)continue;
+      c.st.emails=c.st.emails||[];
+      if(c.st.emails.some(e=>e.id===m.id))continue;
+      c.st.emails.unshift({
+        id:m.id,direction:'in',
+        subject:(m.subject||'').slice(0,140),
+        preview:(m.bodyPreview||'').slice(0,200),
+        from:from,received:m.receivedDateTime,
+        webLink:m.webLink||'',hasAttachments:!!m.hasAttachments
+      });
+      if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
+      changedRows.set(c.excelRow,c);
     }
 
     /* ───── OUTBOUND: sent items from careers@ to candidates ─────
@@ -4418,7 +4575,6 @@ async function pollInboxForCandidateEmails(){
       const msgs=((await outR.json()).value)||[];
       for(const m of msgs){
         const toList=(m.toRecipients||[]).map(t=>((t.emailAddress||{}).address||'').toLowerCase()).filter(Boolean);
-        /* Match the FIRST recipient that maps to a candidate (most emails go to one person anyway) */
         const matchedAddr=toList.find(addr=>byEmail[addr]);
         if(!matchedAddr)continue;
         const c=byEmail[matchedAddr];
@@ -4429,22 +4585,64 @@ async function pollInboxForCandidateEmails(){
           subject:(m.subject||'').slice(0,140),
           preview:(m.bodyPreview||'').slice(0,200),
           to:matchedAddr,received:m.sentDateTime,
-          webLink:m.webLink||'',hasAttachments:!!m.hasAttachments,
-          seen:true /* outgoing emails are "self-read" — don't surface as unread */
+          webLink:m.webLink||'',hasAttachments:!!m.hasAttachments,seen:true
         });
         if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
         changedRows.set(c.excelRow,c);
       }
     }
 
-    /* batch write only changed candidates */
+    /* batch write only changed candidates — SANITIZE before write so a bloated state on any one
+       candidate can't take down the whole poll cycle */
     let inboundCount=0;
+    let writeFailCount=0;
     for(const [row,c] of changedRows){
-      try{await patchRange('AJ'+row,[[JSON.stringify(c.st)]]);}catch(e){}
+      try{
+        const sanitized=sanitizeState(c.st);
+        const json=JSON.stringify(sanitized);
+        if(json.length<=32000){
+          await patchRange('AJ'+row,[[json]]);
+          c.st=sanitized;
+        }else{
+          writeFailCount++;
+          console.warn('Poll: skipped row',row,'— state too large after sanitize:',json.length);
+        }
+      }catch(e){writeFailCount++;console.warn('Poll write row',row,'failed:',e.message);}
       if((c.st.emails||[]).some(e=>e.direction==='in'&&!e.seen))inboundCount++;
     }
     if(inboundCount){toast('📬 '+inboundCount+' candidate'+(inboundCount===1?'':'s')+' got new email');render();}
-  }catch(e){console.warn('Inbox poll error:',e.message);}
+    if(writeFailCount)toast('⚠ '+writeFailCount+' candidate'+(writeFailCount===1?'':'s')+' had state too large to save — open their workspace and click Save manually to repair.');
+    /* Successful poll — reset failure tracking + clear any sticky indicator */
+    if(_pollFailCount>0){_pollFailCount=0;_pollLastError='';_updatePollIndicator();}
+  }catch(e){
+    /* Detailed surface — including the error class so "Failed to fetch" is visible to user */
+    const isNetworkErr=e&&(e.name==='TypeError'||/failed to fetch/i.test(e.message||''));
+    _pollFailCount++;
+    _pollLastError=(isNetworkErr?'Network unreachable':e.message||'Unknown error');
+    console.warn('Inbox poll error ('+_pollFailCount+' consecutive):',e);
+    /* Notify user after 3 consecutive fails so they don't think emails are flowing when they aren't */
+    if(_pollFailCount===3){
+      toast('⚠ Inbox sync failing: '+_pollLastError+'. Will keep retrying every minute.');
+    }
+    _updatePollIndicator();
+  }
+}
+
+/* Update a small visual indicator (red dot) in the header when polling is failing.
+   Tooltip explains what's going on. Cleared on the next successful poll. */
+function _updatePollIndicator(){
+  let dot=document.getElementById('poll-fail-dot');
+  if(_pollFailCount>=2){
+    if(!dot){
+      const sbar=document.getElementById('sync-bar');if(!sbar)return;
+      dot=document.createElement('span');dot.id='poll-fail-dot';
+      dot.style.cssText='display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--red);margin-left:8px;animation:pulseDot 1.4s infinite;cursor:help';
+      sbar.appendChild(dot);
+    }
+    dot.title='Inbox sync failing — '+_pollFailCount+' consecutive errors\nLast: '+(_pollLastError||'?')+'\nClick refresh ⟳ to retry now';
+  }else if(dot){
+    dot.remove();
+  }
 }
 
 /* ===================== PDF report generation =====================
@@ -4899,6 +5097,7 @@ function openAddFromBooking(name,email,startISO){
 
 /* ===================== Settings view ===================== */
 const TEMPLATE_LABELS={
+ application_confirmation:'Application confirmation (auto-sent)',
  screen_invite:'Screen invite',screen_nudge:'Screen nudge',
  ask_references:'Ask for references',
  interview_invite:'Interview invite + BG',bg_request:'BG consent request',
@@ -4906,7 +5105,7 @@ const TEMPLATE_LABELS={
  reject:'Rejection',missing:'Request missing info',
  request_resume:'Request résumé'
 };
-function defaultTplFor(k){const dummy={name:'John Smith',email:'',phone:'',source:'',st:{},__missing:['Work authorization']};return (TEMPLATES[k]||TEMPLATES.screen_invite)(dummy);}
+function defaultTplFor(k){const dummy={name:'John Smith',email:'',phone:'',source:'',st:{refCode:'A7K2P9'},__missing:['Work authorization']};return (TEMPLATES[k]||TEMPLATES.screen_invite)(dummy);}
 /* ===================== SETTINGS — sidebar-driven page ===================== */
 let settingsSection='workflow';
 function setSettingsSection(k){settingsSection=k;renderSettings();}
@@ -4916,6 +5115,7 @@ const SETTINGS_SECTIONS=[
   {key:'templates', label:'Email templates',      icon:'✉'},
   {key:'scripts',   label:'Call scripts',         icon:'☎'},
   {key:'pipeline',  label:'Pipeline config',      icon:'⚙'},
+  {key:'scoring',   label:'Scoring engine',       icon:'⚖'},
   {key:'referrals', label:'Referral program',     icon:'🎁'},
   {key:'calendars', label:'Cal.com booking URLs', icon:'📅'},
   {key:'bgchecks',  label:'Background registries',icon:'🛡'},
@@ -5020,6 +5220,7 @@ function renderSettings(){
   else if(settingsSection==='templates') body=renderSettingsTemplates();
   else if(settingsSection==='scripts') body=renderSettingsScripts();
   else if(settingsSection==='pipeline') body=renderSettingsPipeline();
+  else if(settingsSection==='scoring') body=renderSettingsScoring();
   else if(settingsSection==='referrals') body=renderSettingsReferrals();
   else if(settingsSection==='calendars') body=renderSettingsCalendars();
   else if(settingsSection==='bgchecks') body=renderSettingsBgChecks();
@@ -5255,6 +5456,100 @@ function renderSettingsPipeline(){
   </div>
 
   <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveConfig()">Save pipeline config</button></div>`;
+}
+
+/* ----- SCORING ENGINE section ----- */
+function renderSettingsScoring(){
+  const qw=Object.assign({},QW_DEFAULTS,(SETTINGS.config.qualityWeights||{}));
+  const rw=Object.assign({},RW_DEFAULTS,(SETTINGS.config.retentionWeights||{}));
+  const bt=SETTINGS.config.bandThresholds||{};
+  const customQ=SETTINGS.config.customQuestions||{};
+  /* Question editor: editable text + options per question. The options are 3-tuples of label+score
+     where score must stay 1-5 (the dim-progressive math depends on the 5-point scale). Add/remove
+     questions still TBD — for now editing existing ones covers ~95% of use cases. */
+  return `
+  <div class="wscard"><h3>⚖ Quality dimension weights <span style="font-size:11px;color:var(--soft);font-weight:600">how much each Q dimension counts</span></h3>
+    <p class="set-help">Weights are relative — what matters is the ratio, not the absolute number. A weight of 20 vs 10 means that dimension counts twice as much. Score is always normalized to 0-100.</p>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px">
+    ${Object.keys(QW_DEFAULTS).map(k=>`<label class="set-field"><span style="display:flex;justify-content:space-between"><span>${esc(QW_LABELS[k])}</span><span style="color:var(--soft);font-size:11px">default ${QW_DEFAULTS[k]}</span></span><input type="number" min="0" max="100" id="cfg_qw_${k}" value="${qw[k]}"></label>`).join('')}
+    </div>
+  </div>
+
+  <div class="wscard"><h3>⚖ Retention dimension weights <span style="font-size:11px;color:var(--soft);font-weight:600">how much each R dimension counts</span></h3>
+    <p class="set-help">Same logic as Quality — relative numbers. Retention measures who will STAY; Quality measures who will PERFORM.</p>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px">
+    ${Object.keys(RW_DEFAULTS).map(k=>`<label class="set-field"><span style="display:flex;justify-content:space-between"><span>${esc(RW_LABELS[k])}</span><span style="color:var(--soft);font-size:11px">default ${RW_DEFAULTS[k]}</span></span><input type="number" min="0" max="100" id="cfg_rw_${k}" value="${rw[k]}"></label>`).join('')}
+    </div>
+  </div>
+
+  <div class="wscard"><h3>🎯 Band thresholds</h3>
+    <p class="set-help">A candidate's Q and R scores (0-100) determine their decision band. Defaults are calibrated for typical home-care quality bars — loosen to widen the funnel, tighten to be more selective.</p>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px">
+      <label class="set-field"><span style="display:flex;justify-content:space-between"><span>Hire-track Q threshold</span><span style="color:var(--soft);font-size:11px">default 70</span></span><input type="number" min="0" max="100" id="cfg_bt_hireQ" value="${bt.hireQ!=null?bt.hireQ:70}"></label>
+      <label class="set-field"><span style="display:flex;justify-content:space-between"><span>Hire-track R threshold</span><span style="color:var(--soft);font-size:11px">default 70</span></span><input type="number" min="0" max="100" id="cfg_bt_hireR" value="${bt.hireR!=null?bt.hireR:70}"></label>
+      <label class="set-field"><span style="display:flex;justify-content:space-between"><span>Conditional R threshold</span><span style="color:var(--soft);font-size:11px">default 55 · with Q≥Hire</span></span><input type="number" min="0" max="100" id="cfg_bt_condR" value="${bt.condR!=null?bt.condR:55}"></label>
+      <label class="set-field"><span style="display:flex;justify-content:space-between"><span>Hold/Develop Q threshold</span><span style="color:var(--soft);font-size:11px">default 55 · with R≥Hire</span></span><input type="number" min="0" max="100" id="cfg_bt_holdQ" value="${bt.holdQ!=null?bt.holdQ:55}"></label>
+    </div>
+    <p class="set-help" style="margin-top:8px">Bands: <b>HIRE TRACK</b> if Q≥hireQ AND R≥hireR · <b>CONDITIONAL</b> if Q≥hireQ AND R≥condR · <b>HOLD / DEVELOP</b> if Q≥holdQ AND R≥hireR · <b>DECLINE</b> otherwise.</p>
+  </div>
+
+  <div class="wscard"><h3>💬 Interview / screening questions</h3>
+    <p class="set-help">Edit the question text and option labels below. Each option's score (1-5) is fixed — change the labels and meaning, not the math. To add or remove questions entirely, use the Import/Export tab to edit raw JSON.</p>
+    ${QBANK.map(it=>{
+      const customText=customQ[it.id]?(customQ[it.id].q||it.q):it.q;
+      const customOpts=customQ[it.id]?(customQ[it.id].o||it.o):it.o;
+      return `<div style="background:var(--cream);border-radius:8px;padding:11px 13px;margin-bottom:10px">
+        <div style="font-size:10.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${esc(it.st)} · ${esc(QW_LABELS[it.dim]||RW_LABELS[it.dim]||it.dim)} <span style="color:var(--gold-deep)">${it.id}</span></div>
+        <input type="text" class="qedit-text" data-qid="${it.id}" value="${esc(customText)}" placeholder="Question text" style="width:100%;padding:7px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;outline:none;margin-bottom:7px;font-weight:600">
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${customOpts.map((o,oi)=>`<div style="display:flex;align-items:center;gap:4px;flex:1;min-width:140px"><input type="text" class="qedit-opt" data-qid="${it.id}" data-oi="${oi}" data-score="${o[1]}" value="${esc(o[0])}" style="flex:1;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:11.5px"><span style="font-size:10px;font-weight:700;color:var(--soft);width:18px;text-align:center;background:#fff;border-radius:4px;padding:2px 0">${o[1]}</span></div>`).join('')}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>
+
+  <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveScoringEngine()">Save scoring engine</button></div>`;
+}
+
+async function saveScoringEngine(){
+  const get=id=>document.getElementById(id);
+  /* Quality weights */
+  SETTINGS.config.qualityWeights={};
+  Object.keys(QW_DEFAULTS).forEach(k=>{const el=get('cfg_qw_'+k);if(el)SETTINGS.config.qualityWeights[k]=parseInt(el.value,10)||0;});
+  /* Retention weights */
+  SETTINGS.config.retentionWeights={};
+  Object.keys(RW_DEFAULTS).forEach(k=>{const el=get('cfg_rw_'+k);if(el)SETTINGS.config.retentionWeights[k]=parseInt(el.value,10)||0;});
+  /* Band thresholds */
+  SETTINGS.config.bandThresholds={};
+  ['hireQ','hireR','condR','holdQ'].forEach(k=>{const el=get('cfg_bt_'+k);if(el)SETTINGS.config.bandThresholds[k]=parseInt(el.value,10);});
+  /* Question text overrides */
+  SETTINGS.config.customQuestions=SETTINGS.config.customQuestions||{};
+  document.querySelectorAll('.qedit-text').forEach(el=>{
+    const qid=el.dataset.qid;
+    SETTINGS.config.customQuestions[qid]=SETTINGS.config.customQuestions[qid]||{};
+    SETTINGS.config.customQuestions[qid].q=el.value;
+  });
+  document.querySelectorAll('.qedit-opt').forEach(el=>{
+    const qid=el.dataset.qid,oi=parseInt(el.dataset.oi,10),score=parseInt(el.dataset.score,10);
+    SETTINGS.config.customQuestions[qid]=SETTINGS.config.customQuestions[qid]||{};
+    SETTINGS.config.customQuestions[qid].o=SETTINGS.config.customQuestions[qid].o||[];
+    SETTINGS.config.customQuestions[qid].o[oi]=[el.value,score];
+  });
+  /* Apply overrides to live QBANK for immediate effect */
+  applyQuestionOverrides();
+  await saveSettings();toast('✓ Scoring engine saved');
+}
+
+/* Apply user's customQuestions overrides to the in-memory QBANK so the workspace shows them
+   immediately without page refresh. Called after saveScoringEngine() and from loadSettings(). */
+function applyQuestionOverrides(){
+  const customQ=(SETTINGS.config&&SETTINGS.config.customQuestions)||{};
+  QBANK.forEach(it=>{
+    if(customQ[it.id]){
+      if(customQ[it.id].q)it.q=customQ[it.id].q;
+      if(customQ[it.id].o&&Array.isArray(customQ[it.id].o))it.o=customQ[it.id].o.filter(x=>x);
+    }
+  });
 }
 
 /* ----- REFERRAL PROGRAM section ----- */
