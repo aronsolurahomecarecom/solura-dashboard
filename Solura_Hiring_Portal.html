@@ -2168,11 +2168,14 @@ function action(c){
   }
   else{bucket='action';timing=dn(info.next,'pnew');primary={kind:'open',label:'Open',cls:'sky'};}
 
+  /* Yardstik unprompted-order trigger — when the integration is enabled and the candidate is in
+     a stage where running a BG check makes sense (post-screen, pre-offer), AND no BG check has
+     been started yet (manual or Yardstik), surface "Start Yardstik check" as the primary action.
+     This overrides nothing else — it's a check INSIDE the per-stage branches above (Interview
+     invite handles it natively). For everything outside that, we surface as a secondary nudge. */
+  if(s==='Declined'){return{bucket:'closed',info};}
   /* DECLINE-band override: if the candidate has been scored and the band is DECLINE (red),
-     replace whatever primary action was computed with "Send rejection email." This includes
-     DECLINE (gate) — missing required gates AFTER user has answered them N. Skips the override
-     if the candidate is already at Hired/Declined or if they're at a stage with no booking yet
-     (Applied with no answers — don't pre-judge). */
+     replace whatever primary action was computed with "Send rejection email." */
   if(sc.dec&&sc.dec.cls==='red'&&s!=='Declined'&&s!=='Hired'&&s!=='Applied'){
     bucket='action';
     timing=dn('Decline — score is '+sc.dec.band,'pr2');
@@ -3930,6 +3933,10 @@ function renderWorkspace(){
   const _appSnap=appSnapshotCard(W);
   const _empPrev=employersPreviewCard(W);
   const _refPrev=referralsPreviewCard(W);
+  /* Yardstik preview card — visible in the workspace overview (not just inside the Checks hub)
+     whenever the integration is enabled. Makes the order button discoverable from one click on
+     the candidate. If already ordered, shows current status pill + intake link. */
+  const _yardstikPrev=(SETTINGS.config&&SETTINGS.config.yardstikEnabled)?yardstikBlock():'';
 
   /* refs preview — small card visible at all stages once refs are on file. Distinct from the full refsBlock,
      which is the working surface at the References stage. */
@@ -3961,7 +3968,7 @@ function renderWorkspace(){
   document.getElementById('ws-body').innerHTML=`
     ${thisStep}
     <div class="wsgrid">
-      <div>${gatesCard}${work}${_appSnap}${_empPrev}${_refPrev}${docs}${refsPreviewCard}${emailsCard}${activity}</div>
+      <div>${gatesCard}${work}${_yardstikPrev}${_appSnap}${_empPrev}${_refPrev}${docs}${refsPreviewCard}${emailsCard}${activity}</div>
       <div>${identity}${scoreCard}</div>
     </div>`;
   /* sticky footer with primary action — always visible */
