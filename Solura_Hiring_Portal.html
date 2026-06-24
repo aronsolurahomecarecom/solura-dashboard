@@ -4804,7 +4804,7 @@ function yardstikBlock(){
 async function orderYardstikCheck(){
   if(!confirm('Order a Yardstik background check for '+W.name+'?\n\nYardstik will email them at '+W.email+' with a secure intake form. You can monitor status here.'))return;
   const tok=(SETTINGS.config||{}).ziToken||'';
-  if(!tok){toast('Set internal worker token first in Settings → ZoomInfo integration');return;}
+  if(!tok){toast('Set internal worker token first in Settings → 🔍 ZoomInfo integration (token is shared across all integrations)');return;}
   const accountId=SETTINGS.config.yardstikAccountId, packageId=SETTINGS.config.yardstikPackageId;
   if(!accountId||!packageId){toast('Yardstik not fully configured — see Settings');return;}
   toast('🛡 Ordering Yardstik check…');
@@ -6310,24 +6310,40 @@ function renderSettingsYardstik(){
 async function testYardstik(){
   const out=document.getElementById('ys-test-result');
   const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
-  if(!tok){out.innerHTML='<span style="color:var(--red);font-weight:600">✗ Set internal token first (Settings → ZoomInfo integration)</span>';return;}
+  if(!tok){out.innerHTML='<span style="color:var(--red);font-weight:600">✗ Set internal worker token first (Settings → 🔍 ZoomInfo integration — the token is shared across all integrations)</span>';return;}
   out.innerHTML='<span class="spin"></span> Testing…';
   try{
     const r=await fetch(ZI_WORKER_URL+'/yardstik/test',{method:'POST',headers:{'X-Solura-Token':tok}});
     const data=await r.json();
-    if(data.ok){
-      const accountList=(data.accounts||[]).map(a=>a.name+' ('+a.id.slice(0,8)+'…)').join(', ');
-      out.innerHTML='<span style="color:var(--grn-deep);font-weight:600">✓ Connected</span> · accounts: '+esc(accountList);
-    }else{
-      out.innerHTML='<span style="color:var(--red);font-weight:600">✗ '+esc(data.error||'Connection failed')+'</span>';
+    if(!data.ok){out.innerHTML='<span style="color:var(--red);font-weight:600">✗ '+esc(data.error||'Connection failed')+'</span>';return;}
+    const accounts=data.accounts||[];
+    if(!accounts.length){out.innerHTML='<span style="color:var(--gold-deep)">Connected, but no accounts on this key.</span>';return;}
+    /* Auto-fill if there's only one account (the common case) — copies UUID straight into the
+       Account ID field so the user can skip the copy/paste step entirely. */
+    const inputEl=document.getElementById('cfg_yardstikAccountId');
+    let autoFilled=false;
+    if(accounts.length===1&&inputEl&&!inputEl.value){
+      inputEl.value=accounts[0].id;
+      autoFilled=true;
     }
+    /* Render full UUIDs with a click-to-copy button for each. */
+    const rows=accounts.map(a=>`<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-top:1px solid var(--border-soft);font-size:11.5px">
+      <span style="font-weight:600;color:var(--ink);min-width:140px">${esc(a.name||'(unnamed)')}</span>
+      <code style="background:#fff;padding:2px 7px;border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--mid);font-family:Menlo,monospace;flex:1;overflow-x:auto;white-space:nowrap">${esc(a.id)}</code>
+      <button onclick="navigator.clipboard.writeText('${esc(a.id)}').then(()=>toast('✓ Copied'))" style="background:var(--cream);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:10.5px;font-weight:600;cursor:pointer;color:var(--mid);flex:0 0 auto">📋 Copy</button>
+      <button onclick="document.getElementById('cfg_yardstikAccountId').value='${esc(a.id)}';toast('✓ Filled in')" style="background:var(--sky-l);border:1px solid var(--sky);border-radius:5px;padding:3px 8px;font-size:10.5px;font-weight:600;cursor:pointer;color:var(--sky-deep);flex:0 0 auto">↓ Use this</button>
+    </div>`).join('');
+    out.innerHTML=`<div style="width:100%">
+      <div style="color:var(--grn-deep);font-weight:600;margin-bottom:4px">✓ Connected${autoFilled?' · auto-filled the Account ID below':''}</div>
+      ${rows}
+    </div>`;
   }catch(e){out.innerHTML='<span style="color:var(--red);font-weight:600">✗ '+esc(e.message)+'</span>';}
 }
 
 async function loadYardstikPackages(){
   const out=document.getElementById('ys-package-area');
   const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
-  if(!tok){out.innerHTML='<span style="color:var(--red)">Set internal token first (Settings → ZoomInfo integration)</span>';return;}
+  if(!tok){out.innerHTML='<span style="color:var(--red)">Set internal worker token first (Settings → 🔍 ZoomInfo integration — the token is shared across all integrations)</span>';return;}
   out.innerHTML='<span class="spin"></span> Loading packages…';
   try{
     const r=await fetch(ZI_WORKER_URL+'/yardstik/packages',{headers:{'X-Solura-Token':tok}});
