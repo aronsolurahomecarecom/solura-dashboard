@@ -4802,7 +4802,11 @@ function verifyBlock(){const emp=W.st.employers||[];
     const gvUrl=num?'https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164):'';
     const callBtn=num?`<button class="btn-sm" onclick="openLinkPopup('${esc(gvUrl)}','gvoice',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Call via Google Voice">☎</button>`:'';
     const ziBtn=(e.name||'').trim().length>2?`<button class="btn-sm" onclick="ziLookupEmployer(${i})" style="background:linear-gradient(135deg,#E8B84B,#C59B4E);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Look up this employer in ZoomInfo">🔍 ZI</button>`:'';
-    const ziInfo=e.zi?`<div style="grid-column:1/-1;font-size:11px;color:var(--soft);padding:6px 0 0;border-top:1px dashed var(--border-soft);margin-top:4px"><b style="color:var(--gold-deep,#8B6500)">ZoomInfo:</b> ${esc(e.zi.name||'')}${e.zi.website?' · <a href="https://'+esc(e.zi.website)+'" onclick="event.preventDefault();openLinkPopup(\'https://'+esc(e.zi.website).replace(/'/g,"\\'")+'\',\'website\',1100,800)" style="color:var(--sky-deep)">'+esc(e.zi.website)+'</a>':''}${e.zi.address?' · '+esc(e.zi.address):''}${e.zi.employees?' · '+esc(e.zi.employees)+' employees':''}</div>`:'';
+    /* Only render the ZoomInfo line when there's actually something to display. Without this
+       guard, an enrich call that returned empty/sparse data still shows "ZoomInfo:" with nothing
+       after the colon — confusing to the user. Check for at least one non-empty data field. */
+    const hasZi=e.zi&&(e.zi.name||e.zi.website||e.zi.address||e.zi.employees||e.zi.phone);
+    const ziInfo=hasZi?`<div style="grid-column:1/-1;font-size:11px;color:var(--soft);padding:6px 0 0;border-top:1px dashed var(--border-soft);margin-top:4px"><b style="color:var(--gold-deep,#8B6500)">ZoomInfo:</b> ${esc(e.zi.name||'')}${e.zi.website?' · <a href="https://'+esc(e.zi.website)+'" onclick="event.preventDefault();openLinkPopup(\'https://'+esc(e.zi.website).replace(/'/g,"\\'")+'\',\'website\',1100,800)" style="color:var(--sky-deep)">'+esc(e.zi.website)+'</a>':''}${e.zi.phone?' · 📞 '+esc(e.zi.phone):''}${e.zi.address?' · '+esc(e.zi.address):''}${e.zi.employees?' · '+esc(e.zi.employees)+' employees':''}</div>`:'';
     /* "From application" badge + tenure dates if candidate self-reported */
     const fromApp=e.source==='application';
     const dateRange=(e.startYear||e.endYear||e.current)?`${e.startYear||'?'} → ${e.current?'<b style="color:var(--grn)">Present</b>':(e.endYear||'?')}`:'';
@@ -6820,7 +6824,23 @@ async function ziPickCompany(empIndex,i){
     step='ziCall';
     const r=await ziCall('/zi/company-enrich',{companyId:id});
     step='extract company data';
-    const company=(r.data&&r.data[0])||(r.result&&r.result[0])||r.company||m;
+    /* Response shape from ZoomInfo's CompanyEnrich endpoint:
+         { data: [{ id, matchedCompanies: [{ id, name, phone, website, ... }] }] }
+       The actual enriched fields live inside matchedCompanies[0], not on the top-level data
+       record (which only has id + the matchedCompanies wrapper). flattenZiResponse already pulls
+       attributes up one level, so r.data[0] is {id, matchedCompanies:[...], ...} — but we still
+       need to dig into matchedCompanies for the actual fields. */
+    let company=(r.data&&r.data[0])||(r.result&&r.result[0])||r.company||{};
+    if(company&&Array.isArray(company.matchedCompanies)&&company.matchedCompanies.length){
+      company=company.matchedCompanies[0];
+    }
+    /* Fallback: if enrich returned nothing useful, use the search-time match data (which at
+       minimum has a name). Better than writing an empty record. */
+    const hasEnrichData=company&&(company.name||company.phone||company.website||company.street||company.city);
+    if(!hasEnrichData){
+      console.warn('Enrich returned no usable fields — falling back to search match data');
+      company=Object.assign({},m,company);
+    }
     step='write employer fields';
     W.st.employers=W.st.employers||[];
     if(!W.st.employers[empIndex]){
@@ -6849,13 +6869,21 @@ async function ziPickCompany(empIndex,i){
     if(!emp.address&&ziAddr)emp.address=ziAddr;
     emp.ziEnrichedAt=emp.zi.enrichedAt;
     step='log';
-    logW('🔍 ZoomInfo enriched: '+(emp.ziCompanyName||emp.name)+' — phone, website, address added');
+    /* Detect the "enriched but all fields empty" case so the user knows the lookup hit a sparse
+       record rather than a useful one. The record is still saved (so we don't waste the credit
+       on a retry), but we flag it for them. */
+    const populated=[emp.zi.phone,emp.zi.website,emp.zi.address,emp.zi.employees].filter(Boolean).length;
+    if(populated===0){
+      logW('⚠ ZoomInfo enrich completed but returned no phone/website/address/headcount for '+(emp.zi.name||emp.name||'this company'));
+    }else{
+      logW('🔍 ZoomInfo enriched: '+(emp.ziCompanyName||emp.name)+' — '+populated+' field'+(populated===1?'':'s')+' added');
+    }
     step='save';
     await saveW(true);
     step='close modal';
     closeZiModal();
     step='toast';
-    toast('✓ Filled in details for '+(emp.ziCompanyName||emp.name));
+    toast(populated===0?'⚠ Lookup returned no contact info for '+(emp.zi.name||emp.name||'this company'):'✓ Filled in details for '+(emp.ziCompanyName||emp.name));
     step='renderWorkspace';
     /* Wrap renderWorkspace separately — if it throws, the data is already saved, so the user
        shouldn't see "Enrich failed" (it succeeded). Just log and let them refresh manually. */
