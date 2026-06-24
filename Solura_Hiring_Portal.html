@@ -3386,7 +3386,17 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
     await patchRange('G'+row+':L'+row,[[W.stage,bl(W.gates.wa),bl(W.gates.cr),bl(W.gates.bg),bl(W.gates.tr),bl(W.gates.av)]]);
     await patchRange('N'+row+':Y'+row,[[bl(W.q.rel),bl(W.q.com),bl(W.q.jud),bl(W.q.doc),bl(W.q.ref),bl(W.q.cmp),bl(W.q.phn),'',bl(W.r.ten),bl(W.r.prx),bl(W.r.ava),bl(W.r.exp)]]);
     await patchRange('AI'+row+':AJ'+row,[[JSON.stringify(W.answers||{}),stJson]]);
-    await refreshRow(row);render();if(!silent)toast('Saved');
+    await refreshRow(row);
+    /* Only run the main pipeline render() if the workspace overlay is NOT currently visible.
+       Otherwise the main render replaces DOM that the workspace overlay sits on top of, and any
+       subsequent renderWorkspace() call inside the same flow finds ws-name missing and throws
+       "Cannot set properties of null (setting 'innerHTML')". refreshRow above already updates
+       the in-memory pipeline, so the next time the user closes the workspace, they'll see the
+       updated row. */
+    const wsOverlay=document.getElementById('ws-overlay');
+    const wsOpen=wsOverlay&&wsOverlay.classList&&wsOverlay.classList.contains('open');
+    if(!wsOpen)render();
+    if(!silent)toast('Saved');
   }catch(e){toast('Save failed: '+e.message);console.error('saveW error:',e);}}
 
 /* ===================== email ===================== */
@@ -3855,12 +3865,18 @@ function questionsHubSideRail(c){
 }
 function renderWorkspace(){
   if(!W)return;
+  /* Defensive bail — if the workspace overlay DOM isn't mounted right now (e.g., main pipeline
+     view took over after a save), skip rendering. The next openWorkspace() call will set everything
+     up properly. Without this guard, the unconditional getElementById('ws-name').textContent below
+     throws "Cannot set properties of null", which surfaces as confusing downstream errors. */
+  const nameEl=document.getElementById('ws-name');
+  if(!nameEl)return;
   applyAnswers();
   /* focused-hub mode — overrides normal render: shows only the requested hub + back arrow */
   if(W.focusedHub){return renderFocusedHub();}
   const sc=scoreW(),col=BANDCSS[sc.dec.cls],info=STAGEINFO[W.stage]||STAGEINFO['Applied'];
   const c=pipeline.find(x=>x.excelRow===W.row);const a=action(c);
-  document.getElementById('ws-name').textContent=W.name;
+  nameEl.textContent=W.name;
   document.getElementById('ws-sub').innerHTML=
     '<span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-right:8px">'+esc(stageLabel(W.stage))+'</span>'
     +(W.st.manualAwaiting?'<span class="sbadge" style="background:#FAF6EE;color:#8B6500;border:1px solid var(--gold);margin-right:8px" title="'+esc(W.st.awaitingReason||'Manually parked')+'">⏸ AWAITING</span>':'')
