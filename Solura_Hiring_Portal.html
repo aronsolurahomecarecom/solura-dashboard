@@ -1689,28 +1689,54 @@ async function loadAvailability(){
 }
 async function saveAvailability(){try{await patchRange('AK1',[[JSON.stringify(AVAIL)]]);}catch(e){toast('Could not save availability');}}
 
-/* settings stored in cell AL1: custom expertise/cert/source adds + edited templates.
-   Also mirrored to localStorage as a fallback so settings survive transient sheet failures
-   (network blip, eventual-consistency, locked workbook) without the user losing their work. */
+/* Settings are persisted in THREE places, in priority order:
+   1. PRIMARY: Solura_Settings.json in OneDrive (via worker /settings endpoint) — survives ALL
+      portal updates, no size limit, atomic writes, can't be touched by spreadsheet operations.
+   2. MIRROR: cell AL1 of the Pipeline sheet — fallback if worker is unreachable.
+   3. CACHE: browser localStorage — restores instantly, final fallback when both above fail.
+   Loading: try primary first, then mirror, then cache. Saving: write to all three. */
 async function loadSettings(){
-  let sheetLoaded=false;
-  try{const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AL1')?$select=values");
-    if(r.ok){const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{
-      const saved=JSON.parse(v[0][0]);
-      SETTINGS=Object.assign({},SETTINGS,saved);
-      SETTINGS.config=Object.assign({},SETTINGS.config,saved.config||{});
-      SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},saved.flow||{});
-      sheetLoaded=true;
-      /* Mirror the freshly-loaded settings to localStorage so subsequent loads from local
-         backup are consistent with what's in the sheet. */
-      try{localStorage.setItem('solura_settings',JSON.stringify(SETTINGS));}catch(e){}
-    }catch(e){console.warn('Settings parse failed:',e.message);}}}
-  }catch(e){console.warn('Settings load failed:',e.message);}
+  let primaryLoaded=false;
+  /* 1. PRIMARY — fetch from worker (Solura_Settings.json in OneDrive) */
+  try{
+    const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||localStorage.getItem('solura_internal_token')||'';
+    if(tok){
+      const r=await fetch(ZI_WORKER_URL+'/settings',{headers:{'X-Solura-Token':tok}});
+      if(r.ok){
+        const data=await r.json();
+        if(data.settings&&typeof data.settings==='object'&&Object.keys(data.settings).length){
+          SETTINGS=Object.assign({},SETTINGS,data.settings);
+          SETTINGS.config=Object.assign({},SETTINGS.config,data.settings.config||{});
+          SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},data.settings.flow||{});
+          primaryLoaded=true;
+          try{localStorage.setItem('solura_settings',JSON.stringify(SETTINGS));}catch(e){}
+        }
+      }
+    }
+  }catch(e){console.warn('Settings load from worker failed:',e.message);}
 
-  /* If sheet load failed for any reason, fall back to the local backup. This is why
-     settings appear to "reset" — the sheet read returned nothing usable so SETTINGS was the
-     pristine defaults. Restoring from local lets the user keep working. */
-  if(!sheetLoaded){
+  /* 2. MIRROR — AL1 fallback */
+  if(!primaryLoaded){
+    try{
+      const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AL1')?$select=values");
+      if(r.ok){
+        const v=(await r.json()).values;
+        if(v&&v[0]&&v[0][0]){
+          try{
+            const saved=JSON.parse(v[0][0]);
+            SETTINGS=Object.assign({},SETTINGS,saved);
+            SETTINGS.config=Object.assign({},SETTINGS.config,saved.config||{});
+            SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},saved.flow||{});
+            primaryLoaded=true;
+            try{localStorage.setItem('solura_settings',JSON.stringify(SETTINGS));}catch(e){}
+          }catch(e){console.warn('AL1 settings parse failed:',e.message);}
+        }
+      }
+    }catch(e){console.warn('AL1 settings load failed:',e.message);}
+  }
+
+  /* 3. CACHE — localStorage final fallback */
+  if(!primaryLoaded){
     try{
       const localSettings=localStorage.getItem('solura_settings');
       if(localSettings){
@@ -1718,50 +1744,51 @@ async function loadSettings(){
         SETTINGS=Object.assign({},SETTINGS,saved);
         SETTINGS.config=Object.assign({},SETTINGS.config,saved.config||{});
         SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},saved.flow||{});
-        toast('⚠ Restored settings from local backup — sheet save may have failed earlier');
+        toast('⚠ Restored settings from browser cache — file sync may have failed earlier');
       }
     }catch(e){console.warn('Local settings restore failed:',e.message);}
   }
 
-  /* Restore ZI token from localStorage if the sheet doesn't have it. This handles cases where
-     the AL1 write failed previously (token expired, sheet locked, etc.) so the token survives
-     across sessions even if it never made it to Excel. */
   try{
-    const localTok=localStorage.getItem('solura_zi_token');
+    const localTok=localStorage.getItem('solura_internal_token')||localStorage.getItem('solura_zi_token');
     if(localTok&&(!SETTINGS.config||!SETTINGS.config.ziToken)){
       SETTINGS.config=SETTINGS.config||{};
       SETTINGS.config.ziToken=localTok;
     }
   }catch(e){}
   applyCustomStagesToInfo();
-  /* Apply question-text overrides immediately so customized questions show in the workspace */
   if(typeof applyQuestionOverrides==='function')applyQuestionOverrides();
 }
 
 async function saveSettings(){
   const json=JSON.stringify(SETTINGS);
-  /* Always write to localStorage FIRST — this guarantees survival even if the sheet write fails.
-     The next page load will restore from local if AL1 is empty/stale. */
-  try{localStorage.setItem('solura_settings',json);}catch(e){console.warn('localStorage save failed:',e.message);}
-
-  /* Excel cell limit is 32,767 chars. If we exceed it, the patchRange will return 400 and
-     the toast below will fire — but localStorage already has the changes, so on next load
-     the user's settings come back. The user can also see WHY in the explicit toast. */
-  if(json.length>32000){
-    toast('⚠ Settings too large ('+json.length+' chars) — saved locally only. Consider shortening custom templates or removing unused ones.');
-    console.error('SETTINGS size:',json.length,'chars');
-    return;
-  }
-
   try{
-    await patchRange('AL1',[[json]]);
-  }catch(e){
-    /* Make this LOUD — silent settings failures are exactly why the user has been seeing
-       "settings reset" behavior. Tell them it saved locally and we'll retry on reload. */
-    toast('⚠ Settings saved locally only — could not reach Excel sheet. Will retry on next reload. ('+(e.message||'unknown error')+')');
-    console.error('saveSettings sheet write failed:',e);
+    localStorage.setItem('solura_settings',json);
+    if(SETTINGS.config&&SETTINGS.config.ziToken)localStorage.setItem('solura_internal_token',SETTINGS.config.ziToken);
+  }catch(e){console.warn('localStorage save failed:',e.message);}
+
+  let primaryOk=false;
+  try{
+    const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
+    if(tok){
+      const r=await fetch(ZI_WORKER_URL+'/settings',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-Solura-Token':tok},
+        body:JSON.stringify({settings:SETTINGS})
+      });
+      if(r.ok)primaryOk=true;
+      else{const t=await r.text().catch(()=>'');console.warn('File save failed:',r.status,t.slice(0,200));}
+    }
+  }catch(e){console.warn('Settings save to worker failed:',e.message);}
+
+  if(json.length<=32000){
+    try{await patchRange('AL1',[[json]]);}
+    catch(e){console.warn('AL1 mirror save failed:',e.message);}
+  }else if(!primaryOk){
+    toast('⚠ Settings saved to browser only — could not reach OneDrive. Will retry on next reload.');
   }
 }
+
 
 /* ===================== Microsoft Bookings sync ===================== */
 /* Cal.com is the source of truth for bookings — appointments flow in via the Cloudflare Worker webhook (writes directly to the sheet). The portal's permanent schedule is a visual record only; set actual hours in Cal.com → Availability. */
@@ -3934,9 +3961,13 @@ function renderWorkspace(){
   const _empPrev=employersPreviewCard(W);
   const _refPrev=referralsPreviewCard(W);
   /* Yardstik preview card — visible in the workspace overview (not just inside the Checks hub)
-     whenever the integration is enabled. Makes the order button discoverable from one click on
-     the candidate. If already ordered, shows current status pill + intake link. */
-  const _yardstikPrev=(SETTINGS.config&&SETTINGS.config.yardstikEnabled)?yardstikBlock():'';
+     whenever Yardstik is set up OR this candidate already has a check in flight. The "configured"
+     check is the looser condition (has accountId+packageId) — toggle just controls whether the
+     action engine auto-surfaces it as the primary action. */
+  const _ysCfg=SETTINGS.config||{};
+  const _ysConfigured=!!(_ysCfg.yardstikAccountId&&_ysCfg.yardstikPackageId);
+  const _ysHasState=!!(W.st&&W.st.yardstik&&W.st.yardstik.candidateId);
+  const _yardstikPrev=(_ysConfigured||_ysHasState)?yardstikBlock():'';
 
   /* refs preview — small card visible at all stages once refs are on file. Distinct from the full refsBlock,
      which is the working surface at the References stage. */
@@ -4788,14 +4819,22 @@ function checksBlock(){
   </div>`;
 }
 
-/* Yardstik status card — shows current state of the API-driven background check. Has three modes:
-   1. Not enabled — empty (returns '')
-   2. Not yet ordered — "Order Yardstik check" button
-   3. Ordered — status pill + apply link (for candidate) + view report link (when complete) */
+/* Yardstik status card — shows current state of the API-driven background check. Three modes:
+   1. Not configured — empty (returns '')
+   2. Not yet ordered for this candidate — "Order Yardstik check" button
+   3. Ordered — status pill + apply link (for candidate) + view report link (when complete)
+   The yardstikEnabled toggle controls whether the action engine surfaces ordering as a primary
+   action automatically. The card itself appears whenever the integration is configured. */
 function yardstikBlock(){
-  if(!(SETTINGS.config&&SETTINGS.config.yardstikEnabled))return '';
-  if(!SETTINGS.config.yardstikPackageId||!SETTINGS.config.yardstikAccountId){
-    return `<div style="background:#FFF6E6;border:1px solid var(--gold-mid);border-radius:9px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:#8B6500"><b>Yardstik integration enabled but not configured.</b> Set Account ID + choose package in Settings → Yardstik (background checks).</div>`;
+  const cfg=SETTINGS.config||{};
+  if(!cfg.yardstikAccountId||!cfg.yardstikPackageId){
+    /* Not configured. If this candidate already has Yardstik state somehow, still show a
+       degraded status card so the user can see what's there. */
+    if(W.st&&W.st.yardstik&&W.st.yardstik.candidateId){
+      /* fall through to ordered state */
+    }else{
+      return '';
+    }
   }
   const ys=W.st.yardstik||null;
   if(!ys){
