@@ -4710,6 +4710,9 @@ const REGISTRIES=[
 function chkStatusOpts(cur){const opts=[['','— not checked —'],['clean','Clean'],['flag','Found — flagged'],['na','N/A']];return opts.map(([v,l])=>'<option value="'+v+'" '+(cur===v?'selected':'')+'>'+esc(l)+'</option>').join('');}
 function checksBlock(){
   W.st.registryChecks=W.st.registryChecks||{};
+  /* Yardstik card — only shown when integration is enabled in Settings. If a check has been
+     ordered, shows current status + a "View report" link. If not, shows the "Order check" button. */
+  const yardstikCard=yardstikBlock();
   /* Render each registry as a row with: link + status select + notes input */
   const rows=REGISTRIES.map(r=>{
     const rc=W.st.registryChecks[r.k]||{};
@@ -4727,6 +4730,7 @@ function checksBlock(){
     </div>`;
   }).join('');
   return `<div class="wscard" id="ws-checks"><h3>Background &amp; certificates</h3>
+    ${yardstikCard}
     <div style="font-size:12px;color:var(--soft);margin-bottom:12px">Run each registry, record what you found. The Offer button unlocks when the 3rd-party check returns clear.</div>
     <h4>Registry checks</h4>
     ${rows}
@@ -4735,6 +4739,119 @@ function checksBlock(){
     <div class="kvrow">3rd-party check ${flagPill(W.st.tpCheck)}<select onchange="W.st.tpCheck=this.value;saveW(true);renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('tpCheck')}</select></div>
     <div style="font-size:11px;color:var(--soft);margin-top:8px">Background-check API webhook flips 3rd-party status automatically. State check (BCII Webcheck) is done by the candidate — link is in the BG-consent email.</div>
   </div>`;
+}
+
+/* Yardstik status card — shows current state of the API-driven background check. Has three modes:
+   1. Not enabled — empty (returns '')
+   2. Not yet ordered — "Order Yardstik check" button
+   3. Ordered — status pill + apply link (for candidate) + view report link (when complete) */
+function yardstikBlock(){
+  if(!(SETTINGS.config&&SETTINGS.config.yardstikEnabled))return '';
+  if(!SETTINGS.config.yardstikPackageId||!SETTINGS.config.yardstikAccountId){
+    return `<div style="background:#FFF6E6;border:1px solid var(--gold-mid);border-radius:9px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:#8B6500"><b>Yardstik integration enabled but not configured.</b> Set Account ID + choose package in Settings → Yardstik (background checks).</div>`;
+  }
+  const ys=W.st.yardstik||null;
+  if(!ys){
+    /* Not ordered yet */
+    return `<div style="background:linear-gradient(135deg,#FFFCF5,#FAF6EE);border:1.5px solid var(--gold-mid);border-radius:11px;padding:14px 16px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <span style="font-size:22px">🛡</span>
+        <div>
+          <div style="font-weight:700;color:var(--ink);font-size:13.5px">Yardstik background check</div>
+          <div style="font-size:11.5px;color:var(--mid)">FCRA-compliant · package: ${esc(SETTINGS.config.yardstikPackageName||'(configured)')}</div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--mid);line-height:1.5;margin-bottom:10px">Yardstik will email ${esc(W.email||'the candidate')} with a secure link to enter SSN, DOB, and FCRA consent. Results flow back here automatically — clear results unlock the Offer button; consider/adverse results flag for review.</div>
+      <button class="btn-primary bg-gold" onclick="orderYardstikCheck()" style="padding:9px 18px;cursor:pointer">🛡 Order background check</button>
+    </div>`;
+  }
+  /* Already ordered — show status */
+  const status=ys.status||'unknown';
+  const statusColor={
+    'clear':'#3D7A34','proceed':'#3D7A34','pass':'#3D7A34',
+    'consider':'#9A6100','pre_adverse':'#9A6100','ys_qa_review':'#9A6100',
+    'final_adverse':'#B03025','fail':'#B03025','canceled':'#B03025',
+    'info_requested':'#1E4E8C','dispute':'#1E4E8C',
+    'created':'#525555','queued':'#525555','processing':'#525555','pending':'#525555'
+  }[status]||'#525555';
+  const statusBg={
+    'clear':'#EBF5EA','proceed':'#EBF5EA','pass':'#EBF5EA',
+    'consider':'#FEF7E8','pre_adverse':'#FEF7E8','ys_qa_review':'#FEF7E8',
+    'final_adverse':'#FDECEA','fail':'#FDECEA','canceled':'#FDECEA',
+    'info_requested':'#EBF3FB','dispute':'#EBF3FB'
+  }[status]||'#F2EDE4';
+  const orderedDate=ys.orderedAt?new Date(ys.orderedAt).toLocaleDateString():'';
+  return `<div style="background:#fff;border:1.5px solid var(--border);border-radius:11px;padding:14px 16px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:22px">🛡</span>
+        <div>
+          <div style="font-weight:700;color:var(--ink);font-size:13.5px">Yardstik background check</div>
+          <div style="font-size:11px;color:var(--soft)">Ordered ${esc(orderedDate)} · ${esc(SETTINGS.config.yardstikPackageName||'')}</div>
+        </div>
+      </div>
+      <span style="background:${statusBg};color:${statusColor};padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">${esc(status.replace(/_/g,' '))}</span>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${ys.applyUrl?`<a href="${esc(ys.applyUrl)}" target="_blank" class="btn-sm bg-sky-l" style="text-decoration:none">📋 Candidate intake link</a>`:''}
+      <button class="btn-sm bg-cream" onclick="refreshYardstik()" style="cursor:pointer">🔄 Refresh status</button>
+      ${ys.reportId?`<a href="https://app.yardstik.com/reports/${esc(ys.reportId)}" target="_blank" class="btn-sm bg-cream" style="text-decoration:none">↗ View in Yardstik</a>`:''}
+    </div>
+    ${ys.lastUpdate?`<div style="font-size:10.5px;color:var(--soft);margin-top:8px">Last update: ${esc(new Date(ys.lastUpdate).toLocaleString())}</div>`:''}
+  </div>`;
+}
+
+async function orderYardstikCheck(){
+  if(!confirm('Order a Yardstik background check for '+W.name+'?\n\nYardstik will email them at '+W.email+' with a secure intake form. You can monitor status here.'))return;
+  const tok=(SETTINGS.config||{}).ziToken||'';
+  if(!tok){toast('Set internal worker token first in Settings → ZoomInfo integration');return;}
+  const accountId=SETTINGS.config.yardstikAccountId, packageId=SETTINGS.config.yardstikPackageId;
+  if(!accountId||!packageId){toast('Yardstik not fully configured — see Settings');return;}
+  toast('🛡 Ordering Yardstik check…');
+  try{
+    const r=await fetch(ZI_WORKER_URL+'/yardstik/order',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-Solura-Token':tok},
+      body:JSON.stringify({
+        candidateEmail:W.email,
+        candidateName:W.name,
+        candidatePhone:W.phone||'',
+        excelRow:W.row,
+        accountId:accountId,
+        packageId:packageId
+      })
+    });
+    const data=await r.json();
+    if(!r.ok){toast('✗ Order failed: '+(data.error||r.status));return;}
+    /* Worker already wrote st.yardstik to AJ — refresh our in-memory state by reloading the workspace */
+    W.st.yardstik={candidateId:data.candidateId,invitationId:data.invitationId,reportId:data.reportId,status:'created',applyUrl:data.applyUrl,orderedAt:new Date().toISOString()};
+    W.st.tpCheck='pending';
+    logW('🛡 Yardstik check ordered · candidate '+data.candidateId.slice(0,8)+'…');
+    await saveW(true);
+    toast('✓ Yardstik check ordered — '+esc(W.email)+' will get the intake email shortly');
+    renderWorkspace();
+  }catch(e){toast('✗ Order failed: '+e.message);}
+}
+
+async function refreshYardstik(){
+  if(!W.st.yardstik||!W.st.yardstik.reportId){toast('No report ID on file');return;}
+  const tok=(SETTINGS.config||{}).ziToken||'';
+  if(!tok){toast('Set internal worker token first');return;}
+  toast('🔄 Refreshing…');
+  try{
+    const r=await fetch(ZI_WORKER_URL+'/yardstik/status?reportId='+encodeURIComponent(W.st.yardstik.reportId),{headers:{'X-Solura-Token':tok}});
+    const data=await r.json();
+    if(!r.ok){toast('✗ Refresh failed: '+(data.error||r.status));return;}
+    W.st.yardstik.status=data.status||W.st.yardstik.status;
+    W.st.yardstik.lastUpdate=new Date().toISOString();
+    if(data.reportUrl)W.st.yardstik.reportUrl=data.reportUrl;
+    /* Map status to tpCheck */
+    if(['clear','proceed','pass'].includes(data.status))W.st.tpCheck='clear';
+    else if(['consider','pre_adverse','ys_qa_review','final_adverse','fail'].includes(data.status))W.st.tpCheck='flag';
+    await saveW(true);
+    toast('✓ Status: '+data.status);
+    renderWorkspace();
+  }catch(e){toast('✗ Refresh failed: '+e.message);}
 }
 function setRegistryResult(key,field,val){W.st.registryChecks=W.st.registryChecks||{};W.st.registryChecks[key]=W.st.registryChecks[key]||{};W.st.registryChecks[key][field]=val;if(field==='status')saveW(true);}
 async function advanceWS(toStage,msg){
@@ -5576,6 +5693,7 @@ const SETTINGS_SECTIONS=[
   {key:'referrals', label:'Referral program',     icon:'🎁'},
   {key:'calendars', label:'Cal.com booking URLs', icon:'📅'},
   {key:'bgchecks',  label:'Background registries',icon:'🛡'},
+  {key:'yardstik',  label:'Yardstik (background checks)', icon:'🪪'},
   {key:'zoominfo',  label:'ZoomInfo integration', icon:'🔍'},
   {key:'lists',     label:'Custom lists',         icon:'📋'},
   {key:'access',    label:'Access & lock',        icon:'🔒'},
@@ -5681,6 +5799,7 @@ function renderSettings(){
   else if(settingsSection==='referrals') body=renderSettingsReferrals();
   else if(settingsSection==='calendars') body=renderSettingsCalendars();
   else if(settingsSection==='bgchecks') body=renderSettingsBgChecks();
+  else if(settingsSection==='yardstik') body=renderSettingsYardstik();
   else if(settingsSection==='zoominfo') body=renderSettingsZoomInfo();
   else if(settingsSection==='lists') body=renderSettingsLists();
   else if(settingsSection==='access') body=renderSettingsAccess();
@@ -6141,6 +6260,107 @@ async function ziCall(path,payload){
   const data=await r.json();
   if(!r.ok)throw new Error(data.error||('HTTP '+r.status));
   return data;
+}
+
+function renderSettingsYardstik(){
+  const cfg=SETTINGS.config||{};
+  const accountId=cfg.yardstikAccountId||'';
+  const packageId=cfg.yardstikPackageId||'';
+  const packageName=cfg.yardstikPackageName||'';
+  const enabled=!!cfg.yardstikEnabled;
+  const configured=!!(accountId&&packageId);
+  return `<div class="wscard"><h3>Yardstik background checks ${configured?'<span class="pill pg" style="font-size:9px;margin-left:6px">CONFIGURED</span>':'<span class="pill psoft" style="font-size:9px;margin-left:6px">NOT SET UP</span>'}</h3>
+    <p class="set-help">FCRA-compliant background screening via the Yardstik API. The candidate gets an email from Yardstik with a secure link to enter their SSN, DOB, and consent. Results land back here via webhook — clear results auto-advance to Offer; consider/adverse results flag for review. The API key + webhook signature live in Cloudflare env vars (never in the browser).</p>
+
+    <div class="set-row" style="gap:12px;flex-wrap:wrap;margin-top:14px">
+      <div style="flex:1 1 320px">
+        <label class="set-toggle"><input type="checkbox" id="cfg_yardstikEnabled" ${enabled?'checked':''}><span>Enable Yardstik integration</span></label>
+        <div class="set-toggle-hint">When off, the "🛡 Order background check" button hides on candidate workspaces and webhooks are ignored.</div>
+      </div>
+    </div>
+
+    <label class="set-field" style="margin-top:14px">Yardstik Account ID
+      <input type="text" id="cfg_yardstikAccountId" placeholder="e.g. e829bc40-89eb-4054-94e3-7e826373f8ec" value="${esc(accountId)}">
+    </label>
+    <p class="set-help" style="margin-top:-4px;font-size:11px">Find this at app.yardstik.com → Developer → Account info. Click "Test connection" below to verify the worker can reach Yardstik with the configured key.</p>
+
+    <div class="set-row" style="gap:8px;margin-top:10px;align-items:center">
+      <button class="btn-sec bg-cream" onclick="testYardstik()" style="cursor:pointer">🔌 Test connection</button>
+      <button class="btn-sec bg-cream" onclick="loadYardstikPackages()" style="cursor:pointer">📦 Load packages from Yardstik</button>
+      <div id="ys-test-result" style="font-size:11.5px;color:var(--soft);flex:1"></div>
+    </div>
+
+    <div id="ys-package-area" style="margin-top:14px">
+      ${packageId?`<div style="padding:10px 12px;background:var(--sky-l);border:1px solid var(--sky);border-radius:8px"><div style="font-size:10.5px;font-weight:700;color:var(--sky-deep);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Currently selected package</div><div style="font-weight:700;color:var(--ink)">${esc(packageName||'(name not loaded)')}</div><div style="font-family:monospace;font-size:11px;color:var(--soft);margin-top:2px">${esc(packageId)}</div></div>`:'<div style="font-size:12px;color:var(--soft);font-style:italic">Click "Load packages" to fetch your available packages, then choose one.</div>'}
+    </div>
+
+    <div class="wscard" style="margin-top:18px;background:#FAF6EE">
+      <h4 style="margin:0 0 8px;color:var(--gold-deep);font-size:13px">🔐 Cloudflare env vars (deployed by you, not Claude)</h4>
+      <p style="font-size:11.5px;color:var(--mid);line-height:1.6;margin:0">Set these in Cloudflare dashboard → Workers → solura-hiring-webhook → Settings → Variables:</p>
+      <ul style="font-size:11.5px;color:var(--mid);margin:6px 0 0;padding-left:20px;line-height:1.7">
+        <li><code style="background:#fff;padding:1px 5px;border-radius:3px;font-size:11px">YARDSTIK_API_KEY</code> — from app.yardstik.com → Developer → API Keys → Create</li>
+        <li><code style="background:#fff;padding:1px 5px;border-radius:3px;font-size:11px">YARDSTIK_WEBHOOK_SIGNATURE</code> — create a second API key named exactly <code>WEBHOOK_SIGNATURE</code> in Yardstik (special name — they use it to sign webhooks). Paste its value here.</li>
+      </ul>
+      <p style="font-size:11.5px;color:var(--mid);margin:8px 0 0">Then register the webhook URL in Yardstik (Developer → Webhooks): <code style="background:#fff;padding:1px 5px;border-radius:3px;font-size:11px">https://solura-hiring-webhook.meir-865.workers.dev/yardstik-webhook</code> · subscribe to <b>report.updated</b>, <b>report.completed</b>, and <b>invitation.updated</b>.</p>
+    </div>
+
+    <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveYardstik()">Save Yardstik settings</button></div>`;
+}
+
+async function testYardstik(){
+  const out=document.getElementById('ys-test-result');
+  const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
+  if(!tok){out.innerHTML='<span style="color:var(--red);font-weight:600">✗ Set internal token first (Settings → ZoomInfo integration)</span>';return;}
+  out.innerHTML='<span class="spin"></span> Testing…';
+  try{
+    const r=await fetch(ZI_WORKER_URL+'/yardstik/test',{method:'POST',headers:{'X-Solura-Token':tok}});
+    const data=await r.json();
+    if(data.ok){
+      const accountList=(data.accounts||[]).map(a=>a.name+' ('+a.id.slice(0,8)+'…)').join(', ');
+      out.innerHTML='<span style="color:var(--grn-deep);font-weight:600">✓ Connected</span> · accounts: '+esc(accountList);
+    }else{
+      out.innerHTML='<span style="color:var(--red);font-weight:600">✗ '+esc(data.error||'Connection failed')+'</span>';
+    }
+  }catch(e){out.innerHTML='<span style="color:var(--red);font-weight:600">✗ '+esc(e.message)+'</span>';}
+}
+
+async function loadYardstikPackages(){
+  const out=document.getElementById('ys-package-area');
+  const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
+  if(!tok){out.innerHTML='<span style="color:var(--red)">Set internal token first (Settings → ZoomInfo integration)</span>';return;}
+  out.innerHTML='<span class="spin"></span> Loading packages…';
+  try{
+    const r=await fetch(ZI_WORKER_URL+'/yardstik/packages',{headers:{'X-Solura-Token':tok}});
+    const data=await r.json();
+    if(!r.ok||!data.packages){out.innerHTML='<span style="color:var(--red)">Failed: '+esc(data.error||r.status)+'</span>';return;}
+    if(!data.packages.length){out.innerHTML='<span style="color:var(--soft)">No packages found on this Yardstik account. Talk to Yardstik support to set one up.</span>';return;}
+    const currentId=(SETTINGS.config&&SETTINGS.config.yardstikPackageId)||'';
+    out.innerHTML=`<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:6px;letter-spacing:.05em">Available packages — click to choose</div>
+      ${data.packages.map(p=>`<div onclick="selectYardstikPackage('${esc(p.id)}','${esc((p.name||'').replace(/'/g,"\\'"))}')" style="padding:10px 12px;background:${currentId===p.id?'var(--sky-l)':'#fff'};border:1.5px solid ${currentId===p.id?'var(--sky)':'var(--border)'};border-radius:8px;margin-bottom:6px;cursor:pointer;transition:all .15s">
+        <div style="font-weight:700;color:var(--ink)">${esc(p.name||'(unnamed)')}</div>
+        ${p.description?`<div style="font-size:11.5px;color:var(--mid);margin-top:3px">${esc(p.description)}</div>`:''}
+        <div style="font-family:monospace;font-size:10.5px;color:var(--soft);margin-top:3px">${esc(p.id)}</div>
+      </div>`).join('')}`;
+  }catch(e){out.innerHTML='<span style="color:var(--red)">Failed: '+esc(e.message)+'</span>';}
+}
+
+function selectYardstikPackage(id,name){
+  SETTINGS.config=SETTINGS.config||{};
+  SETTINGS.config.yardstikPackageId=id;
+  SETTINGS.config.yardstikPackageName=name;
+  saveSettings();
+  renderSettings();
+  toast('✓ Selected: '+name);
+}
+
+async function saveYardstik(){
+  SETTINGS.config=SETTINGS.config||{};
+  const get=id=>document.getElementById(id);
+  if(get('cfg_yardstikEnabled'))SETTINGS.config.yardstikEnabled=get('cfg_yardstikEnabled').checked;
+  if(get('cfg_yardstikAccountId'))SETTINGS.config.yardstikAccountId=get('cfg_yardstikAccountId').value.trim();
+  await saveSettings();
+  toast('✓ Yardstik settings saved');
+  renderSettings();
 }
 
 function renderSettingsZoomInfo(){
