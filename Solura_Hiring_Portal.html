@@ -3484,8 +3484,8 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
        "Cannot set properties of null (setting 'innerHTML')". refreshRow above already updates
        the in-memory pipeline, so the next time the user closes the workspace, they'll see the
        updated row. */
-    const wsOverlay=document.getElementById('ws-overlay');
-    const wsOpen=wsOverlay&&wsOverlay.classList&&wsOverlay.classList.contains('open');
+    const wsEl=document.getElementById('workspace');
+    const wsOpen=wsEl&&wsEl.classList&&wsEl.classList.contains('open');
     if(!wsOpen)render();
     if(!silent)toast('Saved');
   }catch(e){toast('Save failed: '+e.message);console.error('saveW error:',e);}}
@@ -6740,11 +6740,18 @@ async function ziPickCompany(empIndex,i){
   const id=m.id||m.companyId||m.zoominfoId||'';
   if(!confirm('Pull full details for "'+(m.name||m.companyName)+'"?\n\nThis costs 1 ZoomInfo credit (free for the next 12 months once pulled).'))return;
   openZiModal(empIndex,'<div style="text-align:center;padding:40px;color:var(--soft)">⏳ Enriching "'+esc(m.name||m.companyName)+'"…</div>');
+  let step='start';
   try{
+    step='ziCall';
     const r=await ziCall('/zi/company-enrich',{companyId:id});
-    /* Response shape (from /enrich/company): {success, data: [{...company...}]} or similar */
+    step='extract company data';
     const company=(r.data&&r.data[0])||(r.result&&r.result[0])||r.company||m;
-    /* Populate employer record on candidate state */
+    step='write employer fields';
+    W.st.employers=W.st.employers||[];
+    if(!W.st.employers[empIndex]){
+      /* Defensive: if employer index points to nothing, abort cleanly rather than throw */
+      throw new Error('Employer slot '+empIndex+' missing on candidate (employers length: '+W.st.employers.length+')');
+    }
     const emp=W.st.employers[empIndex];
     emp.ziCompanyId=id;
     emp.ziCompanyName=company.name||company.companyName||'';
@@ -6752,13 +6759,25 @@ async function ziPickCompany(empIndex,i){
     emp.website=company.website||emp.website||'';
     emp.address=[company.street,company.city,company.state,company.zipCode].filter(Boolean).join(', ')||emp.address||'';
     emp.ziEnrichedAt=new Date().toISOString();
+    step='log';
     logW('🔍 ZoomInfo enriched: '+(emp.ziCompanyName||emp.name)+' — phone, website, address added');
+    step='save';
     await saveW(true);
+    step='close modal';
     closeZiModal();
+    step='toast';
     toast('✓ Filled in details for '+(emp.ziCompanyName||emp.name));
-    renderWorkspace();
+    step='renderWorkspace';
+    /* Wrap renderWorkspace separately — if it throws, the data is already saved, so the user
+       shouldn't see "Enrich failed" (it succeeded). Just log and let them refresh manually. */
+    try{renderWorkspace();}
+    catch(rErr){
+      console.error('renderWorkspace failed after enrich (data saved OK):',rErr);
+      toast('Data saved · refresh to see changes');
+    }
   }catch(e){
-    openZiModal(empIndex,'<div style="padding:20px;color:var(--red)">Enrich failed: '+esc(e.message)+'</div>');
+    console.error('ZI enrich failed at step "'+step+'":',e);
+    openZiModal(empIndex,'<div style="padding:20px;color:var(--red)"><b>Enrich failed at step:</b> '+esc(step)+'<br><br>'+esc(e.message)+'</div>');
   }
 }
 
