@@ -537,6 +537,26 @@ html:has(.modal.open){overflow:hidden;}
 .giftpill{font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;display:inline-block;letter-spacing:.02em;}
 .ws-quick{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
 .ws-quick .btn-sm{font-size:11.5px;padding:5px 10px;}
+
+/* Email composer preset + placeholder buttons */
+.preset-btn{font-size:11px;font-weight:600;padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:#fff;color:var(--mid);cursor:pointer;transition:all .15s ease;}
+.preset-btn:hover{background:var(--sky-l);border-color:var(--sky);color:var(--sky-deep);}
+.preset-btn.active{background:var(--sky-deep);color:#fff;border-color:var(--sky-deep);}
+.ph-btn{font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:4px;border:1px solid var(--gold-mid);background:#fff;color:#8B6500;cursor:pointer;transition:all .12s ease;}
+.ph-btn:hover{background:var(--gold-mid);color:#fff;}
+
+/* Application edit chips — mirror the candidate's form UX */
+.app-chip-group{display:flex;flex-wrap:wrap;gap:5px;padding:4px;}
+.app-chip{font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:999px;border:1.5px solid var(--border);background:#fff;color:var(--mid);cursor:pointer;transition:all .14s ease;white-space:nowrap;}
+.app-chip:hover{border-color:var(--gold-mid);background:#FAF6EE;}
+.app-chip.on{background:var(--sky-deep);color:#fff;border-color:var(--sky-deep);}
+.app-chip.on.custom{background:var(--gold-deep,#8B6500);border-color:var(--gold-deep,#8B6500);}
+.app-chip.clear{font-size:11px;color:var(--soft);font-style:italic;}
+.app-chip.clear.on{background:#aaa;color:#fff;}
+.shifts-grid{display:flex;flex-direction:column;gap:6px;padding:6px;background:#FAFAF7;border-radius:8px;}
+.shift-day-row{display:flex;align-items:center;gap:10px;}
+.shift-day-row .day-lbl{font-size:11px;font-weight:700;color:var(--mid);width:32px;text-align:right;}
+.shift-day-row .shift-pills{display:flex;gap:4px;flex-wrap:wrap;flex:1;}
 .giftpill.caregiver{background:linear-gradient(135deg,#FEF3DC,#FAF6EE);color:#8B6500;border:1px solid #C59B4E;}
 .giftpill.customer{background:linear-gradient(135deg,#E8F5E9,#F0F8E8);color:#2E7D32;border:1px solid #70A54D;}
 
@@ -2128,6 +2148,17 @@ function action(c){
     primary={kind:'custom-advance',nextStage:next,label:'→ Mark complete & advance',cls:'sky'};
   }
   else{bucket='action';timing=dn(info.next,'pnew');primary={kind:'open',label:'Open',cls:'sky'};}
+
+  /* DECLINE-band override: if the candidate has been scored and the band is DECLINE (red),
+     replace whatever primary action was computed with "Send rejection email." This includes
+     DECLINE (gate) — missing required gates AFTER user has answered them N. Skips the override
+     if the candidate is already at Hired/Declined or if they're at a stage with no booking yet
+     (Applied with no answers — don't pre-judge). */
+  if(sc.dec&&sc.dec.cls==='red'&&s!=='Declined'&&s!=='Hired'&&s!=='Applied'){
+    bucket='action';
+    timing=dn('Decline — score is '+sc.dec.band,'pr2');
+    primary={kind:'email-tpl',tpl:'reject',advanceTo:'Declined',label:'✕ Send rejection email',cls:'red'};
+  }
   return{bucket,timing,info,primary,matchable};
 }
 
@@ -2691,7 +2722,7 @@ async function withdrawCandidate(){
    the candidate is auto-declined. All thresholds editable in Settings. */
 async function markNoShow(stage){
   /* Stage param is 'Phone Screen', 'Interview', or 'Onboarding'. Each tracked separately.
-     Score impact: reduces 'rel' (reliability) by 1 step per no-show. Caps at 1. */
+     Score impact: reduces 'rel' (reliability) by 1 step per no-show. */
   const stageKey=String(stage||'').toLowerCase().replace(/\s+/g,'');
   W.st.noShows=W.st.noShows||{};
   W.st.noShows[stageKey]=(W.st.noShows[stageKey]||0)+1;
@@ -2727,8 +2758,12 @@ async function markNoShow(stage){
   W.st.manualAwaiting=true;
   W.st.awaitingReason='No-show #'+count+' — awaiting rebook';
   await saveW(true);
-  toast('📵 No-show logged ('+count+'/'+limit+'). Send rebook invite next.');
-  renderWorkspace();
+  toast('📵 No-show #'+count+' of '+limit+'. Opening rebook email…');
+
+  /* Auto-open the rebook email composer pre-filled with the stage-appropriate template */
+  const rebookTpl=stage==='Interview'?'missed_interview':stage==='Onboarding'?'missed_onboarding':'missed_screen';
+  const t=getEffectiveTemplate(rebookTpl,W);
+  setTimeout(()=>emailModal(rebookTpl,t.s,t.b),300);
 }
 
 async function markNoPickup(){
@@ -3303,10 +3338,13 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
    Example: https://cal.com/solura-hiring/phone-screen (use the screen URL since it goes out first) */
 const BOOK_LINK='https://cal.com/solura-hiring/phone-screen';
 const TEMPLATES={
- /* Auto-sent by the worker on application submission. Edit in Settings → Email templates.
-    Placeholders: {first}, {name}, {refLink}, {refCode}. If unedited, the worker uses its
-    built-in branded HTML version instead of this plain text. */
- application_confirmation:c=>({s:'We received your application — Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying with Solura Home Care. Your application is in and someone from our team will reach out shortly about the next step.\n\nIf you don't hear from us within a few business days, feel free to reply to this email.\n\n🎁 Refer a friend, get priority — share your personal link with other caregivers:\n{refLink}\n\nMeir Schwimer\nSolura Home Care\n(216) 770-4886`}),
+ /* Auto-sent by the worker on application submission. Edit in Settings → Email templates. */
+ application_confirmation:c=>({s:'We received your application — Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying with Solura Home Care. Your application is in and someone from our team will reach out shortly about the next step.\n\nIf you don't hear from us within a few business days, feel free to reply to this email.\n\n🎁 Refer a friend, get priority — share your personal link with other caregivers:\n{referralLink}\n\nMeir Schwimer\nSolura Home Care\n(216) 770-4886`}),
+ /* Missed-call rebook templates — sent after marking a no-show. The phone screen version is
+    forgiving; the interview version notes the higher seriousness. Both editable in Settings. */
+ missed_screen:c=>{const url=(SETTINGS.config&&SETTINGS.config.calScreenUrl)||BOOK_LINK;return {s:'Missed you for our call — Solura Home Care',b:`Hi ${first(c)},\n\nWe were expecting your call today and didn't connect. No worries — life happens. Could you grab another quick 15-min slot here:\n${url}\n\nLooking forward,\nSolura Home Care`};},
+ missed_interview:c=>{const url=(SETTINGS.config&&SETTINGS.config.calInterviewUrl)||BOOK_LINK;return {s:'Rescheduling your Solura Home Care interview',b:`Hi ${first(c)},\n\nWe were expecting you for the interview today. Since you're further along in our process, we'd like to give you one more chance to reschedule — please grab a slot here:\n${url}\n\nIf this isn't the right time for you, just reply and let us know.\n\nSolura Home Care`};},
+ missed_onboarding:c=>{const url=(SETTINGS.config&&SETTINGS.config.calOnboardingUrl)||BOOK_LINK;return {s:'Rescheduling onboarding — Solura Home Care',b:`Hi ${first(c)},\n\nYou missed the orientation session today. Please rebook here:\n${url}\n\nThis is the final step before starting. If you're no longer interested, reply and let us know.\n\nSolura Home Care`};},
  screen_invite:c=>{const url=(SETTINGS.config&&SETTINGS.config.calScreenUrl)||BOOK_LINK;return {s:'Next step with Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying. Let's set up a quick 15-minute call — pick a time here:\n${url}\n\nSolura Home Care Hiring`};},
  screen_nudge:c=>({s:'Still interested? — Solura Home Care',b:`Hi ${first(c)},\n\nJust following up — pick a 15-minute slot whenever it's convenient:\n${BOOK_LINK}\n\nSolura Home Care`}),
  ask_references:c=>{const refLink='https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(c.email||'');
@@ -3332,32 +3370,97 @@ function getEffectiveTemplate(tplKey,c){
     const first=fullName.split(' ')[0]||'there';
     const cfg=SETTINGS.config||{};
     const refLink=c&&c.email?'https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(c.email):'';
+    /* Candidate's PERSONAL referral link — share with friends to earn referral points.
+       This is different from refLink (references form). */
+    const referralCode=c&&c.st&&c.st.refCode?c.st.refCode:'';
+    const referralLink=referralCode?'https://apply.solurahomecare.com/?ref='+encodeURIComponent(referralCode):'';
+    /* Application form link — useful for re-engaging applicants or sharing with leads */
+    const appLink='https://apply.solurahomecare.com/';
     /* All supported placeholders. Order matters slightly — longer keys before shorter ones to avoid partial collisions. */
     const sub=t=>String(t||'')
       .replace(/\{onboardingLink\}/g,cfg.calOnboardingUrl||'')
       .replace(/\{interviewLink\}/g,cfg.calInterviewUrl||BOOK_LINK)
       .replace(/\{screenLink\}/g,cfg.calScreenUrl||BOOK_LINK)
+      .replace(/\{referralLink\}/g,referralLink)
+      .replace(/\{appLink\}/g,appLink)
       .replace(/\{bookLink\}/g,BOOK_LINK)
       .replace(/\{refLink\}/g,refLink)
       .replace(/\{missing\}/g,(c&&c.__missing||[]).map(x=>'• '+x).join('\n'))
       .replace(/\{name\}/g,fullName)
       .replace(/\{first\}/g,first)
-      .replace(/\{pay\}/g,payRange());
+      .replace(/\{pay\}/g,payRange())
+      .replace(/\{refCode\}/g,referralCode);
     return {s:sub(custom.s||''),b:sub(custom.b||'')};
   }
   return (TEMPLATES[tplKey]||TEMPLATES.screen_invite)(c);
+}
+
+/* Placeholders that can be inserted via the composer button bar (#3). The first column is the
+   button label, second is what gets inserted. Used by the placeholder bar in emailModal. */
+const COMPOSER_PLACEHOLDERS=[
+  ['First name','{first}'],
+  ['Full name','{name}'],
+  ['Pay range','{pay}'],
+  ['Phone screen booking link','{screenLink}'],
+  ['Interview booking link','{interviewLink}'],
+  ['Onboarding booking link','{onboardingLink}'],
+  ['References form link','{refLink}'],
+  ['Application form link','{appLink}'],
+  ['Personal referral link','{referralLink}'],
+  ['Missing items list','{missing}']
+];
+
+/* Live placeholder substitution for the composer — applies to whatever's currently in the
+   subject/body fields before sending. Same substitutions as getEffectiveTemplate. */
+function substituteLive(text,candidate){
+  const c=candidate||W;
+  if(!c)return text;
+  const fullName=c.name||'';
+  const first=fullName.split(' ')[0]||'there';
+  const cfg=SETTINGS.config||{};
+  const refLink=c.email?'https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(c.email):'';
+  const referralCode=c.st&&c.st.refCode?c.st.refCode:'';
+  const referralLink=referralCode?'https://apply.solurahomecare.com/?ref='+encodeURIComponent(referralCode):'';
+  return String(text||'')
+    .replace(/\{onboardingLink\}/g,cfg.calOnboardingUrl||'')
+    .replace(/\{interviewLink\}/g,cfg.calInterviewUrl||BOOK_LINK)
+    .replace(/\{screenLink\}/g,cfg.calScreenUrl||BOOK_LINK)
+    .replace(/\{referralLink\}/g,referralLink)
+    .replace(/\{appLink\}/g,'https://apply.solurahomecare.com/')
+    .replace(/\{bookLink\}/g,BOOK_LINK)
+    .replace(/\{refLink\}/g,refLink)
+    .replace(/\{name\}/g,fullName)
+    .replace(/\{first\}/g,first)
+    .replace(/\{pay\}/g,payRange())
+    .replace(/\{refCode\}/g,referralCode);
 }
 function doEmail(tpl,advanceTo){const t=getEffectiveTemplate(tpl,W);emailModal(tpl,t.s,t.b,advanceTo);}
 function doEmailMissing(){const sc=scoreW();W.__missing=sc.missingGates;const t=getEffectiveTemplate('missing',W);emailModal('missing',t.s,t.b);}
 function emailModal(tpl,subj,body,advanceTo){
   document.getElementById('m-title').textContent=tpl==='reject'?'Send rejection email':'Send email';
-  document.getElementById('mbox').style.maxWidth='720px';
+  document.getElementById('mbox').style.maxWidth='780px';
   /* Reset the pending-attachments collection on each open. */
   window._emailAttachments=[];
   const showParkOpt=!['park_awaiting','missing','reject'].includes(tpl)&&!(W.st&&W.st.manualAwaiting);
+
+  /* Preset email row — load any template into the composer with one click. Excludes the
+     application_confirmation (auto-sent by worker) and matches whatever's edited in settings. */
+  const presetKeys=Object.keys(TEMPLATE_LABELS).filter(k=>k!=='application_confirmation');
+  const presetRow=presetKeys.map(k=>`<button class="preset-btn${tpl===k?' active':''}" onclick="loadPresetIntoComposer('${k}','${advanceTo||''}')" title="${esc(TEMPLATE_LABELS[k])}">${esc(TEMPLATE_LABELS[k])}</button>`).join('');
+
+  /* Placeholder insertion row — clicking inserts the token at the cursor in the focused field. */
+  const phRow=COMPOSER_PLACEHOLDERS.map(([l,v])=>`<button class="ph-btn" onclick="_insertPlaceholder('${v}')" title="Inserts ${v}">${esc(l)}</button>`).join('');
+
   document.getElementById('m-body').innerHTML=`<div style="font-size:12px;color:var(--soft);margin-bottom:10px">To: ${esc(W.email||'(no email on file)')}</div>
+
+    <div style="background:var(--cream);border:1px solid var(--border);border-radius:7px;padding:8px;margin-bottom:12px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:6px;letter-spacing:.05em">Quick load preset</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">${presetRow}</div>
+    </div>
+
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Subject</div>
     <input id="e-sub" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none;margin-bottom:12px" value="${esc(subj)}">
+
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft)">Message</div>
       <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--soft);cursor:pointer">
@@ -3365,6 +3468,12 @@ function emailModal(tpl,subj,body,advanceTo){
       </label>
     </div>
     <textarea id="e-body" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;min-height:200px;resize:vertical;outline:none">${esc(body)}</textarea>
+
+    <div style="margin-top:10px;background:#F7F2E5;border:1px solid var(--gold-mid);border-radius:7px;padding:8px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#8B6500;margin-bottom:6px;letter-spacing:.05em">📌 Insert placeholder at cursor</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">${phRow}</div>
+    </div>
+
     <div style="margin-top:10px">
       <label for="e-attach-input" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:var(--cream);border:1.5px solid var(--border);border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;color:var(--mid)">📎 Add attachment</label>
       <input type="file" id="e-attach-input" multiple style="display:none" onchange="_attachFiles(this.files)">
@@ -3374,9 +3483,58 @@ function emailModal(tpl,subj,body,advanceTo){
     ${showParkOpt?`<label style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:9px 12px;background:#FAF6EE;border:1px solid var(--gold-mid);border-radius:8px;cursor:pointer;font-size:13px;color:var(--mid)"><input type="checkbox" id="e-park" style="cursor:pointer;width:16px;height:16px;accent-color:#8B6500;margin:0"><span>⏸ <b>Park in awaiting</b> after sending — pause this candidate until they respond or you resume them manually</span></label>`:''}
     <div class="brow" style="margin-top:14px;gap:8px">
       <button class="btn-primary bg-grn" id="sendbtn" onclick="reallySend('${tpl}','${advanceTo||''}')">✉ Send via Outlook</button>
+      <button class="btn-sec" style="flex:0 0 auto;background:#FAF6EE;color:#8B6500;border:1.5px solid var(--gold-mid)" onclick="previewSubstituted()">👁 Preview substituted</button>
       <button class="btn-sec bg-cream" style="flex:0 0 auto" onclick="closeModal()">Cancel</button>
     </div>`;
   document.getElementById('modal').classList.add('open');
+  _trackLastFocused();
+}
+
+/* Track which composer field (subject or body) was last focused so we know where to insert
+   placeholders. Defaults to body if nothing focused yet. */
+let _lastFocusedField='e-body';
+function _trackLastFocused(){
+  ['e-sub','e-body'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.addEventListener('focus',()=>{_lastFocusedField=id;});
+  });
+}
+function _insertPlaceholder(token){
+  const id=_lastFocusedField||'e-body';
+  const el=document.getElementById(id);
+  if(!el)return;
+  const s=el.selectionStart||0,e=el.selectionEnd||0;
+  el.value=el.value.slice(0,s)+token+el.value.slice(e);
+  /* Restore cursor after the inserted token */
+  el.focus();el.selectionStart=el.selectionEnd=s+token.length;
+}
+function loadPresetIntoComposer(key,advanceTo){
+  /* Replace the current subject + body with the preset template's content. Doesn't clear
+     attachments or other field state — those persist across preset switches. */
+  const t=getEffectiveTemplate(key,W);
+  document.getElementById('e-sub').value=t.s;
+  document.getElementById('e-body').value=t.b;
+  /* Update preset button highlight */
+  document.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
+  const newActive=Array.from(document.querySelectorAll('.preset-btn')).find(b=>b.getAttribute('onclick')&&b.getAttribute('onclick').includes("'"+key+"'"));
+  if(newActive)newActive.classList.add('active');
+  /* Update the send button to send via the new preset's tpl key */
+  const sendBtn=document.getElementById('sendbtn');
+  if(sendBtn)sendBtn.setAttribute('onclick',`reallySend('${key}','${advanceTo||''}')`);
+}
+
+/* Modal preview — shows what the email will look like AFTER all placeholders are substituted. */
+function previewSubstituted(){
+  const subj=document.getElementById('e-sub').value;
+  const body=document.getElementById('e-body').value;
+  const isHtml=!!(document.getElementById('e-html')&&document.getElementById('e-html').checked);
+  const previewSubj=substituteLive(subj);
+  const previewBody=substituteLive(body);
+  const renderBody=isHtml?previewBody:('<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#111;line-height:1.5">'+esc(previewBody).replace(/\n/g,'<br>')+'</div>');
+  const win=window.open('','preview','width=720,height=720');
+  if(!win){toast('Popup blocked — allow popups to preview');return;}
+  win.document.write(`<html><head><title>Preview · ${esc(previewSubj)}</title></head><body style="font-family:'Segoe UI',Calibri,sans-serif;background:#f5f5f0;padding:24px"><div style="max-width:640px;margin:0 auto;background:#fff;padding:24px 28px;border-radius:10px;box-shadow:0 4px 24px rgba(0,0,0,.08)"><div style="font-size:11px;color:#999;margin-bottom:6px;text-transform:uppercase">Subject</div><div style="font-weight:700;font-size:16px;margin-bottom:18px;border-bottom:1px solid #eee;padding-bottom:12px">${esc(previewSubj)}</div>${renderBody}</div></body></html>`);
+  win.document.close();
 }
 
 /* Attach files to the pending email. Each file is read as base64 once and held in
@@ -3402,7 +3560,10 @@ function _renderAttachList(){
 function _fmtSize(n){if(n<1024)return n+' B';if(n<1024*1024)return Math.round(n/1024)+' KB';return (n/(1024*1024)).toFixed(1)+' MB';}
 async function reallySend(tpl,advanceTo){
   if(!W.email){toast('No email on file');return;}
-  const subj=document.getElementById('e-sub').value,body=document.getElementById('e-body').value;
+  /* Substitute any placeholders in subject/body BEFORE sending. This makes the placeholder
+     buttons work even for free-typed text that includes tokens like {first} or {appLink}. */
+  const subj=substituteLive(document.getElementById('e-sub').value);
+  const body=substituteLive(document.getElementById('e-body').value);
   const isHtml=!!(document.getElementById('e-html')&&document.getElementById('e-html').checked);
   const atts=(window._emailAttachments||[]).slice();
   const b=document.getElementById('sendbtn');b.disabled=true;b.innerHTML='<span class="spin"></span> Sending…';
@@ -3954,9 +4115,8 @@ const APP_SECTIONS=[
     {label:'ZIP',path:'st.zip',type:'text',altPath:'st.facts.zip'}
   ]},
   {title:'Experience',fields:[
-    /* Top-level c.years is populated from st.facts.years in cardOf; longest comes from facts.longest */
-    {label:'Years of experience',path:'years',altPath:'st.facts.years',type:'text'},
-    {label:'Longest tenure (at one job)',path:'st.facts.longest',altPath:'st.longest',type:'text'},
+    {label:'Years of experience',path:'years',altPath:'st.facts.years',type:'select',options:[['—',''],['Under 1','under1'],['1-2','y1'],['2-5','y2'],['5+','y5']]},
+    {label:'Longest tenure (at one job)',path:'st.facts.longest',altPath:'st.longest',type:'select',options:[['—',''],['Under 6 mo','u6mo'],['6-12 mo','y1'],['1-2 yr','y2'],['2+ yr','y2p']]},
     {label:'Where worked',path:'st.facts.settings',altPath:'st.settings',type:'tags'},
     {label:'Certifications',path:'st.certs',type:'tags'},
     {label:'Expertise',path:'st.pills',type:'tags'},
@@ -4214,6 +4374,16 @@ function applicationBlock(){
   </div>`;
 }
 
+/* Option sets for tag-typed fields — when present, the field becomes a chip group where the
+   user clicks to toggle, just like the candidate sees on the application form. Keys must match
+   the field path. Add new entries here to opt more fields into chip-style editing. */
+const APP_TAG_OPTIONS={
+  'st.certs':['CPR','First Aid','HHA','STNA','CNA','RN','LPN','BLS','Med Tech','Dementia Care'],
+  'st.pills':['Dementia','Alzheimer','Hospice','Bariatric','Hoyer lift','Wound care','Diabetic','Companionship','Bath/dress','Cooking','Light housekeeping','Transportation'],
+  'st.facts.settings':['Home','Facility','Hospital','Memory care','Hospice','Assisted living'],
+  'st.screening.languages':['English','Spanish','Russian','Hebrew','Yiddish','Arabic','ASL','Mandarin','Polish','Ukrainian','Korean','Hindi','Tagalog','Somali','Amharic','Farsi']
+};
+
 function renderAppField(src,f,editing){
   const v=_appField(src,f.path);
   const altV=f.altPath?_appField(src,f.altPath):'';
@@ -4227,17 +4397,94 @@ function renderAppField(src,f,editing){
   if(f.type==='text'){input=`<input id="${id}" value="${esc(value||'')}" data-path="${esc(f.path)}" data-type="text" class="app-edit-input">`;}
   else if(f.type==='longtext'){input=`<textarea id="${id}" data-path="${esc(f.path)}" data-type="longtext" class="app-edit-input" style="min-height:60px">${esc(value||'')}</textarea>`;}
   else if(f.type==='select'){
-    input=`<select id="${id}" data-path="${esc(f.path)}" data-type="select" class="app-edit-input">${(f.options||[]).map(o=>`<option value="${esc(o[1])}" ${String(value)===String(o[1])?'selected':''}>${esc(o[0])}</option>`).join('')}</select>`;
+    /* Chip-style — same UX as the application form. Buttons toggle the chosen value; "—" clears it. */
+    const opts=f.options||[];
+    const chips=opts.map(o=>{
+      const isSel=String(value)===String(o[1]);
+      const isClear=o[1]==='';
+      return `<button type="button" class="app-chip${isSel?' on':''}${isClear?' clear':''}" data-v="${esc(o[1])}" onclick="_setAppChoice('${id}',this,'${esc(o[1])}',false)">${esc(o[0])}</button>`;
+    }).join('');
+    input=`<div class="app-chip-group" id="${id}" data-path="${esc(f.path)}" data-type="select" data-val="${esc(value||'')}">${chips}</div>`;
   }
   else if(f.type==='tags'){
+    /* Multi-chip — same as form's data-multi questions. Each known option is a toggleable chip;
+       custom-typed values appear as removable chips alongside. */
     const arr=Array.isArray(value)?value:(value?String(value).split(',').map(s=>s.trim()):[]);
-    input=`<input id="${id}" value="${esc(arr.join(', '))}" data-path="${esc(f.path)}" data-type="tags" class="app-edit-input" placeholder="Comma-separated values">`;
+    const known=APP_TAG_OPTIONS[f.path]||[];
+    const knownChips=known.map(opt=>{
+      const isSel=arr.some(x=>String(x).toLowerCase()===opt.toLowerCase());
+      return `<button type="button" class="app-chip multi${isSel?' on':''}" data-v="${esc(opt)}" onclick="_toggleAppTag('${id}',this,'${esc(opt)}')">${esc(opt)}</button>`;
+    }).join('');
+    const customs=arr.filter(x=>!known.some(k=>k.toLowerCase()===String(x).toLowerCase()));
+    const customChips=customs.map(c=>`<button type="button" class="app-chip multi on custom" onclick="_removeAppTag('${id}',this,'${esc(c)}')" title="Click to remove">${esc(c)} ×</button>`).join('');
+    input=`<div class="app-chip-group multi" id="${id}" data-path="${esc(f.path)}" data-type="tags" data-val='${esc(JSON.stringify(arr))}'>
+      ${knownChips}${customChips}
+      <input type="text" placeholder="+ add custom (Enter)" onkeypress="if(event.key==='Enter'){event.preventDefault();_addAppTag('${id}',this.value);this.value='';}" style="flex:1 0 140px;min-width:140px;padding:5px 10px;border:1.5px dashed var(--border);border-radius:999px;font-family:inherit;font-size:11.5px;outline:none;background:#fff">
+    </div>`;
   }
   else if(f.type==='shifts'){
+    /* Day x shift matrix — same toggle UI as the application form. */
     const ds=value||{};
-    input=`<div style="font-size:11.5px;color:var(--soft)" data-path="${esc(f.path)}" data-type="shifts">${esc(JSON.stringify(ds))} <i>(not editable inline; modify via Excel)</i></div>`;
+    const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const SHIFTS=['Morning','Afternoon','Evening','Overnight'];
+    input=`<div class="shifts-grid" id="${id}" data-path="${esc(f.path)}" data-type="shifts" data-val='${esc(JSON.stringify(ds))}'>
+      ${DAYS.map(d=>{
+        const sel=ds[d]||[];
+        return `<div class="shift-day-row"><div class="day-lbl">${d}</div><div class="shift-pills">${SHIFTS.map(s=>`<button type="button" class="app-chip multi${sel.includes(s)?' on':''}" onclick="_toggleShift('${id}','${d}','${s}',this)">${s}</button>`).join('')}</div></div>`;
+      }).join('')}
+    </div>`;
   }
   return `<div class="app-row"><span class="app-label">${esc(f.label)}</span><div class="app-edit-wrap">${input}</div></div>`;
+}
+
+/* Chip-group click handlers — update the data-val attribute on the group so saveAppEdits()
+   can read the current state without scanning DOM. */
+function _setAppChoice(groupId,btn,val,multi){
+  const group=document.getElementById(groupId);if(!group)return;
+  group.querySelectorAll('.app-chip').forEach(c=>c.classList.remove('on'));
+  btn.classList.add('on');
+  group.dataset.val=val;
+}
+function _toggleAppTag(groupId,btn,opt){
+  const group=document.getElementById(groupId);if(!group)return;
+  let arr=[];try{arr=JSON.parse(group.dataset.val||'[]');}catch(e){arr=[];}
+  if(!Array.isArray(arr))arr=[];
+  const idx=arr.findIndex(x=>String(x).toLowerCase()===opt.toLowerCase());
+  if(idx>=0){arr.splice(idx,1);btn.classList.remove('on');}
+  else{arr.push(opt);btn.classList.add('on');}
+  group.dataset.val=JSON.stringify(arr);
+}
+function _addAppTag(groupId,val){
+  val=String(val||'').trim();if(!val)return;
+  const group=document.getElementById(groupId);if(!group)return;
+  let arr=[];try{arr=JSON.parse(group.dataset.val||'[]');}catch(e){arr=[];}
+  if(!Array.isArray(arr))arr=[];
+  if(arr.some(x=>String(x).toLowerCase()===val.toLowerCase()))return; /* already present */
+  arr.push(val);
+  group.dataset.val=JSON.stringify(arr);
+  /* Re-render the group's chips so the custom one appears */
+  const chip=document.createElement('button');
+  chip.type='button';chip.className='app-chip multi on custom';
+  chip.textContent=val+' ×';
+  chip.title='Click to remove';
+  chip.onclick=function(){_removeAppTag(groupId,this,val);};
+  group.insertBefore(chip,group.querySelector('input'));
+}
+function _removeAppTag(groupId,btn,val){
+  const group=document.getElementById(groupId);if(!group)return;
+  let arr=[];try{arr=JSON.parse(group.dataset.val||'[]');}catch(e){arr=[];}
+  arr=arr.filter(x=>String(x).toLowerCase()!==String(val).toLowerCase());
+  group.dataset.val=JSON.stringify(arr);
+  btn.remove();
+}
+function _toggleShift(groupId,day,shift,btn){
+  const group=document.getElementById(groupId);if(!group)return;
+  let ds={};try{ds=JSON.parse(group.dataset.val||'{}');}catch(e){ds={};}
+  ds[day]=ds[day]||[];
+  const idx=ds[day].indexOf(shift);
+  if(idx>=0){ds[day].splice(idx,1);btn.classList.remove('on');if(!ds[day].length)delete ds[day];}
+  else{ds[day].push(shift);btn.classList.add('on');}
+  group.dataset.val=JSON.stringify(ds);
 }
 function _displayValue(v,f){
   if(v==null||v==='')return '—';
@@ -4253,34 +4500,47 @@ function _displayValue(v,f){
 
 async function saveAppEdits(){
   if(!W||!W._appDraft){toast('Nothing to save');return;}
-  const draft=W._appDraft;
-  /* Diff each editable field and collect changes for audit + persistence. */
-  const inputs=document.querySelectorAll('.app-edit-input');
   const changes=[];
-  inputs.forEach(el=>{
-    const path=el.dataset.path,type=el.dataset.type;if(!path||type==='shifts')return;
+  /* Original text/longtext fields — read .value as before */
+  document.querySelectorAll('.app-edit-input').forEach(el=>{
+    const path=el.dataset.path,type=el.dataset.type;if(!path)return;
     let newVal=el.value;
-    if(type==='tags')newVal=newVal.split(',').map(s=>s.trim()).filter(Boolean);
     const oldVal=_appField(W,path);
     const oldStr=Array.isArray(oldVal)?oldVal.join(', '):(oldVal==null?'':String(oldVal));
-    const newStr=Array.isArray(newVal)?newVal.join(', '):String(newVal);
+    const newStr=String(newVal);
+    if(oldStr!==newStr){
+      changes.push({field:path,from:oldStr,to:newStr});
+      _appSet(W,path,newVal);
+    }
+  });
+  /* Chip-group fields — select, tags, shifts. Read .dataset.val and JSON-parse for tags/shifts. */
+  document.querySelectorAll('.app-chip-group, .shifts-grid').forEach(el=>{
+    const path=el.dataset.path,type=el.dataset.type;if(!path)return;
+    let newVal;
+    if(type==='select'){
+      newVal=el.dataset.val||'';
+    }else if(type==='tags'){
+      try{newVal=JSON.parse(el.dataset.val||'[]');}catch(e){newVal=[];}
+    }else if(type==='shifts'){
+      try{newVal=JSON.parse(el.dataset.val||'{}');}catch(e){newVal={};}
+    }
+    const oldVal=_appField(W,path);
+    const oldStr=Array.isArray(oldVal)?oldVal.join(', '):(typeof oldVal==='object'&&oldVal?JSON.stringify(oldVal):(oldVal==null?'':String(oldVal)));
+    const newStr=Array.isArray(newVal)?newVal.join(', '):(typeof newVal==='object'&&newVal?JSON.stringify(newVal):String(newVal));
     if(oldStr!==newStr){
       changes.push({field:path,from:oldStr,to:newStr});
       _appSet(W,path,newVal);
     }
   });
   if(!changes.length){W._editingApp=false;W._appDraft=null;renderWorkspace();toast('No changes');return;}
-  /* Append to audit log on the candidate state */
   W.st.profileEdits=W.st.profileEdits||[];
   const by=(window.userEmail||'unknown');
   const ts=stamp();
   changes.forEach(ch=>{
     W.st.profileEdits.unshift({t:ts,field:ch.field,from:ch.from,to:ch.to,by:by});
-    /* also log to the main activity timeline */
     logW(`✎ Profile edit: ${ch.field} "${ch.from||'(blank)'}" → "${ch.to||'(blank)'}"`);
   });
   W._editingApp=false;W._appDraft=null;
-  /* Save everything: top-level fields are in columns A-F (some), and st JSON in AJ */
   await persistAppChanges(changes);
   renderWorkspace();
   toast('✓ '+changes.length+' change'+(changes.length===1?'':'s')+' saved');
@@ -5293,9 +5553,12 @@ function openAddFromBooking(name,email,startISO){
 const TEMPLATE_LABELS={
  application_confirmation:'Application confirmation (auto-sent)',
  screen_invite:'Screen invite',screen_nudge:'Screen nudge',
+ missed_screen:'Missed phone screen — rebook',
  ask_references:'Ask for references',
  interview_invite:'Interview invite + BG',bg_request:'BG consent request',
+ missed_interview:'Missed interview — rebook',
  offer:'Offer',onboarding:'Onboarding',
+ missed_onboarding:'Missed onboarding — rebook',
  reject:'Rejection',missing:'Request missing info',
  request_resume:'Request résumé'
 };
