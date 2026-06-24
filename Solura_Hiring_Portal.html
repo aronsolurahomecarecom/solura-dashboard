@@ -29,7 +29,7 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--cream);color:va
 /* Header */
 .hdr{background:linear-gradient(135deg,#1A3F72 0%,var(--sky-deep) 60%,#1E5094 100%);border-bottom:2px solid var(--gold);padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 16px rgba(0,0,0,.18);}
 .hdr-l{display:flex;align-items:center;gap:12px;}
-.logo-wrap{width:52px;height:52px;border-radius:50%;overflow:hidden;border:2px solid var(--gold);background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px rgba(200,135,10,.25);flex-shrink:0;aspect-ratio:1/1;}
+.logo-wrap{width:44px;height:44px;border-radius:50%;overflow:hidden;border:2px solid var(--gold);background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px rgba(200,135,10,.2);flex-shrink:0;aspect-ratio:1/1;}
 .logo-wrap img{width:100%;height:100%;object-fit:cover;display:block;border-radius:50%;}
 .logo-s{width:36px;height:36px;background:linear-gradient(135deg,var(--gold),#E8A020);border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:600;color:#fff;}
 .brand{font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:500;color:var(--gold);letter-spacing:.01em;}
@@ -531,8 +531,22 @@ td{padding:13px 16px;vertical-align:top;}
 /* Lock body scroll when any modal is open. Modern :has() — supported in all current browsers
    since late 2023. Prevents the awkward "background scrolls under the modal" feel and traps focus
    visually within the modal viewport. */
-body:has(.modal.open){overflow:hidden;}
-html:has(.modal.open){overflow:hidden;}
+/* Lock body+html scroll when ANY modal, overlay, or workspace is open. Modern :has() — supported
+   in all current browsers since late 2023. Covers every overlay class used in the portal:
+   - .modal.open (default email + park modals)
+   - .zi-modal.open (ZoomInfo lookup)
+   - #email-modal.open (email detail overlay)
+   - #ws-overlay.open (workspace)
+   Without all these in the selector, opening a ZI modal or email detail leaves background scrolling
+   active — confusing and easy to dismiss the modal accidentally by swiping. */
+body:has(.modal.open),
+html:has(.modal.open),
+body:has(.zi-modal.open),
+html:has(.zi-modal.open),
+body:has(#email-modal.open),
+html:has(#email-modal.open),
+body:has(.email-modal.open),
+html:has(.email-modal.open){overflow:hidden;}
 
 .giftpill{font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;display:inline-block;letter-spacing:.02em;}
 .ws-quick{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
@@ -608,19 +622,26 @@ html:has(.modal.open){overflow:hidden;}
 .wscard.warm{background:var(--cream);}
 .wscard h3{font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600;color:var(--sky-deep);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;}
 .wscard h4{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--soft);margin-bottom:10px;}
-/* Phone Screen / Interview hub — 2-column layout with main flow on left + context side rail on right */
-.qhub-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;max-width:1100px;margin:0 auto;align-items:start;}
-.qhub-main{min-width:0;}
-.qhub-side{position:sticky;top:80px;max-height:calc(100vh - 110px);overflow-y:auto;padding-right:4px;}
-.qhub-side .wscard{padding:14px 16px;}
-.qhub-side .wscard h3{font-size:14px;margin-bottom:10px;}
-.qhub-side .scorebig{gap:14px;}
-.qhub-side .scorebig .num{font-size:32px;}
+/* Phone Screen / Interview hub — tightly-packed 2-column layout with BOTH sides independently
+   scrollable. Each column has its own scroll area so the side rail (score, notes, employers,
+   snapshot) stays visible while the main questions scroll. Tighter gap + reduced padding makes
+   the hub feel dense and focused rather than airy. */
+.qhub-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:12px;max-width:1180px;margin:0 auto;height:calc(100vh - 110px);align-items:stretch;}
+.qhub-main{min-width:0;overflow-y:auto;padding-right:6px;max-height:100%;}
+.qhub-main::-webkit-scrollbar{width:6px;}
+.qhub-main::-webkit-scrollbar-thumb{background:rgba(108,76,20,.2);border-radius:3px;}
+.qhub-main .wscard{padding:14px 16px;margin-bottom:10px;}
+.qhub-main .wscard h3{margin-bottom:9px;}
+.qhub-side{overflow-y:auto;padding-right:4px;max-height:100%;}
+.qhub-side .wscard{padding:13px 15px;margin-bottom:10px;}
+.qhub-side .wscard h3{font-size:13.5px;margin-bottom:8px;}
+.qhub-side .scorebig{gap:12px;}
+.qhub-side .scorebig .num{font-size:30px;}
 .qhub-side::-webkit-scrollbar{width:6px;}
 .qhub-side::-webkit-scrollbar-thumb{background:rgba(108,76,20,.2);border-radius:3px;}
 @media(max-width:900px){
-  .qhub-grid{grid-template-columns:1fr;}
-  .qhub-side{position:static;max-height:none;overflow:visible;}
+  .qhub-grid{grid-template-columns:1fr;height:auto;}
+  .qhub-main,.qhub-side{max-height:none;overflow:visible;}
 }
 
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
@@ -1241,6 +1262,27 @@ select.app-edit-input{cursor:pointer;}
 .btn-primary{transition:all .15s !important;}
 .btn-primary:hover{filter:brightness(1.07);transform:translateY(-1px);}
 .kv-num{transition:color .25s,transform .25s cubic-bezier(.4,0,.2,1);}
+
+/* Compact connection-status indicator — replaces the old verbose sync pill in the top bar */
+.sync-dot-wrap{display:flex;align-items:center;justify-content:center;padding:6px;border-radius:50%;cursor:default;position:relative;}
+.sync-dot-wrap .sdot{width:9px;height:9px;border-radius:50%;background:#9A6100;transition:background .3s;box-shadow:0 0 0 3px rgba(154,97,0,.15);}
+.sync-dot-wrap.connected .sdot{background:#3D7A34;box-shadow:0 0 0 3px rgba(61,122,52,.15);}
+.sync-label-hidden{display:none;}
+
+/* User menu (kebab) — houses +Add, Refresh, Sign out instead of cluttering the top bar */
+.usermenu-wrap{position:relative;display:flex;align-items:center;}
+.usermenu{position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border);border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:6px;min-width:170px;display:none;z-index:200;}
+.usermenu.open{display:block;animation:fadeUp .15s ease;}
+.usermenu-item{display:block;width:100%;text-align:left;padding:8px 12px;background:none;border:none;cursor:pointer;font-family:inherit;font-size:13px;color:var(--mid);border-radius:5px;}
+.usermenu-item:hover{background:var(--cream);color:var(--ink);}
+
+/* Floating docs overlay — fixed in bottom-right of workspace, always visible during scroll */
+#ws-floating-docs{position:absolute;bottom:18px;right:18px;z-index:50;pointer-events:none;display:flex;flex-direction:column;gap:8px;align-items:flex-end;}
+#ws-floating-docs:empty{display:none;}
+.floating-docs{display:flex;flex-direction:column;gap:8px;pointer-events:auto;}
+.floating-doc-btn{padding:9px 14px;border:none;color:#fff;border-radius:999px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.18);transition:all .15s ease;letter-spacing:.01em;white-space:nowrap;}
+.floating-doc-btn:hover{transform:translateY(-1px) scale(1.02);box-shadow:0 6px 16px rgba(0,0,0,.24);filter:brightness(1.05);}
+.floating-doc-btn:active{transform:translateY(0) scale(.98);}
 </style>
 
 <div class="hdr">
@@ -1270,9 +1312,25 @@ select.app-edit-input{cursor:pointer;}
     <button class="iconbtn" id="tab-set" style="display:none" onclick="setView('settings')" title="Settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
-    <div class="sync-pill"><div class="sdot" id="sdot"></div><span id="slabel">Not connected</span></div>
-    <button class="hbtn hbtn-gold" id="btn-add" style="display:none" onclick="openAdd()">+ Add</button>
-    <button class="hbtn hbtn-ghost" id="btn-out" style="display:none" onclick="signOut()">Sign out</button>
+    <!-- Compact sync status — just a colored dot with hover tooltip. Replaces the verbose
+         "Not connected/Connected" pill that was eating space in the top bar. The dot's color
+         indicates state; hover reveals the label. -->
+    <div class="sync-dot-wrap" id="sync-bar" title="Connection status">
+      <div class="sdot" id="sdot"></div>
+      <span id="slabel" class="sync-label-hidden">Not connected</span>
+    </div>
+    <!-- User menu (kebab) — houses +Add, Sign out, anything else that was crowding the bar.
+         One button instead of three. -->
+    <div class="usermenu-wrap" id="usermenu-wrap" style="display:none">
+      <button class="iconbtn" id="btn-usermenu" onclick="toggleUserMenu()" title="More">
+        <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+      </button>
+      <div class="usermenu" id="usermenu">
+        <button class="usermenu-item" onclick="closeUserMenu();openAdd()">+ Add candidate</button>
+        <button class="usermenu-item" onclick="closeUserMenu();manualRefresh()">↻ Refresh data</button>
+        <button class="usermenu-item" onclick="closeUserMenu();signOut()">Sign out</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1335,6 +1393,9 @@ select.app-edit-input{cursor:pointer;}
     </div>
   </div>
   <div class="wsbody" id="ws-body"></div>
+  <!-- Floating doc overlay — résumé + application buttons that stick in the bottom-right corner
+       of the workspace regardless of scroll. Populated by renderWorkspace via floatingDocsOverlay(). -->
+  <div id="ws-floating-docs"></div>
   <div class="ws-footer" id="ws-footer" style="display:none"></div>
 </aside>
 
@@ -1477,20 +1538,39 @@ function _autoSignOut(reason){
 }
 function encodeShareUrl(u){return 'u!'+btoa(unescape(encodeURIComponent(u))).replace(/=+$/,'').replace(/\//g,'_').replace(/\+/g,'-');}
 function setConn(on){
-  document.getElementById('sdot').classList.toggle('live',on);
-  document.getElementById('slabel').textContent=on?'Connected':'Not connected';
+  document.getElementById('sync-bar').classList.toggle('connected',on);
+  /* Update tooltip — hidden label gets the text for screen readers but the wrap.title is what
+     the user sees on hover. */
+  const lbl=document.getElementById('slabel');if(lbl)lbl.textContent=on?'Connected':'Not connected';
+  document.getElementById('sync-bar').title=on?'Connected to OneDrive':'Not connected';
   document.getElementById('ls').style.display=on?'none':'flex';
   document.getElementById('kbar').style.display=on?'grid':'none';
   document.getElementById('main').style.display=on?'block':'none';
-  document.getElementById('btn-out').style.display=on?'inline-block':'none';
-  document.getElementById('btn-add').style.display=on?'inline-block':'none';
+  const um=document.getElementById('usermenu-wrap');if(um)um.style.display=on?'inline-flex':'none';
   document.getElementById('btn-filter').style.display=on?'flex':'none';
   document.getElementById('hdr-refresh').style.display=on?'flex':'none';
-  /* Settings tab only visible to admins (after userEmail fetched) */
   const setTab=document.getElementById('tab-set');if(setTab)setTab.style.display=(on&&isAdmin())?'inline-flex':'none';
   document.getElementById('hdr-search-wrap').style.display=on?'flex':'none';
   document.getElementById('tabsbar').style.display=on?'flex':'none';
 }
+
+function toggleUserMenu(){
+  const m=document.getElementById('usermenu');if(!m)return;
+  m.classList.toggle('open');
+  /* Close menu when clicking elsewhere */
+  if(m.classList.contains('open')){
+    setTimeout(()=>{
+      const handler=ev=>{
+        if(!document.getElementById('usermenu-wrap').contains(ev.target)){
+          m.classList.remove('open');
+          document.removeEventListener('click',handler);
+        }
+      };
+      document.addEventListener('click',handler);
+    },0);
+  }
+}
+function closeUserMenu(){const m=document.getElementById('usermenu');if(m)m.classList.remove('open');}
 /* hardcoded super-admin — always has settings access regardless of SETTINGS state.
    Additional admins editable in Settings → Admin access. */
 const SUPER_ADMINS=['aron@solurahomecare.com'];
@@ -2586,6 +2666,7 @@ function renderInbox(){
         <h1>Inbox</h1>
         <span class="inbox-count">${unreadCount} unread · ${total} total</span>
         ${unreadCount>0?'<button class="inbox-mark-read" onclick="markAllRead()">Mark all read</button>':''}
+        <button class="inbox-mark-read" style="background:var(--sky-l);color:var(--sky-deep);border:1px solid var(--sky);margin-left:6px" onclick="diagnoseInboxPoll()" title="Force an inbox poll and show what came back">🔍 Diagnose</button>
       </div>
       <div class="inbox-toolbar">
         <button class="${_inboxFilter==='all'?'on':''}" onclick="setInboxFilter('all')">All (${total})</button>
@@ -3103,10 +3184,20 @@ function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return
     const aUrgent=am!=null&&!isNaN(am)&&am<=5,bUrgent=bm!=null&&!isNaN(bm)&&bm<=5;
     if(aUrgent&&!bUrgent)return -1;
     if(!aUrgent&&bUrgent)return 1;
-    if(aUrgent&&bUrgent)return am-bm;
+    if(aUrgent&&bUrgent){
+      /* Both urgent — user requested DUE calls (upcoming, positive minutes) to sort BEFORE
+         OVERDUE calls (negative minutes). Previously this was a straight am-bm which surfaced
+         the most-overdue call first, burying the "about to happen NOW" call below already-missed
+         calls. New rule: positives first (closest-due first), then negatives (most-recently-overdue
+         first, so old overdue calls don't crowd the top). */
+      const aDue=am>=0, bDue=bm>=0;
+      if(aDue&&!bDue)return -1;
+      if(!aDue&&bDue)return 1;
+      if(aDue&&bDue)return am-bm;       /* both due — closest first (smallest positive) */
+      return bm-am;                      /* both overdue — most-recently-overdue first */
+    }
     const stageDiff=ord(a)-ord(b);
     if(stageDiff!==0)return stageDiff;
-    /* Same stage → referral points tiebreaker */
     const ptDiff=refPoints(b)-refPoints(a);
     if(ptDiff!==0)return ptDiff;
     return a.name<b.name?-1:1;
@@ -3873,10 +3964,16 @@ function renderWorkspace(){
   if(!nameEl)return;
   applyAnswers();
   /* focused-hub mode — overrides normal render: shows only the requested hub + back arrow */
-  if(W.focusedHub){return renderFocusedHub();}
+  if(W.focusedHub){
+    /* Floating docs overlay shows in every view, including focused hubs */
+    const dd=document.getElementById('ws-floating-docs');if(dd)dd.innerHTML=floatingDocsOverlay();
+    return renderFocusedHub();
+  }
   const sc=scoreW(),col=BANDCSS[sc.dec.cls],info=STAGEINFO[W.stage]||STAGEINFO['Applied'];
   const c=pipeline.find(x=>x.excelRow===W.row);const a=action(c);
   nameEl.textContent=W.name;
+  /* Update floating docs overlay too */
+  const fd=document.getElementById('ws-floating-docs');if(fd)fd.innerHTML=floatingDocsOverlay();
   document.getElementById('ws-sub').innerHTML=
     '<span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-right:8px">'+esc(stageLabel(W.stage))+'</span>'
     +(W.st.manualAwaiting?'<span class="sbadge" style="background:#FAF6EE;color:#8B6500;border:1px solid var(--gold);margin-right:8px" title="'+esc(W.st.awaitingReason||'Manually parked')+'">⏸ AWAITING</span>':'')
@@ -4138,28 +4235,35 @@ function questionsBlock(stage,nextStage){
     callBtn='<div style="font-size:11.5px;color:var(--soft);padding:8px 12px;background:#FAFAF7;border-radius:8px;border:1px dashed var(--border)">⚠ No meeting URL captured yet — should arrive automatically when Cal.com fires the booking webhook.</div>';
   }
   const body=qs.map(it=>`<div class="qrow"><div class="qq">${esc(it.q)}</div><div class="qopts">${it.o.map(o=>`<button class="${W.answers[it.id]===o[1]?'on':''}" onclick="qans('${it.id}',${o[1]},'${stage}','${nextStage}')">${esc(o[0])}</button>`).join('')}</div></div>`).join('');
-  /* Quick access to candidate's résumé + application PDF — saved in the onboarding folder by
-     the worker when the application was submitted. Resume link path: st.resumeFile or st.resumeWebUrl.
-     Application PDF path: st.applicationPdfUrl. Falling back to an inline notice if neither exists. */
-  const docBtns=[];
-  if(W.st.resumeWebUrl||W.st.resumeFile){
-    const url=W.st.resumeWebUrl||W.st.resumeFile;
-    docBtns.push(`<button class="meet-btn" onclick="window.open('${esc(url)}','_blank','noopener')" style="background:linear-gradient(135deg,#8B6500,#C59B4E);box-shadow:0 2px 8px rgba(139,101,0,.3)"><svg viewBox="0 0 16 16" fill="currentColor" style="width:14px;height:14px;margin-right:6px"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5z"/></svg>📄 Open résumé</button>`);
-  }
-  if(W.st.applicationPdfUrl){
-    docBtns.push(`<button class="meet-btn" onclick="window.open('${esc(W.st.applicationPdfUrl)}','_blank','noopener')" style="background:linear-gradient(135deg,#1E4E8C,#3A7DC9);box-shadow:0 2px 8px rgba(30,78,140,.3)"><svg viewBox="0 0 16 16" fill="currentColor" style="width:14px;height:14px;margin-right:6px"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5z"/></svg>📋 Open application</button>`);
-  }
-  const docsRow=docBtns.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${docBtns.join('')}</div>`:'';
-
   return `<div class="wscard" id="ws-questions"><h3>${stage==='Interview'?'Structured interview':'Phone screen'} <span style="font-size:11px;color:var(--soft);font-weight:600">${ans}/${qs.length} answered</span></h3>
     ${callBtn?'<div style="margin-bottom:14px">'+callBtn+'</div>':''}
-    ${docsRow}
     <div style="font-size:12px;color:var(--soft);margin-bottom:8px">Pick what you hear — the score updates itself.</div>
     <details style="margin-bottom:10px" open><summary style="font-size:12px;font-weight:600;color:var(--sky-deep);cursor:pointer">📋 Call structure (editable in Settings)</summary><ol style="padding-left:20px;font-size:12.5px;line-height:1.8;color:var(--mid);margin-top:8px">${script.map(l=>'<li>'+esc(l)+'</li>').join('')}</ol></details>
     ${body}
     <div class="brow" style="margin-top:14px;gap:8px"><button class="btn-primary bg-grn" onclick="completeQuestions('${nextStage}')">Complete &amp; advance →</button>
     <button class="btn-sec" style="background:#FFF6E6;color:#8B6500;border:1.5px solid var(--gold-mid)" onclick="markNoShow('${stage}')" title="Candidate didn't show or didn't answer">📵 No-show</button>
     </div></div>`;
+}
+
+/* Floating document overlay — sticks in the bottom-right of the workspace regardless of scroll.
+   Holds quick access to the candidate's résumé and application PDF. Always visible whenever
+   either document exists, in every workspace hub (screen, interview, verify, refs, checks, etc).
+   This replaces the inline buttons we previously injected at the top of each hub, which were
+   misleading (appeared to be part of the hub's contents) and required scrolling to find. */
+function floatingDocsOverlay(){
+  if(!W)return '';
+  const docs=[];
+  if(W.st&&(W.st.resumeWebUrl||W.st.resumeFile)){
+    const url=W.st.resumeWebUrl||W.st.resumeFile;
+    docs.push({label:'📄 Résumé',url:url,bg:'linear-gradient(135deg,#8B6500,#C59B4E)'});
+  }
+  if(W.st&&W.st.applicationPdfUrl){
+    docs.push({label:'📋 Application',url:W.st.applicationPdfUrl,bg:'linear-gradient(135deg,#1E4E8C,#3A7DC9)'});
+  }
+  if(!docs.length)return '';
+  return `<div class="floating-docs">
+    ${docs.map(d=>`<button class="floating-doc-btn" style="background:${d.bg}" onclick="window.open('${esc(d.url)}','_blank','noopener')" title="Open ${esc(d.label)}">${esc(d.label)}</button>`).join('')}
+  </div>`;
 }
 function qans(id,v,stage,nextStage){W.answers[id]=W.answers[id]===v?undefined:v;renderWorkspace();}
 async function completeQuestions(nextStage){applyAnswers();const sc=scoreW();
@@ -5192,6 +5296,55 @@ async function saveAttachment(messageId,attIdx){
    instead of silently swallowing every error. Surfaced after 3 consecutive fails. */
 let _pollFailCount=0;
 let _pollLastError='';
+
+/* Manual inbox diagnostic. Force-runs the poll and surfaces a detailed report — useful when
+   the user thinks emails aren't flowing. Shows what Graph returned, how many matched a candidate,
+   and any error details. */
+async function diagnoseInboxPoll(){
+  const t=toast('🔍 Running inbox diagnostic…');
+  try{
+    /* Test the raw Graph call directly so we can report what came back BEFORE filtering */
+    const cutoff=new Date(Date.now()-30*86400000).toISOString();
+    const inUrl=GR+'/me/messages?$top=100&$orderby=receivedDateTime desc&$select=id,from,subject,receivedDateTime&$filter=receivedDateTime ge '+cutoff;
+    const r=await gfetch(inUrl);
+    let report='';
+    if(!r.ok){
+      const body=await r.text().catch(()=>'');
+      report=`<b style="color:var(--red)">✗ Graph returned ${r.status}</b><div style="font-family:Menlo,monospace;font-size:11px;color:var(--mid);background:#fff;padding:8px;border-radius:6px;margin-top:8px;word-break:break-all">${esc(body.slice(0,400))}</div>`;
+    }else{
+      const data=await r.json();
+      const msgs=data.value||[];
+      const byEmail={};
+      pipeline.forEach(c=>{if(c.email)byEmail[c.email.toLowerCase()]=c;});
+      const candidateEmails=Object.keys(byEmail);
+      const matched=msgs.filter(m=>{
+        const from=((m.from||{}).emailAddress||{}).address||'';
+        return byEmail[from.toLowerCase()];
+      });
+      const fromAddrs=Array.from(new Set(msgs.map(m=>((m.from||{}).emailAddress||{}).address||'').filter(Boolean))).slice(0,12);
+      report=`<b style="color:var(--grn-deep)">✓ Connected to Outlook</b><br><br>
+        <div><b>${msgs.length}</b> messages in your mailbox in the last 30 days</div>
+        <div><b>${candidateEmails.length}</b> candidates have an email on file in the pipeline</div>
+        <div><b>${matched.length}</b> messages match a candidate's email</div>
+        <br>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px;letter-spacing:.05em">Recent senders in your mailbox (top 12)</div>
+        <div style="font-family:Menlo,monospace;font-size:11px;color:var(--mid);background:#fff;padding:8px;border-radius:6px;max-height:140px;overflow-y:auto">${fromAddrs.map(a=>esc(a)).join('<br>')||'(none)'}</div>
+        ${matched.length===0&&msgs.length>0?'<div style="background:#FFF6E6;border:1px solid var(--gold-mid);border-radius:8px;padding:9px 12px;margin-top:12px;font-size:12px;color:#8B6500"><b>Diagnosis:</b> Your mailbox has emails, but none of them are from candidates in the pipeline. Either candidates email a different address (like careers@solurahomecare.com) and you do not have access to that mailbox here, or their email addresses on file do not match what they are sending from.</div>':''}
+        ${msgs.length===0?'<div style="background:#FDECEA;border:1px solid var(--red);border-radius:8px;padding:9px 12px;margin-top:12px;font-size:12px;color:#8B1A1A"><b>Diagnosis:</b> Your mailbox returned zero recent messages. Either you have no email, or the connected account is not the one receiving candidate replies.</div>':''}`;
+    }
+    /* Show as a modal */
+    if(!document.getElementById('diag-modal')){
+      document.body.insertAdjacentHTML('beforeend','<div class="modal" id="diag-modal" onclick="if(event.target===this)document.getElementById(\'diag-modal\').classList.remove(\'open\')"><div class="mbox" style="max-width:560px"><div class="mhead"><div class="mtitle">📬 Inbox diagnostic</div><button class="mclose" onclick="document.getElementById(\'diag-modal\').classList.remove(\'open\')">✕</button></div><div class="mbody" id="diag-body" style="font-size:13px;line-height:1.55"></div></div></div>');
+    }
+    document.getElementById('diag-body').innerHTML=report;
+    document.getElementById('diag-modal').classList.add('open');
+    /* Also run the real poll to actually ingest anything new */
+    await pollInboxForCandidateEmails();
+  }catch(e){
+    toast('Diagnostic failed: '+e.message);
+  }
+}
+
 async function pollInboxForCandidateEmails(){
   if(!pipeline.length)return;
   /* index candidates by lowercased email for O(1) match */
