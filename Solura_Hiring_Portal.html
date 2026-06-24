@@ -2115,12 +2115,31 @@ function action(c){
   else if(s==='Verify employers'){bucket='action';timing=dn('Verify past employers','pnew');primary={kind:'verify',label:'Open verify hub',cls:'sky'};}
   else if(s==='References'){bucket='action';timing=dn('Call references','pnew');primary={kind:'refs',label:'Open reference hub',cls:'sky'};}
   else if(s==='Interview invite'){
-    /* Interview invite stage also kicks off background check in parallel */
+    /* Interview invite stage kicks off background check in parallel — the candidate gets the
+       scheduling email FIRST (so they pick a time), then we initiate the BG check. If Yardstik
+       integration is enabled, the second step becomes "Start Yardstik check" instead of the
+       manual bg_request email. */
     const sent=st.sent&&st.sent.interview_invite;
-    const bgStarted=st.tpCheck||st.reqCheck||(st.sent&&st.sent.bg_request);
-    if(!sent){bucket='action';timing=dn('Send invite + start BG','pnew');primary={kind:'email-tpl',tpl:'interview_invite',label:'Send interview invite + BG request',cls:'gold'};}
-    else if(!bgStarted){bucket='action';timing=dn('Start background check','pnew');primary={kind:'email-tpl',tpl:'bg_request',label:'Send BG consent request',cls:'gold'};}
-    else{bucket='awaiting';timing=dn('Awaiting booking','psoft',st.due?('nudge '+fmtDay(st.due)):'');primary={kind:'email-tpl',tpl:'interview_invite',label:'Send nudge',cls:'gold'};}}
+    const yardstikEnabled=SETTINGS.config&&SETTINGS.config.yardstikEnabled&&SETTINGS.config.yardstikAccountId&&SETTINGS.config.yardstikPackageId;
+    const yardstikOrdered=st.yardstik&&st.yardstik.candidateId;
+    const bgStarted=st.tpCheck||st.reqCheck||(st.sent&&st.sent.bg_request)||yardstikOrdered;
+    if(!sent){
+      const label=yardstikEnabled?'Send interview invite (BG check next)':'Send interview invite + BG request';
+      bucket='action';timing=dn('Send invite','pnew');primary={kind:'email-tpl',tpl:'interview_invite',label:label,cls:'gold'};
+    }
+    else if(!bgStarted&&yardstikEnabled){
+      /* Interview invite sent — now start the Yardstik check. This is the new primary action
+         the user requested: "after sending email asking them to pick a time, the action button
+         should become start the check." */
+      bucket='action';timing=dn('Start Yardstik background check','pa');primary={kind:'yardstik-order',label:'🛡 Start Yardstik check',cls:'gold'};
+    }
+    else if(!bgStarted){
+      bucket='action';timing=dn('Start background check','pnew');primary={kind:'email-tpl',tpl:'bg_request',label:'Send BG consent request',cls:'gold'};
+    }
+    else{
+      bucket='awaiting';timing=dn('Awaiting booking','psoft',st.due?('nudge '+fmtDay(st.due)):'');primary={kind:'email-tpl',tpl:'interview_invite',label:'Send nudge',cls:'gold'};
+    }
+  }
   else if(s==='Offer'){
     if(st.tpCheck==='clear'){bucket='action';timing=dn('Send offer','pa');primary={kind:'email-tpl',tpl:'offer',advanceTo:'Onboarding',label:'Send offer',cls:'grn'};}
     else if(st.tpCheck==='flag'){bucket='action';timing=dn('Background flagged','pr2');primary={kind:'checks',label:'Review check result',cls:'red'};}
@@ -3229,6 +3248,13 @@ function rowHtml(c){
 function doPrimary(r){const c=pipeline.find(x=>x.excelRow===r);if(!c)return;const a=action(c),p=a.primary;loadW(r);
   if(p.kind==='email-info')return doEmailMissing();
   if(p.kind==='email-tpl')return doEmail(p.tpl,p.advanceTo);
+  if(p.kind==='yardstik-order'){
+    /* Action engine routed user to ordering a Yardstik check — open workspace, scroll to checks,
+       then call the existing orderYardstikCheck() handler (which has the confirm dialog + API call). */
+    openWorkspace(r);
+    setTimeout(()=>{orderYardstikCheck();},250);
+    return;
+  }
   if(p.kind==='release-awaiting'){
     /* Clear the manual-awaiting flag and reload the workspace so the normal action shows. */
     delete W.st.manualAwaiting;
@@ -3349,7 +3375,21 @@ const TEMPLATES={
  screen_nudge:c=>({s:'Still interested? — Solura Home Care',b:`Hi ${first(c)},\n\nJust following up — pick a 15-minute slot whenever it's convenient:\n${BOOK_LINK}\n\nSolura Home Care`}),
  ask_references:c=>{const refLink='https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(c.email||'');
    return {s:'Quick form — your references — Solura Home Care',b:`Hi ${first(c)},\n\nGreat speaking with you. To move forward, please share 2–3 professional references using this short form:\n\n${refLink}\n\nIt takes about 90 seconds. You'll need their name, phone, and how you know them. We do the actual calling.\n\nThanks!\nSolura Home Care`};},
- interview_invite:c=>{const url=(SETTINGS.config&&SETTINGS.config.calInterviewUrl)||BOOK_LINK;return {s:'Interview with Solura Home Care + background check',b:`Hi ${first(c)},\n\nGreat news — you're moving to the interview stage. Two things:\n\n1) Book a 60-minute interview here:\n${url}\n\n2) We'll also need to run a standard background check while we're scheduling. Please reply with your consent to run the check, along with copies of any caregiving certificates you have.\n\nThe interview can happen while the check is processing.\n\nSolura Home Care`};},
+ interview_invite:c=>{
+   const url=(SETTINGS.config&&SETTINGS.config.calInterviewUrl)||BOOK_LINK;
+   const yardstikEnabled=SETTINGS.config&&SETTINGS.config.yardstikEnabled&&SETTINGS.config.yardstikAccountId&&SETTINGS.config.yardstikPackageId;
+   /* Template adapts based on whether Yardstik is integrated. With Yardstik, we just give the
+      candidate a heads-up that a SECOND email is coming for the background check — they don't
+      need to do anything in this email except book. Without Yardstik, we still ask for consent
+      + cert copies inline. */
+   const bgParagraph=yardstikEnabled
+     ? `Shortly after this email, you'll also receive a separate, secure email from <b>Yardstik</b> (our background-check partner) with a link to complete a quick consent + identity form. That kicks off a standard caregiver background check, which runs while we schedule and interview — no extra steps from you here.`
+     : `We'll also need to run a standard background check while we're scheduling. Please reply with your consent to run the check, along with copies of any caregiving certificates you have.`;
+   return {
+     s:'Interview with Solura Home Care + background check',
+     b:`Hi ${first(c)},\n\nGreat news — you're moving to the interview stage. Two things:\n\n1) Book a 60-minute interview here:\n${url}\n\n2) ${bgParagraph.replace(/<\/?b>/g,'')}\n\nThe interview can happen while the check is processing.\n\nSolura Home Care`
+   };
+ },
  bg_request:c=>({s:'Background check + certifications — Solura Home Care',b:`Hi ${first(c)},\n\nFollowing up on the background check. There are two pieces:\n\n1) Send us copies of any caregiving certifications you have (STNA, CNA, HHA, CPR, etc.) — just reply with photos or PDFs.\n\n2) You'll need to complete an Ohio BCI Webcheck fingerprint background check. We can't do this for you — it has to be the candidate. Go to a Webcheck-authorized location (search "BCI Webcheck near me") and request:\n  • BCI background check\n  • FBI background check (out-of-state agencies)\n  • Results sent directly to: Solura Home Care, Cleveland Heights, OH\n\nThe cost is around $25 each. Bring photo ID. Most pharmacies and UPS stores offer this.\n\nWe'll send the secure 3rd-party check link separately once we receive your certifications.\n\nSolura Home Care`}),
  offer:c=>({s:'Your offer — Solura Home Care',b:`Hi ${first(c)},\n\nWe're delighted to offer you a caregiver position at ${payRange()}. Your formal offer follows via DocuSign.\n\nWelcome aboard,\nSolura Home Care`}),
  onboarding:c=>{const url=(SETTINGS.config&&SETTINGS.config.calOnboardingUrl)||'https://cal.com/meir-schwimer-juktct/caregiver-onboarding';
