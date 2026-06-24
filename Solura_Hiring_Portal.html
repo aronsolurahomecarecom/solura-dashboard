@@ -6841,31 +6841,35 @@ async function ziPickCompany(empIndex,i){
       console.warn('Enrich returned no usable fields — falling back to search match data');
       company=Object.assign({},m,company);
     }
+    /* Debug logging — surfaces the actual response so we can spot when ZoomInfo uses non-standard
+       field names for this particular company record. Visible in browser DevTools → Console. */
+    console.log('[ZI Enrich] company object:',company);
     step='write employer fields';
     W.st.employers=W.st.employers||[];
     if(!W.st.employers[empIndex]){
-      /* Defensive: if employer index points to nothing, abort cleanly rather than throw */
       throw new Error('Employer slot '+empIndex+' missing on candidate (employers length: '+W.st.employers.length+')');
     }
     const emp=W.st.employers[empIndex];
-    /* Write to BOTH the nested .zi object (what verifyBlock reads) AND the flat fields (what the
-       phone/address inputs read). Without this dual write, the data is saved but verifyBlock
-       can't find it and the inputs don't reflect the enrichment. */
+    /* ZoomInfo records use several possible field names for phone depending on company type
+       (HQ phone, primary phone, main contact, etc). Hospitals and healthcare facilities especially
+       often have phone under `mainPhone` or `hqPhone` rather than the generic `phone`. Try all
+       common variants — first non-empty wins. */
+    const ziPhone=company.phone||company.mainPhone||company.hqPhone||company.companyPhone||(company.headquarters&&company.headquarters.phone)||'';
+    const ziWebsite=company.website||company.websiteUrl||company.domain||'';
     const ziAddr=[company.street,company.city,company.state,company.zipCode].filter(Boolean).join(', ');
+    const ziEmployees=company.employeeCount||company.numberOfEmployees||company.employees||'';
     emp.zi={
       name:company.name||company.companyName||'',
-      website:company.website||'',
-      address:ziAddr||'',
-      employees:company.employeeCount||'',
-      phone:company.phone||'',
+      website:ziWebsite,
+      address:ziAddr,
+      employees:ziEmployees?String(ziEmployees):'',
+      phone:ziPhone,
       enrichedAt:new Date().toISOString()
     };
-    /* Auto-fill flat fields too — but only if the user hasn't typed something there already.
-       Respects manual edits, falls back to ZI data when fields are empty. */
     emp.ziCompanyId=id;
     emp.ziCompanyName=emp.zi.name;
-    if(!emp.phone&&company.phone)emp.phone=company.phone;
-    if(!emp.website&&company.website)emp.website=company.website;
+    if(!emp.phone&&ziPhone)emp.phone=ziPhone;
+    if(!emp.website&&ziWebsite)emp.website=ziWebsite;
     if(!emp.address&&ziAddr)emp.address=ziAddr;
     emp.ziEnrichedAt=emp.zi.enrichedAt;
     step='log';
