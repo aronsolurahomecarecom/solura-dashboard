@@ -528,6 +528,12 @@ td{padding:13px 16px;vertical-align:top;}
 .cbadge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:7px;display:inline-block;background:var(--gold-pale);color:#9A6100;border:1px solid var(--gold-mid);}
 .dlbadge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:7px;display:inline-block;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);}
 .xpill{font-size:10px;font-weight:600;padding:3px 8px;border-radius:999px;display:inline-block;background:#EFEAFC;color:#5B4BAA;border:1px solid #D9D2F3;}
+/* Lock body scroll when any modal is open. Modern :has() — supported in all current browsers
+   since late 2023. Prevents the awkward "background scrolls under the modal" feel and traps focus
+   visually within the modal viewport. */
+body:has(.modal.open){overflow:hidden;}
+html:has(.modal.open){overflow:hidden;}
+
 .giftpill{font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;display:inline-block;letter-spacing:.02em;}
 .ws-quick{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
 .ws-quick .btn-sm{font-size:11.5px;padding:5px 10px;}
@@ -1382,13 +1388,17 @@ let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{},sc
   customerReferralEnabled:true,customerReferralPayoutEnabled:true,
   customerReferralAmount:100,customerReferralRetentionDays:30,
   showLeaderboardPills:true,referralInConfirmEmail:true,
-  /* Required certifications for hire eligibility — fully editable in Settings. Each entry in
-     requiredCerts is a label that must appear in st.certs (case-insensitive substring match, so
-     "CPR" matches "CPR/BLS" or "Adult CPR"). requiredCertGroups is for "must have at least one of"
-     scenarios — like "must have HHA OR higher (STNA, CNA, RN)". */
+  /* Required certifications for hire eligibility */
   requiredCerts:['CPR','First Aid'],
   requiredCertGroups:[{label:'Care credential (one minimum)',options:['HHA','STNA','CNA','RN','LPN']}],
   certFailEnabled:true,
+  /* No-show / no-pickup auto-decline thresholds. Editable in Settings → Pipeline config.
+     After N no-shows on the same stage, candidate is auto-declined. Phone screen no-shows are
+     more forgivable (3 strikes by default); interview no-shows are penalized faster (2 strikes)
+     since being later in the pipeline means a no-show signals a clearer red flag. */
+  screenNoShowLimit:3,
+  interviewNoShowLimit:2,
+  noPickupLimit:5,
   /* Admin number watchlist — phone numbers (any format) that should NEVER appear as candidate
      references. */
   adminPhones:'2167704886,9295454507,6469370249'
@@ -1419,7 +1429,32 @@ async function handleAuthCallback(){const code=new URLSearchParams(location.sear
     const j=await r.json();if(j.access_token){tok=j.access_token;sessionStorage.setItem('ht',tok);if(j.refresh_token)localStorage.setItem('hr',j.refresh_token);await onSignedIn();}else toast('Sign-in error: '+(j.error_description||j.error||'unknown'));}catch(e){toast('Sign-in error: '+e.message);}return true;}
 async function gfetch(url,opts){opts=opts||{};opts.headers=opts.headers||{};opts.headers['Authorization']='Bearer '+tok;
   if(opts.body&&!opts.headers['Content-Type']&&!(opts.body instanceof Blob||opts.body instanceof ArrayBuffer))opts.headers['Content-Type']='application/json';
-  let r=await fetch(url,opts);if(r.status===401&&await refreshToken()){opts.headers['Authorization']='Bearer '+tok;r=await fetch(url,opts);}return r;}
+  let r=await fetch(url,opts);
+  if(r.status===401){
+    const refreshed=await refreshToken();
+    if(refreshed){opts.headers['Authorization']='Bearer '+tok;r=await fetch(url,opts);}
+    else{
+      /* Refresh failed — Microsoft has invalidated the session (typically after 24h of inactivity
+         or 90 days absolute). Auto-sign-out so the user isn't stuck staring at a half-broken UI
+         with mysterious "fetch failed" errors. Triggered as a separate function so it can be
+         debounced (multiple gfetch calls failing simultaneously shouldn't fire it N times). */
+      _autoSignOut('Microsoft session expired — please sign in again');
+    }
+  }
+  return r;
+}
+
+/* Debounced auto-sign-out. Triggers once per "session-expired" cluster of failures. */
+let _signOutTriggered=false;
+function _autoSignOut(reason){
+  if(_signOutTriggered)return;
+  _signOutTriggered=true;
+  console.warn('Auto-sign-out:',reason);
+  toast('⚠ '+(reason||'Session expired')+' — signing you out…');
+  /* Wipe the in-memory token + sessionStorage so a quick refresh forces re-auth */
+  tok='';sessionStorage.removeItem('ht');
+  setTimeout(()=>{setConn(false);_signOutTriggered=false;},1200);
+}
 function encodeShareUrl(u){return 'u!'+btoa(unescape(encodeURIComponent(u))).replace(/=+$/,'').replace(/\//g,'_').replace(/\+/g,'-');}
 function setConn(on){
   document.getElementById('sdot').classList.toggle('live',on);
@@ -1496,9 +1531,12 @@ const SEND_AS='careers@solurahomecare.com';
    attachments is an optional array of {name, contentType, contentBase64} objects.
    Files >3MB get uploaded via createUploadSession; smaller ones go inline. */
 async function sendMailViaGraph(to,subject,bodyContent,isHtml,attachments){
+  /* Convert plain-text newlines to <br> tags. Email clients (especially Outlook) strip
+     white-space:pre-wrap from incoming HTML — so newlines get collapsed into one big paragraph.
+     Explicit <br> tags survive every client. Also keep pre-wrap as belt-and-suspenders. */
   const html=isHtml
     ?bodyContent
-    :'<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#111;white-space:pre-wrap">'+esc(bodyContent)+'</div>';
+    :'<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#111;line-height:1.5">'+esc(bodyContent).replace(/\n/g,'<br>')+'</div>';
   const msg={subject:subject,body:{contentType:'HTML',content:html},toRecipients:[{emailAddress:{address:to}}]};
   if(SEND_AS){msg.from={emailAddress:{address:SEND_AS}};msg.sender={emailAddress:{address:SEND_AS}};}
   /* Small attachments (<3MB total): inline via the message.attachments array. Microsoft Graph
@@ -1753,16 +1791,24 @@ function missingRequiredCerts(certs){
   return missing;
 }
 function decide(Q,R,q,r,gs,certs){
-  /* Required-cert check is a hard gate, independent of Q/R scores. If missing, force DECLINE. */
+  /* Required-cert check is a hard gate, BUT the decision band is "request info" rather than
+     outright DECLINE. The user requested an ask-before-decline flow: send a "do you have these
+     certs?" email, and only after the candidate confirms they don't, decline. The workspace
+     surfaces a Request Certs button (or auto-email) when this band fires.
+     If the user has set the candidate's certStatus to 'confirmed_missing' explicitly, then we
+     DO escalate to DECLINE. */
   if(certs!==undefined){
     const missing=missingRequiredCerts(certs);
-    if(missing.length)return{band:'DECLINE (missing cert)',cls:'red',certMissing:missing};
+    if(missing.length){
+      /* If the user already asked and got confirmation that the candidate doesn't have these,
+         then we hard-decline. Otherwise it's a soft "request info" band that prompts the user
+         to ask first. */
+      return{band:'REQUEST CERTS',cls:'gold',certMissing:missing};
+    }
   }
   if(gs==='FAIL')return{band:'DECLINE (gate)',cls:'red'};
   if(gs!=='PASS'||!qComplete(q)||!rComplete(r))return{band:'In progress',cls:'grey'};
-  /* Band thresholds — editable in Settings → Scoring engine. The defaults are calibrated for
-     Solura's hiring volume; loosening them risks lower-quality hires, tightening them risks
-     missing acceptable candidates. */
+  /* Band thresholds — editable in Settings → Scoring engine. */
   const bt=(SETTINGS&&SETTINGS.config&&SETTINGS.config.bandThresholds)||{};
   const hireQ=bt.hireQ!=null?bt.hireQ:70, hireR=bt.hireR!=null?bt.hireR:70;
   const condR=bt.condR!=null?bt.condR:55;
@@ -1962,7 +2008,12 @@ function action(c){
   const sc=scoreRow(c),gatesIncomplete=sc.gateStatus==='partial';
   const m=st.booking?minsUntil(st.booking):null;
   const dn=(txt,pill,date)=>({txt:txt,pill:pill||'pnew',date:date||''});
-  if(gatesIncomplete&&s!=='Hired'&&s!=='Onboarding'){
+  /* Only force "Request missing info" at the Applied stage. Once a candidate has been engaged
+     (Screen invite or beyond), incomplete gates shouldn't block the normal action flow — the user
+     can still ask for missing info via the email composer when they want to. Previously this
+     surfaced for every candidate whose `wa` (work auth) gate was unset, which happened for every
+     candidate added manually OR from older form submissions, drowning out everything else. */
+  if(gatesIncomplete&&s==='Applied'){
     return{bucket:'action',timing:dn('Request missing info','pnew'),info,primary:{kind:'email-info',label:'Request missing info',cls:'gold'},missing:sc.missingGates};
   }
   let bucket,timing,primary,matchable;
@@ -2005,12 +2056,12 @@ function action(c){
     const d=st.booking?st.booking.slice(0,10):null;
     const isScreen=s==='Screen booked';
     /* Time-based bucket assignment:
-       - Within 30 min of call (or in-progress) → action bucket with countdown
-       - Same day but more than 30 min away → scheduled bucket
+       - Within 5 min of call (or in-progress) → action bucket with countdown
+       - Same day but more than 5 min away → scheduled bucket
        - Future day → scheduled bucket
        - Overdue (past) → action bucket (need to deal with no-show or run late)
        m = minutes until booking (negative = past) */
-    if(m!=null&&m<=30&&m>-150){
+    if(m!=null&&m<=5&&m>-150){
       /* ≤30 min away or in-progress: action bucket, button shows countdown */
       const cd=m>0?Math.ceil(m)+'m':'now';
       bucket='action';timing=dn('Call now','pr2',fmtTime(st.booking)+' · in '+cd);
@@ -2022,7 +2073,7 @@ function action(c){
       primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};
     }
     else if(d===today()){
-      /* Today, but more than 30 min away → scheduled bucket with prep button */
+      /* Today, but more than 5 min away → scheduled bucket with prep button */
       bucket='scheduled';timing=dn('Today','pg',fmtTime(st.booking));
       primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Prep phone screen':'Prep interview',cls:'sky'};
     }
@@ -2060,7 +2111,7 @@ function action(c){
     else{bucket='awaiting';timing=dn('Awaiting orientation booking','psoft',st.due?('nudge '+fmtDay(st.due)):'');primary={kind:'email-tpl',tpl:'onboarding',label:'Send nudge',cls:'gold'};}}
   else if(s==='Onboarding booked'){
     const d=st.booking?st.booking.slice(0,10):null;
-    if(m!=null&&m<=30&&m>-150){
+    if(m!=null&&m<=5&&m>-150){
       const cd=m>0?Math.ceil(m)+'m':'now';
       bucket='action';timing=dn('Orientation now','pr2',fmtTime(st.booking)+' · in '+cd);
       primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'🎬 Run orientation · '+cd,cls:'grn'};
@@ -2617,6 +2668,91 @@ async function declineCandidate(){
   toast('✕ Declined');
   renderWorkspace();
 }
+async function withdrawCandidate(){
+  /* Application withdrawal — distinct from decline. The candidate proactively decided to step
+     away (took another job, life event, lost interest). Stored as a separate stage so reports
+     can distinguish candidate-initiated drops from agency-initiated declines. */
+  const reason=prompt('Why did the candidate withdraw? (optional — e.g., "took another offer", "no longer interested")','');
+  if(reason===null)return; /* cancelled */
+  W.stage='Declined';
+  W.st.withdrawn=true;
+  W.st.withdrawnAt=stamp();
+  if(reason.trim())W.st.withdrawnReason=reason.trim();
+  delete W.st.manualAwaiting;
+  logW('Application withdrawn'+(reason.trim()?(' · '+reason.trim()):''));
+  await saveW(true);
+  toast('↩ Withdrawn');
+  renderWorkspace();
+}
+
+/* ===================== No-show / No-pickup tracking =====================
+   Each call type (phone screen, interview, onboarding) has its own no-show counter. Each
+   failed-to-reach attempt has a separate no-pickup counter. When either hits its threshold,
+   the candidate is auto-declined. All thresholds editable in Settings. */
+async function markNoShow(stage){
+  /* Stage param is 'Phone Screen', 'Interview', or 'Onboarding'. Each tracked separately.
+     Score impact: reduces 'rel' (reliability) by 1 step per no-show. Caps at 1. */
+  const stageKey=String(stage||'').toLowerCase().replace(/\s+/g,'');
+  W.st.noShows=W.st.noShows||{};
+  W.st.noShows[stageKey]=(W.st.noShows[stageKey]||0)+1;
+  const count=W.st.noShows[stageKey];
+
+  /* Reliability score takedown — every no-show drops 'rel' by 1, min floor of 1 */
+  const currentRel=W.q.rel||5;
+  W.q.rel=Math.max(1,currentRel-1);
+
+  const limit=stage==='Interview'?(SETTINGS.config.interviewNoShowLimit||2):stage==='Onboarding'?2:(SETTINGS.config.screenNoShowLimit||3);
+  logW('📵 No-show #'+count+' at '+stage+' (rel score -1 → '+W.q.rel+')');
+
+  if(count>=limit){
+    if(!confirm(stage+' no-shows reached the limit ('+count+'/'+limit+'). Auto-decline this candidate?')){
+      await saveW(true);renderWorkspace();return;
+    }
+    W.stage='Declined';
+    W.st.declineReason=stage+' no-show ×'+count;
+    logW('Auto-declined after '+count+' '+stage+' no-shows');
+    await saveW(true);
+    toast('✕ Auto-declined ('+count+' '+stage+' no-shows)');
+    renderWorkspace();
+    return;
+  }
+
+  /* Below limit: clear booking, send rebook email, park in awaiting. The candidate's stage
+     reverts to the "invite" stage so they need to rebook through the Cal.com link. */
+  delete W.st.booking;delete W.st.meetingUrl;delete W.st.callPhone;
+  if(stage==='Phone Screen'&&W.stage==='Screen booked'){W.stage='Screen invite';delete (W.st.sent||{}).screen_invite;}
+  else if(stage==='Interview'&&W.stage==='Interview booked'){W.stage='Interview invite';delete (W.st.sent||{}).interview_invite;}
+  else if(stage==='Onboarding'&&W.stage==='Onboarding booked'){W.stage='Onboarding';delete (W.st.sent||{}).onboarding;}
+
+  W.st.manualAwaiting=true;
+  W.st.awaitingReason='No-show #'+count+' — awaiting rebook';
+  await saveW(true);
+  toast('📵 No-show logged ('+count+'/'+limit+'). Send rebook invite next.');
+  renderWorkspace();
+}
+
+async function markNoPickup(){
+  /* Lighter than a no-show — used for cold-call followups (e.g., during phone screen attempt).
+     Tracks consecutive missed pickups; auto-declines after threshold. */
+  W.st.noPickups=(W.st.noPickups||0)+1;
+  const count=W.st.noPickups;
+  const limit=SETTINGS.config.noPickupLimit||5;
+  logW('☎ No pickup #'+count);
+  if(count>=limit){
+    if(confirm('Reached '+limit+' missed pickups. Auto-decline this candidate?')){
+      W.stage='Declined';
+      W.st.declineReason='Unreachable — '+count+' missed pickups';
+      logW('Auto-declined after '+count+' missed pickups');
+      await saveW(true);
+      toast('✕ Auto-declined (unreachable)');
+      renderWorkspace();
+      return;
+    }
+  }
+  await saveW(true);
+  toast('☎ No pickup logged ('+count+'/'+limit+')');
+  renderWorkspace();
+}
 
 /* ===================== Referrals view ===================== */
 /* Two-pane view: caregiver leaderboard on the top, customer-referral ledger below.
@@ -2874,10 +3010,13 @@ function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return
          + (rc.screened||0)*(SETTINGS.config.referralPtsScreen||2)
          + (rc.hired||0)*(SETTINGS.config.referralPtsHired||5);
   };
-  /* Action bucket: sort by stage urgency first, then referral points DESC, then name */
+  /* Action bucket: stage urgency first, with imminent bookings rising to top.
+     Imminent = booking is within 5 minutes from now OR up to 30 minutes past start (overdue).
+     The 5-minute floor is by design: the user requested calls surface at the top of the funnel
+     5 minutes before they're due, not later. */
   const byUrgency=(a,b)=>{
     const am=minsUntil(a.st.booking),bm=minsUntil(b.st.booking);
-    const aUrgent=am!=null&&!isNaN(am)&&am<=30,bUrgent=bm!=null&&!isNaN(bm)&&bm<=30;
+    const aUrgent=am!=null&&!isNaN(am)&&am<=5,bUrgent=bm!=null&&!isNaN(bm)&&bm<=5;
     if(aUrgent&&!bUrgent)return -1;
     if(!aUrgent&&bUrgent)return 1;
     if(aUrgent&&bUrgent)return am-bm;
@@ -3288,11 +3427,14 @@ async function reallySend(tpl,advanceTo){
     });
     if(W.st.emails.length>40)W.st.emails=W.st.emails.slice(0,40);
     logW('Sent: '+tpl.replace(/_/g,' ')+' → '+W.email);
-    /* Honor the "park in awaiting after send" checkbox from the modal */
+    /* Honor the "park in awaiting after send" checkbox from the modal. ALSO auto-park for the
+       missing-info request — the candidate must reply with the missing data before we proceed,
+       so parking is the right default (the user can manually resume from awaiting after they reply
+       OR will auto-resume when their email arrives). */
     const parkCheckbox=document.getElementById('e-park');
-    if(parkCheckbox&&parkCheckbox.checked){
+    if((parkCheckbox&&parkCheckbox.checked)||tpl==='missing'||tpl==='request_resume'){
       W.st.manualAwaiting=true;
-      W.st.awaitingReason='Awaiting reply to "'+(subj||'email').slice(0,60)+'"';
+      W.st.awaitingReason=tpl==='missing'?'Awaiting reply with missing info':tpl==='request_resume'?'Awaiting résumé':('Awaiting reply to "'+(subj||'email').slice(0,60)+'"');
       logW('Parked in awaiting after send');
     }
     if(advanceTo){W.stage=advanceTo;if(advanceTo==='Screen invite'||advanceTo==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();logW('Advanced to '+advanceTo);}
@@ -3305,7 +3447,12 @@ async function reallySend(tpl,advanceTo){
     if(wsRow===W.row)renderWorkspace();
   }catch(e){toast('Send failed: '+e.message);b.disabled=false;b.innerHTML='✉ Send via Outlook';}
 }
-function closeModal(){document.getElementById('modal').classList.remove('open');}
+function closeModal(){
+  document.getElementById('modal').classList.remove('open');
+  /* Restore body scroll — paired with the modal-open lock added in emailModal/parkInAwaiting/etc. */
+  document.body.style.overflow='';
+  document.documentElement.style.overflow='';
+}
 
 /* ===================== check-in modal ===================== */
 let CIN=null;
@@ -3499,11 +3646,11 @@ function renderWorkspace(){
      optional reason + optional follow-up date. Resume button only shows when currently parked. */
   const isParked=!!W.st.manualAwaiting;
   let quickActions='';
-  if(W.stage!=='Hired'&&W.stage!=='Declined'){
+  if(W.stage!=='Hired'&&W.stage!=='Declined'&&W.stage!=='Withdrawn'){
     if(isParked){
-      quickActions=`<div class="ws-quick"><button class="btn-sm bg-sky-l" onclick="releaseAwaiting()" title="Move out of awaiting">▶ Resume from awaiting</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
+      quickActions=`<div class="ws-quick"><button class="btn-sm bg-sky-l" onclick="releaseAwaiting()" title="Move out of awaiting">▶ Resume from awaiting</button><button class="btn-sm" style="background:#fff;border:1px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer" onclick="withdrawCandidate()">↩ Withdraw</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
     }else{
-      quickActions=`<div class="ws-quick"><button class="btn-sm bg-cream" onclick="parkInAwaiting()" title="Move this candidate to Awaiting bucket — pause for follow-up">⏸ Park in awaiting</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
+      quickActions=`<div class="ws-quick"><button class="btn-sm bg-cream" onclick="parkInAwaiting()" title="Move this candidate to Awaiting bucket — pause for follow-up">⏸ Park in awaiting</button><button class="btn-sm" style="background:#fff;border:1px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer" onclick="withdrawCandidate()" title="Candidate withdrew their application">↩ Withdraw</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
     }
   }
   const thisStep=`<div class="ws-this">
@@ -3527,12 +3674,32 @@ function renderWorkspace(){
     ${certList?'<div style="margin-top:10px"><h4>Certificates</h4>'+certList+'</div>':''}
     ${pills?'<div style="margin-top:10px"><h4>Expertise</h4>'+pills+'</div>':''}
     </div>`;
+  /* Score rundown — show the 3 top-contributing dimensions for Q and R, plus any active negatives
+     (missing gates, no-shows, missing certs). Helps explain WHY the candidate landed where they
+     did. Hidden in a collapsible details so it doesn't crowd the basic Q/R blocks. */
+  const _qContribs=Object.keys(QW_DEFAULTS).map(k=>({k,label:QW_LABELS[k]||k,score:W.q[k]||0,weight:QW[k]})).filter(x=>x.score).sort((a,b)=>(b.score*b.weight)-(a.score*a.weight));
+  const _rContribs=Object.keys(RW_DEFAULTS).map(k=>({k,label:RW_LABELS[k]||k,score:W.r[k]||0,weight:RW[k]})).filter(x=>x.score).sort((a,b)=>(b.score*b.weight)-(a.score*a.weight));
+  const _badge=(n,max)=>{const ratio=n/max;return `<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;background:${ratio>=.8?'#EBF5EA;color:#3D7A34':ratio>=.5?'#FEF7E8;color:#9A6100':'#FDECEA;color:#B03025'}">${n}/${max}</span>`;};
+  const _missing=sc.missingGates&&sc.missingGates.length?sc.missingGates.join(', '):null;
+  const _certMissing=sc.dec.certMissing&&sc.dec.certMissing.length?sc.dec.certMissing.join(', '):null;
+  const _noShows=W.st.noShows||{};
+  const _noShowLines=Object.keys(_noShows).filter(k=>_noShows[k]).map(k=>`<li>${k.replace(/^(.)/, c=>c.toUpperCase())} no-shows: ${_noShows[k]}</li>`).join('');
+  const _noPickup=W.st.noPickups?`<li>Missed pickups: ${W.st.noPickups}</li>`:'';
+  const _negatives=[_missing?`<li>Missing gates: ${_missing}</li>`:'',_certMissing?`<li>Missing required certs: ${_certMissing}</li>`:'',_noShowLines,_noPickup].filter(Boolean).join('');
   const scoreCard=`<div class="wscard warm"><h3>Score</h3>
     <div class="scorebig">
       <div class="blk"><div class="lab">Quality</div><div class="num">${sc.Q==null?'—':sc.Q}</div></div>
       <div class="blk"><div class="lab">Retention</div><div class="num">${sc.R==null?'—':sc.R}</div></div>
     </div>
     <div style="margin-bottom:10px"><span class="bandpill" style="background:${col[0]};color:${col[1]}">${sc.dec.band}</span></div>
+    <details style="margin-bottom:14px"><summary style="font-size:12px;font-weight:600;color:var(--sky-deep);cursor:pointer;user-select:none">📊 Why this score — top drivers ${_negatives?'<span style="color:var(--red);font-weight:700">+ blockers</span>':''}</summary>
+      <div style="padding:10px 0;font-size:12px;line-height:1.65">
+        ${_qContribs.length?`<div style="margin-bottom:8px"><div style="font-weight:700;color:var(--mid);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Quality drivers</div>${_qContribs.slice(0,3).map(c=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0"><span style="color:var(--mid)">${esc(c.label)}</span> <span>${_badge(c.score,5)} <span style="color:var(--soft);font-size:10px">×${c.weight}</span></span></div>`).join('')}</div>`:''}
+        ${_rContribs.length?`<div style="margin-bottom:8px"><div style="font-weight:700;color:var(--mid);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Retention drivers</div>${_rContribs.slice(0,3).map(c=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0"><span style="color:var(--mid)">${esc(c.label)}</span> <span>${_badge(c.score,5)} <span style="color:var(--soft);font-size:10px">×${c.weight}</span></span></div>`).join('')}</div>`:''}
+        ${_negatives?`<div style="background:#FFF5F4;border:1px solid var(--red);border-radius:6px;padding:8px 10px;margin-top:8px"><div style="font-weight:700;color:#8B1A1A;font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">⚠ Active blockers</div><ul style="margin:0;padding-left:18px;color:#6B1212">${_negatives}</ul></div>`:''}
+        ${!_qContribs.length&&!_rContribs.length&&!_negatives?'<div style="color:var(--soft);font-style:italic">No scores recorded yet — complete the phone screen / interview to populate.</div>':''}
+      </div>
+    </details>
     <h4 style="margin-top:14px">Pipeline progress</h4>
     <div class="stepper-ws">${stepper}</div></div>`;
   const gh=GATES.map(([k,l])=>`<div class="gateitem">${l}<span class="yn"><button class="y${W.gates[k]==='Y'?' on':''}" onclick="hgate('${k}','Y')">Y</button><button class="n${W.gates[k]==='N'?' on':''}" onclick="hgate('${k}','N')">N</button></span></div>`).join('');
@@ -3716,12 +3883,28 @@ function questionsBlock(stage,nextStage){
     callBtn='<div style="font-size:11.5px;color:var(--soft);padding:8px 12px;background:#FAFAF7;border-radius:8px;border:1px dashed var(--border)">⚠ No meeting URL captured yet — should arrive automatically when Cal.com fires the booking webhook.</div>';
   }
   const body=qs.map(it=>`<div class="qrow"><div class="qq">${esc(it.q)}</div><div class="qopts">${it.o.map(o=>`<button class="${W.answers[it.id]===o[1]?'on':''}" onclick="qans('${it.id}',${o[1]},'${stage}','${nextStage}')">${esc(o[0])}</button>`).join('')}</div></div>`).join('');
+  /* Quick access to candidate's résumé + application PDF — saved in the onboarding folder by
+     the worker when the application was submitted. Resume link path: st.resumeFile or st.resumeWebUrl.
+     Application PDF path: st.applicationPdfUrl. Falling back to an inline notice if neither exists. */
+  const docBtns=[];
+  if(W.st.resumeWebUrl||W.st.resumeFile){
+    const url=W.st.resumeWebUrl||W.st.resumeFile;
+    docBtns.push(`<button class="meet-btn" onclick="window.open('${esc(url)}','_blank','noopener')" style="background:linear-gradient(135deg,#8B6500,#C59B4E);box-shadow:0 2px 8px rgba(139,101,0,.3)"><svg viewBox="0 0 16 16" fill="currentColor" style="width:14px;height:14px;margin-right:6px"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5z"/></svg>📄 Open résumé</button>`);
+  }
+  if(W.st.applicationPdfUrl){
+    docBtns.push(`<button class="meet-btn" onclick="window.open('${esc(W.st.applicationPdfUrl)}','_blank','noopener')" style="background:linear-gradient(135deg,#1E4E8C,#3A7DC9);box-shadow:0 2px 8px rgba(30,78,140,.3)"><svg viewBox="0 0 16 16" fill="currentColor" style="width:14px;height:14px;margin-right:6px"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5z"/></svg>📋 Open application</button>`);
+  }
+  const docsRow=docBtns.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${docBtns.join('')}</div>`:'';
+
   return `<div class="wscard" id="ws-questions"><h3>${stage==='Interview'?'Structured interview':'Phone screen'} <span style="font-size:11px;color:var(--soft);font-weight:600">${ans}/${qs.length} answered</span></h3>
     ${callBtn?'<div style="margin-bottom:14px">'+callBtn+'</div>':''}
+    ${docsRow}
     <div style="font-size:12px;color:var(--soft);margin-bottom:8px">Pick what you hear — the score updates itself.</div>
     <details style="margin-bottom:10px" open><summary style="font-size:12px;font-weight:600;color:var(--sky-deep);cursor:pointer">📋 Call structure (editable in Settings)</summary><ol style="padding-left:20px;font-size:12.5px;line-height:1.8;color:var(--mid);margin-top:8px">${script.map(l=>'<li>'+esc(l)+'</li>').join('')}</ol></details>
     ${body}
-    <div class="brow" style="margin-top:14px;gap:8px"><button class="btn-primary bg-grn" onclick="completeQuestions('${nextStage}')">Complete &amp; advance →</button></div></div>`;
+    <div class="brow" style="margin-top:14px;gap:8px"><button class="btn-primary bg-grn" onclick="completeQuestions('${nextStage}')">Complete &amp; advance →</button>
+    <button class="btn-sec" style="background:#FFF6E6;color:#8B6500;border:1.5px solid var(--gold-mid)" onclick="markNoShow('${stage}')" title="Candidate didn't show or didn't answer">📵 No-show</button>
+    </div></div>`;
 }
 function qans(id,v,stage,nextStage){W.answers[id]=W.answers[id]===v?undefined:v;renderWorkspace();}
 async function completeQuestions(nextStage){applyAnswers();const sc=scoreW();
@@ -4735,8 +4918,11 @@ function _pdfCandidateHead(doc,c,y){
 /* ----- Phone-screen / Interview Q&A formatter ----- */
 function _pdfQA(doc,c,stage,y){
   y=_pdfSection(doc,stage==='Interview'?'Interview responses':'Phone screen responses',y);
-  const answers=(c.st&&c.st.answers)||{};
-  const qs=QBANK.filter(q=>q.st===stage);
+  /* Answers live at the top level on the candidate (set by cardOf), NOT under st.answers.
+     Also the QBANK uses 'Phone Screen' with a space, so we normalize stage matching. */
+  const answers=c.answers||(c.st&&c.st.answers)||{};
+  const stageNorm=String(stage||'').toLowerCase().replace(/\s+/g,'');
+  const qs=QBANK.filter(q=>String(q.st||'').toLowerCase().replace(/\s+/g,'')===stageNorm);
   if(!qs.length){y=_pdfPara(doc,'(no questions in question bank for this stage)',y);return y;}
   qs.forEach(q=>{
     if(y>260){doc.addPage();y=24;}
@@ -4782,14 +4968,17 @@ function generatePhoneScreenPdf(c){
   y=_pdfCandidateHead(doc,c,y);
   /* eligibility gates summary */
   y=_pdfSection(doc,'Eligibility gates',y);
-  const g=c.gates||{};const sym=v=>v==='✓'?'Pass':v==='✗'?'Fail':v==='?'?'Pending':'—';
+  const g=c.gates||(c.row?{wa:c.row[7],cr:c.row[8],bg:c.row[9],tr:c.row[10],av:c.row[11]}:{});
+  const sym=v=>v==='Y'?'Pass':v==='N'?'Fail':v?'Pending':'—';
   y=_pdfKV(doc,'Work authorization',sym(g.wa),y);
   y=_pdfKV(doc,'Credential',sym(g.cr),y);
   y=_pdfKV(doc,'Background check',sym(g.bg),y);
   y=_pdfKV(doc,'Transportation',sym(g.tr),y);
   y=_pdfKV(doc,'Availability',sym(g.av),y);
   y+=3;
-  y=_pdfQA(doc,c,'PhoneScreen',y);
+  /* Pass 'Phone Screen' (with space) so the normalized matcher in _pdfQA picks up QBANK items
+     where st: "Phone Screen". The space-stripped comparison handles both styles. */
+  y=_pdfQA(doc,c,'Phone Screen',y);
   y=_pdfScores(doc,c,y);
   _pdfFooter(doc);
   return doc.output('blob');
@@ -4960,11 +5149,17 @@ async function exportCurrentStagePdf(){
   if(!W){return;}
   const stage=W.stage;
   let blob,fileName;
+  /* Detect whether the candidate has answered phone-screen or interview questions. The QBANK
+     uses 'Phone Screen' (with a space) — previous code compared against 'PhoneScreen' which
+     never matched, so the phone screen branch was unreachable and the PDF fell through to
+     the activity-log fallback. */
+  const hasPhoneAns=W.answers&&Object.keys(W.answers).some(k=>{const q=QBANK.find(qq=>qq.id===k);return q&&/phone\s*screen/i.test(q.st||'');});
+  const hasInterviewAns=W.answers&&Object.keys(W.answers).some(k=>{const q=QBANK.find(qq=>qq.id===k);return q&&/interview/i.test(q.st||'');});
   try{
     const ts=today();
-    if(stage==='Screen booked'||W.answers&&Object.keys(W.answers).some(k=>QBANK.find(q=>q.id===k&&q.st==='PhoneScreen'))){
+    if(stage==='Screen booked'||hasPhoneAns){
       blob=generatePhoneScreenPdf(W);fileName='phone-screen-report-'+ts+'.pdf';
-    }else if(stage==='Interview booked'||W.answers&&Object.keys(W.answers).some(k=>QBANK.find(q=>q.id===k&&q.st==='Interview'))){
+    }else if(stage==='Interview booked'||hasInterviewAns){
       blob=generateInterviewPdf(W);fileName='interview-report-'+ts+'.pdf';
     }else if((W.st.refs||[]).length){
       blob=generateRefsPdf(W);fileName='references-summary-'+ts+'.pdf';
@@ -4973,7 +5168,6 @@ async function exportCurrentStagePdf(){
       blob=generateActivityLogPdf(W);fileName='activity-log-'+ts+'.pdf';
     }
     toast('📄 Generating + uploading…');
-    /* Upload only — no popup, no download. Open from SharePoint folder if needed. */
     await uploadPdfToOnboarding(W.name,fileName,blob);
     toast('📄 '+fileName+' saved to onboarding folder');
   }catch(e){
@@ -5432,6 +5626,16 @@ function renderSettingsPipeline(){
   <div class="wscard"><h3>Service area</h3>
     <p class="set-help">Comma-separated ZIP prefixes. Candidates with addresses starting with these score full proximity points.</p>
     <input type="text" id="cfg_serviceZips" value="${esc(SETTINGS.config.serviceZips)}" class="tpl-subject-input">
+  </div>
+
+  <div class="wscard"><h3>📵 No-show & no-pickup thresholds</h3>
+    <p class="set-help">After this many consecutive failures, the candidate is auto-declined. Phone screen no-shows are typically more forgivable than interview no-shows (the later in the pipeline, the higher the consequence).</p>
+    <div class="set-row" style="gap:10px;flex-wrap:wrap">
+      <label class="set-field" style="flex:1 1 180px">Phone screen no-shows before auto-decline<input type="number" min="1" max="10" id="cfg_screenNoShowLimit" value="${SETTINGS.config.screenNoShowLimit||3}"></label>
+      <label class="set-field" style="flex:1 1 180px">Interview no-shows before auto-decline<input type="number" min="1" max="10" id="cfg_interviewNoShowLimit" value="${SETTINGS.config.interviewNoShowLimit||2}"></label>
+      <label class="set-field" style="flex:1 1 180px">Cold-call no-pickups before auto-decline<input type="number" min="1" max="20" id="cfg_noPickupLimit" value="${SETTINGS.config.noPickupLimit||5}"></label>
+    </div>
+    <p class="set-help" style="margin-top:6px">Each no-show also reduces the candidate's <b>Reliability</b> score by 1 step (min floor of 1). No-pickups don't affect score directly but count toward the threshold.</p>
   </div>
 
   <div class="wscard"><h3>🪪 Required certifications (auto-fail)</h3>
@@ -6055,6 +6259,10 @@ async function saveConfig(){
   if(get('cfg_showLeaderboardPills'))SETTINGS.config.showLeaderboardPills=get('cfg_showLeaderboardPills').checked;
   if(get('cfg_referralInConfirmEmail'))SETTINGS.config.referralInConfirmEmail=get('cfg_referralInConfirmEmail').checked;
   if(get('cfg_adminPhones'))SETTINGS.config.adminPhones=get('cfg_adminPhones').value.trim();
+  /* No-show / no-pickup thresholds */
+  if(get('cfg_screenNoShowLimit'))SETTINGS.config.screenNoShowLimit=parseInt(get('cfg_screenNoShowLimit').value,10)||3;
+  if(get('cfg_interviewNoShowLimit'))SETTINGS.config.interviewNoShowLimit=parseInt(get('cfg_interviewNoShowLimit').value,10)||2;
+  if(get('cfg_noPickupLimit'))SETTINGS.config.noPickupLimit=parseInt(get('cfg_noPickupLimit').value,10)||5;
   /* Required-cert settings — comma-separated → array, trimmed of whitespace */
   if(get('cfg_certFailEnabled'))SETTINGS.config.certFailEnabled=get('cfg_certFailEnabled').checked;
   if(get('cfg_requiredCerts'))SETTINGS.config.requiredCerts=get('cfg_requiredCerts').value.split(',').map(s=>s.trim()).filter(Boolean);
