@@ -101,9 +101,20 @@ const DURATIONS=[
 const refs=[{}, {}]; /* start with 2 empty slots */
 const MAX_REFS=5;
 
-function getCandidateEmail(){
+/* Read candidate identifiers from URL params. We accept BOTH `ref` (the candidate's refCode,
+   primary identifier — stable, unique, doesn't change with email edits) and `email` (fallback
+   for older candidates without a refCode). Either is sufficient for the worker to look up the
+   candidate. Submitting both makes the matching more robust. */
+function getCandidateIdentifiers(){
   const params=new URLSearchParams(window.location.search);
-  return (params.get('email')||'').toLowerCase().trim();
+  return {
+    refCode:(params.get('ref')||'').trim(),
+    email:(params.get('email')||'').toLowerCase().trim()
+  };
+}
+function getCandidateEmail(){
+  /* Kept for backwards compatibility but unused in the new validate flow. */
+  return getCandidateIdentifiers().email;
 }
 
 function renderRefs(){
@@ -158,8 +169,8 @@ function removeRef(i){if(refs.length<=2)return;refs.splice(i,1);renderRefs();}
 function esc(s){return String(s||'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
 
 function validate(){
-  const candEmail=getCandidateEmail();
-  if(!candEmail){alert('This link is missing a candidate identifier. Please use the link from the email Solura sent you.');return null;}
+  const ids=getCandidateIdentifiers();
+  if(!ids.refCode&&!ids.email){alert('This link is missing a candidate identifier. Please use the link from the email Solura sent you.');return null;}
   const filled=refs.filter(r=>r.firstName&&r.lastName&&r.relationship&&r.phone).map(r=>({
     firstName:(r.firstName||'').trim(),
     lastName:(r.lastName||'').trim(),
@@ -171,7 +182,8 @@ function validate(){
     notes:(r.notes||'').trim()
   }));
   if(filled.length<2){alert('Please fill in at least 2 references (first name, last name, relationship, phone are required for each).');return null;}
-  return {candidateEmail:candEmail,refs:filled};
+  /* Send BOTH identifiers — worker tries refCode first (more reliable), falls back to email. */
+  return {candidateRefCode:ids.refCode,candidateEmail:ids.email,refs:filled};
 }
 
 async function submitRefs(){
@@ -204,10 +216,10 @@ async function submitRefs(){
   }
 }
 
-/* on load: show banner if no email param, then render */
+/* on load: show banner if BOTH identifiers are missing, then render */
 (function init(){
-  const candEmail=getCandidateEmail();
-  if(!candEmail){
+  const ids=getCandidateIdentifiers();
+  if(!ids.refCode&&!ids.email){
     document.getElementById('app').innerHTML=`<div class="head"><div class="brand">Solura Home Care<small>References Form</small></div></div>
       <div class="err"><h2>Link is missing info</h2>
       <p>This link doesn't have your candidate identifier. Please use the link from the email Solura sent you, or email <a href="mailto:careers@solurahomecare.com" style="color:var(--sky-deep);font-weight:600">careers@solurahomecare.com</a> and we'll send you a fresh one.</p></div>`;

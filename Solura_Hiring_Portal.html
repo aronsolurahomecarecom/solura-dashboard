@@ -3495,6 +3495,20 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
 /* BOOK_LINK is the public Cal.com URL — replace with your actual Cal.com event URL after setup.
    Example: https://cal.com/solura-hiring/phone-screen (use the screen URL since it goes out first) */
 const BOOK_LINK='https://cal.com/solura-hiring/phone-screen';
+/* Build a robust references-form URL that uses the candidate's refCode (stable, unique) as the
+   primary identifier, with email as a backup. Either alone is sufficient for the worker to match
+   the submission to a candidate. This replaces the old "email only" link which broke whenever
+   the email field was missing or got out of sync. */
+function buildReferencesLink(c){
+  if(!c)return '';
+  const params=[];
+  const refCode=c.st&&c.st.refCode;
+  if(refCode)params.push('ref='+encodeURIComponent(refCode));
+  if(c.email)params.push('email='+encodeURIComponent(c.email));
+  if(!params.length)return '';  /* candidate has neither — link would be unusable */
+  return 'https://apply.solurahomecare.com/Solura_References_Form.html?'+params.join('&');
+}
+
 const TEMPLATES={
  /* Auto-sent by the worker on application submission. Edit in Settings → Email templates. */
  application_confirmation:c=>({s:'We received your application — Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying with Solura Home Care. Your application is in and someone from our team will reach out shortly about the next step.\n\nIf you don't hear from us within a few business days, feel free to reply to this email.\n\n🎁 Refer a friend, get priority — share your personal link with other caregivers:\n{referralLink}\n\nMeir Schwimer\nSolura Home Care\n(216) 770-4886`}),
@@ -3505,7 +3519,7 @@ const TEMPLATES={
  missed_onboarding:c=>{const url=(SETTINGS.config&&SETTINGS.config.calOnboardingUrl)||BOOK_LINK;return {s:'Rescheduling onboarding — Solura Home Care',b:`Hi ${first(c)},\n\nYou missed the orientation session today. Please rebook here:\n${url}\n\nThis is the final step before starting. If you're no longer interested, reply and let us know.\n\nSolura Home Care`};},
  screen_invite:c=>{const url=(SETTINGS.config&&SETTINGS.config.calScreenUrl)||BOOK_LINK;return {s:'Next step with Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying. Let's set up a quick 15-minute call — pick a time here:\n${url}\n\nSolura Home Care Hiring`};},
  screen_nudge:c=>({s:'Still interested? — Solura Home Care',b:`Hi ${first(c)},\n\nJust following up — pick a 15-minute slot whenever it's convenient:\n${BOOK_LINK}\n\nSolura Home Care`}),
- ask_references:c=>{const refLink='https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(c.email||'');
+ ask_references:c=>{const refLink=buildReferencesLink(c);
    return {s:'Quick form — your references — Solura Home Care',b:`Hi ${first(c)},\n\nGreat speaking with you. To move forward, please share 2–3 professional references using this short form:\n\n${refLink}\n\nIt takes about 90 seconds. You'll need their name, phone, and how you know them. We do the actual calling.\n\nThanks!\nSolura Home Care`};},
  interview_invite:c=>{
    const url=(SETTINGS.config&&SETTINGS.config.calInterviewUrl)||BOOK_LINK;
@@ -3541,7 +3555,7 @@ function getEffectiveTemplate(tplKey,c){
     const fullName=(c&&c.name)||'';
     const first=fullName.split(' ')[0]||'there';
     const cfg=SETTINGS.config||{};
-    const refLink=c&&c.email?'https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(c.email):'';
+    const refLink=buildReferencesLink(c);
     /* Candidate's PERSONAL referral link — share with friends to earn referral points.
        This is different from refLink (references form). */
     const referralCode=c&&c.st&&c.st.refCode?c.st.refCode:'';
@@ -3590,7 +3604,7 @@ function substituteLive(text,candidate){
   const fullName=c.name||'';
   const first=fullName.split(' ')[0]||'there';
   const cfg=SETTINGS.config||{};
-  const refLink=c.email?'https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(c.email):'';
+  const refLink=buildReferencesLink(c);
   const referralCode=c.st&&c.st.refCode?c.st.refCode:'';
   const referralLink=referralCode?'https://apply.solurahomecare.com/?ref='+encodeURIComponent(referralCode):'';
   return String(text||'')
@@ -3900,7 +3914,11 @@ function renderFocusedHub(){
     document.getElementById('ws-body').innerHTML=`<div style="max-width:760px;margin:0 auto">${block}</div>`;
   }
   const editAppBtn=kind!=='application'?'<button class="btn-sec bg-cream" onclick="setFocusedHub(\'application\')" style="padding:10px 18px">✎ Edit application data</button>':'';
-  document.getElementById('ws-action-bar').innerHTML='<button class="btn-sec bg-cream" onclick="clearFocusedHub()" style="padding:10px 18px">← Back to overview</button>'+editAppBtn;
+  /* ws-action-bar is an optional element — only present in some workspace layouts. Guard
+     against null to prevent the "Cannot set properties of null" crash that was making the ZI
+     enrich path show "Data saved · refresh to view" instead of refreshing in place. */
+  const actionBarEl=document.getElementById('ws-action-bar');
+  if(actionBarEl)actionBarEl.innerHTML='<button class="btn-sec bg-cream" onclick="clearFocusedHub()" style="padding:10px 18px">← Back to overview</button>'+editAppBtn;
 }
 
 /* Side rail for Phone Screen / Interview hub — collects everything Meir might want to glance at
@@ -4381,7 +4399,18 @@ function employersPreviewCard(c){
   const rows=emp.slice(0,5).map(e=>{
     const vIcon=e.v==='ok'?'<span style="color:var(--grn)">✓</span>':e.v==='no'?'<span style="color:var(--soft)">○</span>':e.v==='denied'?'<span style="color:var(--red)" title="Denied">⚠</span>':'<span style="color:var(--gold)">?</span>';
     const dur=e.years?' · '+esc(String(e.years))+'y':'';
-    return `<div style="font-size:12px;color:var(--mid);padding:3px 0;display:flex;gap:8px;align-items:center">${vIcon}<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.name||'(unnamed)')}${dur}</span></div>`;
+    /* ZoomInfo enriched indicator + quick-look info. Pulls from emp.zi (the canonical nested
+       location) and falls back to the flat fields for backward compat. */
+    const ziName=(e.zi&&e.zi.name)||e.ziCompanyName||'';
+    const ziPhone=(e.zi&&e.zi.phone)||(e.ziCompanyId?e.phone:'');
+    const ziWeb=(e.zi&&e.zi.website)||(e.ziCompanyId?e.website:'');
+    const enriched=!!(ziName||e.ziCompanyId);
+    const ziPill=enriched?' <span class="pill" style="font-size:9px;padding:2px 6px;background:var(--gold-mid);color:#fff" title="Enriched via ZoomInfo">🔍 ZI</span>':'';
+    const ziLine=enriched?`<div style="font-size:10.5px;color:var(--soft);margin-left:22px;margin-top:2px">${ziPhone?'📞 '+esc(ziPhone):''}${ziPhone&&ziWeb?' · ':''}${ziWeb?'🌐 '+esc(ziWeb):''}</div>`:'';
+    return `<div style="font-size:12px;color:var(--mid);padding:3px 0">
+      <div style="display:flex;gap:8px;align-items:center"><span style="flex:0 0 14px">${vIcon}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.name||'(unnamed)')}${dur}${ziPill}</span></div>
+      ${ziLine}
+    </div>`;
   }).join('');
   const more=emp.length>5?`<div style="font-size:11px;color:var(--soft);font-style:italic;margin-top:4px">+ ${emp.length-5} more</div>`:'';
   const warn=counts.denied?`<div style="background:#FEE2E2;border-left:3px solid var(--red);padding:7px 11px;border-radius:4px;font-size:11.5px;color:#7B1F1F;font-weight:600;margin-bottom:10px">⚠ ${counts.denied} employer${counts.denied===1?'':'s'} denied employment — major red flag.</div>`:'';
@@ -6193,7 +6222,7 @@ function previewTemplate(key){
   /* Substitute all known placeholders against sample data, matching what live emails see. */
   const cfg=SETTINGS.config||{};
   const sample={name:'Jane Doe',firstName:'Jane',email:'jane@example.com'};
-  const refLink='https://apply.solurahomecare.com/Solura_References_Form.html?email='+encodeURIComponent(sample.email);
+  const refLink=buildReferencesLink(sample);
   const sub=t=>String(t||'')
     .replace(/\{onboardingLink\}/g,cfg.calOnboardingUrl||'(set in Calendars section)')
     .replace(/\{interviewLink\}/g,cfg.calInterviewUrl||BOOK_LINK)
@@ -6451,7 +6480,52 @@ function renderSettingsReferrals(){
     <p class="set-help" style="margin-top:6px">Currently flagging: <b>${(SETTINGS.config.adminPhones||'').split(',').filter(x=>x.trim()).length} numbers</b>. Any reference whose phone matches will be rejected at submission AND flagged with a red warning if it slipped through.</p>
   </div>
 
+  <div class="wscard"><h3>🔑 Backfill missing refCodes</h3>
+    <p class="set-help">Some older candidates may not have a personal refCode (the 6-char identifier used in references-form links and referral URLs). This utility scans every candidate and generates a unique refCode for anyone missing one. Safe to run repeatedly — already-coded candidates are skipped.</p>
+    <div id="refcode-scan-result" style="font-size:12px;color:var(--soft);margin:10px 0;padding:10px 12px;background:var(--cream);border:1px solid var(--border);border-radius:8px">${(function(){
+      const missing=pipeline.filter(c=>!(c.st&&c.st.refCode));
+      const total=pipeline.length;
+      if(!total)return 'No candidates loaded yet.';
+      if(!missing.length)return '✓ All '+total+' candidates have a refCode.';
+      return '⚠ <b>'+missing.length+' of '+total+'</b> candidates are missing a refCode. Click below to generate them.';
+    })()}</div>
+    <button class="btn-primary bg-gold" onclick="backfillRefCodes()" style="padding:8px 16px">🔑 Backfill missing refCodes</button>
+  </div>
+
   <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveConfig()">Save referral program</button></div>`;
+}
+
+/* Generate a unique 6-char alphanumeric refCode (avoids confusable chars 0/O 1/I/l). */
+function generateRefCode(){
+  const chars='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let s='';for(let i=0;i<6;i++)s+=chars[Math.floor(Math.random()*chars.length)];
+  return s;
+}
+
+async function backfillRefCodes(){
+  const missing=pipeline.filter(c=>!(c.st&&c.st.refCode));
+  if(!missing.length){toast('All candidates already have a refCode');return;}
+  if(!confirm('Generate refCodes for '+missing.length+' candidates? This writes to their AJ cells one at a time, so it may take ~'+missing.length+' seconds.'))return;
+  const usedCodes=new Set();
+  pipeline.forEach(c=>{if(c.st&&c.st.refCode)usedCodes.add(c.st.refCode);});
+  let done=0,failed=0;
+  const result=document.getElementById('refcode-scan-result');
+  for(const c of missing){
+    let code=generateRefCode(),tries=0;
+    while(usedCodes.has(code)&&tries<20){code=generateRefCode();tries++;}
+    usedCodes.add(code);
+    c.st=c.st||{};c.st.refCode=code;
+    try{
+      await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+      done++;
+    }catch(e){
+      console.warn('refCode backfill failed for row '+c.excelRow+':',e.message);
+      failed++;
+    }
+    if(result)result.innerHTML='⏳ Working… <b>'+done+' of '+missing.length+'</b> done'+(failed?' · '+failed+' failed':'');
+  }
+  toast('✓ Backfilled '+done+' refCodes'+(failed?' ('+failed+' failed)':''));
+  if(result)result.innerHTML='✓ <b>'+done+'</b> refCodes generated.'+(failed?' '+failed+' failed — check console.':'');
 }
 
 /* ----- CALENDARS section ----- */
@@ -6754,12 +6828,26 @@ async function ziPickCompany(empIndex,i){
       throw new Error('Employer slot '+empIndex+' missing on candidate (employers length: '+W.st.employers.length+')');
     }
     const emp=W.st.employers[empIndex];
+    /* Write to BOTH the nested .zi object (what verifyBlock reads) AND the flat fields (what the
+       phone/address inputs read). Without this dual write, the data is saved but verifyBlock
+       can't find it and the inputs don't reflect the enrichment. */
+    const ziAddr=[company.street,company.city,company.state,company.zipCode].filter(Boolean).join(', ');
+    emp.zi={
+      name:company.name||company.companyName||'',
+      website:company.website||'',
+      address:ziAddr||'',
+      employees:company.employeeCount||'',
+      phone:company.phone||'',
+      enrichedAt:new Date().toISOString()
+    };
+    /* Auto-fill flat fields too — but only if the user hasn't typed something there already.
+       Respects manual edits, falls back to ZI data when fields are empty. */
     emp.ziCompanyId=id;
-    emp.ziCompanyName=company.name||company.companyName||'';
-    emp.phone=company.phone||emp.phone||'';
-    emp.website=company.website||emp.website||'';
-    emp.address=[company.street,company.city,company.state,company.zipCode].filter(Boolean).join(', ')||emp.address||'';
-    emp.ziEnrichedAt=new Date().toISOString();
+    emp.ziCompanyName=emp.zi.name;
+    if(!emp.phone&&company.phone)emp.phone=company.phone;
+    if(!emp.website&&company.website)emp.website=company.website;
+    if(!emp.address&&ziAddr)emp.address=ziAddr;
+    emp.ziEnrichedAt=emp.zi.enrichedAt;
     step='log';
     logW('🔍 ZoomInfo enriched: '+(emp.ziCompanyName||emp.name)+' — phone, website, address added');
     step='save';
