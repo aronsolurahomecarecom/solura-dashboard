@@ -2223,22 +2223,23 @@ function action(c){
   else if(s==='References'){bucket='action';timing=dn('Call references','pnew');primary={kind:'refs',label:'Open reference hub',cls:'sky'};}
   else if(s==='Interview invite'){
     /* Interview invite stage kicks off background check in parallel — the candidate gets the
-       scheduling email FIRST (so they pick a time), then we initiate the BG check. If Yardstik
-       integration is enabled, the second step becomes "Start Yardstik check" instead of the
-       manual bg_request email. */
+       scheduling email FIRST (so they pick a time), then we initiate the BG check.
+       Yardstik replaces the manual bg_request email when it is configured (Account ID + Package
+       set). The yardstikEnabled toggle is NOT required here — if the user took the time to wire
+       up Yardstik, they almost certainly want it as the BG action. */
     const sent=st.sent&&st.sent.interview_invite;
-    const yardstikEnabled=SETTINGS.config&&SETTINGS.config.yardstikEnabled&&SETTINGS.config.yardstikAccountId&&SETTINGS.config.yardstikPackageId;
+    const yardstikReady=SETTINGS.config&&SETTINGS.config.yardstikAccountId&&SETTINGS.config.yardstikPackageId;
     const yardstikOrdered=st.yardstik&&st.yardstik.candidateId;
     const bgStarted=st.tpCheck||st.reqCheck||(st.sent&&st.sent.bg_request)||yardstikOrdered;
     if(!sent){
-      const label=yardstikEnabled?'Send interview invite (BG check next)':'Send interview invite + BG request';
+      const label=yardstikReady?'Send interview invite (BG check next)':'Send interview invite + BG request';
       bucket='action';timing=dn('Send invite','pnew');primary={kind:'email-tpl',tpl:'interview_invite',label:label,cls:'gold'};
     }
-    else if(!bgStarted&&yardstikEnabled){
-      /* Interview invite sent — now start the Yardstik check. This is the new primary action
-         the user requested: "after sending email asking them to pick a time, the action button
-         should become start the check." */
-      bucket='action';timing=dn('Start Yardstik background check','pa');primary={kind:'yardstik-order',label:'🛡 Start Yardstik check',cls:'gold'};
+    else if(!bgStarted&&yardstikReady){
+      /* Interview invite sent — surface Yardstik check as the very next primary action.
+         This is the requested flow: "the yardstik check should be an action button right after
+         the interview schedule link." */
+      bucket='action';timing=dn('Start background check','pa');primary={kind:'yardstik-order',label:'🛡 Start Yardstik check',cls:'gold'};
     }
     else if(!bgStarted){
       bucket='action';timing=dn('Start background check','pnew');primary={kind:'email-tpl',tpl:'bg_request',label:'Send BG consent request',cls:'gold'};
