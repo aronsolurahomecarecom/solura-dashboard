@@ -4822,6 +4822,14 @@ function verifyBlock(){const emp=W.st.employers||[];
       <button class="no ${e.v==='no'?'on':''}" onclick="vset(${i},'no')" title="Couldn't reach anyone to verify">unable</button>
       <button class="denied ${e.v==='denied'?'on':''}" onclick="vset(${i},'denied')" title="Employer says candidate never worked here — RED FLAG">didn't work here</button>
     </span>`;
+    /* Find-phone helper — when the phone field is empty AND we have a company name, give the
+       user a one-click Google search. Phone numbers for small healthcare facilities are sparse
+       in ZoomInfo's basic tier, so a quick web lookup is often faster than digging through ZI. */
+    const findPhoneBtn=(!e.phone&&(e.name||'').trim().length>2)?(function(){
+      const city=(e.zi&&e.zi.address?e.zi.address.split(',')[1]:'')||'';
+      const q=encodeURIComponent((e.name||'').trim()+' phone number'+(city?' '+city.trim():''));
+      return `<button class="btn-sm" onclick="openLinkPopup('https://www.google.com/search?q=${q}','findphone',900,720)" style="background:#FAF6EE;color:#8B6500;border:1.5px solid var(--gold-mid);cursor:pointer;flex:0 0 auto;font-size:11.5px" title="Search Google for this company's phone">🔎 Find phone</button>`;
+    })():'';
     /* When marked "didn't work there", show a prominent red warning banner */
     const deniedBanner=e.v==='denied'?`<div style="grid-column:1/-1;background:#FEE2E2;border-left:3px solid var(--red);padding:7px 11px;margin-top:6px;border-radius:4px;font-size:11.5px;color:#7B1F1F;font-weight:600">⚠ Employer denies candidate worked here. Major red flag — consider declining.</div>`:'';
     return `<div class="emp-row" style="background:#fff;border:1px solid ${e.v==='denied'?'var(--red)':'var(--border)'};border-radius:9px;padding:10px 12px;margin-bottom:8px;animation:fadeIn .15s ease-out both;animation-delay:${i*30}ms">
@@ -4832,6 +4840,7 @@ function verifyBlock(){const emp=W.st.employers||[];
       ${tenureLine}
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <input value="${esc(e.phone||'')}" placeholder="Phone number" oninput="W.st.employers[${i}].phone=this.value;renderWorkspace()" onblur="saveW(true)" style="flex:1;min-width:130px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
+        ${findPhoneBtn}
         ${callBtn}
         ${vBtns}
         <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;flex:0 0 auto" onclick="if(confirm('Remove this employer?')){W.st.employers.splice(${i},1);saveW(true);renderWorkspace();}">×</button>
