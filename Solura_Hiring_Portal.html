@@ -615,7 +615,7 @@ html:has(.email-modal.open){overflow:hidden;}
 .wsclose:hover{background:rgba(255,255,255,.28);}
 .wsbody{flex:1;overflow-y:auto;padding:24px 32px 110px;background:#fff;}
 @media (max-width:900px){.wsbody{padding:18px 18px 110px;}}
-.wsgrid{display:grid;grid-template-columns:1.7fr 1fr;gap:22px;}
+.wsgrid{display:grid;grid-template-columns:1.25fr 1fr;gap:18px;}
 @media (max-width:900px){.wsgrid{grid-template-columns:1fr;}}
 .wscard{background:#fff;border:1px solid var(--border-soft);border-radius:14px;padding:18px 20px;margin-bottom:18px;box-shadow:var(--shadow-sm);transition:box-shadow .25s,transform .15s;animation:fadeUp .35s ease both;}
 .wscard:hover{box-shadow:var(--shadow-md);}
@@ -1276,8 +1276,10 @@ select.app-edit-input{cursor:pointer;}
 .usermenu-item{display:block;width:100%;text-align:left;padding:8px 12px;background:none;border:none;cursor:pointer;font-family:inherit;font-size:13px;color:var(--mid);border-radius:5px;}
 .usermenu-item:hover{background:var(--cream);color:var(--ink);}
 
-/* Floating docs overlay — fixed in bottom-right of workspace, always visible during scroll */
-#ws-floating-docs{position:absolute;bottom:18px;right:18px;z-index:50;pointer-events:none;display:flex;flex-direction:column;gap:8px;align-items:flex-end;}
+/* Floating docs overlay — fixed in bottom-LEFT of workspace, always visible during scroll.
+   Moved from bottom-right because in the verify hub it overlapped with the verification action
+   buttons. Bottom-left is clear of all hub content. */
+#ws-floating-docs{position:absolute;bottom:18px;left:18px;z-index:50;pointer-events:none;display:flex;flex-direction:column;gap:8px;align-items:flex-start;}
 #ws-floating-docs:empty{display:none;}
 .floating-docs{display:flex;flex-direction:column;gap:8px;pointer-events:auto;}
 .floating-doc-btn{padding:9px 14px;border:none;color:#fff;border-radius:999px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.18);transition:all .15s ease;letter-spacing:.01em;white-space:nowrap;}
@@ -1327,6 +1329,7 @@ select.app-edit-input{cursor:pointer;}
       </button>
       <div class="usermenu" id="usermenu">
         <button class="usermenu-item" onclick="closeUserMenu();openAdd()">+ Add candidate</button>
+        <button class="usermenu-item" onclick="closeUserMenu();openMassEmailModal()">📨 Mass email (current filter)</button>
         <button class="usermenu-item" onclick="closeUserMenu();manualRefresh()">↻ Refresh data</button>
         <button class="usermenu-item" onclick="closeUserMenu();signOut()">Sign out</button>
       </div>
@@ -1420,6 +1423,7 @@ select.app-edit-input{cursor:pointer;}
     <div class="email-modal-attach" id="em-attach" style="display:none"><h4>Attachments</h4><div id="em-attach-list"></div></div>
     <div class="email-modal-foot">
       <button class="btn-primary bg-sky-l" id="em-reply" onclick="replyToCurrentEmail()" style="padding:8px 16px;background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer">↩ Reply</button>
+      <button class="btn-sec bg-cream" onclick="markCurrentEmailUnread()" style="padding:8px 14px;cursor:pointer" title="Mark as unread in Outlook">✉ Mark unread</button>
       <button id="em-outlook-btn" class="btn-sec bg-cream" style="padding:8px 14px;cursor:pointer">Open in Outlook ↗</button>
       <button class="btn-sec bg-cream" onclick="closeEmailDetail()" style="padding:8px 18px">Close</button>
     </div>
@@ -1590,8 +1594,12 @@ async function onSignedIn(){setConn(true);
     if(!r.ok)throw new Error('Could not open the file ('+r.status+')');
     const j=await r.json();itemId=j.id;driveId=j.parentReference.driveId;
     await loadData();await loadAvailability();await loadSettings();
-    /* fire-and-forget email poll so signin isn't blocked by it */
-    pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));
+    /* fire-and-forget email poll so signin isn't blocked by it. After it completes, force-render
+       the inbox view if that's where the user is — otherwise the just-loaded emails sit in memory
+       but the UI keeps showing the stale (often empty) state. */
+    pollInboxForCandidateEmails()
+      .then(()=>{if(view==='inbox')renderInbox();updateInboxBadge();})
+      .catch(e=>console.warn('Inbox poll:',e.message));
   }catch(e){toast(e.message);}
 }
 let _saveInFlight=0;
@@ -2289,6 +2297,16 @@ function action(c){
     timing=dn('Decline — score is '+sc.dec.band,'pr2');
     primary={kind:'email-tpl',tpl:'reject',advanceTo:'Declined',label:'✕ Send rejection email',cls:'red'};
   }
+  /* BG-report-needs-decision override: when Yardstik flags a report as needing manual review
+     (`consider`/`pre_adverse`/`final_adverse`/etc.), surface a "Decide on BG report" action
+     above almost everything else — except an already-decided decline. The user explicitly asked
+     for this: when a flagged report comes back, push the candidate up to action-needed with a
+     decide button + note input. */
+  if(st.yardstik&&st.yardstik.decisionRequired&&s!=='Declined'&&s!=='Hired'){
+    bucket='action';
+    timing=dn('Background check flagged — review report','pr2');
+    primary={kind:'bg-decision',label:'⚠ Decide on background report',cls:'gold'};
+  }
   return{bucket,timing,info,primary,matchable};
 }
 
@@ -2592,7 +2610,14 @@ function setView(v){
   document.getElementById('sync-bar').style.display=v==='pipeline'?'flex':'none';
   if(v==='settings'){seqInit();renderSettings();}
   if(v==='active')renderActiveCaregivers();
-  if(v==='inbox')renderInbox();
+  if(v==='inbox'){
+    renderInbox();
+    /* Force a fresh poll whenever the user opens the inbox — this ensures messages are always
+       current when viewed, not stale from the last 60-sec background tick. */
+    pollInboxForCandidateEmails()
+      .then(()=>{if(view==='inbox'){renderInbox();updateInboxBadge();}})
+      .catch(e=>console.warn('Inbox poll on tab switch:',e.message));
+  }
   if(v==='referrals')renderReferralsView();
   render();
   updateInboxBadge();
@@ -3212,13 +3237,22 @@ function render(){if(!tok)return;updateFilterCount();if(view==='calendar')return
   fillBucket(1,B.awaiting.sort(byTime));
   fillBucket(2,B.checks.sort(byTime));
   fillBucket(4,all.sort((a,b)=>ord(b)-ord(a)||(a.name<b.name?-1:1)));
-  /* Auto-collapse buckets that are empty (unless user explicitly expanded them this session) */
+  /* Auto-collapse buckets that are empty UNLESS the user explicitly expanded them this session.
+     Without honoring the explicit-expand flag, every render() that empties a bucket (e.g., after
+     sending a nudge that moves the candidate or just refreshed the data) re-collapses sections
+     the user just opened — feels like a bug. The collapsed[i] tracking:
+       undefined: default (collapse if empty, expand if has items)
+       true:      user explicitly collapsed (always collapse)
+       false:     user explicitly expanded (always expand) */
   const counts=[B.action.length,B.awaiting.length,B.checks.length,0,all.length];
   for(let i=0;i<5;i++){
-    const wasManuallyOpened=collapsed[i]===false; /* explicit open */
+    const wasManuallyOpened=collapsed[i]===false;
+    const wasManuallyCollapsed=collapsed[i]===true;
     const isEmpty=counts[i]===0;
-    const collapse=isEmpty?true:!!collapsed[i];
-    if(isEmpty&&!wasManuallyOpened){/* leave manual opens alone */}
+    let collapse;
+    if(wasManuallyOpened)collapse=false;
+    else if(wasManuallyCollapsed)collapse=true;
+    else collapse=isEmpty;   /* default behavior: collapse-if-empty */
     document.getElementById('sw-'+i).classList.toggle('collapsed',collapse);
   }
 }
@@ -3375,6 +3409,13 @@ function doPrimary(r){const c=pipeline.find(x=>x.excelRow===r);if(!c)return;cons
        then call the existing orderYardstikCheck() handler (which has the confirm dialog + API call). */
     openWorkspace(r);
     setTimeout(()=>{orderYardstikCheck();},250);
+    return;
+  }
+  if(p.kind==='bg-decision'){
+    /* Open the BG decision modal — shows the flagged report status, lets user decide proceed/decline,
+       and capture a note that gets logged + uploaded alongside the report PDF. */
+    openWorkspace(r);
+    setTimeout(()=>openBgDecisionModal(),250);
     return;
   }
   if(p.kind==='release-awaiting'){
@@ -3864,7 +3905,9 @@ async function detectResumeInFolder(c){
   try{
     const folder='caregivers/'+safeFileName(c.name)+'/onboarding';
     const enc=folder.split('/').map(encodeURIComponent).join('/');
-    const r=await gfetch(GR+'/drives/'+driveId+'/root:/'+enc+':/children?$select=name');
+    /* Pull webUrl too so the floating "Open résumé" button has a working link to SharePoint.
+       Without webUrl, the button was using the bare filename as the URL → 404. */
+    const r=await gfetch(GR+'/drives/'+driveId+'/root:/'+enc+':/children?$select=name,webUrl');
     if(!r.ok)return;
     const items=((await r.json()).value)||[];
     /* Match: anything with "resume", "cv", or "curriculum" in the name, OR any PDF/Word doc
@@ -3873,9 +3916,12 @@ async function detectResumeInFolder(c){
     const resume=items.find(f=>/resume|cv|curriculum/i.test(f.name))
       ||items.find(f=>/\.(pdf|docx?)$/i.test(f.name)&&!isReport(f.name));
     if(resume){
-      c.st=c.st||{};c.st.hasResume=true;c.st.resumeFile=resume.name;
+      c.st=c.st||{};
+      c.st.hasResume=true;
+      c.st.resumeFile=resume.name;
+      c.st.resumeWebUrl=resume.webUrl||'';   /* the canonical link the button uses */
       await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
-      if(W&&W.row===c.excelRow){W.st.hasResume=true;W.st.resumeFile=resume.name;}
+      if(W&&W.row===c.excelRow){W.st.hasResume=true;W.st.resumeFile=resume.name;W.st.resumeWebUrl=resume.webUrl||'';}
       render();
       if(W&&W.row===c.excelRow)renderWorkspace();
       toast('Found résumé in folder — auto-marked');
@@ -4131,8 +4177,8 @@ function renderWorkspace(){
   document.getElementById('ws-body').innerHTML=`
     ${thisStep}
     <div class="wsgrid">
-      <div>${gatesCard}${work}${_yardstikPrev}${_appSnap}${_empPrev}${_refPrev}${docs}${refsPreviewCard}${emailsCard}${activity}</div>
-      <div>${identity}${scoreCard}</div>
+      <div>${gatesCard}${work}${_appSnap}${docs}${emailsCard}${activity}</div>
+      <div>${identity}${scoreCard}${_yardstikPrev}${_empPrev}${_refPrev}${refsPreviewCard}</div>
     </div>`;
   /* sticky footer with primary action — always visible */
   const ftext=`<div class="ftext">Next step<b>${esc(a.info.next||'—')}</b></div>`;
@@ -4272,9 +4318,16 @@ function questionsBlock(stage,nextStage){
 function floatingDocsOverlay(){
   if(!W)return '';
   const docs=[];
-  if(W.st&&(W.st.resumeWebUrl||W.st.resumeFile)){
-    const url=W.st.resumeWebUrl||W.st.resumeFile;
-    docs.push({label:'📄 Résumé',url:url,bg:'linear-gradient(135deg,#8B6500,#C59B4E)'});
+  /* Only show the résumé button when we have a REAL URL (resumeWebUrl). resumeFile is just the
+     filename — using it as a URL leads to a 404, which is what the user reported. If they have a
+     resume on file but no webUrl, surface a "find résumé" button that opens the candidate folder
+     in SharePoint instead. */
+  if(W.st&&W.st.resumeWebUrl){
+    docs.push({label:'📄 Résumé',url:W.st.resumeWebUrl,bg:'linear-gradient(135deg,#8B6500,#C59B4E)'});
+  }else if(W.st&&W.st.hasResume&&W.name){
+    /* Fallback: open SharePoint folder where the résumé lives. The user can locate the file there. */
+    const folderUrl='https://solurahomecare.sharepoint.com/sites/careers9/Shared%20Documents/caregivers/'+encodeURIComponent(safeFileName(W.name))+'/onboarding';
+    docs.push({label:'📄 Find résumé',url:folderUrl,bg:'linear-gradient(135deg,#8B6500,#C59B4E)'});
   }
   if(W.st&&W.st.applicationPdfUrl){
     docs.push({label:'📋 Application',url:W.st.applicationPdfUrl,bg:'linear-gradient(135deg,#1E4E8C,#3A7DC9)'});
@@ -5082,6 +5135,59 @@ async function orderYardstikCheck(){
   }catch(e){toast('✗ Order failed: '+e.message);}
 }
 
+/* BG-report decision modal — opens when the action engine surfaces "Decide on background report"
+   for candidates whose Yardstik check came back flagged. Shows status + report PDF link, then lets
+   the user choose Proceed or Decline with a required decision note. The decision + note are
+   written to st.yardstik.decision{,Note,At,By} and the PDF (uploaded by the worker on webhook
+   receipt) is already in SharePoint. */
+function openBgDecisionModal(){
+  if(!W||!W.st.yardstik){toast('No Yardstik state on this candidate');return;}
+  const ys=W.st.yardstik;
+  const statusPretty=String(ys.status||'unknown').replace(/_/g,' ');
+  const pdfLink=ys.reportPdfUrl?'<a href="'+esc(ys.reportPdfUrl)+'" target="_blank" style="color:var(--sky-deep);font-weight:600;text-decoration:none">📎 Open report PDF</a>':'<span style="color:var(--soft);font-style:italic">(report PDF not yet uploaded — refresh Yardstik status)</span>';
+  document.getElementById('m-title').textContent='Decide on background report';
+  document.getElementById('mbox').style.maxWidth='580px';
+  document.getElementById('m-body').innerHTML=`<div style="font-size:13px;color:var(--mid);line-height:1.6">
+    <div style="background:#FFF6E6;border:1px solid var(--gold-mid);border-radius:9px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#8B6500;letter-spacing:.05em;margin-bottom:4px">Yardstik report status</div>
+      <div style="font-weight:700;color:var(--ink);font-size:14px;text-transform:capitalize">${esc(statusPretty)}</div>
+      <div style="margin-top:8px">${pdfLink}</div>
+    </div>
+    <div style="font-size:12.5px;color:var(--mid);margin-bottom:14px">Review the report, then decide whether to proceed. Your decision + note will be logged on the candidate.</div>
+    <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:5px;letter-spacing:.05em">Decision note (required)</label>
+    <textarea id="bg-decision-note" placeholder="Why are you proceeding or declining? (e.g., 'Old misdemeanor, unrelated to caregiving' or 'Recent serious offense — not safe for clients')" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;min-height:90px;resize:vertical;outline:none"></textarea>
+  </div>
+  <div class="brow" style="margin-top:14px;gap:8px">
+    <button class="btn-primary" style="background:linear-gradient(135deg,#3D7A34,#6EAF48);color:#fff" onclick="decideBgReport('proceed')">✓ Proceed with candidate</button>
+    <button class="btn-primary" style="background:linear-gradient(135deg,#B03025,#D9534F);color:#fff" onclick="decideBgReport('decline')">✕ Decline</button>
+    <button class="btn-sec bg-cream" onclick="closeModal()">Cancel</button>
+  </div>`;
+  document.getElementById('modal').classList.add('open');
+}
+
+async function decideBgReport(decision){
+  const noteEl=document.getElementById('bg-decision-note');
+  const note=noteEl?noteEl.value:'';
+  if(!note.trim()){toast('Please add a decision note');return;}
+  if(!W||!W.st.yardstik){toast('No Yardstik state');return;}
+  W.st.yardstik.decision=decision;
+  W.st.yardstik.decisionNote=note.trim();
+  W.st.yardstik.decisionAt=new Date().toISOString();
+  W.st.yardstik.decisionBy=window.userEmail||'';
+  W.st.yardstik.decisionRequired=false;
+  W.st.tpCheck=decision==='proceed'?'clear':'flag';
+  logW((decision==='proceed'?'✓ ':'✕ ')+'BG report decision: '+decision.toUpperCase()+' — '+note.trim());
+  await saveW(true);
+  if(decision==='decline'){
+    closeModal();
+    setTimeout(()=>doEmail('reject','Declined'),200);
+  }else{
+    closeModal();
+    toast('✓ Marked as cleared — candidate can move to Offer');
+    renderWorkspace();
+  }
+}
+
 async function refreshYardstik(){
   if(!W.st.yardstik||!W.st.yardstik.reportId){toast('No report ID on file');return;}
   const tok=(SETTINGS.config||{}).ziToken||'';
@@ -5184,6 +5290,33 @@ async function maybeAdvanceReferrer(fromStage,toStage){
 /* ===================== email detail view + attachment upload ===================== */
 let _emailCache={}; /* messageId -> full message object (cached during session) */
 let _currentEmailMsgId=null; /* tracks which email is open for the Reply button */
+
+/* "Mark unread" — flips isRead back to false in Outlook AND clears the seen flag we set on the
+   candidate when the modal opened. Without clearing the local flag too, the UI would show "read"
+   while Outlook shows "unread." */
+async function markCurrentEmailUnread(){
+  if(!_currentEmailMsgId){toast('No email open');return;}
+  const id=_currentEmailMsgId;
+  try{
+    const r=await gfetch(GR+'/me/messages/'+id,{
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({isRead:false})
+    });
+    if(!r.ok)throw new Error('Outlook returned '+r.status);
+    pipeline.forEach(c=>{
+      const e=(c.st.emails||[]).find(x=>x.id===id);
+      if(e&&e.seen){
+        delete e.seen;delete e.seenAt;
+        patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(err=>console.warn('unmark persist:',err.message));
+      }
+    });
+    toast('✓ Marked unread in Outlook');
+    closeEmailDetail();
+    render();updateInboxBadge();
+  }catch(e){toast('Failed: '+e.message);}
+}
+
 async function openEmailDetail(messageId){
   /* Mark this email as seen on the candidate (across any candidates that have it) so
      the "new email" action surfacer clears once user opens it. */
@@ -5194,11 +5327,18 @@ async function openEmailDetail(messageId){
       e.seen=true;
       e.seenAt=stamp();
       anyMarked=true;
-      /* persist the seen flag back to the sheet for this row — patchRange wants a 2D array */
       patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(err=>console.warn('seen persist:',err.message));
     }
   });
-  if(anyMarked)setTimeout(()=>render(),200); /* re-render bucket to clear "New email" surfacer */
+  if(anyMarked)setTimeout(()=>render(),200);
+  /* ALSO mark as read in Outlook itself — Graph PATCH /me/messages/{id} with isRead:true.
+     The user explicitly asked: when reading an email through the portal it should be marked as
+     read automatically in Outlook. This keeps Outlook's unread counter accurate. */
+  gfetch(GR+'/me/messages/'+messageId,{
+    method:'PATCH',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({isRead:true})
+  }).catch(err=>console.warn('Outlook mark-read:',err.message));
   document.getElementById('em-subject').textContent='Loading…';
   document.getElementById('em-meta').textContent='';
   document.getElementById('em-body').innerHTML='<div style="color:var(--soft);text-align:center;padding:40px">Fetching message…</div>';
@@ -5421,6 +5561,23 @@ async function pollInboxForCandidateEmails(){
         webLink:m.webLink||'',hasAttachments:!!m.hasAttachments
       });
       if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
+      /* Auto-detect resume arrival: if request_resume was sent AND this email has attachments
+         AND we haven't already flagged hasResume, flip the flag so the action engine moves to
+         "Send screen invite" without waiting for the user to open the workspace.
+         Also clears awaiting state so the candidate moves out of the awaiting bucket. */
+      const reqSent=c.st.sent&&c.st.sent.request_resume;
+      const alreadyHas=c.st.hasResume;
+      if(reqSent&&!alreadyHas&&m.hasAttachments){
+        c.st.hasResume=true;
+        /* Drop the awaiting flag — the system was holding the candidate in "Awaiting résumé"
+           and the user shouldn't have to manually clear that after the resume arrives. */
+        if(c.st.manualAwaiting&&c.st.awaitingReason&&/résumé|resume/i.test(c.st.awaitingReason)){
+          delete c.st.manualAwaiting;
+          delete c.st.awaitingReason;
+        }
+        c.st.log=(c.st.log||[]);
+        c.st.log.unshift({t:stamp(),x:'📎 Résumé detected in inbound email — advancing to Send screen invite'});
+      }
       changedRows.set(c.excelRow,c);
     }
 
@@ -5516,6 +5673,22 @@ const PDF={
   ML:14,MR:14,MT:18,W:210,H:297,TW:182,
   navy:[26,63,114],sky:[30,78,140],gold:[200,135,10],muted:[120,127,139],ink:[28,36,51],paper:[250,250,247]
 };
+
+/* Sanitize text before passing to jsPDF's helvetica which is Latin-1 only — non-Latin1 chars
+   (emoji, em-dashes encoded weirdly, zero-width spaces, etc.) can render as `&` or other garbage.
+   Also strips control chars that some browsers paste in. Preserves spaces and standard punctuation. */
+function _pdfSafe(s){
+  if(s==null)return '';
+  return String(s)
+    .replace(/[\u200B-\u200F\uFEFF]/g,'')             /* zero-width + RTL marks */
+    .replace(/[\u2018\u2019]/g,"'")                    /* curly single quotes → straight */
+    .replace(/[\u201C\u201D]/g,'"')                    /* curly double quotes → straight */
+    .replace(/[\u2013\u2014]/g,'-')                    /* en/em dash → hyphen */
+    .replace(/[\u2022]/g,'*')                          /* bullet → asterisk */
+    .replace(/[\u2026]/g,'...')                        /* ellipsis */
+    .replace(/[\u00A0]/g,' ')                          /* nbsp → space */
+    .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g,''); /* keep tab/LF/CR + printable Latin-1 only */
+}
 function _pdfHeader(doc,title,subtitle){
   /* Solid navy block with the wordmark + subtle gold rule + title block */
   doc.setFillColor.apply(doc,PDF.navy);
@@ -5553,9 +5726,9 @@ function _pdfSection(doc,label,y){
 function _pdfKV(doc,k,v,y){
   if(y>275){doc.addPage();y=24;}
   doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor.apply(doc,PDF.muted);
-  doc.text(k,PDF.ML,y);
+  doc.text(_pdfSafe(k),PDF.ML,y);
   doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor.apply(doc,PDF.ink);
-  const value=String(v==null||v===''?'—':v);
+  const value=_pdfSafe(v==null||v===''?'—':v);
   const lines=doc.splitTextToSize(value,PDF.TW-40);
   doc.text(lines,PDF.ML+40,y);
   return y+Math.max(5,lines.length*5);
@@ -5563,7 +5736,7 @@ function _pdfKV(doc,k,v,y){
 function _pdfPara(doc,text,y){
   if(y>270){doc.addPage();y=24;}
   doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor.apply(doc,PDF.ink);
-  const lines=doc.splitTextToSize(String(text||''),PDF.TW);
+  const lines=doc.splitTextToSize(_pdfSafe(text||''),PDF.TW);
   /* page-break on long paragraphs */
   for(let i=0;i<lines.length;i++){
     if(y>275){doc.addPage();y=24;}
@@ -5603,7 +5776,7 @@ function _pdfQA(doc,c,stage,y){
     if(y>260){doc.addPage();y=24;}
     /* question */
     doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor.apply(doc,PDF.ink);
-    const qLines=doc.splitTextToSize(q.q,PDF.TW);
+    const qLines=doc.splitTextToSize(_pdfSafe(q.q),PDF.TW);
     doc.text(qLines,PDF.ML,y);y+=qLines.length*5+1;
     /* answer */
     const ans=answers[q.id];
@@ -5614,7 +5787,7 @@ function _pdfQA(doc,c,stage,y){
       valColor=PDF.sky;
     }
     doc.setFont('helvetica','italic');doc.setFontSize(9.5);doc.setTextColor.apply(doc,valColor);
-    doc.text('→ '+label,PDF.ML+4,y);
+    doc.text(_pdfSafe('-> '+label),PDF.ML+4,y);
     y+=8;
   });
   return y;
@@ -5949,6 +6122,111 @@ function renderCalendar(){
     ${[0,1,2,3,4,5,6].map(off=>renderCalDay(base,off)).join('')}`;
 }
 async function manualRefresh(){const btn=document.getElementById('hdr-refresh');if(btn)btn.classList.add('spinning');try{await loadData();await loadAvailability();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();if(view==='inbox')renderInbox();updateInboxBadge();}finally{if(btn)setTimeout(()=>btn.classList.remove('spinning'),300);}}
+
+/* ===================== MASS EMAIL ===================== */
+/* Lightweight bulk-email feature. Reuses the standard filter system (matchFilters) to scope
+   recipients, then runs sequential Graph sendMail calls (Outlook rate-limits at ~30/min so we
+   pace at 2/sec). Templates support full placeholder substitution per-candidate. */
+function openMassEmailModal(){
+  if(!isAdmin()){toast('Mass email is restricted to admins');return;}
+  /* The currently-filtered candidate set is what we'll send to. Show count + breakdown. */
+  const candidates=pipeline.filter(c=>c.stage!=='Hired'&&c.stage!=='Declined'&&matchFilters(c));
+  const withEmail=candidates.filter(c=>c.email&&c.email.trim());
+  const stageBreakdown={};
+  withEmail.forEach(c=>{stageBreakdown[c.stage]=(stageBreakdown[c.stage]||0)+1;});
+  const breakdownLines=Object.entries(stageBreakdown).sort((a,b)=>b[1]-a[1]).map(([s,n])=>`<div style="display:flex;justify-content:space-between"><span>${esc(s)}</span><b>${n}</b></div>`).join('');
+  const presetKeys=Object.keys(TEMPLATE_LABELS).filter(k=>k!=='application_confirmation');
+  const presetOptions=presetKeys.map(k=>`<option value="${esc(k)}">${esc(TEMPLATE_LABELS[k])}</option>`).join('');
+
+  if(!document.getElementById('massmodal')){
+    document.body.insertAdjacentHTML('beforeend','<div class="modal" id="massmodal" onclick="if(event.target===this)closeMassModal()"><div class="mbox" id="massbox" style="max-width:700px"><div class="mhead"><div class="mtitle" id="mass-title">📨 Mass email</div><button class="mclose" onclick="closeMassModal()">✕</button></div><div class="mbody" id="mass-body"></div></div></div>');
+  }
+  document.getElementById('mass-body').innerHTML=`
+    <div style="background:var(--cream);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px">
+      <b>Recipients (from active filters):</b> ${withEmail.length} candidate${withEmail.length===1?'':'s'} with email on file
+      ${candidates.length>withEmail.length?'<span style="color:var(--soft)"> · '+(candidates.length-withEmail.length)+' skipped (no email)</span>':''}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+      <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:9px 11px">
+        <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;color:var(--soft);letter-spacing:.05em;margin-bottom:6px">By stage</div>
+        <div style="font-size:12px;display:flex;flex-direction:column;gap:2px">${breakdownLines||'<i style="color:var(--soft)">no matches</i>'}</div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:9px 11px">
+        <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;color:var(--soft);letter-spacing:.05em;margin-bottom:6px">Tips</div>
+        <div style="font-size:11.5px;color:var(--mid);line-height:1.5">Use the filter panel BEFORE opening this to scope (stage, certs, source, etc). Placeholders like <code style="background:var(--cream);padding:1px 4px;border-radius:3px">{first}</code>, <code style="background:var(--cream);padding:1px 4px;border-radius:3px">{appLink}</code>, <code style="background:var(--cream);padding:1px 4px;border-radius:3px">{referralLink}</code> are substituted per candidate.</div>
+      </div>
+    </div>
+
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Load a preset (optional)</div>
+    <select id="mass-preset" onchange="_massLoadPreset(this.value)" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12px;margin-bottom:12px">
+      <option value="">— blank / write your own —</option>${presetOptions}
+    </select>
+
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Subject</div>
+    <input id="mass-sub" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none;margin-bottom:10px" placeholder="Subject — supports {first} {name} etc">
+
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Message</div>
+    <textarea id="mass-body-text" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;min-height:180px;resize:vertical;outline:none" placeholder="Body — supports {first} {appLink} {referralLink} etc"></textarea>
+
+    <div style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <span style="font-size:10.5px;color:var(--soft);text-transform:uppercase;font-weight:700">Quick insert:</span>
+      ${COMPOSER_PLACEHOLDERS.map(([l,v])=>`<button class="ph-btn" onclick="_massInsert('${v}')">${esc(l)}</button>`).join('')}
+    </div>
+
+    <div id="mass-progress" style="margin-top:12px;font-size:12px;color:var(--soft)"></div>
+
+    <div class="brow" style="margin-top:14px;gap:8px">
+      <button class="btn-primary bg-grn" id="mass-send" onclick="sendMassEmail()">✉ Send to ${withEmail.length} candidate${withEmail.length===1?'':'s'}</button>
+      <button class="btn-sec bg-cream" onclick="closeMassModal()">Cancel</button>
+    </div>`;
+  document.getElementById('massmodal').classList.add('open');
+}
+function closeMassModal(){const m=document.getElementById('massmodal');if(m)m.classList.remove('open');}
+function _massLoadPreset(key){
+  if(!key){document.getElementById('mass-sub').value='';document.getElementById('mass-body-text').value='';return;}
+  /* Use a synthetic candidate so placeholders stay raw — they'll be substituted per-candidate at send time */
+  const t=TEMPLATES[key]?TEMPLATES[key]({name:'',email:'',st:{}}):{s:'',b:''};
+  const custom=SETTINGS.templates&&SETTINGS.templates[key];
+  document.getElementById('mass-sub').value=(custom&&custom.s)||t.s||'';
+  document.getElementById('mass-body-text').value=(custom&&custom.b)||t.b||'';
+}
+function _massInsert(token){
+  /* Inserts into whichever field is focused last; defaults to body */
+  const sub=document.getElementById('mass-sub'),body=document.getElementById('mass-body-text');
+  const el=document.activeElement===sub?sub:body;
+  const s=el.selectionStart||0,e=el.selectionEnd||0;
+  el.value=el.value.slice(0,s)+token+el.value.slice(e);
+  el.focus();el.selectionStart=el.selectionEnd=s+token.length;
+}
+async function sendMassEmail(){
+  const subTpl=document.getElementById('mass-sub').value;
+  const bodyTpl=document.getElementById('mass-body-text').value;
+  if(!subTpl||!bodyTpl){toast('Subject + body required');return;}
+  const candidates=pipeline.filter(c=>c.stage!=='Hired'&&c.stage!=='Declined'&&matchFilters(c)&&c.email&&c.email.trim());
+  if(!candidates.length){toast('No recipients');return;}
+  if(!confirm('Send to '+candidates.length+' candidate'+(candidates.length===1?'':'s')+'? This cannot be undone.'))return;
+  const btn=document.getElementById('mass-send');btn.disabled=true;btn.textContent='Sending…';
+  const progress=document.getElementById('mass-progress');
+  let sent=0,failed=0;
+  for(const c of candidates){
+    const subj=substituteLive(subTpl,c);
+    const body=substituteLive(bodyTpl,c);
+    try{
+      await sendMailViaGraph(c.email,subj,body,false,[]);
+      sent++;
+      c.st.emails=c.st.emails||[];
+      c.st.emails.unshift({id:'mass-'+Date.now()+'-'+sent,direction:'out',subject:subj.slice(0,140),preview:body.slice(0,200),to:c.email,received:new Date().toISOString(),seen:true});
+      patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(e=>{});
+    }catch(e){failed++;console.warn('Mass send failed for '+c.email+':',e.message);}
+    progress.innerHTML='Sending… <b>'+sent+' / '+candidates.length+'</b>'+(failed?' · '+failed+' failed':'');
+    /* Pace at 500ms to stay well under Graph's send-rate limit */
+    await new Promise(r=>setTimeout(r,500));
+  }
+  btn.disabled=false;btn.textContent='✉ Send to '+candidates.length+' candidate'+(candidates.length===1?'':'s');
+  progress.innerHTML='<span style="color:var(--grn-deep);font-weight:600">✓ Sent '+sent+'</span>'+(failed?' · <span style="color:var(--red)">'+failed+' failed</span>':'');
+  toast('✓ Mass email: '+sent+' sent'+(failed?', '+failed+' failed':''));
+  if(!failed)setTimeout(closeMassModal,2000);
+}
 /* Background refresh path — fully silent. No toast, no spin, no visible signal at all.
    Refreshes data + availability + inbox so calendar stays in sync with Cal.com bookings landing
    via webhook (which writes to the candidate's AJ cell and may touch AK1 for slot consumption). */
