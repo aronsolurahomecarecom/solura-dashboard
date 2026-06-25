@@ -559,6 +559,11 @@ html:has(.email-modal.open){overflow:hidden;}
 .ph-btn{font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:4px;border:1px solid var(--gold-mid);background:#fff;color:#8B6500;cursor:pointer;transition:all .12s ease;}
 .ph-btn:hover{background:var(--gold-mid);color:#fff;}
 
+/* Sequence engine — drag-and-drop card styling */
+.seq-card{border-top:2px solid transparent !important;border-bottom:2px solid transparent !important;}
+.seq-card .seq-drag:hover{color:var(--gold-deep,#8B6500)!important;cursor:grab;}
+.seq-card .seq-drag:active{cursor:grabbing;}
+
 /* Application edit chips — mirror the candidate's form UX */
 .app-chip-group{display:flex;flex-wrap:wrap;gap:5px;padding:4px;}
 .app-chip{font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:999px;border:1.5px solid var(--border);background:#fff;color:var(--mid);cursor:pointer;transition:all .14s ease;white-space:nowrap;}
@@ -2110,29 +2115,307 @@ function predictedQuality(c){
   return{tier:'ok',reasons:[]};
 }
 
+/* ===================== SEQUENCE ENGINE — data-driven workflow =====================
+   The action engine reads SEQUENCE_DEFAULTS (overridable via SETTINGS.sequence) to decide
+   what each candidate's next step is. Each stage is a declarative config:
+
+     {
+       key: 'Applied',                  // identifier; matches W.stage
+       icon: '📝',
+       bucket: 'action',                // default bucket when ready
+       action: {                        // what to do when entering this stage
+         kind: 'email-tpl',             // see ACTION_KINDS below
+         tpl: 'request_resume',
+         label: 'Request résumé',
+         cls: 'gold',
+         markSent: true
+       },
+       skipActionIf: 'hasResume',       // skip the action if this trigger fires
+       readyAction: { ... },            // alternate action if the skip condition is met from the start
+       awaitTrigger: 'hasResume',       // what we wait for before advancing
+       awaitingLabel: 'Awaiting résumé',
+       awaitingBucket: 'awaiting',
+       awaitingAction: { ... },         // typically a nudge email
+       advanceTo: 'Screen invite'       // next stage when ready
+     }
+
+   For stages with bookings (Screen booked, Interview booked, Onboarding booked), set
+   `timeBased: true` and supply imminentLabel/prepLabel/runLabel/questionsStage/nextStageOnRun.
+
+   Cross-cutting overrides (decline-band, unread emails, manualAwaiting, BG decision required,
+   gates incomplete at Applied) stay hardcoded — they apply across all stages. */
+
+/* Triggers — named predicates the sequence config refers to via string key. Each takes a
+   candidate (c) and returns a boolean. Edit Settings → Sequence engine to chain triggers in
+   different ways without touching code. */
+const TRIGGERS={
+  /* Documents / data on file */
+  hasResume:        c => !!(c.st&&c.st.hasResume),
+  noResume:         c => !(c.st&&c.st.hasResume),
+  hasRefs:          c => !!(c.st&&Array.isArray(c.st.refs)&&c.st.refs.length>=2),
+  noRefs:           c => !(c.st&&Array.isArray(c.st.refs)&&c.st.refs.length>=2),
+  hasBooking:       c => !!(c.st&&c.st.booking),
+  noBooking:        c => !(c.st&&c.st.booking),
+  bookingImminent:  c => {const m=c.st&&c.st.booking?minsUntil(c.st.booking):null;return m!=null&&m<=5&&m>-150;},
+  bookingOverdue:   c => {const m=c.st&&c.st.booking?minsUntil(c.st.booking):null;return m!=null&&m<=-150;},
+  bookingToday:     c => {const d=c.st&&c.st.booking?c.st.booking.slice(0,10):null;return d===today();},
+  bookingFuture:    c => {const d=c.st&&c.st.booking?c.st.booking.slice(0,10):null;return d&&d>today();},
+
+  /* Workflow milestones */
+  screenDone:       c => !!(c.st&&c.st.screenAnsweredAt),
+  interviewDone:    c => !!(c.st&&c.st.interviewAnsweredAt),
+  onboardingDone:   c => c.stage==='Hired',
+  employersVerified:c => {
+    /* All employers either marked verified, unable, or denied */
+    const emp=(c.st&&c.st.employers)||[];
+    return emp.length>0&&emp.every(e=>e.v==='ok'||e.v==='no'||e.v==='denied');
+  },
+
+  /* Background check */
+  tpCheckClear:     c => (c.st&&c.st.tpCheck)==='clear',
+  tpCheckFlag:      c => (c.st&&c.st.tpCheck)==='flag',
+  tpCheckPending:   c => !(c.st&&c.st.tpCheck),
+  bgStarted:        c => !!(c.st&&(c.st.tpCheck||c.st.reqCheck||(c.st.sent&&c.st.sent.bg_request)||(c.st.yardstik&&c.st.yardstik.candidateId))),
+
+  /* Yardstik integration readiness */
+  yardstikReady:    c => !!(SETTINGS.config&&SETTINGS.config.yardstikAccountId&&SETTINGS.config.yardstikPackageId),
+  yardstikOrdered:  c => !!(c.st&&c.st.yardstik&&c.st.yardstik.candidateId),
+
+  /* Constant booleans */
+  always:           c => true,
+  never:            c => false
+};
+
+/* Email triggers — auto-derived from TEMPLATE_LABELS so every template gets a "<tpl>Sent" trigger.
+   Lets the sequence config check whether a specific email was sent. */
+function _initEmailTriggers(){
+  Object.keys(TEMPLATE_LABELS||{}).forEach(tpl=>{
+    TRIGGERS[tpl+'Sent']=c=>!!(c.st&&c.st.sent&&c.st.sent[tpl]);
+    TRIGGERS[tpl+'NotSent']=c=>!(c.st&&c.st.sent&&c.st.sent[tpl]);
+  });
+}
+
+/* Helper to evaluate a trigger by name, with safe fallback for unknown triggers. */
+function evalTrigger(name,c){
+  if(!name)return false;
+  /* Negation prefix: "!triggerName" */
+  if(name[0]==='!')return !evalTrigger(name.slice(1),c);
+  const fn=TRIGGERS[name];
+  if(!fn){console.warn('Unknown trigger:',name);return false;}
+  try{return !!fn(c);}catch(e){console.warn('Trigger eval failed:',name,e);return false;}
+}
+
+/* Default sequence — captures the current hard-coded workflow as data. Editable in
+   Settings → Sequence engine, or override entirely via SETTINGS.sequence. */
+const SEQUENCE_DEFAULTS=[
+  {
+    key:'Applied',icon:'📝',
+    action:{kind:'email-tpl',tpl:'request_resume',label:'Request résumé',cls:'gold',markSent:true},
+    skipActionIf:'hasResume',
+    /* If hasResume is already true on entry, the readyAction is what gets surfaced instead. */
+    readyAction:{kind:'email-tpl',tpl:'screen_invite',label:'Send screen invite',cls:'gold',advanceTo:'Screen invite'},
+    awaitTrigger:'hasResume',
+    awaitingLabel:'Awaiting résumé from candidate',
+    awaitingAction:{kind:'email-tpl',tpl:'request_resume',label:'Send nudge',cls:'gold'},
+    advanceTo:'Screen invite'
+  },
+  {
+    key:'Screen invite',icon:'📞',
+    action:{kind:'email-tpl',tpl:'screen_invite',label:'Send screen invite',cls:'gold'},
+    awaitTrigger:'hasBooking',
+    awaitingLabel:'Awaiting booking',
+    awaitingAction:{kind:'email-tpl',tpl:'screen_nudge',label:'Send nudge',cls:'gold'},
+    advanceTo:'Screen booked'
+  },
+  {
+    key:'Screen booked',icon:'☎',timeBased:true,
+    questionsStage:'Phone Screen',nextStageOnRun:'Ask references',
+    imminentLabel:'📞 Run phone screen',prepLabel:'Prep phone screen',runLabel:'Run phone screen'
+  },
+  {
+    key:'Ask references',icon:'✉',
+    action:{kind:'email-tpl',tpl:'ask_references',label:'Send references request',cls:'gold',advanceTo:'Verify employers'},
+    awaitTrigger:'hasRefs',
+    awaitingLabel:'Awaiting references',
+    awaitingAction:{kind:'email-tpl',tpl:'ask_references',label:'Nudge for references',cls:'gold'},
+    advanceTo:'Verify employers'
+  },
+  {
+    key:'Verify employers',icon:'🔍',
+    action:{kind:'verify',label:'Open verify hub',cls:'sky'},
+    awaitTrigger:'employersVerified',
+    awaitingLabel:'Verify past employers',
+    awaitingAction:{kind:'verify',label:'Continue verification',cls:'sky'},
+    advanceTo:'Interview invite'
+  },
+  {
+    key:'References',icon:'📋',
+    action:{kind:'refs',label:'Open reference hub',cls:'sky'},
+    awaitTrigger:'never',
+    advanceTo:'Interview invite'
+  },
+  {
+    key:'Interview invite',icon:'🗓',
+    action:{kind:'email-tpl',tpl:'interview_invite',label:'Send interview invite',cls:'gold'},
+    /* When Yardstik is configured, the post-invite step becomes ordering the check. */
+    postActionAwait:{trigger:'yardstikReady',action:{kind:'yardstik-order',label:'🛡 Start Yardstik check',cls:'gold'},untilTrigger:'bgStarted'},
+    fallbackPostAction:{action:{kind:'email-tpl',tpl:'bg_request',label:'Send BG consent request',cls:'gold'},untilTrigger:'bgStarted'},
+    awaitTrigger:'hasBooking',
+    awaitingLabel:'Awaiting booking',
+    awaitingAction:{kind:'email-tpl',tpl:'interview_invite',label:'Send nudge',cls:'gold'},
+    advanceTo:'Interview booked'
+  },
+  {
+    key:'Interview booked',icon:'🎥',timeBased:true,
+    questionsStage:'Interview',nextStageOnRun:'Offer',
+    imminentLabel:'🎥 Run interview',prepLabel:'Prep interview',runLabel:'Run interview'
+  },
+  {
+    key:'Offer',icon:'💼',
+    /* Offer waits on BG check clearing. If tpCheck is clear → send offer; flag → review; else lock. */
+    rules:[
+      {when:'tpCheckClear',action:{kind:'email-tpl',tpl:'offer',label:'Send offer',cls:'grn',advanceTo:'Onboarding'},bucket:'action',label:'Send offer'},
+      {when:'tpCheckFlag',action:{kind:'checks',label:'Review check result',cls:'red'},bucket:'action',label:'Background flagged'},
+      {when:'always',action:{kind:'lock',label:'🔒 Awaiting check',cls:'lock'},bucket:'checks',label:'BG check pending'}
+    ]
+  },
+  {
+    key:'Onboarding',icon:'🎬',
+    action:{kind:'email-tpl',tpl:'onboarding',label:'Send onboarding invite',cls:'grn'},
+    awaitTrigger:'hasBooking',
+    awaitingLabel:'Awaiting orientation booking',
+    awaitingAction:{kind:'email-tpl',tpl:'onboarding',label:'Send nudge',cls:'gold'},
+    advanceTo:'Onboarding booked'
+  },
+  {
+    key:'Onboarding booked',icon:'🎬',timeBased:true,
+    questionsStage:'Onboarding',nextStageOnRun:'Hired',
+    imminentLabel:'🎬 Run orientation',prepLabel:'Prep orientation',runLabel:'Run orientation'
+  }
+];
+
+/* Resolve the active sequence — user-edited if present, else defaults */
+function getActiveSequence(){
+  if(SETTINGS.sequence&&Array.isArray(SETTINGS.sequence)&&SETTINGS.sequence.length){
+    return SETTINGS.sequence;
+  }
+  return SEQUENCE_DEFAULTS;
+}
+
+/* Find a stage config by key (case-sensitive, exact match). */
+function getStageConfig(stageKey){
+  const seq=getActiveSequence();
+  return seq.find(s=>s.key===stageKey)||null;
+}
+
+/* Resolve the primary action for a stage config + candidate. Returns the same shape that the
+   old action() function returned: {bucket, timing, info, primary, matchable}. */
+function sequenceAction(c,info){
+  const cfg=getStageConfig(c.stage);
+  if(!cfg){
+    /* Unknown stage — must be a user-custom milestone or stale data. */
+    if(isCustomStage(c.stage)){
+      const eff=flowOrder();const idx=eff.indexOf(c.stage);const next=idx>=0&&idx<eff.length-1?eff[idx+1]:'Hired';
+      return{bucket:'action',timing:_dn('Mark milestone complete','pnew'),info,primary:{kind:'custom-advance',nextStage:next,label:'→ Mark complete & advance',cls:'sky'}};
+    }
+    return{bucket:'action',timing:_dn(info.next,'pnew'),info,primary:{kind:'open',label:'Open',cls:'sky'}};
+  }
+  const st=c.st;
+
+  /* Multi-rule stages (e.g., Offer with tpCheck branching). First matching rule wins. */
+  if(Array.isArray(cfg.rules)){
+    for(const r of cfg.rules){
+      if(evalTrigger(r.when,c)){
+        return{bucket:r.bucket||'action',timing:_dn(r.label||cfg.key,r.pill||'pa'),info,primary:r.action};
+      }
+    }
+    return{bucket:'action',timing:_dn(cfg.key,'pa'),info,primary:{kind:'open',label:'Open',cls:'sky'}};
+  }
+
+  /* Time-based booking stages (Screen/Interview/Onboarding booked) */
+  if(cfg.timeBased){
+    return _sequenceBookingStage(c,cfg,info);
+  }
+
+  /* Linear single-action stages — three states:
+       1. Action not done yet → surface the primary action
+       2. Action done, awaiting trigger → surface awaitingAction (nudge), in awaitingBucket
+       3. Action done, awaiting trigger met → advance is ready (handled by primary advanceTo) */
+  const actionDone=cfg.action&&cfg.action.kind==='email-tpl'?(st.sent&&st.sent[cfg.action.tpl]):evalTrigger(cfg.skipActionIf,c);
+  const skipReady=cfg.skipActionIf&&evalTrigger(cfg.skipActionIf,c);
+  const awaitMet=evalTrigger(cfg.awaitTrigger,c);
+
+  /* If the skip condition is met but action is not yet done and a readyAction exists,
+     surface that instead (e.g., Applied + hasResume → skip request_resume, send screen invite). */
+  if(skipReady&&cfg.readyAction&&!actionDone){
+    return{bucket:'action',timing:_dn(cfg.readyAction.label||cfg.action.label,'pnew'),info,primary:cfg.readyAction};
+  }
+
+  /* Action not yet done → surface primary */
+  if(!actionDone&&cfg.action){
+    return{bucket:'action',timing:_dn(cfg.action.label||cfg.key,'pnew'),info,primary:cfg.action};
+  }
+
+  /* Action done but waiting on post-action follow-up (e.g., Interview invite → Yardstik order) */
+  if(actionDone&&cfg.postActionAwait){
+    const p=cfg.postActionAwait;
+    const postDone=evalTrigger(p.untilTrigger,c);
+    if(!postDone&&evalTrigger(p.trigger,c))return{bucket:'action',timing:_dn(p.action.label||'Next step','pa'),info,primary:p.action};
+    if(!postDone&&cfg.fallbackPostAction){
+      const fp=cfg.fallbackPostAction;
+      if(!evalTrigger(fp.untilTrigger,c))return{bucket:'action',timing:_dn(fp.action.label||'Next step','pnew'),info,primary:fp.action};
+    }
+  }
+
+  /* Action done, awaiting trigger not yet met → awaiting bucket with nudge */
+  if(actionDone&&!awaitMet){
+    return{bucket:cfg.awaitingBucket||'awaiting',timing:_dn(cfg.awaitingLabel||'Awaiting',cfg.awaitingPill||'psoft',st.due?('nudge '+fmtDay(st.due)):''),info,primary:cfg.awaitingAction||cfg.action};
+  }
+
+  /* Action done + trigger met → ready to advance. We don't auto-advance; the user clicks the
+     advance button on the previous step's email send (which has advanceTo). For sequences where
+     the trigger fires without an email click (e.g., booking arrives via Cal.com), the system
+     auto-advances elsewhere. Surface a generic "open" action as a fallback. */
+  return{bucket:'action',timing:_dn('Ready for next step','pa'),info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
+}
+
+/* Time-based booking stage handler (Screen/Interview/Onboarding booked) */
+function _sequenceBookingStage(c,cfg,info){
+  const st=c.st;
+  const m=st.booking?minsUntil(st.booking):null;
+  const d=st.booking?st.booking.slice(0,10):null;
+  const baseAction={kind:'questions',stage:cfg.questionsStage,nextStage:cfg.nextStageOnRun,cls:'sky'};
+  if(m!=null&&m<=5&&m>-150){
+    const cd=m>0?Math.ceil(m)+'m':'now';
+    return{bucket:'action',timing:_dn('Call now','pr2',fmtTime(st.booking)+' · in '+cd),info,primary:Object.assign({},baseAction,{label:(cfg.imminentLabel||'Run')+' · '+cd})};
+  }
+  if(m!=null&&m<=-150){
+    return{bucket:'action',timing:_dn('Overdue call — log result','pr2',fmtTime(st.booking)),info,primary:Object.assign({},baseAction,{label:cfg.runLabel||'Run'})};
+  }
+  if(d===today())return{bucket:'scheduled',timing:_dn('Today','pg',fmtTime(st.booking)),info,primary:Object.assign({},baseAction,{label:cfg.prepLabel||'Prep'})};
+  if(d&&d>today())return{bucket:'scheduled',timing:_dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking)),info,primary:Object.assign({},baseAction,{label:cfg.prepLabel||'Prep'})};
+  return{bucket:'action',timing:_dn('Booking time unknown','pa',''),info,primary:Object.assign({},baseAction,{label:cfg.runLabel||'Run'})};
+}
+
+/* Tiny helper used by sequence — matches the shape of the inline `dn` in the old action() */
+function _dn(txt,pill,date){return{txt:txt,pill:pill||'pnew',date:date||''};}
+
+
 function action(c){
   const s=c.stage,st=c.st,info=STAGEINFO[s]||STAGEINFO['Applied'];
   if(s==='Declined')return{bucket:'closed',info};
-  /* Manual awaiting flag — user can park a candidate in Awaiting from any non-closed stage to keep
-     them out of Action while waiting on external follow-up (e.g., candidate said "call me Tuesday").
-     Cleared via "Move out of awaiting" button in the workspace. New email arrival auto-clears it
-     so the user is alerted when the candidate responds. */
+  /* Manual awaiting flag — park candidate to suppress action prompts until they respond. */
   if(st.manualAwaiting&&s!=='Hired'&&s!=='Declined'){
-    /* Auto-release on new unread email (request #8 — surface advance option when they respond) */
     const emails=(st.emails||[]);
     const unread=emails.filter(e=>!e.seen);
     if(unread.length){
-      /* Don't clear the flag here — that's a write. Just route to action bucket so the candidate
-         surfaces, and the workspace will offer a "they responded — clear awaiting & advance" button. */
       const newest=unread[0];
       const subj=(newest.subject||'(no subject)').slice(0,60);
       return{bucket:'action',timing:{txt:'Responded while awaiting',pill:'pa',date:subj},info,primary:{kind:'open-email',emailId:newest.id,label:'✉ Open response ('+unread.length+')',cls:'sky'},manuallyAwaiting:true};
     }
     return{bucket:'awaiting',timing:{txt:st.awaitingReason||'Manually parked',pill:'psoft',date:st.awaitingUntil?('until '+fmtDay(st.awaitingUntil)):''},info,primary:{kind:'release-awaiting',label:'Move out of awaiting',cls:'sky'},manuallyAwaiting:true};
   }
-  /* Email-as-action: if candidate sent us mail since we last opened their workspace,
-     surface them as Action with primary = open the most recent unread.
-     This overrides whatever stage-driven primary would otherwise apply. */
+  /* Email-as-action: unread email overrides whatever stage-driven primary would apply. */
   const emails=(st.emails||[]);
   const unread=emails.filter(e=>!e.seen);
   if(unread.length){
@@ -2141,173 +2424,45 @@ function action(c){
     return{bucket:'action',timing:{txt:'New email from candidate',pill:'pa',date:subj},info,primary:{kind:'open-email',emailId:newest.id,label:'✉ Open new email ('+unread.length+')',cls:'sky'}};
   }
   const sc=scoreRow(c),gatesIncomplete=sc.gateStatus==='partial';
-  const m=st.booking?minsUntil(st.booking):null;
-  const dn=(txt,pill,date)=>({txt:txt,pill:pill||'pnew',date:date||''});
-  /* Only force "Request missing info" at the Applied stage. Once a candidate has been engaged
-     (Screen invite or beyond), incomplete gates shouldn't block the normal action flow — the user
-     can still ask for missing info via the email composer when they want to. Previously this
-     surfaced for every candidate whose `wa` (work auth) gate was unset, which happened for every
-     candidate added manually OR from older form submissions, drowning out everything else. */
+  /* Force "Request missing info" only at Applied stage */
   if(gatesIncomplete&&s==='Applied'){
-    return{bucket:'action',timing:dn('Request missing info','pnew'),info,primary:{kind:'email-info',label:'Request missing info',cls:'gold'},missing:sc.missingGates};
+    return{bucket:'action',timing:{txt:'Request missing info',pill:'pnew',date:''},info,primary:{kind:'email-info',label:'Request missing info',cls:'gold'},missing:sc.missingGates};
   }
-  let bucket,timing,primary,matchable;
-  if(s==='Hired'){matchable=st.reqCheck==='clear';bucket='hired';
-    timing=dn(matchable?'Patient-matchable':'Required check pending',matchable?'pg':'pa',st.due?('check-in '+fmtDay(st.due)):'');
-    primary={kind:'checkin',label:'Log check-in',cls:'grn'};}
-  else if(s==='Applied'){
+  /* Hired stage — special case: no "next" step, just check-ins */
+  if(s==='Hired'){
+    const matchable=st.reqCheck==='clear';
+    return{bucket:'hired',matchable,
+      timing:{txt:matchable?'Patient-matchable':'Required check pending',pill:matchable?'pg':'pa',date:st.due?('check-in '+fmtDay(st.due)):''},
+      info,primary:{kind:'checkin',label:'Log check-in',cls:'grn'}};
+  }
+  /* Applied-stage decline/review override (must happen BEFORE sequence — score gates inviting) */
+  if(s==='Applied'){
     const pq=predictedQuality(c);
-    const hasResume=!!(c.st&&c.st.hasResume);
-    const resumeRequested=!!(c.st&&c.st.sent&&c.st.sent.request_resume);
     if(sc.dec.cls==='red'||pq.tier==='decline'){
       const reasons=pq.tier==='decline'?pq.reasons:['Score below bar'];
-      bucket='action';
-      timing=dn('Decline recommended — '+reasons.slice(0,2).join(', '),'pr2');
-      primary={kind:'decline',label:'Decline & email',cls:'red'};
-    }else if(pq.tier==='review'){
-      bucket='action';
-      timing=dn('Review first — '+pq.reasons.slice(0,2).join(', '),'pa');
-      primary={kind:'open',label:'Review before inviting',cls:'gold'};
-    }else if(!hasResume&&!resumeRequested){
-      bucket='action';
-      timing=dn('No résumé on file — request it','pnew');
-      primary={kind:'email-tpl',tpl:'request_resume',markSent:true,label:'Request résumé',cls:'gold'};
-    }else if(!hasResume&&resumeRequested){
-      /* Awaiting candidate to send résumé. Nudge available; manual override via workspace buttons. */
-      bucket='awaiting';
-      timing=dn('Awaiting résumé from candidate','psoft',W&&W.row===c.excelRow?'open to override':'');
-      primary={kind:'email-tpl',tpl:'request_resume',label:'Send nudge',cls:'gold'};
-    }else{
-      bucket='action';
-      timing=dn('Send screen invite','pnew');
-      primary={kind:'email-tpl',tpl:'screen_invite',advanceTo:'Screen invite',label:'Send screen invite',cls:'gold'};
-    }}
-  else if(s==='Screen invite'||s==='Interview invite'){
-    const sent=s==='Screen invite'?(st.sent&&st.sent.screen_invite):(st.sent&&st.sent.interview_invite);
-    const tpl=s==='Screen invite'?'screen_invite':'interview_invite';
-    if(!sent){bucket='action';timing=dn('Send invite','pnew');primary={kind:'email-tpl',tpl:tpl,label:'Send invite',cls:'gold'};}
-    else{bucket='awaiting';timing=dn('Awaiting booking','psoft',st.due?('nudge '+fmtDay(st.due)):'');primary={kind:'email-tpl',tpl:s==='Screen invite'?'screen_nudge':'interview_invite',label:'Send nudge',cls:'gold'};}}
-  else if(s==='Screen booked'||s==='Interview booked'){
-    const d=st.booking?st.booking.slice(0,10):null;
-    const isScreen=s==='Screen booked';
-    /* Time-based bucket assignment:
-       - Within 5 min of call (or in-progress) → action bucket with countdown
-       - Same day but more than 5 min away → scheduled bucket
-       - Future day → scheduled bucket
-       - Overdue (past) → action bucket (need to deal with no-show or run late)
-       m = minutes until booking (negative = past) */
-    if(m!=null&&m<=5&&m>-150){
-      /* ≤30 min away or in-progress: action bucket, button shows countdown */
-      const cd=m>0?Math.ceil(m)+'m':'now';
-      bucket='action';timing=dn('Call now','pr2',fmtTime(st.booking)+' · in '+cd);
-      primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:(isScreen?'📞 Run phone screen':'🎥 Run interview')+' · '+cd,cls:'sky'};
+      return{bucket:'action',timing:{txt:'Decline recommended — '+reasons.slice(0,2).join(', '),pill:'pr2',date:''},info,primary:{kind:'decline',label:'Decline & email',cls:'red'}};
     }
-    else if(m!=null&&m<=-150){
-      /* Overdue (>2.5h past start) → flag for resolution */
-      bucket='action';timing=dn('Overdue call — log result','pr2',fmtTime(st.booking));
-      primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};
-    }
-    else if(d===today()){
-      /* Today, but more than 5 min away → scheduled bucket with prep button */
-      bucket='scheduled';timing=dn('Today','pg',fmtTime(st.booking));
-      primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Prep phone screen':'Prep interview',cls:'sky'};
-    }
-    else if(d&&d>today()){
-      /* Future day → scheduled bucket */
-      bucket='scheduled';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));
-      primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Prep phone screen':'Prep interview',cls:'sky'};
-    }
-    else{
-      /* No date or other unusual case */
-      bucket='action';timing=dn('Booking time unknown','pa','');
-      primary={kind:'questions',stage:isScreen?'Phone Screen':'Interview',nextStage:isScreen?'Ask references':'Offer',label:isScreen?'Run phone screen':'Run interview',cls:'sky'};
+    if(pq.tier==='review'){
+      return{bucket:'action',timing:{txt:'Review first — '+pq.reasons.slice(0,2).join(', '),pill:'pa',date:''},info,primary:{kind:'open',label:'Review before inviting',cls:'gold'}};
     }
   }
-  else if(s==='Ask references'){
-    const sent=st.sent&&st.sent.ask_references;
-    if(!sent){bucket='action';timing=dn('Send references request','pnew');primary={kind:'email-tpl',tpl:'ask_references',advanceTo:'Verify employers',label:'Send references request',cls:'gold'};}
-    else{bucket='awaiting';timing=dn('Awaiting references','psoft');primary={kind:'email-tpl',tpl:'ask_references',label:'Nudge for references',cls:'gold'};}}
-  else if(s==='Verify employers'){bucket='action';timing=dn('Verify past employers','pnew');primary={kind:'verify',label:'Open verify hub',cls:'sky'};}
-  else if(s==='References'){bucket='action';timing=dn('Call references','pnew');primary={kind:'refs',label:'Open reference hub',cls:'sky'};}
-  else if(s==='Interview invite'){
-    /* Interview invite stage kicks off background check in parallel — the candidate gets the
-       scheduling email FIRST (so they pick a time), then we initiate the BG check.
-       Yardstik replaces the manual bg_request email when it is configured (Account ID + Package
-       set). The yardstikEnabled toggle is NOT required here — if the user took the time to wire
-       up Yardstik, they almost certainly want it as the BG action. */
-    const sent=st.sent&&st.sent.interview_invite;
-    const yardstikReady=SETTINGS.config&&SETTINGS.config.yardstikAccountId&&SETTINGS.config.yardstikPackageId;
-    const yardstikOrdered=st.yardstik&&st.yardstik.candidateId;
-    const bgStarted=st.tpCheck||st.reqCheck||(st.sent&&st.sent.bg_request)||yardstikOrdered;
-    if(!sent){
-      const label=yardstikReady?'Send interview invite (BG check next)':'Send interview invite + BG request';
-      bucket='action';timing=dn('Send invite','pnew');primary={kind:'email-tpl',tpl:'interview_invite',label:label,cls:'gold'};
-    }
-    else if(!bgStarted&&yardstikReady){
-      /* Interview invite sent — surface Yardstik check as the very next primary action.
-         This is the requested flow: "the yardstik check should be an action button right after
-         the interview schedule link." */
-      bucket='action';timing=dn('Start background check','pa');primary={kind:'yardstik-order',label:'🛡 Start Yardstik check',cls:'gold'};
-    }
-    else if(!bgStarted){
-      bucket='action';timing=dn('Start background check','pnew');primary={kind:'email-tpl',tpl:'bg_request',label:'Send BG consent request',cls:'gold'};
-    }
-    else{
-      bucket='awaiting';timing=dn('Awaiting booking','psoft',st.due?('nudge '+fmtDay(st.due)):'');primary={kind:'email-tpl',tpl:'interview_invite',label:'Send nudge',cls:'gold'};
-    }
-  }
-  else if(s==='Offer'){
-    if(st.tpCheck==='clear'){bucket='action';timing=dn('Send offer','pa');primary={kind:'email-tpl',tpl:'offer',advanceTo:'Onboarding',label:'Send offer',cls:'grn'};}
-    else if(st.tpCheck==='flag'){bucket='action';timing=dn('Background flagged','pr2');primary={kind:'checks',label:'Review check result',cls:'red'};}
-    else{bucket='checks';timing=dn('BG check pending','psoft');primary={kind:'lock',label:'🔒 Awaiting check',cls:'lock'};}}
-  else if(s==='Onboarding'){
-    const sent=st.sent&&st.sent.onboarding;
-    if(!sent){bucket='action';timing=dn('Send onboarding invite','pa');primary={kind:'email-tpl',tpl:'onboarding',label:'Send onboarding invite',cls:'grn'};}
-    else{bucket='awaiting';timing=dn('Awaiting orientation booking','psoft',st.due?('nudge '+fmtDay(st.due)):'');primary={kind:'email-tpl',tpl:'onboarding',label:'Send nudge',cls:'gold'};}}
-  else if(s==='Onboarding booked'){
-    const d=st.booking?st.booking.slice(0,10):null;
-    if(m!=null&&m<=5&&m>-150){
-      const cd=m>0?Math.ceil(m)+'m':'now';
-      bucket='action';timing=dn('Orientation now','pr2',fmtTime(st.booking)+' · in '+cd);
-      primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'🎬 Run orientation · '+cd,cls:'grn'};
-    }
-    else if(m!=null&&m<=-150){bucket='action';timing=dn('Overdue orientation — log result','pr2',fmtTime(st.booking));primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'Run orientation',cls:'grn'};}
-    else if(d===today()){bucket='scheduled';timing=dn('Today','pg',fmtTime(st.booking));primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'Prep orientation',cls:'grn'};}
-    else if(d&&d>today()){bucket='scheduled';timing=dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking));primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'Prep orientation',cls:'grn'};}
-    else{bucket='action';timing=dn('Booking time unknown','pa','');primary={kind:'questions',stage:'Onboarding',nextStage:'Hired',label:'Run orientation',cls:'grn'};}
-  }
-  else if(isCustomStage(s)){
-    /* user-inserted milestone — manual advance only */
-    const eff=flowOrder();const idx=eff.indexOf(s);const next=idx>=0&&idx<eff.length-1?eff[idx+1]:'Hired';
-    bucket='action';timing=dn('Mark milestone complete','pnew');
-    primary={kind:'custom-advance',nextStage:next,label:'→ Mark complete & advance',cls:'sky'};
-  }
-  else{bucket='action';timing=dn(info.next,'pnew');primary={kind:'open',label:'Open',cls:'sky'};}
+  /* === SEQUENCE ENGINE — data-driven workflow === */
+  let result=sequenceAction(c,info);
 
-  /* Yardstik unprompted-order trigger — when the integration is enabled and the candidate is in
-     a stage where running a BG check makes sense (post-screen, pre-offer), AND no BG check has
-     been started yet (manual or Yardstik), surface "Start Yardstik check" as the primary action.
-     This overrides nothing else — it's a check INSIDE the per-stage branches above (Interview
-     invite handles it natively). For everything outside that, we surface as a secondary nudge. */
-  if(s==='Declined'){return{bucket:'closed',info};}
-  /* DECLINE-band override: if the candidate has been scored and the band is DECLINE (red),
-     replace whatever primary action was computed with "Send rejection email." */
+  /* === Cross-cutting overrides — applied AFTER sequence === */
+  /* DECLINE-band: scored DECLINE → swap primary to rejection email */
   if(sc.dec&&sc.dec.cls==='red'&&s!=='Declined'&&s!=='Hired'&&s!=='Applied'){
-    bucket='action';
-    timing=dn('Decline — score is '+sc.dec.band,'pr2');
-    primary={kind:'email-tpl',tpl:'reject',advanceTo:'Declined',label:'✕ Send rejection email',cls:'red'};
+    result.bucket='action';
+    result.timing={txt:'Decline — score is '+sc.dec.band,pill:'pr2',date:''};
+    result.primary={kind:'email-tpl',tpl:'reject',advanceTo:'Declined',label:'✕ Send rejection email',cls:'red'};
   }
-  /* BG-report-needs-decision override: when Yardstik flags a report as needing manual review
-     (`consider`/`pre_adverse`/`final_adverse`/etc.), surface a "Decide on BG report" action
-     above almost everything else — except an already-decided decline. The user explicitly asked
-     for this: when a flagged report comes back, push the candidate up to action-needed with a
-     decide button + note input. */
+  /* BG-report-needs-decision: Yardstik flagged report */
   if(st.yardstik&&st.yardstik.decisionRequired&&s!=='Declined'&&s!=='Hired'){
-    bucket='action';
-    timing=dn('Background check flagged — review report','pr2');
-    primary={kind:'bg-decision',label:'⚠ Decide on background report',cls:'gold'};
+    result.bucket='action';
+    result.timing={txt:'Background check flagged — review report',pill:'pr2',date:''};
+    result.primary={kind:'bg-decision',label:'⚠ Decide on background report',cls:'gold'};
   }
-  return{bucket,timing,info,primary,matchable};
+  return result;
 }
 
 /* ===================== filter ===================== */
@@ -6262,6 +6417,7 @@ function setSettingsSection(k){settingsSection=k;renderSettings();}
 
 const SETTINGS_SECTIONS=[
   {key:'workflow',  label:'Workflow & stages',    icon:'⚐'},
+  {key:'sequence',  label:'Sequence engine',      icon:'⚡'},
   {key:'templates', label:'Email templates',      icon:'✉'},
   {key:'scripts',   label:'Call scripts',         icon:'☎'},
   {key:'pipeline',  label:'Pipeline config',      icon:'⚙'},
@@ -6368,6 +6524,7 @@ function renderSettings(){
     body=_renderLockwall(lbl);
   }
   else if(settingsSection==='workflow') body=renderSettingsWorkflow();
+  else if(settingsSection==='sequence') body=renderSettingsSequence();
   else if(settingsSection==='templates') body=renderSettingsTemplates();
   else if(settingsSection==='scripts') body=renderSettingsScripts();
   else if(settingsSection==='pipeline') body=renderSettingsPipeline();
@@ -6399,6 +6556,406 @@ function renderSettings(){
 }
 
 /* ----- WORKFLOW section ----- */
+function renderSettingsSequence(){
+  const seq=getActiveSequence();
+  const isCustom=!!(SETTINGS.sequence&&Array.isArray(SETTINGS.sequence)&&SETTINGS.sequence.length);
+  const tplOptions=Object.keys(TEMPLATE_LABELS).filter(k=>k!=='application_confirmation').map(k=>`<option value="${esc(k)}">${esc(TEMPLATE_LABELS[k])}</option>`).join('');
+  const trigOptions=Object.keys(TRIGGERS).sort().map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  const jsonStr=JSON.stringify(seq,null,2);
+
+  return `<div class="wscard">
+    <h3>⚡ Sequence engine ${isCustom?'<span class="pill pg" style="font-size:9px;margin-left:6px">CUSTOMIZED</span>':'<span class="pill psoft" style="font-size:9px;margin-left:6px">DEFAULTS</span>'}</h3>
+    <p class="set-help">This is the workflow that drives every candidate's next-step button. Each stage has an action (typically an email to send), a trigger that advances to the next stage, and a fallback "nudge" action while awaiting that trigger. Drag the ⋮⋮ handle to reorder, edit any field inline, or use the JSON editor below for bulk changes.</p>
+    <p class="set-help" style="margin-top:6px;font-size:11.5px;color:var(--soft)"><b>Triggers</b> are named conditions: <code>hasResume</code>, <code>hasBooking</code>, <code>tpCheckClear</code>, <code>employersVerified</code>, etc. Prefix with <code>!</code> to negate. Per-template triggers like <code>screen_inviteSent</code> are auto-derived from your email templates.</p>
+
+    <div id="seq-list" style="margin-top:16px;display:flex;flex-direction:column;gap:10px" ondragover="event.preventDefault()">
+      ${seq.map((stage,idx)=>_seqStageCard(stage,idx,seq.length,tplOptions,trigOptions)).join('')}
+    </div>
+
+    <div class="set-row" style="margin-top:14px;gap:8px;flex-wrap:wrap">
+      <button class="btn-sec bg-cream" onclick="seqAddStage('standard')" style="padding:8px 14px">+ Add standard stage</button>
+      <button class="btn-sec bg-cream" onclick="seqAddStage('time')" style="padding:8px 14px">+ Add time-based stage</button>
+      <button class="btn-sec bg-cream" onclick="seqAddStage('rule')" style="padding:8px 14px">+ Add branching stage</button>
+      ${isCustom?'<button class="btn-sec" style="background:#FFF6E6;color:#8B6500;border:1.5px solid var(--gold-mid);padding:8px 14px" onclick="seqResetToDefaults()">↺ Reset to defaults</button>':''}
+      <div style="flex:1"></div>
+      <button class="btn-primary bg-grn" onclick="seqSave()" style="padding:8px 16px">Save sequence</button>
+    </div>
+  </div>
+
+  <details class="wscard" style="margin-top:14px;background:#FAFAF7">
+    <summary style="font-weight:700;color:var(--ink);cursor:pointer;font-size:13.5px;padding:4px 0">📄 JSON view / export / import</summary>
+    <p class="set-help" style="margin-top:8px">Raw config — copy to back up, paste a new one to import. Click "Apply JSON" to load. Changes still require "Save sequence" to persist.</p>
+    <textarea id="seq-json" style="width:100%;min-height:300px;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:Menlo,monospace;font-size:11.5px;outline:none;background:#fff;resize:vertical;margin-top:8px">${esc(jsonStr)}</textarea>
+    <div class="set-row" style="margin-top:8px;gap:6px">
+      <button class="btn-sec bg-cream" onclick="seqJsonCopy()" style="padding:6px 12px;font-size:12px">📋 Copy</button>
+      <button class="btn-sec bg-cream" onclick="seqJsonApply()" style="padding:6px 12px;font-size:12px">↓ Apply JSON to editor</button>
+      <button class="btn-sec bg-cream" onclick="seqJsonDownload()" style="padding:6px 12px;font-size:12px">⬇ Download as file</button>
+    </div>
+  </details>
+
+  <div class="wscard" style="margin-top:16px;background:#FAF6EE">
+    <h4 style="margin:0 0 8px;color:var(--gold-deep);font-size:13px">📖 Trigger reference</h4>
+    <p style="font-size:11.5px;color:var(--mid);line-height:1.5;margin:0">Triggers are evaluated against each candidate. Most common:</p>
+    <ul style="font-size:11.5px;color:var(--mid);line-height:1.7;margin:6px 0 0;padding-left:20px;columns:2;gap:18px">
+      <li><code>hasResume</code> — résumé file is on record</li>
+      <li><code>hasBooking</code> — Cal.com booking received</li>
+      <li><code>bookingImminent</code> — booking within 5min</li>
+      <li><code>hasRefs</code> — at least 2 references on file</li>
+      <li><code>employersVerified</code> — all employers verified/unable/denied</li>
+      <li><code>tpCheckClear</code> — background check passed</li>
+      <li><code>tpCheckFlag</code> — background flagged</li>
+      <li><code>yardstikReady</code> — Yardstik configured in settings</li>
+      <li><code>yardstikOrdered</code> — Yardstik check ordered</li>
+      <li><code>bgStarted</code> — any BG flow has begun</li>
+      <li><code>screenDone</code> — phone screen answered</li>
+      <li><code>{tpl}Sent</code> — that specific email was sent</li>
+      <li><code>!trigger</code> — negation prefix</li>
+      <li><code>always</code> / <code>never</code> — constants</li>
+    </ul>
+  </div>`;
+}
+
+/* Render a single stage card. Three shapes share a unified envelope (drag handle, header,
+   action buttons) but have different body content based on stage type. */
+function _seqStageCard(stage,idx,total,tplOptions,trigOptions){
+  const i=idx;
+  const isTimeBased=!!stage.timeBased;
+  const isRuleBased=!!Array.isArray(stage.rules);
+  const kindBadge=isTimeBased?'<span class="pill psoft" style="font-size:9px">⏱ TIME-BASED</span>':isRuleBased?'<span class="pill psoft" style="font-size:9px">⑂ BRANCHING</span>':'<span class="pill psoft" style="font-size:9px">→ STANDARD</span>';
+
+  const header=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span class="seq-drag" draggable="true" ondragstart="seqDragStart(event,${i})" ondragend="seqDragEnd(event)" style="cursor:grab;font-size:14px;color:var(--soft);padding:4px 2px;user-select:none" title="Drag to reorder">⋮⋮</span>
+    <input value="${esc(stage.icon||'')}" onchange="seqEdit(${i},'icon',this.value)" style="width:36px;text-align:center;padding:4px;border:1.5px solid var(--border);border-radius:6px;font-size:16px" maxlength="2">
+    <input value="${esc(stage.key)}" onchange="seqEdit(${i},'key',this.value)" style="flex:1;padding:6px 10px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:13.5px;font-weight:700" placeholder="Stage key">
+    ${kindBadge}
+    <button class="btn-sm bg-cream" onclick="seqDuplicate(${i})" title="Duplicate this stage">⎘</button>
+    <button class="btn-sm bg-cream" onclick="seqMove(${i},-1)" ${i===0?'disabled':''} title="Move up">↑</button>
+    <button class="btn-sm bg-cream" onclick="seqMove(${i},1)" ${i===total-1?'disabled':''} title="Move down">↓</button>
+    <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff" onclick="seqRemove(${i})" title="Remove stage">×</button>
+  </div>`;
+
+  let body;
+  if(isRuleBased)body=_seqRuleBody(stage,i,tplOptions,trigOptions);
+  else if(isTimeBased)body=_seqTimeBody(stage,i);
+  else body=_seqStandardBody(stage,i,tplOptions,trigOptions);
+
+  return `<div class="seq-card" data-seq-idx="${i}"
+    ondragover="seqDragOver(event,${i})"
+    ondragleave="seqDragLeave(event)"
+    ondrop="seqDrop(event,${i})"
+    style="background:#fff;border:1px solid var(--border);border-radius:9px;padding:11px 13px;transition:all .15s">
+    ${header}
+    ${body}
+  </div>`;
+}
+
+function _seqStandardBody(stage,i,tplOptions,trigOptions){
+  const action=stage.action||{};
+  const await_=stage.awaitingAction||{};
+  /* Pre-select the current values in the dropdowns by substituting in a `selected` attr */
+  const tplSel=tplOptions.replace(new RegExp('value="'+_reEsc(action.tpl||'')+'"'),'value="'+esc(action.tpl||'')+'" selected');
+  const awaitTplSel=tplOptions.replace(new RegExp('value="'+_reEsc(await_.tpl||'')+'"'),'value="'+esc(await_.tpl||'')+'" selected');
+  const trigSel=trigOptions.replace(new RegExp('value="'+_reEsc(stage.awaitTrigger||'')+'"'),'value="'+esc(stage.awaitTrigger||'')+'" selected');
+  const skipSel=trigOptions.replace(new RegExp('value="'+_reEsc(stage.skipActionIf||'')+'"'),'value="'+esc(stage.skipActionIf||'')+'" selected');
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:3px;letter-spacing:.05em">When entered → action</div>
+      <select onchange="seqEditAction(${i},'tpl',this.value)" style="width:100%;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">
+        <option value="">— no action —</option>${tplSel}
+      </select>
+      <input value="${esc(action.label||'')}" onchange="seqEditAction(${i},'label',this.value)" placeholder="Button label" style="width:100%;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:11.5px;margin-top:4px">
+    </div>
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:3px;letter-spacing:.05em">Then wait for trigger</div>
+      <select onchange="seqEdit(${i},'awaitTrigger',this.value)" style="width:100%;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">${trigSel}</select>
+      <input value="${esc(stage.awaitingLabel||'')}" onchange="seqEdit(${i},'awaitingLabel',this.value)" placeholder="Awaiting label" style="width:100%;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:11.5px;margin-top:4px">
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:3px;letter-spacing:.05em">Nudge while awaiting</div>
+      <select onchange="seqEditAwaiting(${i},'tpl',this.value)" style="width:100%;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">
+        <option value="">— same as primary —</option>${awaitTplSel}
+      </select>
+    </div>
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:3px;letter-spacing:.05em">Advance to stage</div>
+      <input value="${esc(stage.advanceTo||'')}" onchange="seqEdit(${i},'advanceTo',this.value)" placeholder="Next stage" style="width:100%;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">
+    </div>
+  </div>
+  <details style="margin-top:8px">
+    <summary style="font-size:10.5px;font-weight:700;color:var(--soft);cursor:pointer;text-transform:uppercase;letter-spacing:.05em">Advanced</summary>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
+      <div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:3px">Skip action if trigger</div>
+        <select onchange="seqEdit(${i},'skipActionIf',this.value)" style="width:100%;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">
+          <option value="">— never skip —</option>${skipSel}
+        </select>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:3px">Button color</div>
+        <select onchange="seqEditAction(${i},'cls',this.value)" style="width:100%;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">
+          ${['gold','sky','grn','red'].map(c=>`<option value="${c}"${(action.cls||'gold')===c?' selected':''}>${c}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+  </details>`;
+}
+
+function _seqTimeBody(stage,i){
+  const qStages=['Phone Screen','Interview','Onboarding','Reference'];
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:3px;letter-spacing:.05em">Questions stage (QBANK key)</div>
+      <select onchange="seqEdit(${i},'questionsStage',this.value)" style="width:100%;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">
+        ${qStages.map(q=>`<option value="${esc(q)}"${stage.questionsStage===q?' selected':''}>${esc(q)}</option>`).join('')}
+      </select>
+    </div>
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:3px;letter-spacing:.05em">Advance to on completion</div>
+      <input value="${esc(stage.nextStageOnRun||'')}" onchange="seqEdit(${i},'nextStageOnRun',this.value)" placeholder="e.g. Offer" style="width:100%;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+    <input value="${esc(stage.imminentLabel||'')}" onchange="seqEdit(${i},'imminentLabel',this.value)" placeholder="Imminent label (≤5min)" style="padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:11.5px">
+    <input value="${esc(stage.prepLabel||'')}" onchange="seqEdit(${i},'prepLabel',this.value)" placeholder="Prep label" style="padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:11.5px">
+    <input value="${esc(stage.runLabel||'')}" onchange="seqEdit(${i},'runLabel',this.value)" placeholder="Run label" style="padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:11.5px">
+  </div>
+  <div style="font-size:10.5px;color:var(--soft);margin-top:6px"><b>Time-based stage:</b> within 5min of booking → imminent action. Same day → "Prep". Future day → "Prep" in scheduled bucket. Overdue → run/log result.</div>`;
+}
+
+function _seqRuleBody(stage,i,tplOptions,trigOptions){
+  const rules=stage.rules||[];
+  const rulesHtml=rules.map((r,ri)=>{
+    const trigSel=trigOptions.replace(new RegExp('value="'+_reEsc(r.when||'')+'"'),'value="'+esc(r.when||'')+'" selected');
+    const tplSel=tplOptions.replace(new RegExp('value="'+_reEsc((r.action&&r.action.tpl)||'')+'"'),'value="'+esc((r.action&&r.action.tpl)||'')+'" selected');
+    const buckets=['action','awaiting','scheduled','checks'];
+    return `<div style="background:var(--cream);border:1px solid var(--border);border-radius:7px;padding:8px 10px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+        <span style="font-size:11px;font-weight:700;color:var(--soft)">RULE ${ri+1}</span>
+        <span style="font-size:11px;color:var(--soft)">when</span>
+        <select onchange="seqEditRule(${i},${ri},'when',this.value)" style="flex:1;padding:5px 7px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px">${trigSel}</select>
+        <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff" onclick="seqRemoveRule(${i},${ri})">×</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div>
+          <div style="font-size:9px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:2px">Action template</div>
+          <select onchange="seqEditRuleAction(${i},${ri},'tpl',this.value)" style="width:100%;padding:5px 7px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px">
+            <option value="">— no email —</option>${tplSel}
+          </select>
+        </div>
+        <div>
+          <div style="font-size:9px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:2px">Bucket</div>
+          <select onchange="seqEditRule(${i},${ri},'bucket',this.value)" style="width:100%;padding:5px 7px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px">
+            ${buckets.map(b=>`<option value="${b}"${r.bucket===b?' selected':''}>${b}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px">
+        <input value="${esc(r.label||'')}" onchange="seqEditRule(${i},${ri},'label',this.value)" placeholder="Timing label" style="padding:5px 7px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px">
+        <input value="${esc((r.action&&r.action.label)||'')}" onchange="seqEditRuleAction(${i},${ri},'label',this.value)" placeholder="Button label" style="padding:5px 7px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px">
+        <input value="${esc((r.action&&r.action.advanceTo)||'')}" onchange="seqEditRuleAction(${i},${ri},'advanceTo',this.value)" placeholder="Advance to" style="padding:5px 7px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px">
+      </div>
+    </div>`;
+  }).join('');
+  return `<div style="font-size:10.5px;color:var(--soft);margin-bottom:8px"><b>Branching stage:</b> rules evaluated top-to-bottom; first matching rule wins. Use this when a stage has multiple possible paths based on state (e.g., Offer: tpCheckClear → send offer; tpCheckFlag → review; else → lock).</div>
+  ${rulesHtml||'<div style="font-style:italic;color:var(--soft);padding:6px">No rules yet.</div>'}
+  <button class="btn-sm bg-cream" onclick="seqAddRule(${i})" style="margin-top:4px">+ Add rule</button>`;
+}
+
+/* In-memory draft of the sequence — edits don't write until "Save sequence" clicked */
+let _seqDraft=null;
+function _seqEnsureDraft(){
+  if(!_seqDraft)_seqDraft=JSON.parse(JSON.stringify(getActiveSequence()));
+  return _seqDraft;
+}
+/* Tiny regex-escape helper — used to safely build the `selected` substitution patterns above */
+function _reEsc(s){return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
+
+function seqEdit(idx,field,value){
+  const d=_seqEnsureDraft();
+  if(!d[idx])return;
+  d[idx][field]=value;
+}
+function seqEditAction(idx,field,value){
+  const d=_seqEnsureDraft();
+  if(!d[idx])return;
+  if(!d[idx].action)d[idx].action={kind:'email-tpl',cls:'gold'};
+  if(field==='tpl'){
+    if(!value){d[idx].action=null;}
+    else{d[idx].action.tpl=value;d[idx].action.kind='email-tpl';if(!d[idx].action.cls)d[idx].action.cls='gold';}
+  }else{
+    d[idx].action[field]=value;
+  }
+}
+function seqEditAwaiting(idx,field,value){
+  const d=_seqEnsureDraft();
+  if(!d[idx])return;
+  if(field==='tpl'){
+    if(!value){d[idx].awaitingAction=null;}
+    else{
+      d[idx].awaitingAction=d[idx].awaitingAction||{kind:'email-tpl',cls:'gold',label:'Send nudge'};
+      d[idx].awaitingAction.tpl=value;d[idx].awaitingAction.kind='email-tpl';
+    }
+  }
+}
+function seqEditRule(idx,ri,field,value){
+  const d=_seqEnsureDraft();
+  if(!d[idx]||!d[idx].rules||!d[idx].rules[ri])return;
+  d[idx].rules[ri][field]=value;
+}
+function seqEditRuleAction(idx,ri,field,value){
+  const d=_seqEnsureDraft();
+  if(!d[idx]||!d[idx].rules||!d[idx].rules[ri])return;
+  if(!d[idx].rules[ri].action)d[idx].rules[ri].action={kind:'email-tpl',cls:'gold'};
+  if(field==='tpl'&&!value){d[idx].rules[ri].action=null;return;}
+  if(field==='tpl'){d[idx].rules[ri].action.kind='email-tpl';d[idx].rules[ri].action.cls=d[idx].rules[ri].action.cls||'gold';}
+  d[idx].rules[ri].action[field]=value;
+}
+function seqAddRule(idx){
+  const d=_seqEnsureDraft();
+  if(!d[idx])return;
+  d[idx].rules=d[idx].rules||[];
+  d[idx].rules.push({when:'always',action:{kind:'open',label:'Open',cls:'sky'},bucket:'action',label:'New rule'});
+  renderSettings();
+}
+function seqRemoveRule(idx,ri){
+  const d=_seqEnsureDraft();
+  if(!d[idx]||!d[idx].rules)return;
+  d[idx].rules.splice(ri,1);
+  renderSettings();
+}
+function seqMove(idx,delta){
+  const d=_seqEnsureDraft();
+  const newIdx=idx+delta;
+  if(newIdx<0||newIdx>=d.length)return;
+  const item=d.splice(idx,1)[0];
+  d.splice(newIdx,0,item);
+  renderSettings();
+}
+function seqRemove(idx){
+  const d=_seqEnsureDraft();
+  if(!confirm('Remove stage "'+d[idx].key+'"? Candidates currently in this stage will lose their next-step button until you save or undo.'))return;
+  d.splice(idx,1);
+  renderSettings();
+}
+function seqDuplicate(idx){
+  const d=_seqEnsureDraft();
+  if(!d[idx])return;
+  const clone=JSON.parse(JSON.stringify(d[idx]));
+  /* Add suffix to avoid duplicate-key conflict on save */
+  clone.key=clone.key+' (copy)';
+  d.splice(idx+1,0,clone);
+  renderSettings();
+}
+function seqAddStage(kind){
+  const key=prompt('New stage key (used internally and as display name):');
+  if(!key||!key.trim())return;
+  const d=_seqEnsureDraft();
+  let stage;
+  if(kind==='time'){
+    stage={key:key.trim(),icon:'⏱',timeBased:true,questionsStage:'Phone Screen',nextStageOnRun:'',imminentLabel:'Run now',prepLabel:'Prep',runLabel:'Run'};
+  }else if(kind==='rule'){
+    stage={key:key.trim(),icon:'⑂',rules:[{when:'always',action:{kind:'open',label:'Open',cls:'sky'},bucket:'action',label:'Default'}]};
+  }else{
+    stage={key:key.trim(),icon:'•',action:{kind:'email-tpl',tpl:'',label:'Action',cls:'gold'},awaitTrigger:'always',advanceTo:''};
+  }
+  d.push(stage);
+  renderSettings();
+}
+async function seqSave(){
+  if(!_seqDraft){toast('No changes to save');return;}
+  const keys=_seqDraft.map(s=>s.key);
+  const dupes=keys.filter((k,i)=>keys.indexOf(k)!==i);
+  if(dupes.length){toast('Duplicate stage keys: '+dupes.join(', '));return;}
+  SETTINGS.sequence=_seqDraft;
+  await saveSettings();
+  _seqDraft=null;
+  toast('✓ Sequence saved');
+  renderSettings();
+}
+async function seqResetToDefaults(){
+  if(!confirm('Reset the sequence to factory defaults? Your custom edits will be lost.'))return;
+  delete SETTINGS.sequence;
+  _seqDraft=null;
+  await saveSettings();
+  toast('✓ Reset to defaults');
+  renderSettings();
+}
+
+/* ----- JSON view/import/export ----- */
+function seqJsonCopy(){
+  const el=document.getElementById('seq-json');if(!el)return;
+  navigator.clipboard.writeText(el.value).then(()=>toast('✓ Copied to clipboard')).catch(()=>{
+    /* Fallback selection-based copy */
+    el.select();document.execCommand('copy');toast('✓ Copied');
+  });
+}
+function seqJsonApply(){
+  const el=document.getElementById('seq-json');if(!el)return;
+  let parsed;
+  try{parsed=JSON.parse(el.value);}catch(e){toast('Invalid JSON: '+e.message);return;}
+  if(!Array.isArray(parsed)){toast('JSON must be an array of stage objects');return;}
+  if(!parsed.every(s=>s&&typeof s==='object'&&s.key)){toast('Every stage needs a "key" field');return;}
+  _seqDraft=parsed;
+  toast('✓ JSON applied to editor — click "Save sequence" to persist');
+  renderSettings();
+}
+function seqJsonDownload(){
+  const el=document.getElementById('seq-json');if(!el)return;
+  const blob=new Blob([el.value],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='solura-sequence-'+today()+'.json';
+  document.body.appendChild(a);a.click();a.remove();
+  URL.revokeObjectURL(url);
+  toast('✓ Downloaded');
+}
+
+/* ----- HTML5 drag-drop reorder -----
+   Track the dragged-from index on dragstart; on drop, splice it to the target position. */
+let _seqDragFrom=null;
+function seqDragStart(e,idx){
+  _seqDragFrom=idx;
+  e.dataTransfer.effectAllowed='move';
+  /* setData required for Firefox */
+  try{e.dataTransfer.setData('text/plain',String(idx));}catch(err){}
+  e.target.closest('.seq-card').style.opacity='0.4';
+}
+function seqDragEnd(e){
+  const card=e.target.closest&&e.target.closest('.seq-card');if(card)card.style.opacity='';
+  document.querySelectorAll('.seq-card').forEach(c=>{c.style.borderTopColor='';c.style.borderBottomColor='';c.style.transform='';});
+}
+function seqDragOver(e,idx){
+  e.preventDefault();
+  e.dataTransfer.dropEffect='move';
+  if(_seqDragFrom==null||_seqDragFrom===idx)return;
+  /* Visual indicator: which side of the target we'll drop on */
+  const card=e.currentTarget;
+  const rect=card.getBoundingClientRect();
+  const above=(e.clientY-rect.top)<rect.height/2;
+  card.style.borderTopColor=above?'var(--gold)':'';
+  card.style.borderBottomColor=!above?'var(--gold)':'';
+}
+function seqDragLeave(e){
+  const card=e.currentTarget;
+  card.style.borderTopColor='';
+  card.style.borderBottomColor='';
+}
+function seqDrop(e,idx){
+  e.preventDefault();
+  if(_seqDragFrom==null||_seqDragFrom===idx){_seqDragFrom=null;return;}
+  const d=_seqEnsureDraft();
+  const rect=e.currentTarget.getBoundingClientRect();
+  const above=(e.clientY-rect.top)<rect.height/2;
+  const targetIdx=above?idx:idx+1;
+  const adjusted=_seqDragFrom<targetIdx?targetIdx-1:targetIdx;
+  const item=d.splice(_seqDragFrom,1)[0];
+  d.splice(adjusted,0,item);
+  _seqDragFrom=null;
+  renderSettings();
+}
+
 function renderSettingsWorkflow(){
   return `<div class="wscard">
     <p class="set-help">Drag stages by the <b>≡</b> handle to reorder. Click ✎ to rename the display label (the internal key stays stable, so transitions keep working). "+ Insert milestone" adds a manual checkpoint between two stages — you advance through it by hand from the candidate workspace.</p>
@@ -7826,7 +8383,13 @@ function _autoResetAfterExport(count,kind){
 
 <script>
 /* (post-FAB script — initialize the badge on load in case the FAB rendered after the IIFE) */
-function _fbReady(){if(typeof updateFabBadge==='function')updateFabBadge();}
+function _fbReady(){
+  if(typeof updateFabBadge==='function')updateFabBadge();
+  /* Derive per-template "<tpl>Sent" / "<tpl>NotSent" triggers now that TEMPLATE_LABELS exists.
+     The sequence engine uses these to check whether a specific email was sent (e.g.,
+     'screen_inviteSent' is the trigger string the sequence config can reference). */
+  if(typeof _initEmailTriggers==='function')_initEmailTriggers();
+}
 document.addEventListener('DOMContentLoaded',_fbReady);
 </script>
 </body>
