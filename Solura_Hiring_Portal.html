@@ -2226,6 +2226,54 @@ async function loadData(){
     if(!row||row[2]===''||row[2]==null){if(nextRow===null)nextRow=i+1;continue;}
     pipeline.push(cardOf(i,row));}
   if(nextRow===null)nextRow=vals.length+1;pipeline.reverse();
+  /* Auto-heal stuck awaiting candidates — runs once per page load. Fixes:
+       (1) hasResume=Y but still parked with awaitingReason matching résumé/resume
+       (2) awaitingItems contains a resume entry but hasResume=Y (drain it)
+       (3) manualAwaiting=true with empty awaitingItems queue (initial count > 0)
+     Each heal calls patchRange asynchronously so the load doesn't block on N writes. */
+  let healed=0;
+  for(const c of pipeline){
+    if(!c.st||!c.st.manualAwaiting)continue;
+    const hasResume=(c.row[6]==='Y')||c.st.hasResume;
+    let touched=false;
+    /* Case (2): awaitingItems still contains resume but candidate has one */
+    if(hasResume&&(c.st.awaitingItems||[]).some(a=>a.kind==='resume')){
+      c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='resume');
+      touched=true;
+    }
+    /* Case (1): legacy candidates without awaitingItems tracking — only release if the parking
+       reason clearly indicates we were waiting for the résumé. Don't touch candidates parked
+       for other reasons (e.g. "Awaiting reply about start date"). */
+    const reasonMentionsResume=c.st.awaitingReason&&/résumé|resume|cv/i.test(c.st.awaitingReason);
+    if(hasResume&&reasonMentionsResume&&(!c.st.awaitingItems||c.st.awaitingItems.length===0)){
+      delete c.st.manualAwaiting;
+      delete c.st.awaitingReason;
+      delete c.st.awaitingUntil;
+      delete c.st.awaitingSince;
+      delete c.st.awaitingItemsInitialCount;
+      delete c.st.lastAwaitingReview;
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-healed — résumé on file, released from awaiting'});
+      touched=true;
+      healed++;
+    }
+    /* Case (3): awaitingItems is empty (all drained via earlier assignments) but they stayed parked. */
+    else if(c.st.manualAwaiting&&Array.isArray(c.st.awaitingItems)&&c.st.awaitingItems.length===0&&c.st.awaitingItemsInitialCount>0){
+      delete c.st.manualAwaiting;
+      delete c.st.awaitingReason;
+      delete c.st.awaitingUntil;
+      delete c.st.awaitingSince;
+      delete c.st.awaitingItemsInitialCount;
+      delete c.st.lastAwaitingReview;
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-healed — awaiting queue empty, released'});
+      touched=true;
+      healed++;
+    }
+    if(touched){
+      /* Fire-and-forget persist — load shouldn't block. */
+      patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(e=>console.warn('Heal write failed for row '+c.excelRow+':',e.message));
+    }
+  }
+  if(healed)console.info('Auto-healed '+healed+' stuck awaiting candidate'+(healed===1?'':'s'));
   document.getElementById('sync-time').textContent='Synced '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
   render();
 }
@@ -3262,10 +3310,14 @@ async function releaseAwaiting(){
   delete W.st.manualAwaiting;
   delete W.st.awaitingReason;
   delete W.st.awaitingUntil;
+  delete W.st.awaitingSince;
+  delete W.st.awaitingItemsInitialCount;
+  delete W.st.lastAwaitingReview;
   logW('Resumed from awaiting');
   await saveW(true);
-  toast('▶ Resumed');
+  toast('▶ Resumed — next step now available');
   renderWorkspace();
+  render();
 }
 async function declineCandidate(){
   if(!confirm('Decline this candidate? They will move to the Declined bucket and be removed from active pipeline. You can manually reverse this later via the workspace.'))return;
