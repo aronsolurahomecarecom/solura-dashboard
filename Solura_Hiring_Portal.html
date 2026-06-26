@@ -2569,16 +2569,48 @@ function _dn(txt,pill,date){return{txt:txt,pill:pill||'pnew',date:date||''};}
 function action(c){
   const s=c.stage,st=c.st,info=STAGEINFO[s]||STAGEINFO['Applied'];
   if(s==='Declined')return{bucket:'closed',info};
-  /* Manual awaiting flag — park candidate to suppress action prompts until they respond. */
+  /* SMART AWAITING — when manually parked, surface temporarily on ANY new activity:
+       - Unread email reply
+       - New Cal.com booking that arrived after the park
+       - New attachment landed and was assigned (resume/cert showed up)
+     After the user reviews, they decide: keep parked (if request still pending), release
+     (request fulfilled), or cancel the original request entirely. If all awaitingItems get
+     drained via attachment assignment, the candidate auto-releases. */
   if(st.manualAwaiting&&s!=='Hired'&&s!=='Declined'){
     const emails=(st.emails||[]);
     const unread=emails.filter(e=>!e.seen);
+    /* Check for "new activity since the user last reviewed" — re-surface only on FRESH events,
+       not the same one over and over. lastAwaitingReview is stamped in openWorkspace() when the
+       user opens a parked candidate, so opening + closing the workspace effectively dismisses the
+       surface. */
+    const reviewedAt=st.lastAwaitingReview?new Date(st.lastAwaitingReview).getTime():(st.awaitingSince?new Date(st.awaitingSince).getTime():0);
+    /* Booking arrived after review */
+    const bookingFresh=st.booking&&st.bookingReceivedAt&&new Date(st.bookingReceivedAt).getTime()>reviewedAt;
+    /* Attachment assigned after review */
+    const assignmentFresh=st.lastAssignmentAt&&new Date(st.lastAssignmentAt).getTime()>reviewedAt;
+    /* Awaiting queue fully drained from its initial parked state */
+    const awaitingItems=st.awaitingItems||[];
+    const allFulfilled=st.awaitingItemsInitialCount>0&&awaitingItems.length===0;
+    if(allFulfilled){
+      return{bucket:'action',timing:{txt:'✓ All awaited items received',pill:'pg',date:''},info,primary:{kind:'release-awaiting',label:'✓ Release from awaiting',cls:'grn'},manuallyAwaiting:true};
+    }
     if(unread.length){
       const newest=unread[0];
       const subj=(newest.subject||'(no subject)').slice(0,60);
-      return{bucket:'action',timing:{txt:'Responded while awaiting',pill:'pa',date:subj},info,primary:{kind:'open-email',emailId:newest.id,label:'✉ Open response ('+unread.length+')',cls:'sky'},manuallyAwaiting:true};
+      return{bucket:'action',timing:{txt:'Responded while awaiting',pill:'pa',date:subj},info,primary:{kind:'open-email',emailId:newest.id,label:'✉ Open response ('+unread.length+')',cls:'sky'},manuallyAwaiting:true,awaitingReSurfaceReason:'email'};
     }
-    return{bucket:'awaiting',timing:{txt:st.awaitingReason||'Manually parked',pill:'psoft',date:st.awaitingUntil?('until '+fmtDay(st.awaitingUntil)):''},info,primary:{kind:'release-awaiting',label:'Move out of awaiting',cls:'sky'},manuallyAwaiting:true};
+    if(bookingFresh){
+      const m=minsUntil(st.booking);
+      const when=m>0?fmtDay(st.booking):'past due';
+      return{bucket:'action',timing:{txt:'Booking arrived while awaiting',pill:'pnew',date:when},info,primary:{kind:'open',label:'📅 Review new booking',cls:'sky'},manuallyAwaiting:true,awaitingReSurfaceReason:'booking'};
+    }
+    if(assignmentFresh){
+      const remaining=awaitingItems.length;
+      return{bucket:'action',timing:{txt:'New document assigned',pill:'pnew',date:remaining+' more awaited'},info,primary:{kind:'open',label:'📎 Review — '+remaining+' awaited remaining',cls:'gold'},manuallyAwaiting:true,awaitingReSurfaceReason:'attachment'};
+    }
+    /* No new activity — silently parked. */
+    const awaitingItemsLabel=awaitingItems.length?(' ('+awaitingItems.length+' item'+(awaitingItems.length===1?'':'s')+')'):'';
+    return{bucket:'awaiting',timing:{txt:(st.awaitingReason||'Manually parked')+awaitingItemsLabel,pill:'psoft',date:st.awaitingUntil?('until '+fmtDay(st.awaitingUntil)):''},info,primary:{kind:'release-awaiting',label:'Move out of awaiting',cls:'sky'},manuallyAwaiting:true};
   }
   /* Email-as-action: unread email overrides whatever stage-driven primary would apply. */
   const emails=(st.emails||[]);
@@ -3214,6 +3246,10 @@ async function commitPark(){
   const reason=(document.getElementById('park-reason').value||'').trim();
   const until=document.getElementById('park-until').value;
   W.st.manualAwaiting=true;
+  W.st.awaitingSince=new Date().toISOString();
+  /* Snapshot the awaitingItems count at park time. The action engine uses this to detect
+     "all originally-awaited items have been fulfilled" and auto-surface a release suggestion. */
+  W.st.awaitingItemsInitialCount=(W.st.awaitingItems||[]).length;
   if(reason)W.st.awaitingReason=reason;
   if(until)W.st.awaitingUntil=until;
   logW('Manually parked in awaiting'+(reason?' · '+reason:'')+(until?' · follow up '+until:''));
@@ -3822,12 +3858,16 @@ function doPrimary(r){const c=pipeline.find(x=>x.excelRow===r);if(!c)return;cons
     return;
   }
   if(p.kind==='release-awaiting'){
-    /* Clear the manual-awaiting flag and reload the workspace so the normal action shows. */
+    /* Full release: clear all awaiting state. The action engine then surfaces the candidate
+       based on stage-driven logic (booking, missing items, etc.). Awaiting queue stays — those
+       are docs we still want — but the manual park is gone. */
     delete W.st.manualAwaiting;
     delete W.st.awaitingReason;
     delete W.st.awaitingUntil;
-    logW('Manually moved out of awaiting');
-    saveW(true).then(()=>{openWorkspace(r);toast('Moved out of awaiting');});
+    delete W.st.awaitingSince;
+    delete W.st.awaitingItemsInitialCount;
+    logW('Released from awaiting' + ((W.st.awaitingItems||[]).length?' — '+(W.st.awaitingItems||[]).length+' awaiting items kept':''));
+    saveW(true).then(()=>{openWorkspace(r);toast('Released from awaiting');});
     return;
   }
   if(p.kind==='questions'){
@@ -4496,6 +4536,8 @@ async function reallySend(tpl,advanceTo){
     const parkCheckbox=document.getElementById('e-park');
     if((parkCheckbox&&parkCheckbox.checked)||tpl==='missing'||tpl==='request_resume'){
       W.st.manualAwaiting=true;
+      W.st.awaitingSince=new Date().toISOString();
+      W.st.awaitingItemsInitialCount=(W.st.awaitingItems||[]).length;
       W.st.awaitingReason=tpl==='missing'?'Awaiting reply with missing info':tpl==='request_resume'?'Awaiting résumé':('Awaiting reply to "'+(subj||'email').slice(0,60)+'"');
       logW('Parked in awaiting after send');
     }
@@ -4571,11 +4613,15 @@ function openWorkspace(r,jump){wsRow=r;loadW(r);renderWorkspace(jump);
   if(jump){setTimeout(()=>{const el=document.getElementById('ws-'+jump);if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},250);}
   const c=pipeline.find(x=>x.excelRow===r);
   if(c){
-    /* Detect existing resume files in the onboarding folder — handles legacy candidates whose
-       resume landed before the hasResume flag was introduced, OR users who manually uploaded
-       a resume into SharePoint without going through the form. */
+    /* Smart-awaiting dismissal: if this candidate is parked AND was surfaced (booking arrived,
+       attachment assigned, etc.), stamp lastAwaitingReview = now. The action engine then stops
+       surfacing them until another fresh event happens — auto-re-park, exactly as requested. */
+    if(c.st&&c.st.manualAwaiting){
+      c.st.lastAwaitingReview=new Date().toISOString();
+      /* Persist this stamp so refreshes don't re-surface them */
+      patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(err=>console.warn('Awaiting review stamp:',err.message));
+    }
     detectResumeInFolder(c).catch(e=>console.warn(e.message));
-    /* Auto-generate the application PDF on first visit. */
     ensureApplicationPdf(c).catch(e=>console.warn(e.message));
   }
 }
@@ -4587,13 +4633,9 @@ async function detectResumeInFolder(c){
   try{
     const folder='caregivers/'+safeFileName(c.name)+'/onboarding';
     const enc=folder.split('/').map(encodeURIComponent).join('/');
-    /* Pull webUrl too so the floating "Open résumé" button has a working link to SharePoint.
-       Without webUrl, the button was using the bare filename as the URL → 404. */
     const r=await gfetch(GR+'/drives/'+driveId+'/root:/'+enc+':/children?$select=name,webUrl');
     if(!r.ok)return;
     const items=((await r.json()).value)||[];
-    /* Match: anything with "resume", "cv", or "curriculum" in the name, OR any PDF/Word doc
-       that isn't an application-, phone-screen-, interview-, references-, background-, or activity-log report */
     const isReport=n=>/^(application|phone-screen|interview|interview-report|references-summary|background-summary|activity-log)/i.test(n);
     const resume=items.find(f=>/resume|cv|curriculum/i.test(f.name))
       ||items.find(f=>/\.(pdf|docx?)$/i.test(f.name)&&!isReport(f.name));
@@ -4601,12 +4643,28 @@ async function detectResumeInFolder(c){
       c.st=c.st||{};
       c.st.hasResume=true;
       c.st.resumeFile=resume.name;
-      c.st.resumeWebUrl=resume.webUrl||'';   /* the canonical link the button uses */
+      c.st.resumeWebUrl=resume.webUrl||'';
+      /* Also flip the row's column G (résumé) so the rest of the engine picks it up immediately. */
+      if(c.row&&c.row[6]!=='Y'){c.row[6]='Y';patchRange('G'+c.excelRow,[['Y']]).catch(e=>{});}
+      /* If candidate was parked waiting for the résumé, drain the awaiting item + auto-release. */
+      const hadResumeWait=(c.st.awaitingItems||[]).some(a=>a.kind==='resume');
+      if(hadResumeWait){
+        c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='resume');
+        if(c.st.manualAwaiting&&c.st.awaitingItems.length===0){
+          delete c.st.manualAwaiting;
+          delete c.st.awaitingReason;
+          delete c.st.awaitingUntil;
+          delete c.st.awaitingSince;
+          delete c.st.awaitingItemsInitialCount;
+          delete c.st.lastAwaitingReview;
+          c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-released — résumé received'});
+        }
+      }
       await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
-      if(W&&W.row===c.excelRow){W.st.hasResume=true;W.st.resumeFile=resume.name;W.st.resumeWebUrl=resume.webUrl||'';}
+      if(W&&W.row===c.excelRow){W.st=c.st;W.gates=W.gates||{};}
       render();
       if(W&&W.row===c.excelRow)renderWorkspace();
-      toast('Found résumé in folder — auto-marked');
+      toast('Found résumé in folder — next step now available');
     }
   }catch(e){console.warn('Resume detection failed:',e.message);}
 }
@@ -5255,8 +5313,47 @@ function appSnapshotCard(c){
     <button class="btn-sec bg-cream" style="margin-top:10px;padding:6px 12px;font-size:12px" onclick="setFocusedHub('application')">👤 Open full application →</button>
   </div>`;
 }
-async function markResumeReceived(){if(!W)return;W.st.hasResume=true;logW('✓ Résumé received (manually marked)');await saveW(true);renderWorkspace();toast('Marked received — screen invite available');}
-async function skipResumeRequirement(){if(!W)return;if(!confirm('Skip the résumé requirement and continue without one?'))return;W.st.hasResume=true;W.st.resumeSkipped=true;logW('→ Résumé requirement skipped');await saveW(true);renderWorkspace();toast('Skipped — proceed with screen invite');}
+async function markResumeReceived(){
+  if(!W)return;
+  W.st.hasResume=true;
+  /* Drain awaiting resume request + auto-release if it was the last item */
+  W.st.awaitingItems=(W.st.awaitingItems||[]).filter(a=>a.kind!=='resume');
+  if(W.st.manualAwaiting&&W.st.awaitingItems.length===0){
+    delete W.st.manualAwaiting;
+    delete W.st.awaitingReason;
+    delete W.st.awaitingUntil;
+    delete W.st.awaitingSince;
+    delete W.st.awaitingItemsInitialCount;
+    delete W.st.lastAwaitingReview;
+  }
+  /* Flip column G so action engine picks up the change immediately */
+  if(W.gates)W.gates.hasResume=true;
+  if(W.row&&W.row[6]!=='Y'){W.row[6]='Y';await patchRange('G'+W.excelRow,[['Y']]).catch(e=>{});}
+  logW('✓ Résumé received (manually marked) — released from awaiting');
+  await saveW(true);
+  renderWorkspace();
+  render();
+  toast('Marked received — next step ready');
+}
+async function skipResumeRequirement(){
+  if(!W)return;
+  if(!confirm('Skip the résumé requirement and continue without one?'))return;
+  W.st.hasResume=true;
+  W.st.resumeSkipped=true;
+  W.st.awaitingItems=(W.st.awaitingItems||[]).filter(a=>a.kind!=='resume');
+  if(W.st.manualAwaiting&&W.st.awaitingItems.length===0){
+    delete W.st.manualAwaiting;
+    delete W.st.awaitingReason;
+    delete W.st.awaitingSince;
+    delete W.st.awaitingItemsInitialCount;
+    delete W.st.lastAwaitingReview;
+  }
+  logW('→ Résumé requirement skipped — released from awaiting');
+  await saveW(true);
+  renderWorkspace();
+  render();
+  toast('Skipped — next step ready');
+}
 
 /* ===================== Referrals & rewards hub ===================== */
 function rewardsBlock(c){
@@ -6771,10 +6868,32 @@ async function _doAssignment(messageId,attIdx,cand,item){
     }
     /* Remove this item from awaiting queue */
     cand.st.awaitingItems=(cand.st.awaitingItems||[]).filter(a=>!(a.kind===item.kind&&(a.name||'')===(item.name||'')));
+    /* AUTO-RELEASE: if the queue is now empty AND the candidate was parked in awaiting, release
+       them automatically. The user's intent when they parked was "wait for this stuff" — once
+       all of it has arrived, there's no reason to keep them parked behind a release button. The
+       normal action engine then shows the actual next step (e.g., "Send screen invite" for an
+       Applied candidate who now has a résumé). */
+    const wasParked=cand.st.manualAwaiting;
+    const queueEmpty=cand.st.awaitingItems.length===0;
+    if(wasParked&&queueEmpty){
+      delete cand.st.manualAwaiting;
+      delete cand.st.awaitingReason;
+      delete cand.st.awaitingUntil;
+      delete cand.st.awaitingSince;
+      delete cand.st.awaitingItemsInitialCount;
+      delete cand.st.lastAwaitingReview;
+      cand.st.log=cand.st.log||[];
+      cand.st.log.push({t:stamp(),x:'✓ Auto-released from awaiting — all requested items received'});
+    }
+    /* Stamp lastAssignmentAt for the surface logic on candidates still parked (e.g., they had
+       multiple awaiting items and only one was just fulfilled). */
+    cand.st.lastAssignmentAt=new Date().toISOString();
     cand.st.log=cand.st.log||[];
     cand.st.log.push({t:stamp(),x:'📎 Assigned attachment "'+att.name+'" as '+_awaitingItemLabel(item)+' — saved to '+finalName});
     await patchRange('AJ'+cand.excelRow,[[JSON.stringify(cand.st)]]);
-    toast('✓ Assigned as '+_awaitingItemLabel(item)+' — '+(cand.st.awaitingItems.length?cand.st.awaitingItems.length+' awaiting items remaining':'all requests fulfilled'));
+    const releasedNow=wasParked&&queueEmpty;
+    const remainingMsg=cand.st.awaitingItems.length?cand.st.awaitingItems.length+' awaiting item'+(cand.st.awaitingItems.length===1?'':'s')+' remaining':(releasedNow?'released from awaiting — next step ready':'all requests fulfilled');
+    toast('✓ Assigned as '+_awaitingItemLabel(item)+' — '+remainingMsg);
     /* If user is currently viewing this candidate's workspace, refresh it */
     if(W&&W.row===cand.excelRow){renderWorkspace();}
     /* Refresh the email detail to update the awaiting badge + buttons */
