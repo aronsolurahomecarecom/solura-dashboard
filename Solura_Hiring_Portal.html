@@ -2076,9 +2076,21 @@ function decide(Q,R,q,r,gs,certs){
 }
 function n(x){return(x===''||x==null)?undefined:Number(x);}
 function scoreRow(c){const row=c.row,q={rel:n(row[13]),com:n(row[14]),jud:n(row[15]),doc:n(row[16]),ref:n(row[17]),cmp:n(row[18]),phn:n(row[19])};
-  const r={ten:n(row[21]),prx:n(row[22]),ava:n(row[23]),exp:n(row[24])},g={wa:row[7],cr:row[8],bg:row[9],tr:row[10],av:row[11]};
+  const r={ten:n(row[21]),prx:n(row[22]),ava:n(row[23]),exp:n(row[24])};
+  /* Gates — start with what the user/candidate set in the row (columns H-L), then apply any
+     BG-driven overrides recorded in st.bgOverrides. Overrides take priority because they reflect
+     verified facts from the background check, not self-reported claims. */
+  const baseGates={wa:row[7],cr:row[8],bg:row[9],tr:row[10],av:row[11]};
+  const ov=(c.st&&c.st.bgOverrides)||{};
+  const g={
+    wa: ov.wa||baseGates.wa,
+    cr: ov.cr||baseGates.cr,
+    bg: ov.bg||baseGates.bg,
+    tr: ov.tr||baseGates.tr,
+    av: ov.av||baseGates.av
+  };
   const Q=progressive(q,QW),R=progressive(r,RW);
-  return{Q,R,q,r,g,dec:decide(Q,R,q,r,gateState(g),(c.st&&c.st.certs)||[]),gateStatus:gateState(g),missingGates:missingGateLabels(g)};}
+  return{Q,R,q,r,g,baseGates,dec:decide(Q,R,q,r,gateState(g),(c.st&&c.st.certs)||[]),gateStatus:gateState(g),missingGates:missingGateLabels(g)};}
 
 /* ===================== question bank ===================== */
 const QBANK=[
@@ -2544,9 +2556,32 @@ function action(c){
   if(gatesIncomplete&&s==='Applied'){
     return{bucket:'action',timing:{txt:'Request missing info',pill:'pnew',date:''},info,primary:{kind:'email-info',label:'Request missing info',cls:'gold'},missing:sc.missingGates};
   }
-  /* Hired stage — special case: no "next" step, just check-ins */
+  /* Hired stage — special case: no "next" step, just check-ins. Also check credential
+     expirations and surface renewal requests when any credential is in the reminder window or
+     expired. The most urgent credential (smallest daysOut) wins the primary slot. */
   if(s==='Hired'){
     const matchable=st.reqCheck==='clear';
+    /* Find expiring credentials we haven't already nudged in the last 14 days */
+    const creds=(st.credentials||[]).map(cr=>{
+      if(!cr.expiresAt)return null;
+      const now=new Date();
+      const exp=new Date(cr.expiresAt+'T23:59:59');
+      const daysOut=Math.ceil((exp-now)/(1000*60*60*24));
+      const remindDays=cr.remindDaysBefore||((SETTINGS.config||{}).credRemindDays)||60;
+      const inWindow=daysOut<=remindDays;
+      if(!inWindow)return null;
+      /* Suppress if we already asked within 14d */
+      const lastAsked=cr.lastRenewalRequestedAt?(Date.now()-new Date(cr.lastRenewalRequestedAt).getTime())/(1000*60*60*24):999;
+      if(lastAsked<14)return null;
+      return {...cr,daysOut};
+    }).filter(Boolean).sort((a,b)=>a.daysOut-b.daysOut);
+    if(creds.length){
+      const urgent=creds[0];
+      const expired=urgent.daysOut<0;
+      return{bucket:'action',matchable,
+        timing:{txt:expired?'Credential expired: '+urgent.name:'Credential expiring: '+urgent.name,pill:expired?'pr2':'pa',date:urgent.expiresAt},
+        info,primary:{kind:'credential-renewal',credId:urgent.id,label:'📜 Request updated '+urgent.name,cls:'gold'}};
+    }
     return{bucket:'hired',matchable,
       timing:{txt:matchable?'Patient-matchable':'Required check pending',pill:matchable?'pg':'pa',date:st.due?('check-in '+fmtDay(st.due)):''},
       info,primary:{kind:'checkin',label:'Log check-in',cls:'grn'}};
@@ -3689,6 +3724,12 @@ function doPrimary(r){const c=pipeline.find(x=>x.excelRow===r);if(!c)return;cons
     setTimeout(()=>openBgDecisionModal(),250);
     return;
   }
+  if(p.kind==='credential-renewal'){
+    /* Open workspace + trigger renewal flow for the specific credential. */
+    openWorkspace(r);
+    setTimeout(()=>requestCredentialRenewal(p.credId),250);
+    return;
+  }
   if(p.kind==='release-awaiting'){
     /* Clear the manual-awaiting flag and reload the workspace so the normal action shows. */
     delete W.st.manualAwaiting;
@@ -3854,7 +3895,19 @@ const TEMPLATES={
    return {s:'Welcome to Solura — book your orientation',b:`Hi ${first(c)},\n\nWelcome to the Solura Home Care team! 🎉\n\nThe last step before your first shift is a 30-minute orientation call where we'll go over policies, paperwork, and your schedule. Please pick a time that works for you:\n\n${url}\n\nYou'll get a confirmation with the meeting link as soon as you book. Looking forward to it!\n\nSolura Home Care`};},
  reject:c=>({s:'Update on your application',b:`Hi ${first(c)},\n\nThank you for your interest in Solura Home Care. After careful review we won't be moving forward at this time. We appreciate the time you invested and wish you the very best.\n\nSolura Home Care`}),
  missing:c=>({s:'A few details to complete your application',b:`Hi ${first(c)},\n\nThanks for your interest in Solura Home Care. To move forward we still need a few details:\n\n${(c.__missing||[]).map(x=>'• '+x).join('\n')}\n\nPlease reply with these and we'll get back to you quickly.\n\nSolura Home Care`}),
- request_resume:c=>({s:'Could you send us your résumé? — Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying to Solura Home Care. Before we set up a phone screen, could you send us your résumé as a PDF? Just reply to this email with the file attached.\n\nIf you don't have a written résumé, no worries — just reply with a quick summary: where you've worked, when, and what your role was at each place.\n\nThanks!\nSolura Home Care`})
+ request_resume:c=>({s:'Could you send us your résumé? — Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying to Solura Home Care. Before we set up a phone screen, could you send us your résumé as a PDF? Just reply to this email with the file attached.\n\nIf you don't have a written résumé, no worries — just reply with a quick summary: where you've worked, when, and what your role was at each place.\n\nThanks!\nSolura Home Care`}),
+ /* Credential renewal — c.__credential is set by the action engine when a specific credential is
+    coming up for renewal. Falls back to a generic message if no specific credential is targeted. */
+ request_updated_credential:c=>{
+   const cred=c.__credential||{};
+   const name=cred.name||'your credential';
+   const exp=cred.expiresAt?new Date(cred.expiresAt).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}):'soon';
+   const expired=cred.expiresAt&&new Date(cred.expiresAt)<new Date();
+   return {
+     s:expired?`Your ${name} has expired — please send the renewed copy`:`Your ${name} expires ${exp} — time to renew`,
+     b:`Hi ${first(c)},\n\n${expired?'Our records show your '+name+' expired on '+exp+'.':'Your '+name+' on file with us expires on '+exp+'.'} To keep you patient-matchable and compliant with state requirements, we need an updated copy.\n\nPlease reply to this email with a photo or PDF of your renewed ${name}, including the new expiration date.\n\nIf you've already renewed it, just reply with the new card — takes 30 seconds.\n\nThanks,\nSolura Home Care`
+   };
+ }
 };
 function first(c){return (c.name||'there').split(' ')[0];}
 function payRange(){const floor=14,ceil=18;let base=15.5;if(W&&(W.st.certs||[]).some(x=>/CNA|STNA/i.test(x)))base+=1.25;const sc=W?scoreW():{Q:null};if(W&&(W.q.cmp>=4||(sc.Q&&sc.Q>=85)))base+=1;
@@ -4096,8 +4149,16 @@ async function reallySend(tpl,advanceTo){
       W.st.awaitingReason=tpl==='missing'?'Awaiting reply with missing info':tpl==='request_resume'?'Awaiting résumé':('Awaiting reply to "'+(subj||'email').slice(0,60)+'"');
       logW('Parked in awaiting after send');
     }
+    const _fromStageForPdf=W.stage;
     if(advanceTo){W.stage=advanceTo;if(advanceTo==='Screen invite'||advanceTo==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();logW('Advanced to '+advanceTo);}
     await saveW(true);closeModal();toast('Email sent — watching for delivery');
+    /* Auto-save stage report on advance via email-send (e.g., Applied → Screen invite triggers
+       application snapshot save). Skip when no advance happened. */
+    if(advanceTo&&advanceTo!==_fromStageForPdf){
+      autoUploadStageReport(W,_fromStageForPdf).catch(e=>console.warn('Stage PDF auto-upload:',e.message));
+    }
+    /* If this send was a renewal request, stamp lastRenewalRequestedAt on the credential. */
+    if(typeof window._credRenewalStampHook==='function')window._credRenewalStampHook(true);
     watchForBounce(W.email,W.row);
     /* Re-render the pipeline immediately so the candidate moves to their new bucket
        (e.g., Applied without résumé → Awaiting once request_resume is sent). Without this,
@@ -4382,10 +4443,17 @@ function renderWorkspace(){
     </details>
     <h4 style="margin-top:14px">Pipeline progress</h4>
     <div class="stepper-ws">${stepper}</div></div>`;
-  const gh=GATES.map(([k,l])=>`<div class="gateitem">${l}<span class="yn"><button class="y${W.gates[k]==='Y'?' on':''}" onclick="hgate('${k}','Y')">Y</button><button class="n${W.gates[k]==='N'?' on':''}" onclick="hgate('${k}','N')">N</button></span></div>`).join('');
+  const gh=GATES.map(([k,l])=>{
+    /* Show a small "BG override" badge on gates that have been overridden */
+    const ov=(W.st.bgOverrides||{})[k];
+    const ovBadge=ov?'<span class="pill" style="font-size:9px;padding:1px 5px;margin-left:6px;background:var(--gold-mid);color:#fff" title="Override from BG check">BG</span>':'';
+    return `<div class="gateitem">${l}${ovBadge}<span class="yn"><button class="y${W.gates[k]==='Y'?' on':''}" onclick="hgate('${k}','Y')">Y</button><button class="n${W.gates[k]==='N'?' on':''}" onclick="hgate('${k}','N')">N</button></span></div>`;
+  }).join('');
   const gatesCard=`<div class="wscard" id="ws-gates"><h3>Gates ${sc.gateStatus==='partial'?'<span class="pill psoft" style="font-size:9px">incomplete</span>':sc.gateStatus==='PASS'?'<span class="pill pg" style="font-size:9px">all pass</span>':'<span class="pill pr2" style="font-size:9px">fail</span>'}</h3>
     <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Hard pass/fail. Any "N" disqualifies; gaps mean you owe the candidate a request for info.</div>
     <div class="gatesrow">${gh}</div></div>`;
+  const _bgFindingsCard=renderBgFindingsCard(W,sc);
+  const _credentialsCard=renderCredentialsCard(W);
   const work=workBlock(a);
   const docs=`<div class="wscard" id="ws-docs"><h3>Documents <input type="file" id="ws-file" multiple style="display:none" onchange="uploadFiles(this.files)"><label for="ws-file" class="uploadbtn">📎 Upload</label></h3>
     <div style="font-size:12px;color:var(--soft);margin-bottom:8px">caregivers › ${esc(W.name)} › onboarding</div>
@@ -4394,6 +4462,7 @@ function renderWorkspace(){
       <button class="btn-sm bg-cream" style="cursor:pointer" onclick="openFolderInSharePoint()">📁 Open folder in SharePoint</button>
       <button class="btn-sm" style="cursor:pointer;background:var(--gold-mid);color:#fff;border:none" onclick="exportCurrentStagePdf()">📄 Generate report PDF</button>
     </div>
+    ${_stageReportsTrail(W)}
     <div id="ws-doclist"><div style="font-size:12px;color:var(--soft)"><span class="spin"></span> Loading…</div></div></div>`;
   const checkinList=(W.st.checkins||[]).slice().reverse().map(ci=>`<div class="checkin-entry">
     <div class="head"><span class="when">${esc(ci.date)} · ${esc(ci.type)}</span><span class="type">Risk: ${esc(ci.risk||'—')}</span></div>
@@ -4448,7 +4517,7 @@ function renderWorkspace(){
   document.getElementById('ws-body').innerHTML=`
     ${thisStep}
     <div class="wsgrid">
-      <div>${gatesCard}${work}${_appSnap}${docs}${emailsCard}${activity}</div>
+      <div>${gatesCard}${_bgFindingsCard}${_credentialsCard}${work}${_appSnap}${docs}${emailsCard}${activity}</div>
       <div>${identity}${scoreCard}${_yardstikPrev}${_empPrev}${_refPrev}${refsPreviewCard}</div>
     </div>`;
   /* sticky footer with primary action — always visible */
@@ -4609,6 +4678,16 @@ function floatingDocsOverlay(){
   </div>`;
 }
 function qans(id,v,stage,nextStage){W.answers[id]=W.answers[id]===v?undefined:v;renderWorkspace();}
+/* Per-reference answer setter — writes to W.st.refs[refIdx].qa[id] so each reference gets its
+   own answer set. Pass v=null to clear an answer. */
+function qansPerRef(refIdx,id,v){
+  if(!W.st.refs||!W.st.refs[refIdx])return;
+  W.st.refs[refIdx].qa=W.st.refs[refIdx].qa||{};
+  if(v===null||W.st.refs[refIdx].qa[id]===v){delete W.st.refs[refIdx].qa[id];}
+  else{W.st.refs[refIdx].qa[id]=v;}
+  saveW(true);
+  renderWorkspace();
+}
 async function completeQuestions(nextStage){applyAnswers();const sc=scoreW();
   if(sc.dec.cls==='red'){return doEmail('reject','Declined');}
   const completedStage=W.stage; /* capture before changing */
@@ -5186,16 +5265,32 @@ function verifyBlock(){const emp=W.st.employers||[];
     <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Employers verified')">Done → references →</button></div></div>`;
 }
 function vset(i,v){W.st.employers[i].v=W.st.employers[i].v===v?'':v;saveW(true);renderWorkspace();}
+/* Render a compact trail of stage reports that have been auto-saved for this candidate. Reads
+   c.st.stageReports — populated by autoUploadStageReport on each transition. Just an at-a-glance
+   "what audit trail exists" indicator; the actual files live in SharePoint. */
+function _stageReportsTrail(c){
+  const reports=(c.st&&c.st.stageReports)||{};
+  const keys=Object.keys(reports);
+  if(!keys.length)return '';
+  const pills=keys.map(k=>{
+    const r=reports[k];
+    const when=r.at?new Date(r.at).toLocaleDateString():'';
+    return `<span class="pill" style="font-size:9px;background:#EBF5EA;color:var(--grn-deep);border:1px solid var(--grn);font-weight:600">📄 ${esc(k)}${when?' · '+esc(when):''}</span>`;
+  }).join(' ');
+  return `<div style="font-size:11px;color:var(--soft);margin-bottom:8px"><b>Auto-saved reports:</b> ${pills}</div>`;
+}
+
 function refsBlock(){
   const refs=W.st.refs||[];
   const REL={supervisor:'Former supervisor',coworker:'Coworker',patientFamily:'Patient family',case_manager:'Case manager',personal:'Personal',other:'Other'};
   const TIME={morning:'Mornings',afternoon:'Afternoons',evening:'Evenings',any:'Any time'};
-  /* Build the normalized admin-phone watchlist once. Numbers compared as digits-only. */
+  /* Per-reference questions — pulled from QBANK Reference stage. Each reference stores its
+     OWN answers in rf.qa so we can compare across references and surface inconsistencies. */
+  const refQuestions=QBANK.filter(x=>x.st==='Reference');
   const adminDigits=String(SETTINGS.config.adminPhones||'').split(',').map(s=>s.replace(/\D/g,'')).filter(x=>x.length>=7);
   const isSuspicious=phone=>{
     const d=String(phone||'').replace(/\D/g,'');
     if(d.length<7)return false;
-    /* Compare last 10 digits to handle "+1" vs "1" vs no-country-code variants */
     const last10=d.slice(-10);
     return adminDigits.some(a=>a.slice(-10)===last10);
   };
@@ -5209,6 +5304,10 @@ function refsBlock(){
     const fromForm=!!rf.submittedAt;
     const outcome=rf.outcome||'';
     const ourNotes=rf.callNotes||'';
+    /* Track completion of per-reference questions */
+    const qa=rf.qa||{};
+    const answered=refQuestions.filter(q=>qa[q.id]!==undefined).length;
+    const completionPct=refQuestions.length?Math.round(answered/refQuestions.length*100):0;
     /* For FORM-submitted refs: show as a display card with all info from the candidate.
        For MANUAL refs: show editable input fields so the user can fill them in. */
     const header=fromForm
@@ -5225,6 +5324,24 @@ function refsBlock(){
         <input value="${esc(rf.email||'')}" placeholder="Email (optional)" oninput="W.st.refs[${i}].email=this.value" onblur="saveW(true)" style="flex:1;min-width:130px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
         ${num?`<button class="btn-sm" onclick="openLinkPopup('${esc(gvUrl)}','gvoice',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Call via Google Voice">☎ Call</button>`:''}
       </div>`;
+    /* Per-reference question block — collapsible, expanded by default when reference is being
+       actively contacted (has outcome set) so the user can capture answers while on the call. */
+    const qBlock=refQuestions.length?`<details ${outcome?'open':''} style="margin-bottom:8px;background:#FAF6EE;border:1px solid var(--gold-mid);border-radius:7px;padding:8px 10px">
+      <summary style="cursor:pointer;font-size:11.5px;font-weight:700;color:#8B6500;display:flex;align-items:center;gap:8px">
+        <span>📋 On-call question set</span>
+        <span style="font-size:10px;color:var(--soft);font-weight:500">${answered} of ${refQuestions.length} answered</span>
+        ${completionPct===100?'<span class="pill pg" style="font-size:9px">COMPLETE</span>':answered>0?'<span class="pill" style="font-size:9px;background:#FEF7E8;color:#8B6500;border:1px solid var(--gold-mid)">IN PROGRESS</span>':''}
+      </summary>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
+        ${refQuestions.map(q=>`<div>
+          <div style="font-size:11.5px;color:var(--mid);margin-bottom:3px;font-weight:600">${esc(q.q)}</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            ${q.o.map(o=>`<button class="qopt-btn${qa[q.id]===o[1]?' on':''}" style="padding:4px 9px;border:1.5px solid ${qa[q.id]===o[1]?'var(--gold-deep,#8B6500)':'var(--border)'};background:${qa[q.id]===o[1]?'var(--gold)':'#fff'};color:${qa[q.id]===o[1]?'#fff':'var(--mid)'};border-radius:5px;font-family:inherit;font-size:11.5px;cursor:pointer;font-weight:${qa[q.id]===o[1]?700:500}" onclick="qansPerRef(${i},'${q.id}',${o[1]})">${esc(o[0])}</button>`).join('')}
+            ${qa[q.id]!==undefined?'<button style="padding:4px 7px;background:none;border:none;color:var(--soft);font-size:11.5px;cursor:pointer" onclick="qansPerRef('+i+',\''+q.id+'\',null)" title="Clear answer">✕</button>':''}
+          </div>
+        </div>`).join('')}
+      </div>
+    </details>`:'';
     return `<div class="ref-card" style="background:${sus?'#FFF5F4':'#fff'};border:1.5px solid ${sus?'var(--red)':fromForm?'var(--gold-mid)':'var(--border)'};border-radius:11px;padding:13px 14px;margin-bottom:10px;animation:fadeUp .3s ease both;animation-delay:${i*40}ms">
       ${sus?'<div style="background:linear-gradient(135deg,#FFEEEE,#FFE0E0);border:1px solid var(--red);color:#8B1A1A;padding:7px 10px;border-radius:7px;margin-bottom:9px;font-size:11.5px;font-weight:700;display:flex;gap:6px;align-items:center"><span style="font-size:14px">🚨</span><span>SUSPICIOUS — phone matches an internal Solura number on the admin watchlist. Likely fraudulent reference. Recommend removing.</span></div>':''}
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px">
@@ -5233,6 +5350,7 @@ function refsBlock(){
       </div>
       ${contactRow}
       ${rf.notes?`<div style="background:var(--cream);padding:8px 10px;border-radius:7px;font-size:11.5px;color:var(--mid);margin-bottom:8px;border-left:3px solid var(--gold-mid)"><b style="color:var(--soft);font-size:10px;text-transform:uppercase">From candidate:</b><br>${esc(rf.notes)}</div>`:''}
+      ${qBlock}
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <select onchange="W.st.refs[${i}].outcome=this.value;saveW(true);renderWorkspace()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">
           <option value="">— call outcome —</option>
@@ -5247,18 +5365,25 @@ function refsBlock(){
       </div>
     </div>`;
   }).join('');
-  const qs=QBANK.filter(x=>x.st==='Reference').map(it=>`<div class="qrow"><div class="qq">${esc(it.q)}</div><div class="qopts">${it.o.map(o=>`<button class="${W.answers[it.id]===o[1]?'on':''}" onclick="qans('${it.id}',${o[1]},'Reference','Background')">${esc(o[0])}</button>`).join('')}</div></div>`).join('');
-  return `<div class="wscard" id="ws-refs"><h3>Reference checks <span style="font-size:11px;color:var(--soft);font-weight:600">${refs.length} on file</span></h3>
+  /* Aggregate summary across all references — used to show completion at the top */
+  const totalAnswers=refs.reduce((sum,rf)=>sum+(rf.qa?Object.keys(rf.qa).length:0),0);
+  const refsWithOutcome=refs.filter(rf=>rf.outcome).length;
+  const allRefsDone=refs.length>=2&&refsWithOutcome===refs.length;
+  return `<div class="wscard" id="ws-refs"><h3>Reference checks <span style="font-size:11px;color:var(--soft);font-weight:600">${refs.length} on file · ${refsWithOutcome}/${refs.length} called · ${totalAnswers} answers captured</span></h3>
     ${suspiciousRefs.length?`<div style="background:linear-gradient(135deg,#FFE0E0,#FFEEEE);border:2px solid var(--red);border-radius:10px;padding:12px 14px;margin-bottom:14px;animation:fadeUp .3s ease both">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:18px">🚨</span><b style="color:#8B1A1A;font-size:14px">${suspiciousRefs.length} suspicious reference${suspiciousRefs.length===1?'':'s'} detected</b></div>
       <div style="font-size:12px;color:#6B1212;line-height:1.45;margin-bottom:8px">${suspiciousRefs.length===1?'A reference phone number matches an internal Solura contact on the admin watchlist. This is almost certainly fraudulent.':'Reference phone numbers match internal Solura contacts on the admin watchlist. These are almost certainly fraudulent.'} Recommend removing and flagging this candidate.</div>
       <button class="btn-sm" style="background:var(--red);color:#fff;border:none;cursor:pointer;font-weight:600" onclick="if(confirm('Remove all ${suspiciousRefs.length} suspicious reference${suspiciousRefs.length===1?'':'s'}?')){W.st.refs=W.st.refs.filter((_,j)=>!${JSON.stringify(suspiciousRefs)}.includes(j));saveW(true);renderWorkspace();}">Remove all suspicious refs</button>
     </div>`:''}
-    <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Refs with a <span class="pill pa" style="font-size:9px">FROM FORM</span> badge came from the candidate's own submission. Call each, then record the outcome below.</div>
+    <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Refs with a <span class="pill pa" style="font-size:9px">FROM FORM</span> badge came from the candidate's own submission. Each reference has its own question set — expand the "On-call question set" inside each card to capture answers during the call.</div>
     ${list||'<div style="font-size:12.5px;color:var(--soft);padding:14px;background:var(--cream);border-radius:8px;text-align:center">No references yet. Either the candidate hasn\'t submitted the form, or you can add them manually below.</div>'}
-    <button class="btn-sec bg-cream" style="margin:6px 0 14px;width:auto;padding:7px 13px" onclick="W.st.refs=W.st.refs||[];W.st.refs.push({name:'',phone:'',relationship:'other'});renderWorkspace()">+ add reference manually</button>
-    <h4 style="margin-top:10px">Overall assessment questions</h4>${qs}
-    <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="completeQuestions('Interview invite')">Complete &amp; advance →</button></div></div>`;
+    <button class="btn-sec bg-cream" style="margin:6px 0 14px;width:auto;padding:7px 13px" onclick="W.st.refs=W.st.refs||[];W.st.refs.push({name:'',phone:'',relationship:'other',qa:{}});renderWorkspace()">+ add reference manually</button>
+    <div class="brow" style="margin-top:14px;gap:8px">
+      <button class="btn-primary" style="background:var(--gold-mid);color:#fff;border:none" onclick="saveReferencesPdf()" ${refs.length===0?'disabled':''}>📄 Save references PDF to SharePoint</button>
+      <button class="btn-primary bg-grn" onclick="completeQuestions('Interview invite')" ${!allRefsDone?'title=\"All references should have a call outcome before completing\"':''}>Complete &amp; advance →</button>
+    </div>
+    ${refs.length?'<p style="font-size:11px;color:var(--soft);margin-top:8px;font-style:italic">PDF includes each reference\'s contact info, on-call question answers, outcome, and notes. Saved to caregivers › '+esc(W.name)+' › onboarding.</p>':''}
+  </div>`;
 }
 function flagPill(v){const map={clear:['Clear','pg'],flag:['Flag','pr2'],pending:['Pending','pa']};const m=map[v]||['—','psoft'];return '<span class="pill '+m[1]+'">'+m[0]+'</span>';}
 function chkOpts(which){return ['','pending','clear','flag'].map(o=>`<option value="${o}" ${o===W.st[which]?'selected':''}>${o||'set status'}</option>`).join('');}
@@ -5459,6 +5584,358 @@ async function decideBgReport(decision){
   }
 }
 
+/* ===== Background check findings — reconciliation with candidate's self-reported claims =====
+   When a Yardstik report comes back, the worker writes structured findings to st.bgFindings.
+   This card surfaces any contradictions between what the candidate said vs what the check found,
+   and offers one-click overrides to update the gates with the verified data.
+   Mapping of findings to gates:
+     • motorVehicle.hasValidLicense → tr (transport)
+     • identity.ssnMatched          → wa (work auth — partial signal)
+     • criminal.recordsFound > 0    → bg (background)
+     • sexOffender.match            → bg (background)
+   Each row shows: candidate's claim, BG finding, current override status, and an "Apply BG" button. */
+function renderBgFindingsCard(W,sc){
+  const f=W.st.bgFindings;
+  if(!f)return '';  /* No card unless we actually have findings */
+
+  /* Compute contradictions: for each gate we have a finding for, compare what the candidate
+     claimed (via the row gate columns) to what BG found, and the current override state. */
+  const claimed={
+    wa: W.gates.wa||'',
+    cr: W.gates.cr||'',
+    bg: W.gates.bg||'',
+    tr: W.gates.tr||'',
+    av: W.gates.av||''
+  };
+  const ov=W.st.bgOverrides||{};
+  const rows=[];
+
+  if(f.motorVehicle){
+    const mv=f.motorVehicle;
+    const bgSays=mv.hasValidLicense?'Y':'N';
+    const claim=W.st.bgOverrides&&W.st.bgOverrides._origTr?W.st.bgOverrides._origTr:claimed.tr;
+    rows.push({
+      key:'tr',
+      label:'Transport (driver license)',
+      claimed:claim==='Y'?'Has valid license':claim==='N'?'No valid license':'— not set —',
+      claimedRaw:claim,
+      found:mv.hasValidLicense?'✓ Valid · '+esc(mv.licenseState||'')+(mv.licenseClass?' · class '+esc(mv.licenseClass):''):'✗ '+esc(mv.licenseStatus||'invalid'),
+      bgGate:bgSays,
+      override:ov.tr||'',
+      detail:mv.suspensionCount?(mv.suspensionCount+' suspension'+(mv.suspensionCount===1?'':'s')+' / violation'+(mv.suspensionCount===1?'':'s')+' on record'):(mv.expirationDate?'Expires '+esc(mv.expirationDate):'')
+    });
+  }
+
+  if(f.identity){
+    const id=f.identity;
+    const bgSays=id.ssnMatched?'Y':'N';
+    rows.push({
+      key:'wa',
+      label:'Identity / SSN match',
+      claimed:claimed.wa==='Y'?'Confirmed work-eligible':claimed.wa==='N'?'Not eligible':'— not set —',
+      claimedRaw:claimed.wa,
+      found:id.ssnMatched?'✓ SSN matched':'✗ Mismatch — id verification failed',
+      bgGate:bgSays,
+      override:ov.wa||'',
+      detail:id.deathRecord?'⚠ Death record found — possible identity theft':((id.nameVariations||[]).length?'Name variations: '+id.nameVariations.slice(0,3).map(esc).join(', '):'')
+    });
+  }
+
+  if(f.criminal){
+    const cr=f.criminal;
+    const bgSays=cr.recordsFound===0?'Y':'N';  /* records found = bg gate fails */
+    rows.push({
+      key:'bg',
+      label:'Background (criminal)',
+      claimed:claimed.bg==='Y'?'No criminal record':claimed.bg==='N'?'Has record':'— not set —',
+      claimedRaw:claimed.bg,
+      found:cr.recordsFound===0?'✓ No records found':'⚠ '+cr.recordsFound+' record'+(cr.recordsFound===1?'':'s')+' found',
+      bgGate:bgSays,
+      override:ov.bg||'',
+      detail:(cr.records||[]).slice(0,2).map(r=>esc(r.offense||'')+(r.date?' ('+esc(r.date.slice(0,10))+')':'')).join('; ')
+    });
+  }
+
+  if(f.sexOffender&&f.sexOffender.match){
+    /* Always show this row when a hit — overrides bg gate to N regardless of other criminal data */
+    rows.push({
+      key:'bg',
+      label:'Sex offender registry',
+      claimed:'—',
+      claimedRaw:'',
+      found:'⚠ HIT — appears on registry',
+      bgGate:'N',
+      override:ov.bg||'',
+      detail:'This is a hard fail — recommend immediate decline'
+    });
+  }
+
+  if(!rows.length){
+    return `<div class="wscard" style="background:#EBF5EA;border:1px solid var(--grn)">
+      <h3 style="color:var(--grn-deep)">🛡 Background check findings <span class="pill pg" style="font-size:9px">CLEAR</span></h3>
+      <div style="font-size:12.5px;color:var(--mid)">Yardstik report received — no contradictions with candidate's claims. Overall status: <b>${esc(f.overallStatus||'clear')}</b>.</div>
+      ${f.receivedAt?'<div style="font-size:11px;color:var(--soft);margin-top:6px">Received '+esc(new Date(f.receivedAt).toLocaleString())+'</div>':''}
+    </div>`;
+  }
+
+  /* Count how many rows have contradictions (claimed ≠ bgGate) */
+  const conflicts=rows.filter(r=>r.claimedRaw&&r.claimedRaw!==r.bgGate&&r.override!==r.bgGate);
+  const statusBadge=conflicts.length
+    ?`<span class="pill pr2" style="font-size:9px;margin-left:6px">${conflicts.length} CONFLICT${conflicts.length===1?'':'S'}</span>`
+    :`<span class="pill pg" style="font-size:9px;margin-left:6px">RECONCILED</span>`;
+
+  const rowsHtml=rows.map(r=>{
+    const mismatch=r.claimedRaw&&r.claimedRaw!==r.bgGate&&r.override!==r.bgGate;
+    const applied=r.override===r.bgGate&&r.override;
+    const bg=mismatch?'#FDECEA':applied?'#EBF5EA':'#fff';
+    const border=mismatch?'var(--red)':applied?'var(--grn)':'var(--border)';
+    return `<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:9px 12px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <b style="color:var(--ink);font-size:12.5px">${esc(r.label)}</b>
+        ${mismatch?'<span class="pill" style="font-size:9px;padding:2px 6px;background:#FDECEA;color:#8B1A1A;border:1px solid var(--red)">CONFLICT</span>':''}
+        ${applied?'<span class="pill" style="font-size:9px;padding:2px 6px;background:#EBF5EA;color:var(--grn-deep);border:1px solid var(--grn)">OVERRIDE APPLIED</span>':''}
+        <div style="flex:1"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11.5px">
+        <div><span style="color:var(--soft);font-size:10px;text-transform:uppercase;font-weight:700">Candidate said</span><div style="color:var(--mid);margin-top:1px">${esc(r.claimed)}</div></div>
+        <div><span style="color:var(--soft);font-size:10px;text-transform:uppercase;font-weight:700">BG found</span><div style="color:var(--ink);margin-top:1px;font-weight:600">${r.found}</div></div>
+      </div>
+      ${r.detail?`<div style="font-size:11px;color:var(--soft);margin-top:4px">${r.detail}</div>`:''}
+      ${mismatch?`<div style="margin-top:7px;display:flex;gap:6px">
+        <button class="btn-sm" style="background:var(--gold-mid);color:#fff;border:none;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer" onclick="applyBgOverride('${r.key}','${r.bgGate}',${JSON.stringify(r.label).replace(/"/g,'&quot;')})">Apply BG override → ${r.bgGate}</button>
+        <button class="btn-sm bg-cream" style="font-size:11px;padding:5px 10px" onclick="dismissBgConflict('${r.key}')">Keep candidate's claim</button>
+      </div>`:applied?`<div style="margin-top:7px"><button class="btn-sm bg-cream" style="font-size:11px;padding:4px 9px" onclick="revertBgOverride('${r.key}')">↺ Revert override</button></div>`:''}
+    </div>`;
+  }).join('');
+
+  return `<div class="wscard">
+    <h3>🛡 Background check findings ${statusBadge}</h3>
+    <p style="font-size:11.5px;color:var(--soft);margin:0 0 10px">Verified data from the Yardstik report compared to what the candidate self-reported. Apply BG overrides on any conflicts — those override the gate values and recompute the candidate's decision band.</p>
+    ${rowsHtml}
+  </div>`;
+}
+
+/* ===== Credentials & licenses — expiration tracking & renewal nudges =====
+   Data model: c.st.credentials = array of {id, name, type, issuedAt, expiresAt, fileUrl,
+   fileName, remindDaysBefore, addedAt, addedBy, lastRenewalRequestedAt, notes}.
+   The action engine reads this to surface "Request updated [credName]" when any credential is
+   within its remindDaysBefore window or expired. The legacy st.certs flat-string array is
+   auto-derived from credential names so existing code (scoring, search, payRange) keeps working. */
+function _credStatus(cred){
+  if(!cred.expiresAt)return {label:'No expiration',cls:'soft',daysOut:null};
+  const now=new Date();
+  const exp=new Date(cred.expiresAt+'T23:59:59');
+  const daysOut=Math.ceil((exp-now)/(1000*60*60*24));
+  const remindDays=cred.remindDaysBefore||((SETTINGS.config||{}).credRemindDays)||60;
+  if(daysOut<0)return {label:'⚠ EXPIRED '+Math.abs(daysOut)+'d ago',cls:'red',daysOut};
+  if(daysOut<=remindDays)return {label:'⏰ Expires in '+daysOut+'d',cls:'gold',daysOut};
+  return {label:'✓ Current ('+daysOut+'d)',cls:'grn',daysOut};
+}
+function _credStatusBg(cls){return cls==='red'?'#FDECEA':cls==='gold'?'#FEF7E8':cls==='grn'?'#EBF5EA':'#fff';}
+function _credStatusFg(cls){return cls==='red'?'#8B1A1A':cls==='gold'?'#8B6500':cls==='grn'?'var(--grn-deep)':'var(--soft)';}
+
+function renderCredentialsCard(W){
+  const creds=(W.st&&W.st.credentials)||[];
+  /* Surface a one-line indicator at the top showing how many need attention */
+  const expired=creds.filter(c=>{const s=_credStatus(c);return s.daysOut!=null&&s.daysOut<0;});
+  const expiring=creds.filter(c=>{const s=_credStatus(c);return s.cls==='gold';});
+  const statusBadge=expired.length
+    ?`<span class="pill pr2" style="font-size:9px;margin-left:6px">${expired.length} EXPIRED</span>`
+    :expiring.length
+    ?`<span class="pill" style="font-size:9px;margin-left:6px;background:#FEF7E8;color:#8B6500;border:1px solid var(--gold-mid)">${expiring.length} EXPIRING</span>`
+    :creds.length
+    ?'<span class="pill pg" style="font-size:9px;margin-left:6px">CURRENT</span>'
+    :'';
+
+  const list=creds.map((c,idx)=>{
+    const s=_credStatus(c);
+    const bg=_credStatusBg(s.cls);
+    const fg=_credStatusFg(s.cls);
+    const issued=c.issuedAt?'Issued '+esc(c.issuedAt):'';
+    const exp=c.expiresAt?'Expires '+esc(c.expiresAt):'';
+    const fileBtn=c.fileUrl?`<a href="${esc(c.fileUrl)}" target="_blank" style="color:var(--sky-deep);font-size:11px;text-decoration:none">📎 ${esc(c.fileName||'open')}</a>`:'';
+    const requestBtn=(s.cls==='gold'||s.cls==='red')?`<button class="btn-sm" style="background:var(--gold-mid);color:#fff;border:none;padding:4px 9px;font-size:11px;font-weight:600;cursor:pointer" onclick="requestCredentialRenewal('${esc(c.id)}')" title="Send renewal email">✉ Ask for renewal</button>`:'';
+    return `<div style="background:${bg};border:1px solid ${fg};border-radius:7px;padding:8px 11px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+        <b style="color:var(--ink);font-size:12.5px;flex:1">${esc(c.name)}</b>
+        <span style="font-size:10.5px;font-weight:700;color:${fg};text-transform:uppercase;letter-spacing:.04em">${s.label}</span>
+      </div>
+      <div style="display:flex;gap:12px;font-size:11px;color:var(--soft);align-items:center;flex-wrap:wrap">
+        ${issued?'<span>'+issued+'</span>':''}
+        ${exp?'<span>'+exp+'</span>':''}
+        ${fileBtn}
+        ${c.lastRenewalRequestedAt?'<span style="color:var(--soft);font-style:italic">Last asked '+esc(new Date(c.lastRenewalRequestedAt).toLocaleDateString())+'</span>':''}
+        <div style="flex:1"></div>
+        ${requestBtn}
+        <button class="btn-sm bg-cream" style="font-size:10.5px;padding:3px 7px" onclick="editCredential('${esc(c.id)}')">edit</button>
+        <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;font-size:10.5px;padding:3px 7px" onclick="removeCredential('${esc(c.id)}')">×</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="wscard"><h3>📜 Credentials &amp; licenses ${statusBadge}</h3>
+    <p style="font-size:11.5px;color:var(--soft);margin:0 0 10px">Track expiration dates on certifications, licenses, and anything renewable. The system will surface a renewal action when any of these enter the reminder window (default 60 days before expiry).</p>
+    ${creds.length?list:'<div style="font-size:12px;color:var(--soft);font-style:italic;padding:6px 0">No credentials on file yet — add the first one to start tracking expirations.</div>'}
+    <button class="btn-sec bg-cream" style="margin-top:6px;padding:6px 12px;font-size:12px" onclick="addCredential()">+ Add credential</button>
+  </div>`;
+}
+
+function _credId(){return 'cred-'+Math.random().toString(36).slice(2,10);}
+
+function addCredential(){_credEditModal(null);}
+function editCredential(id){
+  if(!W||!W.st.credentials)return;
+  const c=W.st.credentials.find(x=>x.id===id);
+  if(c)_credEditModal(c);
+}
+function _credEditModal(existing){
+  const c=existing||{id:_credId(),name:'',type:'cert',issuedAt:'',expiresAt:'',fileUrl:'',fileName:'',remindDaysBefore:60,notes:''};
+  document.getElementById('m-title').textContent=existing?'Edit credential':'Add credential';
+  document.getElementById('mbox').style.maxWidth='540px';
+  document.getElementById('m-body').innerHTML=`<div style="font-size:13px;color:var(--mid)">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <label class="set-field" style="grid-column:1/-1">Name<input id="cred-name" value="${esc(c.name)}" placeholder="e.g. CPR/BLS, STNA, Driver's License" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;outline:none"></label>
+      <label class="set-field">Type
+        <select id="cred-type" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px">
+          <option value="cert"${c.type==='cert'?' selected':''}>Certification</option>
+          <option value="license"${c.type==='license'?' selected':''}>License</option>
+          <option value="auto"${c.type==='auto'?' selected':''}>Auto / Vehicle</option>
+          <option value="other"${c.type==='other'?' selected':''}>Other</option>
+        </select>
+      </label>
+      <label class="set-field">Remind days before expiry
+        <input id="cred-remind" type="number" min="1" max="365" value="${c.remindDaysBefore||60}" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;outline:none">
+      </label>
+      <label class="set-field">Issued date <span style="color:var(--soft);font-size:10px;font-weight:400">(optional)</span>
+        <input id="cred-issued" type="date" value="${esc(c.issuedAt)}" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px">
+      </label>
+      <label class="set-field">Expiration date <span style="color:var(--red);font-size:10px;font-weight:600">REQUIRED</span>
+        <input id="cred-expires" type="date" value="${esc(c.expiresAt)}" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px">
+      </label>
+      <label class="set-field" style="grid-column:1/-1">Notes <span style="color:var(--soft);font-size:10px;font-weight:400">(optional)</span>
+        <input id="cred-notes" value="${esc(c.notes||'')}" placeholder="e.g. card number, issuing org, training provider" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;outline:none">
+      </label>
+    </div>
+    ${c.fileUrl?`<div style="margin-bottom:10px;padding:8px 11px;background:var(--cream);border-radius:7px;font-size:11.5px">📎 Current file: <a href="${esc(c.fileUrl)}" target="_blank" style="color:var(--sky-deep)">${esc(c.fileName||'open')}</a></div>`:''}
+  </div>
+  <div class="brow" style="margin-top:14px;gap:8px">
+    <button class="btn-primary bg-grn" onclick="_credSave('${c.id}',${existing?'true':'false'})">${existing?'Save changes':'Add credential'}</button>
+    <button class="btn-sec bg-cream" onclick="closeModal()">Cancel</button>
+  </div>`;
+  document.getElementById('modal').classList.add('open');
+}
+async function _credSave(id,isEdit){
+  const get=k=>(document.getElementById('cred-'+k)||{}).value||'';
+  const name=get('name').trim();
+  if(!name){toast('Name required');return;}
+  const expires=get('expires');
+  if(!expires){toast('Expiration date required — that\'s the whole point of tracking');return;}
+  W.st.credentials=W.st.credentials||[];
+  let cred;
+  if(isEdit==='true'||isEdit===true){
+    cred=W.st.credentials.find(x=>x.id===id);
+    if(!cred){toast('Credential not found');return;}
+  }else{
+    cred={id:id||_credId(),addedAt:new Date().toISOString(),addedBy:window.userEmail||''};
+    W.st.credentials.push(cred);
+  }
+  cred.name=name;
+  cred.type=get('type')||'cert';
+  cred.issuedAt=get('issued');
+  cred.expiresAt=expires;
+  cred.remindDaysBefore=parseInt(get('remind'),10)||60;
+  cred.notes=get('notes').trim();
+  /* Keep st.certs in sync — flat string array of names, used by scoring/search/payRange */
+  W.st.certs=W.st.credentials.map(c=>c.name);
+  logW((isEdit==='true'||isEdit===true?'✎ Edited':'+ Added')+' credential: '+name+' (expires '+expires+')');
+  await saveW(true);
+  closeModal();
+  toast('✓ Saved');
+  renderWorkspace();
+  render();
+}
+async function removeCredential(id){
+  if(!W||!W.st.credentials)return;
+  const c=W.st.credentials.find(x=>x.id===id);
+  if(!c)return;
+  if(!confirm('Remove credential "'+c.name+'"?'))return;
+  W.st.credentials=W.st.credentials.filter(x=>x.id!==id);
+  W.st.certs=W.st.credentials.map(c=>c.name);
+  logW('✕ Removed credential: '+c.name);
+  await saveW(true);
+  renderWorkspace();
+}
+async function requestCredentialRenewal(id){
+  if(!W||!W.st.credentials)return;
+  const c=W.st.credentials.find(x=>x.id===id);
+  if(!c)return;
+  /* Open the email composer with the renewal template, passing the specific credential so the
+     template can render its name and expiration date. Stamps lastRenewalRequestedAt on send. */
+  W.__credential=c;  /* Synthetic field read by request_updated_credential template */
+  doEmail('request_updated_credential');
+  /* The send handler (reallySend) doesn't know to update lastRenewalRequestedAt on the credential
+     itself, so we set up a one-shot hook: when the modal closes after a send, stamp the field. */
+  const origCloseEmail=window.closeEmailModal;
+  let stamped=false;
+  window._credRenewalStampHook=async function(sent){
+    if(stamped||!sent)return;stamped=true;
+    c.lastRenewalRequestedAt=new Date().toISOString();
+    logW('📅 Renewal request sent for '+c.name);
+    await saveW(true);
+    delete W.__credential;
+    window._credRenewalStampHook=null;
+  };
+}
+
+async function applyBgOverride(gateKey,newValue,labelEsc){
+  if(!W)return;
+  W.st.bgOverrides=W.st.bgOverrides||{};
+  /* Stash the original (candidate-claimed) value so a Revert button can restore it. */
+  const origKey='_orig'+gateKey.charAt(0).toUpperCase()+gateKey.slice(1);
+  if(!W.st.bgOverrides[origKey])W.st.bgOverrides[origKey]=W.gates[gateKey]||'';
+  W.st.bgOverrides[gateKey]=newValue;
+  W.st.bgOverrides.appliedAt=new Date().toISOString();
+  W.st.bgOverrides.appliedBy=window.userEmail||'';
+  /* Also write to the row's gate cell so the gate UI reflects it immediately. The candidate's
+     original answer is preserved on st.bgOverrides._origXx. */
+  W.gates[gateKey]=newValue;
+  const colMap={wa:'H',cr:'I',bg:'J',tr:'K',av:'L'};
+  await patchRange(colMap[gateKey]+W.row,[[newValue]]);
+  logW('🛡 Applied BG override — '+(labelEsc||gateKey)+' → '+newValue+' (was '+W.st.bgOverrides[origKey]+')');
+  await saveW(true);
+  toast('✓ Override applied to gate "'+gateKey+'"');
+  renderWorkspace();
+  render();
+}
+
+async function dismissBgConflict(gateKey){
+  if(!W||!W.st.bgFindings)return;
+  /* Just mark this specific finding as dismissed so the conflict UI hides. The findings stay on
+     the candidate for audit, but the user has explicitly decided to trust the claim over the BG. */
+  W.st.bgConflictsDismissed=W.st.bgConflictsDismissed||{};
+  W.st.bgConflictsDismissed[gateKey]=new Date().toISOString();
+  logW('Dismissed BG conflict on "'+gateKey+'" — kept candidate\'s self-report');
+  await saveW(true);
+  renderWorkspace();
+}
+
+async function revertBgOverride(gateKey){
+  if(!W||!W.st.bgOverrides)return;
+  const origKey='_orig'+gateKey.charAt(0).toUpperCase()+gateKey.slice(1);
+  const orig=W.st.bgOverrides[origKey]||'';
+  delete W.st.bgOverrides[gateKey];
+  delete W.st.bgOverrides[origKey];
+  /* Restore the original gate value */
+  W.gates[gateKey]=orig;
+  const colMap={wa:'H',cr:'I',bg:'J',tr:'K',av:'L'};
+  await patchRange(colMap[gateKey]+W.row,[[orig]]);
+  logW('↺ Reverted BG override on "'+gateKey+'" — restored candidate\'s claim ('+orig+')');
+  await saveW(true);
+  toast('Override reverted');
+  renderWorkspace();
+  render();
+}
+
 async function refreshYardstik(){
   if(!W.st.yardstik||!W.st.yardstik.reportId){toast('No report ID on file');return;}
   const tok=(SETTINGS.config||{}).ziToken||'';
@@ -5486,6 +5963,11 @@ async function advanceWS(toStage,msg){
   if(toStage==='Screen invite'||toStage==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();
   await saveW(true);
   toast('→ '+toStage);
+  /* Auto-save the stage report for whatever step we just completed. This is the same hook used
+     by completeQuestions; centralizing here means EVERY stage transition gets a PDF, not just
+     the ones that go through the questions modal. Fire-and-forget so the user's next action
+     isn't blocked. */
+  autoUploadStageReport(W,fromStage).catch(e=>console.warn('Stage PDF auto-upload:',e.message));
   if(toStage==='Hired'){uploadHiredActivityLog(W).catch(e=>console.warn('Activity log upload:',e.message));}
   /* Referral funnel — if this candidate was referred by someone, advance the referrer's counters
      when their referred candidate reaches the appropriate funnel milestone.
@@ -6102,6 +6584,145 @@ function generatePhoneScreenPdf(c){
   _pdfFooter(doc);
   return doc.output('blob');
 }
+
+/* References-summary PDF — one section per reference showing contact, on-call answers,
+   outcome, and notes. Designed to be the audit trail attached to the candidate's onboarding
+   folder so any future review has a snapshot of what each reference said. */
+function generateReferencesPdf(c){
+  const doc=_jspdfNew();
+  let y=_pdfHeader(doc,'Reference Check Summary','Compiled '+(new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})));
+  y=_pdfCandidateHead(doc,c,y);
+  const refs=(c.st&&c.st.refs)||[];
+  if(!refs.length){
+    y=_pdfSection(doc,'No references on file',y);
+    y=_pdfPara(doc,'This candidate has not submitted any references via the application form, and none have been added manually.',y);
+    _pdfFooter(doc);
+    return doc.output('blob');
+  }
+  /* Overall summary block */
+  y=_pdfSection(doc,'Summary',y);
+  const refQuestions=QBANK.filter(x=>x.st==='Reference');
+  const withOutcome=refs.filter(r=>r.outcome).length;
+  const totalAnswers=refs.reduce((sum,r)=>sum+(r.qa?Object.keys(r.qa).length:0),0);
+  const strongCount=refs.filter(r=>r.outcome==='strong').length;
+  const mixedCount=refs.filter(r=>r.outcome==='mixed').length;
+  const negativeCount=refs.filter(r=>r.outcome==='negative').length;
+  const nopickupCount=refs.filter(r=>r.outcome==='nopickup'||r.outcome==='bad_num').length;
+  y=_pdfKV(doc,'Total references',String(refs.length),y);
+  y=_pdfKV(doc,'Calls completed',withOutcome+' of '+refs.length,y);
+  y=_pdfKV(doc,'Answers captured',String(totalAnswers),y);
+  if(strongCount)y=_pdfKV(doc,'Strong endorsements',String(strongCount),y);
+  if(mixedCount)y=_pdfKV(doc,'Mixed reviews',String(mixedCount),y);
+  if(negativeCount)y=_pdfKV(doc,'Negative reviews',String(negativeCount),y);
+  if(nopickupCount)y=_pdfKV(doc,'Unreachable / bad number',String(nopickupCount),y);
+  y+=4;
+
+  const RELABELS={supervisor:'Former supervisor',coworker:'Coworker',patientFamily:'Patient family',case_manager:'Case manager',personal:'Personal',other:'Other'};
+  const OUTCOMELABELS={strong:'Strong endorsement',mixed:'Mixed',negative:'Negative',nopickup:'Could not reach',bad_num:'Bad number'};
+
+  /* Per-reference detail sections */
+  refs.forEach((rf,idx)=>{
+    y+=2;
+    if(y>250){doc.addPage();y=24;}
+    y=_pdfSection(doc,'Reference '+(idx+1)+' · '+(rf.name||'(no name)'),y);
+    y=_pdfKV(doc,'Relationship',rf.relationshipLabel||RELABELS[rf.relationship]||rf.relationship||'—',y);
+    if(rf.durationLabel)y=_pdfKV(doc,'Duration known',rf.durationLabel,y);
+    if(rf.phone)y=_pdfKV(doc,'Phone',rf.phone,y);
+    if(rf.email)y=_pdfKV(doc,'Email',rf.email,y);
+    if(rf.bestTimeLabel)y=_pdfKV(doc,'Best time to call',rf.bestTimeLabel,y);
+    if(rf.submittedAt)y=_pdfKV(doc,'Submitted via form',new Date(rf.submittedAt).toLocaleDateString(),y);
+    if(rf.notes){
+      y+=2;
+      doc.setFont('helvetica','italic');doc.setFontSize(9.5);doc.setTextColor.apply(doc,PDF.muted);
+      doc.text('Note from candidate:',PDF.ML,y);y+=4;
+      doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.setTextColor.apply(doc,PDF.ink);
+      const lines=doc.splitTextToSize(_pdfSafe(rf.notes),PDF.TW);
+      doc.text(lines,PDF.ML,y);y+=lines.length*4+3;
+    }
+
+    /* Call result */
+    if(rf.outcome){
+      y+=2;
+      y=_pdfKV(doc,'Call outcome',OUTCOMELABELS[rf.outcome]||rf.outcome,y);
+      if(rf.callNotes){
+        doc.setFont('helvetica','italic');doc.setFontSize(9.5);doc.setTextColor.apply(doc,PDF.muted);
+        doc.text('Call notes:',PDF.ML,y);y+=4;
+        doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.setTextColor.apply(doc,PDF.ink);
+        const lines=doc.splitTextToSize(_pdfSafe(rf.callNotes),PDF.TW);
+        doc.text(lines,PDF.ML,y);y+=lines.length*4+3;
+      }
+    }else{
+      y=_pdfKV(doc,'Call outcome','— not yet called —',y);
+    }
+
+    /* Per-reference question answers */
+    const qa=rf.qa||{};
+    const answered=refQuestions.filter(q=>qa[q.id]!==undefined);
+    if(answered.length){
+      y+=3;
+      if(y>260){doc.addPage();y=24;}
+      doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor.apply(doc,PDF.navy);
+      doc.text('On-call question responses',PDF.ML,y);y+=5;
+      refQuestions.forEach(q=>{
+        if(qa[q.id]===undefined)return;
+        if(y>270){doc.addPage();y=24;}
+        const found=(q.o||[]).find(o=>String(o[1])===String(qa[q.id]));
+        const label=found?found[0]:String(qa[q.id]);
+        doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor.apply(doc,PDF.ink);
+        const qLines=doc.splitTextToSize(_pdfSafe(q.q),PDF.TW);
+        doc.text(qLines,PDF.ML,y);y+=qLines.length*5+1;
+        doc.setFont('helvetica','italic');doc.setFontSize(9.5);doc.setTextColor.apply(doc,PDF.sky);
+        doc.text(_pdfSafe('-> '+label),PDF.ML+4,y);
+        y+=6;
+      });
+    }
+    y+=4;
+  });
+  _pdfFooter(doc);
+  return doc.output('blob');
+}
+
+async function saveReferencesPdf(){
+  if(!W){toast('No candidate open');return;}
+  const refs=(W.st&&W.st.refs)||[];
+  if(!refs.length){toast('No references to save');return;}
+  toast('Generating references PDF…');
+  let blob;
+  try{
+    const ctx={name:W.name,email:W.email,phone:W.phone,stage:W.stage,row:W.row,gates:W.gates,answers:W.answers,st:W.st};
+    blob=generateReferencesPdf(ctx);
+  }catch(e){toast('PDF generation failed: '+e.message);return;}
+  const ts=new Date().toISOString().slice(0,10);
+  const fileName='references-summary-'+ts+'.pdf';
+  /* Upload to caregivers › {name} › onboarding */
+  try{
+    const safeNm=safeFileName(W.name||('candidate-'+W.row));
+    const folderPath='caregivers/'+safeNm+'/onboarding';
+    const encPath=folderPath.split('/').map(encodeURIComponent).join('/');
+    const buf=await blob.arrayBuffer();
+    const r=await gfetch(GR+'/drives/'+driveId+'/root:/'+encPath+'/'+encodeURIComponent(fileName)+':/content',{
+      method:'PUT',
+      headers:{'Content-Type':'application/pdf'},
+      body:buf
+    });
+    if(!r.ok)throw new Error('Upload returned '+r.status);
+    const uploaded=await r.json();
+    W.st.referencesPdfUrl=uploaded.webUrl||'';
+    W.st.referencesPdfSavedAt=new Date().toISOString();
+    logW('📄 References PDF saved to SharePoint — '+fileName);
+    await saveW(true);
+    toast('✓ Saved to '+folderPath+'/'+fileName);
+  }catch(e){
+    /* Fallback: download to the user's machine if SharePoint upload fails */
+    console.warn('SharePoint upload failed:',e.message);
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=fileName;
+    document.body.appendChild(a);a.click();a.remove();
+    URL.revokeObjectURL(url);
+    toast('⚠ SharePoint upload failed — downloaded locally instead');
+  }
+}
+
 function generateInterviewPdf(c){
   const doc=_jspdfNew();
   let y=_pdfHeader(doc,'Interview Report','Conducted on '+(new Date().toLocaleDateString()));
@@ -6147,6 +6768,91 @@ function generateRefsPdf(c){
   _pdfFooter(doc);
   return doc.output('blob');
 }
+
+/* Verify-employers PDF — captures every prior employer, contact info, verification outcome,
+   ZoomInfo enrichment, and any tenure/role details. Built when the candidate transitions out
+   of "Verify employers" — provides an audit trail for compliance reviews. */
+function generateEmployerVerificationPdf(c){
+  const doc=_jspdfNew();
+  let y=_pdfHeader(doc,'Employer Verification Summary','Compiled '+(new Date().toLocaleDateString()));
+  y=_pdfCandidateHead(doc,c,y);
+  const emp=(c.st&&c.st.employers)||[];
+  if(!emp.length){
+    y=_pdfPara(doc,'No prior employers on file.',y);
+    _pdfFooter(doc);
+    return doc.output('blob');
+  }
+  y=_pdfSection(doc,'Summary',y);
+  const verified=emp.filter(e=>e.v==='ok').length;
+  const denied=emp.filter(e=>e.v==='denied').length;
+  const unable=emp.filter(e=>e.v==='no').length;
+  y=_pdfKV(doc,'Total employers',String(emp.length),y);
+  y=_pdfKV(doc,'Verified',String(verified),y);
+  if(denied)y=_pdfKV(doc,'Denied employment',String(denied)+' — MAJOR RED FLAG',y);
+  if(unable)y=_pdfKV(doc,'Unable to reach',String(unable),y);
+  y+=3;
+  const STATUSLABEL={ok:'Verified',no:'Unable to reach',denied:'Denied employment',pending:'Pending'};
+  emp.forEach((e,i)=>{
+    if(y>250){doc.addPage();y=24;}
+    y=_pdfSection(doc,'Employer '+(i+1)+' — '+(e.name||'(no name)'),y);
+    if(e.phone)y=_pdfKV(doc,'Phone',e.phone,y);
+    if(e.address)y=_pdfKV(doc,'Address',e.address,y);
+    if(e.role)y=_pdfKV(doc,'Role',e.role,y);
+    if(e.years)y=_pdfKV(doc,'Years there',String(e.years),y);
+    if(e.startDate||e.endDate)y=_pdfKV(doc,'Tenure',(e.startDate||'?')+' to '+(e.endDate||'present'),y);
+    y=_pdfKV(doc,'Verification status',STATUSLABEL[e.v]||e.v||'pending',y);
+    if(e.zi&&e.zi.name){
+      y+=2;
+      doc.setFont('helvetica','italic');doc.setFontSize(8.5);doc.setTextColor.apply(doc,PDF.muted);
+      doc.text('Enriched via ZoomInfo:',PDF.ML,y);y+=4;
+      doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor.apply(doc,PDF.ink);
+      const ziLine=[e.zi.name,e.zi.website,e.zi.address,e.zi.employees?e.zi.employees+' employees':''].filter(Boolean).join(' · ');
+      const lines=doc.splitTextToSize(_pdfSafe(ziLine),PDF.TW);
+      doc.text(lines,PDF.ML,y);y+=lines.length*4+1;
+    }
+    if(e.callNotes){
+      doc.setFont('helvetica','italic');doc.setFontSize(8.5);doc.setTextColor.apply(doc,PDF.muted);
+      doc.text('Notes:',PDF.ML,y);y+=4;
+      doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor.apply(doc,PDF.ink);
+      const lines=doc.splitTextToSize(_pdfSafe(e.callNotes),PDF.TW);
+      doc.text(lines,PDF.ML,y);y+=lines.length*4+1;
+    }
+    if(e.v==='denied'){
+      y+=2;
+      doc.setFillColor(255,232,232);doc.rect(PDF.ML-2,y-3,PDF.TW+4,8,'F');
+      doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(139,26,26);
+      doc.text('** EMPLOYER DENIED CANDIDATE WORKED THERE — POSSIBLE FABRICATED EMPLOYMENT **',PDF.ML,y+2);
+      y+=10;
+    }
+    y+=3;
+  });
+  _pdfFooter(doc);
+  return doc.output('blob');
+}
+
+/* Onboarding-report PDF — captures the onboarding question answers + start-date plans. Generated
+   when the candidate transitions to Hired (i.e. orientation was completed). */
+function generateOnboardingPdf(c){
+  const doc=_jspdfNew();
+  let y=_pdfHeader(doc,'Onboarding & Orientation Report','Completed '+(new Date().toLocaleDateString()));
+  y=_pdfCandidateHead(doc,c,y);
+  y=_pdfSection(doc,'Onboarding details',y);
+  if(c.st&&c.st.startDate)y=_pdfKV(doc,'Start date',c.st.startDate,y);
+  if(c.st&&c.st.hoursPerWeek)y=_pdfKV(doc,'Hours/week target',String(c.st.hoursPerWeek),y);
+  if(c.st&&c.st.payRate)y=_pdfKV(doc,'Pay rate',c.st.payRate,y);
+  y+=3;
+  /* Pass "Onboarding" stage so _pdfQA picks up QBANK items with st: "Onboarding". */
+  y=_pdfQA(doc,c,'Onboarding',y);
+  _pdfFooter(doc);
+  return doc.output('blob');
+}
+
+/* Application snapshot — alias to the existing full-application PDF. Used by auto-upload so a
+   first-time advance past Applied saves a frozen copy of the candidate's claims. */
+function generateApplicationSnapshotPdf(c){
+  return generateApplicationPdf(c);
+}
+
 function generateApplicationPdf(c){
   /* Renders the full application — all sections defined in APP_SECTIONS — as a clean PDF.
      Used as the canonical "what they said on the form" artifact in the onboarding folder. */
@@ -6244,22 +6950,43 @@ async function uploadPdfToOnboarding(candidateName,fileName,blob){
 
 /* Auto-generate the right report based on the stage that just completed.
    Called from completeQuestions() and advanceWS() at the appropriate moments. */
+/* Auto-save a PDF for whichever stage the candidate just transitioned out of. Called from every
+   point in the workflow where a stage advance happens (completeQuestions, decideBgReport,
+   completion of employer verification, hiring, etc.). Always fire-and-forget so the user's
+   advance flow doesn't block on PDF gen / SharePoint upload latency. */
 async function autoUploadStageReport(c,fromStage){
   if(!c||!window.jspdf){return;}
   try{
     let blob,fileName;
     const ts=today();
-    if(fromStage==='Phone Screen'||fromStage==='Screen booked'){
+    /* Normalize stage name for matching — "Phone Screen" / "Screen booked" / "Screen invite" all
+       map to the phone screen PDF; similar for interview. References use the new richer generator
+       built for the per-reference question feature. */
+    const s=String(fromStage||'').toLowerCase();
+    if(s==='phone screen'||s==='screen booked'||s==='screen invite'){
       blob=generatePhoneScreenPdf(c);fileName='phone-screen-report-'+ts+'.pdf';
-    }else if(fromStage==='Interview'||fromStage==='Interview booked'){
+    }else if(s==='interview'||s==='interview booked'||s==='interview invite'){
       blob=generateInterviewPdf(c);fileName='interview-report-'+ts+'.pdf';
-    }else if(fromStage==='References'){
-      blob=generateRefsPdf(c);fileName='references-summary-'+ts+'.pdf';
+    }else if(s==='references'||s==='ask references'){
+      blob=generateReferencesPdf(c);fileName='references-summary-'+ts+'.pdf';
+    }else if(s==='verify employers'){
+      blob=generateEmployerVerificationPdf(c);fileName='employer-verification-'+ts+'.pdf';
+    }else if(s==='applied'){
+      /* Application snapshot — gets uploaded when the candidate moves past Applied for the first time */
+      blob=generateApplicationSnapshotPdf(c);fileName='application-snapshot-'+ts+'.pdf';
+    }else if(s==='onboarding'||s==='onboarding booked'){
+      blob=generateOnboardingPdf(c);fileName='onboarding-report-'+ts+'.pdf';
+    }else if(s==='hired'){
+      blob=generateActivityLogPdf(c);fileName='final-activity-log-'+ts+'.pdf';
     }else{return;}
     await uploadPdfToOnboarding(c.name,fileName,blob);
-    toast('📄 '+fileName+' saved');
-    /* No popup — user can open it from the SharePoint folder if they want to review. */
-  }catch(e){console.warn('PDF auto-upload failed:',e.message);}
+    /* Stamp on st so we know which reports exist. Useful for the docs card and audit. */
+    c.st=c.st||{};
+    c.st.stageReports=c.st.stageReports||{};
+    c.st.stageReports[fromStage]={file:fileName,at:new Date().toISOString()};
+    /* Silent unless user is viewing this candidate — they're already moving on to the next step. */
+    if(W&&W.row===c.row)toast('📄 '+fileName+' saved');
+  }catch(e){console.warn('PDF auto-upload failed for '+fromStage+':',e.message);}
 }
 
 /* On-demand: button in the workspace docs card lets the user generate the report
@@ -6524,7 +7251,8 @@ const TEMPLATE_LABELS={
  offer:'Offer',onboarding:'Onboarding',
  missed_onboarding:'Missed onboarding — rebook',
  reject:'Rejection',missing:'Request missing info',
- request_resume:'Request résumé'
+ request_resume:'Request résumé',
+ request_updated_credential:'Request updated credential (renewal)'
 };
 function defaultTplFor(k){const dummy={name:'John Smith',email:'',phone:'',source:'',st:{refCode:'A7K2P9'},__missing:['Work authorization']};return (TEMPLATES[k]||TEMPLATES.screen_invite)(dummy);}
 /* ===================== SETTINGS — sidebar-driven page ===================== */
@@ -7312,6 +8040,11 @@ function renderSettingsPipeline(){
     <label class="set-field" style="margin-top:14px">Required certs (every candidate must have ALL of these — comma-separated)<input type="text" id="cfg_requiredCerts" value="${esc((SETTINGS.config.requiredCerts||[]).join(', '))}" placeholder="CPR, First Aid"></label>
     <label class="set-field">Minimum care credential (candidate must have AT LEAST ONE of these — comma-separated)<input type="text" id="cfg_requiredCertGroup" value="${esc(((SETTINGS.config.requiredCertGroups||[])[0]||{}).options ? (SETTINGS.config.requiredCertGroups[0].options.join(', ')) : '')}" placeholder="HHA, STNA, CNA, RN, LPN"></label>
     <p class="set-help" style="margin-top:6px"><b>Current rule:</b> Candidate must have ${(SETTINGS.config.requiredCerts||[]).length?'<b>'+esc((SETTINGS.config.requiredCerts||[]).join('</b>, <b>'))+'</b>':'(no specific certs)'} AND at least one of ${((SETTINGS.config.requiredCertGroups||[])[0]||{}).options?'<b>'+esc((SETTINGS.config.requiredCertGroups[0].options).join('</b>, <b>'))+'</b>':'(no minimum specified)'}.</p>
+  </div>
+
+  <div class="wscard"><h3>Credential renewal reminders</h3>
+    <p class="set-help">Default lead time for credential expiration nudges. When any candidate-credential is within this many days of its expiration date (or already expired), the candidate surfaces in the action bucket with a one-click "Request updated credential" action. Per-credential override is available when adding/editing each credential.</p>
+    <label class="set-field" style="max-width:200px">Days before expiry<input type="number" min="1" max="365" id="cfg_credRemindDays" value="${SETTINGS.config.credRemindDays||60}"></label>
   </div>
 
   <div class="wscard"><h3>Nudge reminders</h3>
@@ -8217,6 +8950,7 @@ function saveConfigSilent(){
   if(get('cfg_serviceZips'))SETTINGS.config.serviceZips=get('cfg_serviceZips').value.trim();
   if(get('cfg_autoRejectDays'))SETTINGS.config.autoRejectDays=parseInt(get('cfg_autoRejectDays').value,10)||14;
   if(get('cfg_nudgeDays'))SETTINGS.config.nudgeDays=parseInt(get('cfg_nudgeDays').value,10)||3;
+  if(get('cfg_credRemindDays'))SETTINGS.config.credRemindDays=parseInt(get('cfg_credRemindDays').value,10)||60;
   if(get('cfg_calScreenUrl'))SETTINGS.config.calScreenUrl=get('cfg_calScreenUrl').value.trim();
   if(get('cfg_calInterviewUrl'))SETTINGS.config.calInterviewUrl=get('cfg_calInterviewUrl').value.trim();
   if(get('cfg_calOnboardingUrl'))SETTINGS.config.calOnboardingUrl=get('cfg_calOnboardingUrl').value.trim();
