@@ -2585,10 +2585,19 @@ function sequenceAction(c,info){
     return{bucket:cfg.awaitingBucket||'awaiting',timing:_dn(cfg.awaitingLabel||'Awaiting',cfg.awaitingPill||'psoft',st.due?('nudge '+fmtDay(st.due)):''),info,primary:cfg.awaitingAction||cfg.action};
   }
 
-  /* Action done + trigger met → ready to advance. We don't auto-advance; the user clicks the
-     advance button on the previous step's email send (which has advanceTo). For sequences where
-     the trigger fires without an email click (e.g., booking arrives via Cal.com), the system
-     auto-advances elsewhere. Surface a generic "open" action as a fallback. */
+  /* Action done + trigger met → ready for the next step. Three sub-cases in priority order:
+       1. If cfg.readyAction exists, surface that — typically the next email-template to send
+          (e.g., Applied stage: readyAction is 'send screen invite'). This is the most common
+          unstuck path: resume came in via attachment assignment (so request_resume was sent =
+          actionDone, AND hasResume met = awaitMet), readyAction is screen_invite.
+       2. If cfg.advanceTo exists, surface an advance button.
+       3. Otherwise generic "Open candidate" — true dead-end. */
+  if(cfg.readyAction){
+    return{bucket:'action',timing:_dn(cfg.readyAction.label||'Next step','pnew'),info,primary:cfg.readyAction};
+  }
+  if(cfg.advanceTo){
+    return{bucket:'action',timing:_dn('Ready: '+cfg.advanceTo,'pnew'),info,primary:{kind:'advance-stage',advanceTo:cfg.advanceTo,label:'→ Advance to '+cfg.advanceTo,cls:'grn'}};
+  }
   return{bucket:'action',timing:_dn('Ready for next step','pa'),info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
 }
 
@@ -3947,6 +3956,13 @@ function doPrimary(r){const c=pipeline.find(x=>x.excelRow===r);if(!c)return;cons
   if(p.kind==='decline')return doEmail('reject','Declined');
   if(p.kind==='open-email'){openWorkspace(r);return setTimeout(()=>openEmailDetail(p.emailId),300);}
   if(p.kind==='custom-advance'){openWorkspace(r);return setTimeout(()=>{if(confirm('Mark "'+stageLabel(W.stage)+'" complete and advance to '+stageLabel(p.nextStage)+'?')){advanceWS(p.nextStage,'Custom milestone "'+stageLabel(W.stage)+'" complete');}},100);}
+  /* Generic advance-stage from the sequence engine's "ready to advance" fallback. Opens the
+     workspace AND immediately advances (no confirm) — the action engine only emits this primary
+     when the candidate is genuinely ready to move on (e.g., Applied with résumé received). */
+  if(p.kind==='advance-stage'){
+    openWorkspace(r);
+    return setTimeout(()=>{advanceWS(p.advanceTo,'Advanced to '+p.advanceTo+' — '+(W.stage==='Applied'?'résumé on file':'requirements met'));},100);
+  }
   return openWorkspace(r);
 }
 function quickDecline(r){loadW(r);doEmail('reject','Declined');}
