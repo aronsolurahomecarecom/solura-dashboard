@@ -1789,6 +1789,8 @@ async function saveAvailability(){try{await patchRange('AK1',[[JSON.stringify(AV
    3. CACHE: browser localStorage — restores instantly, final fallback when both above fail.
    Loading: try primary first, then mirror, then cache. Saving: write to all three. */
 async function loadSettings(){
+  /* Track where settings actually loaded from so the diagnostic panel shows truth. */
+  const load={source:'defaults',workerFile:false,al1:false,localStorage:false,errors:[],at:new Date().toISOString()};
   let primaryLoaded=false;
   /* 1. PRIMARY — fetch from worker (Solura_Settings.json in OneDrive) */
   try{
@@ -1802,11 +1804,18 @@ async function loadSettings(){
           SETTINGS.config=Object.assign({},SETTINGS.config,data.settings.config||{});
           SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},data.settings.flow||{});
           primaryLoaded=true;
+          load.source='workerFile';load.workerFile=true;
           try{localStorage.setItem('solura_settings',JSON.stringify(SETTINGS));}catch(e){}
+        }else{
+          load.errors.push('Worker file exists but is empty');
         }
+      }else{
+        load.errors.push('Worker GET /settings returned '+r.status);
       }
+    }else{
+      load.errors.push('No internal worker token at load time');
     }
-  }catch(e){console.warn('Settings load from worker failed:',e.message);}
+  }catch(e){load.errors.push('Worker GET failed: '+e.message);}
 
   /* 2. MIRROR — AL1 fallback */
   if(!primaryLoaded){
@@ -1821,11 +1830,12 @@ async function loadSettings(){
             SETTINGS.config=Object.assign({},SETTINGS.config,saved.config||{});
             SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},saved.flow||{});
             primaryLoaded=true;
+            load.source='al1';load.al1=true;
             try{localStorage.setItem('solura_settings',JSON.stringify(SETTINGS));}catch(e){}
-          }catch(e){console.warn('AL1 settings parse failed:',e.message);}
+          }catch(e){load.errors.push('AL1 parse failed: '+e.message);}
         }
       }
-    }catch(e){console.warn('AL1 settings load failed:',e.message);}
+    }catch(e){load.errors.push('AL1 read failed: '+e.message);}
   }
 
   /* 3. CACHE — localStorage final fallback */
@@ -1837,11 +1847,13 @@ async function loadSettings(){
         SETTINGS=Object.assign({},SETTINGS,saved);
         SETTINGS.config=Object.assign({},SETTINGS.config,saved.config||{});
         SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},saved.flow||{});
+        load.source='localStorage';load.localStorage=true;
         toast('⚠ Restored settings from browser cache — file sync may have failed earlier');
       }
-    }catch(e){console.warn('Local settings restore failed:',e.message);}
+    }catch(e){load.errors.push('localStorage parse failed: '+e.message);}
   }
 
+  /* Restore internal worker token from localStorage if not in settings yet */
   try{
     const localTok=localStorage.getItem('solura_internal_token')||localStorage.getItem('solura_zi_token');
     if(localTok&&(!SETTINGS.config||!SETTINGS.config.ziToken)){
@@ -1849,18 +1861,98 @@ async function loadSettings(){
       SETTINGS.config.ziToken=localTok;
     }
   }catch(e){}
+  window._lastSettingsLoadStatus=load;
   applyCustomStagesToInfo();
   if(typeof applyQuestionOverrides==='function')applyQuestionOverrides();
 }
 
+/* ===================== AUTO-SAVE INFRASTRUCTURE =====================
+   Every settings change marks SETTINGS dirty and schedules a debounced save. No explicit Save
+   buttons required — edits persist within ~700ms of the last change. A small status indicator
+   in the settings header tracks dirty/saving/saved/error state. */
+let _settingsDirty=false;
+let _settingsSaveTimeout=null;
+let _settingsSaveInFlight=false;
+
+function markSettingsDirty(){
+  _settingsDirty=true;
+  _updateAutosaveStatus('dirty');
+  if(_settingsSaveTimeout)clearTimeout(_settingsSaveTimeout);
+  /* 700ms debounce — long enough to absorb rapid typing, short enough to feel instant. */
+  _settingsSaveTimeout=setTimeout(_runAutoSave,700);
+}
+
+async function _runAutoSave(){
+  if(_settingsSaveInFlight){
+    /* If a save is already running, schedule another pass to capture the latest edits. */
+    _settingsSaveTimeout=setTimeout(_runAutoSave,300);
+    return;
+  }
+  _settingsSaveInFlight=true;
+  _updateAutosaveStatus('saving');
+  try{
+    const status=await saveSettings();
+    if(status&&status.workerFile){
+      _settingsDirty=false;
+      _updateAutosaveStatus('saved');
+    }else if(status&&status.localStorage){
+      _updateAutosaveStatus('local-only',(status.errors||[])[0]||'');
+    }else{
+      _updateAutosaveStatus('error',(status&&status.errors&&status.errors[0])||'Unknown error');
+    }
+  }catch(e){
+    _updateAutosaveStatus('error',e.message);
+  }finally{
+    _settingsSaveInFlight=false;
+  }
+}
+
+function _updateAutosaveStatus(state,detail){
+  const el=document.getElementById('autosave-status');
+  if(!el)return;
+  const cfg={
+    'dirty':       {text:'• Unsaved changes',bg:'#FAF6EE',color:'#8B6500',border:'var(--gold-mid)'},
+    'saving':      {text:'⟳ Saving…',         bg:'#EBF3FB',color:'#1E4E8C',border:'var(--sky)'},
+    'saved':       {text:'✓ Saved to OneDrive',bg:'#EBF5EA',color:'var(--grn-deep)',border:'var(--grn)'},
+    'local-only':  {text:'⚠ Browser-only (file save failed)',bg:'#FEF7E8',color:'#8B6500',border:'var(--gold-mid)'},
+    'error':       {text:'✗ Save failed',     bg:'#FDECEA',color:'#8B1A1A',border:'var(--red)'}
+  };
+  const c=cfg[state]||cfg.dirty;
+  el.style.background=c.bg;el.style.color=c.color;el.style.border='1px solid '+c.border;
+  el.textContent=c.text;
+  if(detail)el.title=detail;
+  /* After "saved", fade back to neutral after 4s so the indicator isn't permanently green. */
+  if(state==='saved'){
+    setTimeout(()=>{
+      const el2=document.getElementById('autosave-status');
+      if(el2&&!_settingsDirty)el2.textContent='Synced';
+    },4000);
+  }
+}
+
 async function saveSettings(){
   const json=JSON.stringify(SETTINGS);
+  /* Track exactly where the settings made it so the diagnostic panel can show truth, not hope. */
+  const status={
+    localStorage:false,
+    workerFile:false,
+    workerFileBytes:0,
+    al1Mirror:false,
+    al1Skipped:false,
+    errors:[],
+    at:new Date().toISOString()
+  };
+  /* 1. localStorage — instant, never fails (unless quota exceeded). */
   try{
     localStorage.setItem('solura_settings',json);
     if(SETTINGS.config&&SETTINGS.config.ziToken)localStorage.setItem('solura_internal_token',SETTINGS.config.ziToken);
-  }catch(e){console.warn('localStorage save failed:',e.message);}
+    status.localStorage=true;
+  }catch(e){status.errors.push('localStorage: '+e.message);}
 
-  let primaryOk=false;
+  /* 2. PRIMARY — POST to worker (writes Solura_Settings.json in OneDrive).
+     Now verifies the write by reading back the byte count and confirming it matches. Without
+     read-back, silent partial writes go undetected and the user thinks settings are saved when
+     they actually weren't. */
   try{
     const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
     if(tok){
@@ -1869,17 +1961,41 @@ async function saveSettings(){
         headers:{'Content-Type':'application/json','X-Solura-Token':tok},
         body:JSON.stringify({settings:SETTINGS})
       });
-      if(r.ok)primaryOk=true;
-      else{const t=await r.text().catch(()=>'');console.warn('File save failed:',r.status,t.slice(0,200));}
+      if(r.ok){
+        const data=await r.json();
+        status.workerFile=true;
+        status.workerFileBytes=data.bytes||0;
+        /* Sanity check — bytes returned should roughly match what we sent. JSON.stringify pretty-
+           prints with 2-space indent on the worker side, so allow ±50% tolerance. */
+        if(data.bytes&&data.bytes<json.length*0.5){
+          status.errors.push('File save truncated: sent '+json.length+' chars but file has '+data.bytes+' bytes');
+        }
+      }else{
+        const t=await r.text().catch(()=>'');
+        status.errors.push('Worker returned '+r.status+': '+t.slice(0,200));
+      }
+    }else{
+      status.errors.push('No internal worker token — file save skipped. Set token in Settings → ZoomInfo integration.');
     }
-  }catch(e){console.warn('Settings save to worker failed:',e.message);}
+  }catch(e){status.errors.push('Worker call failed: '+e.message);}
 
+  /* 3. MIRROR — AL1 (skip if too large; the file + localStorage already have it) */
   if(json.length<=32000){
-    try{await patchRange('AL1',[[json]]);}
-    catch(e){console.warn('AL1 mirror save failed:',e.message);}
-  }else if(!primaryOk){
-    toast('⚠ Settings saved to browser only — could not reach OneDrive. Will retry on next reload.');
+    try{
+      await patchRange('AL1',[[json]]);
+      status.al1Mirror=true;
+    }catch(e){status.errors.push('AL1 mirror: '+e.message);}
+  }else{
+    status.al1Skipped=true;
   }
+
+  /* Stash the latest status so the diagnostic panel can show it. */
+  window._lastSettingsSaveStatus=status;
+  /* If the PRIMARY (file) save failed AND localStorage is our only home, surface loudly. */
+  if(!status.workerFile&&status.localStorage){
+    toast('⚠ Settings saved to browser only — file save failed. Check Settings → Access & lock → storage status.');
+  }
+  return status;
 }
 
 
@@ -6439,7 +6555,7 @@ const SETTINGS_SECTIONS=[
    edited often and the blast radius is small.
    Storage: SETTINGS.seqPasswordHash (sha256 hex). Set/changed/cleared in Access section.
    Unlock state lives in sessionStorage, so each new tab session re-locks. */
-const SENSITIVE_SECTIONS=['workflow','pipeline','access'];
+const SENSITIVE_SECTIONS=['workflow','sequence','pipeline','access'];
 async function _sha256(text){
   const buf=new TextEncoder().encode(text);
   const hash=await crypto.subtle.digest('SHA-256',buf);
@@ -6540,6 +6656,9 @@ function renderSettings(){
 
   const activeLabel=(SETTINGS_SECTIONS.find(s=>s.key===settingsSection)||{}).label||'';
   const lockBtn=(isSeqPasswordSet()&&isSeqUnlocked()&&SENSITIVE_SECTIONS.includes(settingsSection))?'<button class="set-lock-btn" onclick="lockSeq()" title="Lock sensitive sections again">🔒 Lock</button>':'';
+  /* Autosave status pill — shows current persistence state. Set to "Synced" by default; edits
+     flip it to "Unsaved changes" → "Saving…" → "Saved" within ~1s. */
+  const autoSavePill='<span id="autosave-status" style="position:absolute;top:24px;right:'+(lockBtn?'110px':'32px')+';padding:5px 12px;border-radius:6px;font-size:11px;font-weight:600;background:#EBF5EA;color:var(--grn-deep);border:1px solid var(--grn);transition:all .15s">Synced</span>';
 
   document.getElementById('settings-view').innerHTML=`
     <div class="set-shell">
@@ -6549,10 +6668,38 @@ function renderSettings(){
         <nav>${sidebar}</nav>
       </aside>
       <main class="set-content">
-        <header class="set-section-head"><h1>${esc(activeLabel)}</h1>${lockBtn}</header>
+        <header class="set-section-head"><h1>${esc(activeLabel)}</h1>${autoSavePill}${lockBtn}</header>
         <div class="set-section-body">${body}</div>
       </main>
     </div>`;
+  /* Auto-save: a single delegated listener on the settings content. ANY change/input/blur event
+     bubbling up triggers saveConfig() to capture form-field values into SETTINGS, then
+     markSettingsDirty() to schedule a debounced persist. This catches every settings input
+     without having to wire each renderer individually. */
+  const content=document.querySelector('.set-content');
+  if(content&&!content._autosaveBound){
+    content._autosaveBound=true;
+    /* "change" fires on commit (blur/select), "input" fires on every keystroke. We use change
+       to avoid spamming the worker on every typed character. */
+    const handler=function(e){
+      const t=e.target;
+      if(!t)return;
+      /* Ignore non-form-control events (clicks on buttons, etc.) */
+      if(!/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))return;
+      /* Buttons inside the form area shouldn't trigger config-save (e.g. the JSON copy/apply buttons) */
+      if(t.type==='button'||t.type==='submit')return;
+      /* Pull current field values into SETTINGS.config — saveConfigSilent reads everything that exists.
+         Sequence engine fields write to SETTINGS.sequence via their own handlers (seqEdit etc),
+         so saveConfigSilent doesn't interfere. */
+      try{saveConfigSilent();}catch(err){console.warn('saveConfig:',err);}
+      markSettingsDirty();
+    };
+    content.addEventListener('change',handler);
+    /* Also handle textarea input — change fires only on blur which feels too laggy for long text */
+    content.addEventListener('input',function(e){
+      if(e.target&&e.target.tagName==='TEXTAREA')handler(e);
+    });
+  }
 }
 
 /* ----- WORKFLOW section ----- */
@@ -6577,9 +6724,8 @@ function renderSettingsSequence(){
       <button class="btn-sec bg-cream" onclick="seqAddStage('time')" style="padding:8px 14px">+ Add time-based stage</button>
       <button class="btn-sec bg-cream" onclick="seqAddStage('rule')" style="padding:8px 14px">+ Add branching stage</button>
       ${isCustom?'<button class="btn-sec" style="background:#FFF6E6;color:#8B6500;border:1.5px solid var(--gold-mid);padding:8px 14px" onclick="seqResetToDefaults()">↺ Reset to defaults</button>':''}
-      <div style="flex:1"></div>
-      <button class="btn-primary bg-grn" onclick="seqSave()" style="padding:8px 16px">Save sequence</button>
     </div>
+    <p class="set-help" style="margin-top:10px;font-size:11px;color:var(--soft);font-style:italic">All changes save automatically — watch the status pill in the top-right of this page.</p>
   </div>
 
   <details class="wscard" style="margin-top:14px;background:#FAFAF7">
@@ -6763,22 +6909,27 @@ function _seqRuleBody(stage,i,tplOptions,trigOptions){
   <button class="btn-sm bg-cream" onclick="seqAddRule(${i})" style="margin-top:4px">+ Add rule</button>`;
 }
 
-/* In-memory draft of the sequence — edits don't write until "Save sequence" clicked */
-let _seqDraft=null;
-function _seqEnsureDraft(){
-  if(!_seqDraft)_seqDraft=JSON.parse(JSON.stringify(getActiveSequence()));
-  return _seqDraft;
+/* No draft — every edit writes directly to SETTINGS.sequence and triggers debounced auto-save.
+   This is simpler than the draft-then-save flow and gives the user immediate confidence that
+   their changes persisted. On first edit, if SETTINGS.sequence isn't yet a deep copy of defaults,
+   we clone the active sequence into SETTINGS.sequence so we don't mutate the shared defaults. */
+function _seqEnsureWritable(){
+  if(!SETTINGS.sequence||!Array.isArray(SETTINGS.sequence)||!SETTINGS.sequence.length){
+    SETTINGS.sequence=JSON.parse(JSON.stringify(SEQUENCE_DEFAULTS));
+  }
+  return SETTINGS.sequence;
 }
 /* Tiny regex-escape helper — used to safely build the `selected` substitution patterns above */
 function _reEsc(s){return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
 
 function seqEdit(idx,field,value){
-  const d=_seqEnsureDraft();
+  const d=_seqEnsureWritable();
   if(!d[idx])return;
   d[idx][field]=value;
+  markSettingsDirty();
 }
 function seqEditAction(idx,field,value){
-  const d=_seqEnsureDraft();
+  const d=_seqEnsureWritable();
   if(!d[idx])return;
   if(!d[idx].action)d[idx].action={kind:'email-tpl',cls:'gold'};
   if(field==='tpl'){
@@ -6787,9 +6938,10 @@ function seqEditAction(idx,field,value){
   }else{
     d[idx].action[field]=value;
   }
+  markSettingsDirty();
 }
 function seqEditAwaiting(idx,field,value){
-  const d=_seqEnsureDraft();
+  const d=_seqEnsureWritable();
   if(!d[idx])return;
   if(field==='tpl'){
     if(!value){d[idx].awaitingAction=null;}
@@ -6798,60 +6950,67 @@ function seqEditAwaiting(idx,field,value){
       d[idx].awaitingAction.tpl=value;d[idx].awaitingAction.kind='email-tpl';
     }
   }
+  markSettingsDirty();
 }
 function seqEditRule(idx,ri,field,value){
-  const d=_seqEnsureDraft();
+  const d=_seqEnsureWritable();
   if(!d[idx]||!d[idx].rules||!d[idx].rules[ri])return;
   d[idx].rules[ri][field]=value;
+  markSettingsDirty();
 }
 function seqEditRuleAction(idx,ri,field,value){
-  const d=_seqEnsureDraft();
+  const d=_seqEnsureWritable();
   if(!d[idx]||!d[idx].rules||!d[idx].rules[ri])return;
   if(!d[idx].rules[ri].action)d[idx].rules[ri].action={kind:'email-tpl',cls:'gold'};
-  if(field==='tpl'&&!value){d[idx].rules[ri].action=null;return;}
+  if(field==='tpl'&&!value){d[idx].rules[ri].action=null;markSettingsDirty();return;}
   if(field==='tpl'){d[idx].rules[ri].action.kind='email-tpl';d[idx].rules[ri].action.cls=d[idx].rules[ri].action.cls||'gold';}
   d[idx].rules[ri].action[field]=value;
+  markSettingsDirty();
 }
 function seqAddRule(idx){
-  const d=_seqEnsureDraft();
+  const d=_seqEnsureWritable();
   if(!d[idx])return;
   d[idx].rules=d[idx].rules||[];
   d[idx].rules.push({when:'always',action:{kind:'open',label:'Open',cls:'sky'},bucket:'action',label:'New rule'});
+  markSettingsDirty();
   renderSettings();
 }
 function seqRemoveRule(idx,ri){
-  const d=_seqEnsureDraft();
+  const d=_seqEnsureWritable();
   if(!d[idx]||!d[idx].rules)return;
   d[idx].rules.splice(ri,1);
+  markSettingsDirty();
   renderSettings();
 }
 function seqMove(idx,delta){
-  const d=_seqEnsureDraft();
+  const d=_seqEnsureWritable();
   const newIdx=idx+delta;
   if(newIdx<0||newIdx>=d.length)return;
   const item=d.splice(idx,1)[0];
   d.splice(newIdx,0,item);
+  markSettingsDirty();
   renderSettings();
 }
 function seqRemove(idx){
-  const d=_seqEnsureDraft();
-  if(!confirm('Remove stage "'+d[idx].key+'"? Candidates currently in this stage will lose their next-step button until you save or undo.'))return;
+  const d=_seqEnsureWritable();
+  if(!confirm('Remove stage "'+d[idx].key+'"? Candidates currently in this stage will lose their next-step button.'))return;
   d.splice(idx,1);
+  markSettingsDirty();
   renderSettings();
 }
 function seqDuplicate(idx){
-  const d=_seqEnsureDraft();
+  const d=_seqEnsureWritable();
   if(!d[idx])return;
   const clone=JSON.parse(JSON.stringify(d[idx]));
-  /* Add suffix to avoid duplicate-key conflict on save */
   clone.key=clone.key+' (copy)';
   d.splice(idx+1,0,clone);
+  markSettingsDirty();
   renderSettings();
 }
 function seqAddStage(kind){
   const key=prompt('New stage key (used internally and as display name):');
   if(!key||!key.trim())return;
-  const d=_seqEnsureDraft();
+  const d=_seqEnsureWritable();
   let stage;
   if(kind==='time'){
     stage={key:key.trim(),icon:'⏱',timeBased:true,questionsStage:'Phone Screen',nextStageOnRun:'',imminentLabel:'Run now',prepLabel:'Prep',runLabel:'Run'};
@@ -6861,24 +7020,13 @@ function seqAddStage(kind){
     stage={key:key.trim(),icon:'•',action:{kind:'email-tpl',tpl:'',label:'Action',cls:'gold'},awaitTrigger:'always',advanceTo:''};
   }
   d.push(stage);
-  renderSettings();
-}
-async function seqSave(){
-  if(!_seqDraft){toast('No changes to save');return;}
-  const keys=_seqDraft.map(s=>s.key);
-  const dupes=keys.filter((k,i)=>keys.indexOf(k)!==i);
-  if(dupes.length){toast('Duplicate stage keys: '+dupes.join(', '));return;}
-  SETTINGS.sequence=_seqDraft;
-  await saveSettings();
-  _seqDraft=null;
-  toast('✓ Sequence saved');
+  markSettingsDirty();
   renderSettings();
 }
 async function seqResetToDefaults(){
   if(!confirm('Reset the sequence to factory defaults? Your custom edits will be lost.'))return;
   delete SETTINGS.sequence;
-  _seqDraft=null;
-  await saveSettings();
+  markSettingsDirty();
   toast('✓ Reset to defaults');
   renderSettings();
 }
@@ -6887,7 +7035,6 @@ async function seqResetToDefaults(){
 function seqJsonCopy(){
   const el=document.getElementById('seq-json');if(!el)return;
   navigator.clipboard.writeText(el.value).then(()=>toast('✓ Copied to clipboard')).catch(()=>{
-    /* Fallback selection-based copy */
     el.select();document.execCommand('copy');toast('✓ Copied');
   });
 }
@@ -6897,8 +7044,13 @@ function seqJsonApply(){
   try{parsed=JSON.parse(el.value);}catch(e){toast('Invalid JSON: '+e.message);return;}
   if(!Array.isArray(parsed)){toast('JSON must be an array of stage objects');return;}
   if(!parsed.every(s=>s&&typeof s==='object'&&s.key)){toast('Every stage needs a "key" field');return;}
-  _seqDraft=parsed;
-  toast('✓ JSON applied to editor — click "Save sequence" to persist');
+  /* Validate unique keys before committing */
+  const keys=parsed.map(s=>s.key);
+  const dupes=keys.filter((k,i)=>keys.indexOf(k)!==i);
+  if(dupes.length){toast('Duplicate stage keys: '+dupes.join(', '));return;}
+  SETTINGS.sequence=parsed;
+  markSettingsDirty();
+  toast('✓ JSON applied — auto-saving now');
   renderSettings();
 }
 function seqJsonDownload(){
@@ -6912,13 +7064,11 @@ function seqJsonDownload(){
   toast('✓ Downloaded');
 }
 
-/* ----- HTML5 drag-drop reorder -----
-   Track the dragged-from index on dragstart; on drop, splice it to the target position. */
+/* ----- HTML5 drag-drop reorder ----- */
 let _seqDragFrom=null;
 function seqDragStart(e,idx){
   _seqDragFrom=idx;
   e.dataTransfer.effectAllowed='move';
-  /* setData required for Firefox */
   try{e.dataTransfer.setData('text/plain',String(idx));}catch(err){}
   e.target.closest('.seq-card').style.opacity='0.4';
 }
@@ -6930,7 +7080,6 @@ function seqDragOver(e,idx){
   e.preventDefault();
   e.dataTransfer.dropEffect='move';
   if(_seqDragFrom==null||_seqDragFrom===idx)return;
-  /* Visual indicator: which side of the target we'll drop on */
   const card=e.currentTarget;
   const rect=card.getBoundingClientRect();
   const above=(e.clientY-rect.top)<rect.height/2;
@@ -6945,7 +7094,7 @@ function seqDragLeave(e){
 function seqDrop(e,idx){
   e.preventDefault();
   if(_seqDragFrom==null||_seqDragFrom===idx){_seqDragFrom=null;return;}
-  const d=_seqEnsureDraft();
+  const d=_seqEnsureWritable();
   const rect=e.currentTarget.getBoundingClientRect();
   const above=(e.clientY-rect.top)<rect.height/2;
   const targetIdx=above?idx:idx+1;
@@ -6953,6 +7102,7 @@ function seqDrop(e,idx){
   const item=d.splice(_seqDragFrom,1)[0];
   d.splice(adjusted,0,item);
   _seqDragFrom=null;
+  markSettingsDirty();
   renderSettings();
 }
 
@@ -7174,7 +7324,7 @@ function renderSettingsPipeline(){
     <label class="set-field" style="max-width:200px">Days of silence<input type="number" min="3" max="60" id="cfg_autoRejectDays" value="${SETTINGS.config.autoRejectDays}"></label>
   </div>
 
-  <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveConfig()">Save pipeline config</button></div>`;
+  <p class="set-help" style="margin-top:10px;font-size:11px;color:var(--soft);font-style:italic">All changes save automatically — watch the status pill in the header.</p>`;
 }
 
 /* ----- SCORING ENGINE section ----- */
@@ -7340,7 +7490,7 @@ function renderSettingsReferrals(){
     <button class="btn-primary bg-gold" onclick="backfillRefCodes()" style="padding:8px 16px">🔑 Backfill missing refCodes</button>
   </div>
 
-  <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveConfig()">Save referral program</button></div>`;
+  <p class="set-help" style="margin-top:10px;font-size:11px;color:var(--soft);font-style:italic">All changes save automatically.</p>`;
 }
 
 /* Generate a unique 6-char alphanumeric refCode (avoids confusable chars 0/O 1/I/l). */
@@ -7384,7 +7534,7 @@ function renderSettingsCalendars(){
     <label class="set-field">Interview URL<input type="text" id="cfg_calInterviewUrl" placeholder="https://cal.com/your-name/interview" value="${esc(SETTINGS.config.calInterviewUrl||'')}"></label>
     <label class="set-field">Onboarding URL<input type="text" id="cfg_calOnboardingUrl" placeholder="https://cal.com/your-name/caregiver-onboarding" value="${esc(SETTINGS.config.calOnboardingUrl||'')}"></label>
     <p class="set-help" style="margin-top:14px"><b>Important Cal.com setup:</b> name your event types so they contain the words "screen", "interview", or "onboarding" — that's how the webhook routes each booking to the right stage. Also add "Phone" as a booking question on each event so we can capture the candidate's number.</p>
-    <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveConfig()">Save calendar URLs</button></div>
+    <p class="set-help" style="margin-top:10px;font-size:11px;color:var(--soft);font-style:italic">All changes save automatically.</p>
   </div>`;
 }
 
@@ -7804,7 +7954,91 @@ function renderSettingsAccess(){
     ${pwSet?`<details style="margin-top:14px;font-size:11.5px;color:var(--soft)"><summary style="cursor:pointer;font-weight:600">Forgot the password?</summary>
       <p style="margin-top:8px;line-height:1.55">Open <b>Solura_Hiring_Engine.xlsx</b> directly in Excel or SharePoint. Cell <b>AL1</b> contains a JSON blob with all settings — find the <code>seqPasswordHash</code> key and delete it (and its value). Save the file, then refresh the portal. The lock will be removed and you can set a new password.</p>
     </details>`:''}
+  </div>
+  ${_renderStorageStatusCard()}`;
+}
+
+/* Storage status panel — shows EXACTLY where settings are persisted right now. Surfaces silent
+   failures the user has been hitting (worker file save returning empty, AL1 size limit, etc.)
+   instead of the previous behavior where saves looked fine but didn't actually persist. */
+function _renderStorageStatusCard(){
+  const loadStatus=window._lastSettingsLoadStatus||{};
+  const saveStatus=window._lastSettingsSaveStatus||null;
+  const lsBytes=(function(){try{return (localStorage.getItem('solura_settings')||'').length;}catch(e){return 0;}})();
+  const fileBytes=saveStatus?saveStatus.workerFileBytes:0;
+
+  const tierRow=(label,ok,detail,muted)=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:${ok?'#EBF5EA':muted?'#F5F5F0':'#FDECEA'};border-radius:7px;margin-bottom:6px">
+    <span style="font-size:18px">${ok?'✓':muted?'○':'✗'}</span>
+    <div style="flex:1">
+      <div style="font-weight:700;color:${ok?'var(--grn-deep)':muted?'var(--soft)':'#8B1A1A'};font-size:12.5px">${esc(label)}</div>
+      <div style="font-size:11px;color:var(--soft);margin-top:1px">${detail}</div>
+    </div>
   </div>`;
+
+  const loadSource=loadStatus.source||'unknown';
+  const loadSourceLabel={
+    'workerFile':'OneDrive file (Solura_Settings.json) — primary',
+    'al1':'Cell AL1 in Pipeline sheet — fallback',
+    'localStorage':'Browser cache only — file/AL1 unreachable',
+    'defaults':'Defaults only — nothing persisted yet',
+    'unknown':'Not loaded yet'
+  }[loadSource]||loadSource;
+
+  const errBlock=(arr)=>arr&&arr.length?'<div style="background:#FDECEA;border:1px solid var(--red);border-radius:7px;padding:8px 11px;margin-top:6px;font-size:11.5px;color:#8B1A1A;font-family:Menlo,monospace">'+arr.map(e=>'• '+esc(e)).join('<br>')+'</div>':'';
+
+  return `<div class="wscard"><h3>💾 Settings storage status</h3>
+    <p class="set-help">Where your settings live right now. Settings should be persisted to the <b>OneDrive file</b> (primary) so they survive any refresh, code update, or sheet edit. The other tiers are fallbacks — if you see settings loading from AL1 or browser cache regularly, something's preventing the file save.</p>
+
+    <h4 style="margin-top:14px">Last load (this session)</h4>
+    <div style="padding:9px 13px;background:${loadSource==='workerFile'?'#EBF5EA':loadSource==='defaults'?'#F5F5F0':'#FEF7E8'};border-radius:8px;font-size:12.5px">
+      <b style="color:${loadSource==='workerFile'?'var(--grn-deep)':loadSource==='defaults'?'var(--soft)':'#8B6500'}">${esc(loadSourceLabel)}</b>
+      ${loadStatus.at?'<div style="font-size:11px;color:var(--soft);margin-top:2px">at '+esc(new Date(loadStatus.at).toLocaleString())+'</div>':''}
+    </div>
+    ${errBlock(loadStatus.errors)}
+
+    <h4 style="margin-top:16px">Persistence tiers</h4>
+    ${tierRow('OneDrive file (PRIMARY — survives everything)',saveStatus?saveStatus.workerFile:loadStatus.workerFile,saveStatus?(saveStatus.workerFile?(saveStatus.workerFileBytes+' bytes written successfully'):'Save failed — see errors below'):loadStatus.workerFile?'Last loaded from this tier':'Not yet attempted',!saveStatus&&!loadStatus.workerFile)}
+    ${tierRow('Pipeline sheet · cell AL1 (mirror)',saveStatus?saveStatus.al1Mirror:loadStatus.al1,saveStatus?(saveStatus.al1Skipped?'Skipped — settings too large for 32k cell limit':saveStatus.al1Mirror?'Mirror written':'Mirror write failed'):loadStatus.al1?'Last loaded from this tier':'Not yet written',!saveStatus&&!loadStatus.al1)}
+    ${tierRow('Browser localStorage (cache, this device only)',lsBytes>0,lsBytes>0?(lsBytes+' bytes cached'):'Empty',false)}
+
+    ${saveStatus&&saveStatus.errors.length?'<h4 style="margin-top:16px;color:var(--red)">Last save errors</h4>'+errBlock(saveStatus.errors):''}
+
+    <div class="set-row" style="margin-top:16px;gap:8px">
+      <button class="btn-primary bg-gold" onclick="forceSaveAndVerify()" style="padding:9px 16px">💾 Hard-save now &amp; verify</button>
+      <button class="btn-sec bg-cream" onclick="renderSettings()" style="padding:9px 14px">🔄 Refresh status</button>
+    </div>
+
+    <div style="margin-top:14px;padding:10px 12px;background:#F7F2E5;border-left:3px solid var(--gold-mid);border-radius:6px;font-size:11.5px;color:#8B6500;line-height:1.55">
+      <b>Why this matters:</b> only the OneDrive file is truly permanent. AL1 lives in the sheet and could be touched by anyone with Excel access. localStorage is per-device per-browser — clearing cookies or switching machines wipes it. If "OneDrive file" doesn't show ✓ green, your customizations are at risk.
+    </div>
+  </div>`;
+}
+
+async function forceSaveAndVerify(){
+  toast('💾 Saving and verifying…');
+  const status=await saveSettings();
+  /* Then immediately read it back to confirm round-trip works */
+  let verifyOk=false;
+  try{
+    const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
+    if(tok){
+      const r=await fetch(ZI_WORKER_URL+'/settings',{headers:{'X-Solura-Token':tok}});
+      if(r.ok){
+        const data=await r.json();
+        const fileJson=JSON.stringify(data.settings);
+        const memJson=JSON.stringify(SETTINGS);
+        verifyOk=fileJson.length>0&&fileJson.length>=memJson.length*0.95;
+      }
+    }
+  }catch(e){console.warn('Verify failed:',e.message);}
+  if(verifyOk){
+    toast('✓ Hard-saved and verified — settings are safe in OneDrive');
+  }else if(status.workerFile){
+    toast('⚠ Saved but verify read came back small — try refreshing the page and check again');
+  }else{
+    toast('✗ Save did not reach OneDrive — see errors in storage status panel');
+  }
+  renderSettings();
 }
 
 /* ----- DATA section (export/import) ----- */
@@ -7970,9 +8204,11 @@ function applyCustomStagesToInfo(){
 /* run on load too */
 applyCustomStagesToInfo();
 
-async function saveConfig(){
+/* Collect every settings form-field's current value into SETTINGS, WITHOUT triggering a save.
+   Called automatically on any input change in the settings UI (delegated listener wires this
+   up in renderSettings). The actual persist is then scheduled by markSettingsDirty. */
+function saveConfigSilent(){
   SETTINGS.config=SETTINGS.config||{};
-  /* Each section's fields only exist in DOM when that section is rendered, so only read fields that are present. */
   const get=id=>document.getElementById(id);
   if(get('cfg_payFloor'))SETTINGS.config.payFloor=parseFloat(get('cfg_payFloor').value)||14;
   if(get('cfg_payCeil'))SETTINGS.config.payCeil=parseFloat(get('cfg_payCeil').value)||18;
@@ -7984,7 +8220,6 @@ async function saveConfig(){
   if(get('cfg_calScreenUrl'))SETTINGS.config.calScreenUrl=get('cfg_calScreenUrl').value.trim();
   if(get('cfg_calInterviewUrl'))SETTINGS.config.calInterviewUrl=get('cfg_calInterviewUrl').value.trim();
   if(get('cfg_calOnboardingUrl'))SETTINGS.config.calOnboardingUrl=get('cfg_calOnboardingUrl').value.trim();
-  /* Referral program fields — checkboxes use .checked, numeric fields parse with sensible defaults */
   if(get('cfg_referralEnabled'))SETTINGS.config.referralEnabled=get('cfg_referralEnabled').checked;
   if(get('cfg_referralAwardPoints'))SETTINGS.config.referralAwardPoints=get('cfg_referralAwardPoints').checked;
   if(get('cfg_referralPtsSubmit'))SETTINGS.config.referralPtsSubmit=parseInt(get('cfg_referralPtsSubmit').value,10)||0;
@@ -7997,18 +8232,22 @@ async function saveConfig(){
   if(get('cfg_showLeaderboardPills'))SETTINGS.config.showLeaderboardPills=get('cfg_showLeaderboardPills').checked;
   if(get('cfg_referralInConfirmEmail'))SETTINGS.config.referralInConfirmEmail=get('cfg_referralInConfirmEmail').checked;
   if(get('cfg_adminPhones'))SETTINGS.config.adminPhones=get('cfg_adminPhones').value.trim();
-  /* No-show / no-pickup thresholds */
   if(get('cfg_screenNoShowLimit'))SETTINGS.config.screenNoShowLimit=parseInt(get('cfg_screenNoShowLimit').value,10)||3;
   if(get('cfg_interviewNoShowLimit'))SETTINGS.config.interviewNoShowLimit=parseInt(get('cfg_interviewNoShowLimit').value,10)||2;
   if(get('cfg_noPickupLimit'))SETTINGS.config.noPickupLimit=parseInt(get('cfg_noPickupLimit').value,10)||5;
-  /* Required-cert settings — comma-separated → array, trimmed of whitespace */
   if(get('cfg_certFailEnabled'))SETTINGS.config.certFailEnabled=get('cfg_certFailEnabled').checked;
   if(get('cfg_requiredCerts'))SETTINGS.config.requiredCerts=get('cfg_requiredCerts').value.split(',').map(s=>s.trim()).filter(Boolean);
   if(get('cfg_requiredCertGroup')){
     const opts=get('cfg_requiredCertGroup').value.split(',').map(s=>s.trim()).filter(Boolean);
     SETTINGS.config.requiredCertGroups=opts.length?[{label:'Care credential (one minimum)',options:opts}]:[];
   }
-  await saveSettings();toast('✓ Config saved');
+}
+
+/* Backward-compatible wrapper for legacy buttons that still call saveConfig() directly.
+   No-toast, no-await — auto-save handles the rest. */
+async function saveConfig(){
+  saveConfigSilent();
+  markSettingsDirty();
 }
 async function saveScript(k){const lines=document.getElementById('script_'+k).value.split('\n').map(s=>s.trim()).filter(Boolean);
   SETTINGS.scripts=SETTINGS.scripts||{};SETTINGS.scripts[k]=lines;await saveSettings();toast('Script saved');renderSettings();}
