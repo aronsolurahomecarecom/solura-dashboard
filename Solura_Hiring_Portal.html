@@ -8524,51 +8524,45 @@ function _massPasteHtml(){
 }
 
 async function sendMassEmail(){
-  const subTpl=document.getElementById('mass-sub').value;
-  const bodyTpl=document.getElementById('mass-body-text').value;
+  const subEl=document.getElementById('mass-sub'),bodyEl=document.getElementById('mass-body-text');
+  const subTpl=subEl?subEl.value:'',bodyTpl=bodyEl?bodyEl.value:'';
   if(!subTpl||!bodyTpl){toast('Subject + body required');return;}
-  /* Read send-mode (text vs HTML). In HTML mode, sendMailViaGraph gets isHtml=true. */
   const isHtml=window._massMode==='html';
   const candidates=pipeline.filter(c=>c.stage!=='Hired'&&c.stage!=='Declined'&&matchFilters(c)&&c.email&&c.email.trim());
   if(!candidates.length){toast('No recipients');return;}
   if(!confirm('Send '+(isHtml?'HTML':'plain text')+' email to '+candidates.length+' candidate'+(candidates.length===1?'':'s')+'? This cannot be undone.'))return;
   const btn=document.getElementById('mass-send');
   const progress=document.getElementById('mass-progress');
-  /* Null-guarded UI helpers + a guaranteed button reset. Previously, ANY throw inside the loop left
-     the button stuck on "Sending…" forever (the reported bug); the finally block below makes that
-     impossible. */
   const setProgress=html=>{if(progress)progress.innerHTML=html;};
   const resetBtn=()=>{if(btn){btn.disabled=false;btn.textContent='\u2709 Send to '+candidates.length+' candidate'+(candidates.length===1?'':'s');}};
-  if(btn){btn.disabled=true;btn.textContent='Sending\u2026';}
-  /* Per-send timeout — one stalled Graph request must not freeze the whole blast. fetch has no
-     default timeout, so a single hung send was the other way this got stuck "sending forever". */
   const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timed out after '+Math.round(ms/1000)+'s')),ms))]);
-  const blastId='blast-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);
-  const filterSummary=_describeActiveFilters();
-  const blast={id:blastId,sentAt:new Date().toISOString(),sentBy:window.userEmail||'',subjectTemplate:subTpl,bodyTemplate:bodyTpl,isHtml:isHtml,filterSummary:filterSummary,recipientCount:candidates.length,recipients:[]};
-  let sent=0,failed=0;
+  let sent=0,failed=0,firstError='';
+  /* EVERYTHING that can throw — including setup — lives inside this try so the finally ALWAYS
+     re-enables the button. The button is set to "Sending…" here too (not before), so a setup error
+     can't strand it. This closes the last path to a permanent "Sending…" spinner. */
   try{
+    if(btn){btn.disabled=true;btn.textContent='Sending\u2026';}
+    setProgress('Starting\u2026');
+    const blastId='blast-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);
+    let filterSummary='';try{filterSummary=_describeActiveFilters();}catch(e){filterSummary='';}
+    const blast={id:blastId,sentAt:new Date().toISOString(),sentBy:window.userEmail||'',subjectTemplate:subTpl,bodyTemplate:bodyTpl,isHtml:isHtml,filterSummary:filterSummary,recipientCount:candidates.length,recipients:[]};
     for(const c of candidates){
       const recipientRecord={row:c.excelRow,name:c.name,email:c.email,stage:c.stage,subject:'',sentAt:new Date().toISOString(),success:false,error:''};
       try{
-        /* Substitution is INSIDE the try now — a single candidate with data that breaks the template
-           used to throw out of the whole loop and freeze the blast. Now it just fails that one. */
         const subj=substituteLive(subTpl,c);
         const body=substituteLive(bodyTpl,c);
         recipientRecord.subject=subj.slice(0,140);
         await withTimeout(sendMailViaGraph(c.email,subj,body,isHtml,[]),20000);
-        sent++;
-        recipientRecord.success=true;
+        sent++;recipientRecord.success=true;
         c.st.emails=c.st.emails||[];
         c.st.emails.unshift({id:'mass-'+Date.now()+'-'+sent,direction:'out',subject:subj.slice(0,140),preview:body.slice(0,200),to:c.email,received:new Date().toISOString(),seen:true,blastId:blastId,blastSubject:subj.slice(0,80)});
+        if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
         patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(e=>{});
       }catch(e){
-        failed++;
-        recipientRecord.error=e.message;
+        failed++;recipientRecord.error=e.message;if(!firstError)firstError=e.message;
         console.warn('Mass send failed for '+c.email+':',e.message);
       }
       blast.recipients.push(recipientRecord);
-      /* Show processed/total (sent+failed) so the bar advances even when sends are failing. */
       setProgress('Sending\u2026 <b>'+(sent+failed)+' / '+candidates.length+'</b>'+(failed?' \u00b7 '+failed+' failed':''));
       await new Promise(r=>setTimeout(r,500));
     }
@@ -8576,14 +8570,15 @@ async function sendMassEmail(){
     SETTINGS.massSends.unshift(blast);
     if(SETTINGS.massSends.length>200)SETTINGS.massSends=SETTINGS.massSends.slice(0,200);
     markSettingsDirty();
-    setProgress('<span style="color:var(--grn-deep);font-weight:600">\u2713 Sent '+sent+'</span>'+(failed?' \u00b7 <span style="color:var(--red)">'+failed+' failed</span>':''));
-    toast('\u2713 Mass email: '+sent+' sent'+(failed?', '+failed+' failed':''));
+    /* Surface WHY sends failed — a blank "N failed" was useless for debugging auth/permission/throttle. */
+    const failMsg=failed?(' \u00b7 <span style="color:var(--red)">'+failed+' failed</span>'+(firstError?' <span style="color:var(--soft);font-size:11px">('+esc(firstError.slice(0,140))+')</span>':'')):'';
+    setProgress('<span style="color:var(--grn-deep);font-weight:600">\u2713 Sent '+sent+'</span>'+failMsg);
+    toast('Mass email: '+sent+' sent'+(failed?(', '+failed+' failed \u2014 '+firstError.slice(0,90)):''));
     if(!failed)setTimeout(closeMassModal,2000);
   }catch(fatal){
-    /* Last-resort guard: even an unexpected error outside the per-send try won't strand the button. */
     console.error('Mass send aborted:',fatal);
     setProgress('<span style="color:var(--red)">Stopped: '+esc(fatal.message||'error')+' \u00b7 '+sent+' sent before stopping</span>');
-    toast('Mass send stopped \u2014 '+sent+' sent');
+    toast('Mass send stopped \u2014 '+(fatal.message||'error'));
   }finally{
     resetBtn();
   }
