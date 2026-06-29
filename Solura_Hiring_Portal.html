@@ -1627,6 +1627,28 @@ async function patchRange(addr,values){const base=GR+'/drives/'+driveId+'/items/
 
 /* Excel workbook session — batched writes are ~3-5x faster + reduce sheet locking.
    Sessions last ~5min idle; we refresh on use, kill on signout. */
+async function patchRangesBatch(payloads){
+  /* Bundle multiple worksheet range PATCHes into ONE Microsoft Graph $batch round-trip instead of
+     N sequential ones. Sub-requests are chained with dependsOn so they execute sequentially
+     server-side (workbook writes in a single session must not run concurrently) — but it's still
+     one network call. Throws on any sub-request failure so the caller can fall back. */
+  const sid=await getWorkbookSession();
+  const relBase='/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET;
+  const requests=payloads.map((p,i)=>{
+    const h={'Content-Type':'application/json'};if(sid)h['workbook-session-id']=sid;
+    const r={id:String(i+1),method:'PATCH',url:relBase+"/range(address='"+p.addr+"')",headers:h,body:{values:p.values}};
+    if(i>0)r.dependsOn=[String(i)];
+    return r;
+  });
+  pulseOn();
+  try{
+    const resp=await gfetch(GR+'/$batch',{method:'POST',body:JSON.stringify({requests:requests})});
+    if(!resp.ok)throw new Error('batch HTTP '+resp.status);
+    const data=await resp.json().catch(()=>({}));
+    const bad=(data.responses||[]).filter(x=>x.status>=400);
+    if(bad.length)throw new Error(bad.map(b=>'#'+b.id+' '+b.status+((b.body&&b.body.error&&b.body.error.message)?(' '+b.body.error.message):'')).join('; '));
+  }finally{pulseOff();}
+}
 async function getWorkbookSession(){
   if(workbookSessionId&&Date.now()<workbookSessionExpiresAt)return workbookSessionId;
   try{
@@ -2730,6 +2752,8 @@ function _actionC(c){
     }
   }
   /* === SEQUENCE ENGINE — data-driven workflow === */
+  /* Verification & references — three-tier engine intercepts the Verify employers stage. */
+  if(s==='Verify employers')return vrAction(c,info);
   let result=sequenceAction(c,info);
 
   /* === Cross-cutting overrides — applied AFTER sequence === */
@@ -3679,6 +3703,7 @@ function render(){_memGen++;if(!tok)return;updateFilterCount();if(view==='calend
   /* auto-reject surfacer — banner above the buckets */
   renderAutoRejectBanner();
   renderNudgeBanner();
+  renderFastTrackBanner();
   const ord=c=>{const i=flowOrder().indexOf(c.stage);return i<0?999:i;};
   /* Referral priority points — only used as tiebreaker within same-urgency bucket.
      Stage urgency dominates (overdue calls beat new applications regardless of points). */
@@ -3710,6 +3735,12 @@ function render(){_memGen++;if(!tok)return;updateFilterCount();if(view==='calend
       if(aDue&&bDue)return am-bm;       /* both due — closest first (smallest positive) */
       return bm-am;                      /* both overdue — most-recently-overdue first */
     }
+    /* Fast-track lane — strong-scoring candidates jump ahead of routine stage urgency (but
+       never ahead of an imminent/overdue booking, which is handled above). Keeps your best
+       people from getting buried under new applications. */
+    const aFt=isFastTrack(a),bFt=isFastTrack(b);
+    if(aFt&&!bFt)return -1;
+    if(!aFt&&bFt)return 1;
     const stageDiff=ord(a)-ord(b);
     if(stageDiff!==0)return stageDiff;
     const ptDiff=refPoints(b)-refPoints(a);
@@ -3798,6 +3829,57 @@ function findStaleCandidates(){
 function findNudgeCandidates(){
   return pipeline.filter(needsNudge);
 }
+/* ===================== fast-track lane ===================== */
+/* A candidate is "fast-track" when their PROGRESSIVE Quality AND Retention both clear the
+   fast-track thresholds (default 70/70 — same bar as HIRE TRACK, tunable in Settings → Scoring
+   engine). Keying off the progressive score (not the final band) is deliberate: a strong candidate
+   should surface EARLY — often right after the screen, sometimes off strong biodata alone — so you
+   rush your best people through screening/interview before a competitor grabs them. A failed hard
+   gate or a hired candidate is never fast-track. */
+function isFastTrack(c){
+  if(!c||c.stage==='Hired')return false;
+  if(SETTINGS.config.fastTrackEnabled===false)return false;
+  const sc=scoreRow(c);
+  if(sc.gateStatus==='FAIL')return false;
+  if(sc.Q==null||sc.R==null)return false;
+  const ftQ=SETTINGS.config.fastTrackQ!=null?SETTINGS.config.fastTrackQ:70;
+  const ftR=SETTINGS.config.fastTrackR!=null?SETTINGS.config.fastTrackR:70;
+  return sc.Q>=ftQ&&sc.R>=ftR;
+}
+/* Fast-track candidates who need a move NOW — only those sitting in the action bucket. Parked,
+   scheduled, and check-stage candidates are excluded (no same-day move to make on them). Sorted
+   strongest-first by Q+R. */
+function findFastTrackCandidates(){
+  if(SETTINGS.config.fastTrackEnabled===false)return [];
+  return pipeline.filter(c=>isFastTrack(c)&&action(c).bucket==='action')
+    .sort((a,b)=>{const A=scoreRow(a),B=scoreRow(b);return (B.Q+B.R)-(A.Q+A.R);});
+}
+/* Surfacer banner — mirrors the nudge / auto-reject banners; lives at the top of #pipeline-view. */
+function renderFastTrackBanner(){
+  let banner=document.getElementById('fasttrack-banner');
+  if(!banner){banner=document.createElement('div');banner.id='fasttrack-banner';banner.style.cssText='margin:8px 0 10px 0';
+    const pipe=document.getElementById('pipeline-view');if(pipe)pipe.insertBefore(banner,pipe.firstChild);}
+  const ft=findFastTrackCandidates();
+  if(!ft.length){banner.innerHTML='';return;}
+  const wasOpen=window._ftListOpen===true;
+  const items=ft.slice(0,10).map(c=>{const sc=scoreRow(c);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-top:1px solid #EADBB8">
+      <span style="font-weight:700;color:#5C4A1E;flex:1">${esc(c.name)}</span>
+      <span style="font-size:11.5px;color:#8A6A1F">${esc(stageLabel(c.stage))} · Q ${sc.Q} · R ${sc.R}</span>
+      <button onclick="openWorkspace(${c.excelRow})" style="background:#C59B4E;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer">Open →</button>
+    </div>`;}).join('');
+  const more=ft.length>10?`<div style="font-size:11px;color:#8A6A1F;padding:6px 12px 0">+ ${ft.length-10} more</div>`:'';
+  banner.innerHTML=`<div style="background:linear-gradient(180deg,#FBF1DC,#F7E9C8);border:1px solid #C59B4E;border-radius:10px;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:9px 12px">
+      <span style="font-size:15px">\u26A1</span>
+      <span style="font-weight:700;color:#5C4A1E;flex:1">${ft.length} fast-track candidate${ft.length===1?'':'s'} — your strongest, act today</span>
+      <button onclick="_toggleFtList()" style="background:none;border:none;color:#8A6A1F;font-size:12px;font-weight:700;cursor:pointer">${wasOpen?'collapse \u25B4':'review \u25BE'}</button>
+    </div>
+    <div id="ft-list" style="display:${wasOpen?'block':'none'}">${items}${more}</div>
+  </div>`;
+}
+function _toggleFtList(){window._ftListOpen=!(window._ftListOpen===true);renderFastTrackBanner();}
+
 function renderNudgeBanner(){
   let banner=document.getElementById('nudge-banner');
   if(!banner){banner=document.createElement('div');banner.id='nudge-banner';banner.style.cssText='margin:8px 0 10px 0';
@@ -3865,6 +3947,7 @@ function rowHtml(c){
   const phone=c.phone?'<a class="ph" href="tel:'+telify(c.phone)+'" onclick="event.stopPropagation()">📞 '+esc(c.phone)+'</a>':'';
   const email=c.email?'<div><a class="em" href="mailto:'+esc(c.email)+'" onclick="event.stopPropagation()">✉ '+esc(c.email)+'</a></div>':'';
   const band='<span class="bandpill" style="background:'+col[0]+';color:'+col[1]+'">'+sc.dec.band+'</span>';
+  const ftPill=isFastTrack(c)?'<span style="background:#FBF1DC;color:#8A6A1F;border:1px solid #C59B4E;font-weight:700;border-radius:999px;padding:1px 7px;font-size:10.5px" title="Fast-track \u2014 strong Q+R, prioritize">\u26A1 Fast-track</span>':'';
   const certs=(c.st.certs||[]).slice(0,2).map(x=>'<span class="cbadge">'+esc(x)+'</span>').join('');
   const dl=c.st.licenseNum||c.st.license?'<span class="dlbadge">DL</span>':'';
   const pills=(c.st.pills||[]).slice(0,3).map(p=>'<span class="xpill">'+esc(p)+'</span>').join('');
@@ -3878,7 +3961,7 @@ function rowHtml(c){
     if(totalRefs>0)giftPill+='<span class="giftpill caregiver" title="'+totalRefs+' caregiver referral'+(totalRefs===1?'':'s')+'">🎁 '+totalRefs+'</span>';
     if(custRefs>0)giftPill+='<span class="giftpill customer" title="'+custRefs+' customer referral'+(custRefs===1?'':'s')+'">💰 '+custRefs+'</span>';
   }
-  const idline='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">'+band+certs+dl+pills+giftPill+'</div>';
+  const idline='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">'+band+ftPill+certs+dl+pills+giftPill+'</div>';
   const sub='<div class="dm-tag" style="margin-top:5px">'+(c.source?esc(c.source)+' · ':'')+'Q <span>'+(sc.Q==null?'—':sc.Q)+'</span> · R <span>'+(sc.R==null?'—':sc.R)+'</span></div>';
   const sci=a.info.color;
   const stageBadge='<span class="sbadge" style="background:'+sci[0]+';color:'+sci[1]+';border-color:'+sci[1]+'33">'+esc(stageLabel(c.stage))+'</span>';
@@ -4112,10 +4195,24 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
       console.error('State size exceeded 32k:',stJson.length,'chars for row',row);
       return;
     }
-    await patchRange('G'+row+':L'+row,[[W.stage,bl(W.gates.wa),bl(W.gates.cr),bl(W.gates.bg),bl(W.gates.tr),bl(W.gates.av)]]);
-    await patchRange('N'+row+':Y'+row,[[bl(W.q.rel),bl(W.q.com),bl(W.q.jud),bl(W.q.doc),bl(W.q.ref),bl(W.q.cmp),bl(W.q.phn),'',bl(W.r.ten),bl(W.r.prx),bl(W.r.ava),bl(W.r.exp)]]);
-    await patchRange('AI'+row+':AJ'+row,[[JSON.stringify(W.answers||{}),stJson]]);
-    await refreshRow(row);
+    const _gl=[W.stage,bl(W.gates.wa),bl(W.gates.cr),bl(W.gates.bg),bl(W.gates.tr),bl(W.gates.av)];
+    const _ny=[bl(W.q.rel),bl(W.q.com),bl(W.q.jud),bl(W.q.doc),bl(W.q.ref),bl(W.q.cmp),bl(W.q.phn),'',bl(W.r.ten),bl(W.r.prx),bl(W.r.ava),bl(W.r.exp)];
+    const _aj=[JSON.stringify(W.answers||{}),stJson];
+    const _payloads=[{addr:'G'+row+':L'+row,values:[_gl]},{addr:'N'+row+':Y'+row,values:[_ny]},{addr:'AI'+row+':AJ'+row,values:[_aj]}];
+    /* One $batch round-trip instead of 3 sequential PATCHes. Falls back to the proven sequential
+       path on any batch error — writes are idempotent, so re-writing after a partial batch is safe. */
+    try{ await patchRangesBatch(_payloads); }
+    catch(be){ console.warn('batch save failed \u2192 sequential fallback:',be&&be.message);
+      for(const p of _payloads)await patchRange(p.addr,p.values); }
+    /* In-memory row sync — we already know every value we just wrote, so rebuild the local card from
+       the existing row + new values instead of spending another network round-trip re-reading it
+       (what refreshRow used to do here). Purely local: no write-conflict risk. */
+    {const _idx=pipeline.findIndex(c=>c.excelRow===row);
+     if(_idx>=0){const nr=(pipeline[_idx].row||[]).slice();while(nr.length<36)nr.push('');
+       nr[6]=_gl[0];nr[7]=_gl[1];nr[8]=_gl[2];nr[9]=_gl[3];nr[10]=_gl[4];nr[11]=_gl[5];
+       for(let _k=0;_k<12;_k++)nr[13+_k]=_ny[_k];
+       nr[34]=_aj[0];nr[35]=_aj[1];
+       pipeline[_idx]=cardOf(row-1,nr);}}
     /* Only run the main pipeline render() if the workspace overlay is NOT currently visible.
        Otherwise the main render replaces DOM that the workspace overlay sits on top of, and any
        subsequent renderWorkspace() call inside the same flow finds ws-name missing and throws
@@ -5758,75 +5855,246 @@ async function persistAppChanges(changes){
   await saveW(true);
 }
 
-function verifyBlock(){const emp=W.st.employers||[];
-  if(!emp.length){
-    return emptyCard('🏢','No past employers added','+ add employer','W.st.employers=W.st.employers||[];W.st.employers.push({name:\'\',phone:\'\',v:\'\'});renderWorkspace()')
-      +`<div class="brow" style="margin-top:6px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Skipped employer verify')" style="flex:0 0 auto;padding:8px 14px">Skip → references →</button></div>`;
+/* ===================== VERIFICATION & REFERENCES — three-tier engine =====================
+   Tier 1: hard facts (Yardstik or manual) — gate. Tier 2: independent supervisor opinion at
+   the past employers. Tier 3: candidate-provided references (the closer, handled by refsBlock).
+   State lives on c.st.vr (tier + timers + gate) plus per-employer fields on c.st.employers:
+     e.v        — Tier-1 facts: ''=pending, 'ok'=clear, 'no'=unable, 'denied'=contradicted
+     e.t1n      — Tier-1 contact attempts (number)
+     e.t2n      — Tier-2 supervisor-call attempts (number)
+     e.t2status — 'reached' | 'unable' | undefined(pending)
+     e.sup{name,title,phone,source} — the independent supervisor we hunted
+     e.rehire   — 'yes' | 'no' | 'unknown'  (legally-safe proxy when opinions are blocked)
+     e.t2note   — recorded supervisor read (facts in)
+   All thresholds are settings-driven via vrCfg(). */
+function vrCfg(){
+  const v=(SETTINGS.config&&SETTINGS.config.vr)||{};
+  return {
+    t1Source: v.t1Source||'manual',                                  /* 'manual' | 'yardstik' */
+    pctUnableMax: v.pctUnableMax!=null?v.pctUnableMax:50,            /* % of attempted that may be 'unable' */
+    pctAction: v.pctAction||'manual',                                /* 'manual' | 'disqualify' */
+    mostRecentMustClear: !!v.mostRecentMustClear,
+    minSupervisors: v.minSupervisors!=null?v.minSupervisors:1,
+    attemptsPerEmployer: v.attemptsPerEmployer!=null?v.attemptsPerEmployer:3,
+    t1BudgetH: v.t1BudgetH!=null?v.t1BudgetH:null,                   /* null = waiting-on-vendor, not penalized */
+    t2BudgetH: v.t2BudgetH!=null?v.t2BudgetH:24,
+    t3BudgetH: v.t3BudgetH!=null?v.t3BudgetH:12,
+    autoSurface: v.autoSurface!==false
+  };
+}
+function vrInit(st){
+  if(!st)return;
+  if(!st.vr)st.vr={tier:1,t1StartedAt:new Date().toISOString()};
+  if(!st.vr.tier)st.vr.tier=1;
+}
+/* Most-recent employer heuristic: a 'current' job wins, else the largest end/start year. */
+function vrMostRecent(emp){
+  if(!emp||!emp.length)return null;
+  const cur=emp.find(e=>e.current);if(cur)return cur;
+  return emp.slice().sort((a,b)=>(parseInt(b.endYear||b.startYear||0,10))-(parseInt(a.endYear||a.startYear||0,10)))[0];
+}
+/* Tier-1 gate. The gate is "not contradicted", not "fully confirmed" — silence never freezes a
+   candidate, only a caught lie halts. Returns a state the hub + action engine both read. */
+function vrTier1Eval(c){
+  const cfg=vrCfg();const emp=(c.st.employers||[]);
+  if(!emp.length)return{state:'empty',total:0,resolved:0};
+  if(emp.some(e=>e.v==='denied'))return{state:'contradicted',total:emp.length};
+  const resolved=emp.filter(e=>e.v==='ok'||e.v==='no'||e.v==='denied');
+  if(resolved.length<emp.length)return{state:'running',resolved:resolved.length,total:emp.length};
+  const attempted=resolved.length,unable=emp.filter(e=>e.v==='no').length;
+  const pct=attempted?Math.round(unable/attempted*100):0;
+  if(cfg.mostRecentMustClear){
+    const mr=vrMostRecent(emp);
+    if(mr&&mr.v!=='ok')return{state:cfg.pctAction==='disqualify'?'disqualify':'manual',reason:'most-recent',pct,unable,attempted};
   }
-  const list=emp.map((e,i)=>{
+  if(pct>cfg.pctUnableMax)return{state:cfg.pctAction==='disqualify'?'disqualify':'manual',reason:'pct-unable',pct,unable,attempted};
+  return{state:'pass',pct,unable,attempted};
+}
+/* Tier-2: independent supervisor opinion. Targets are employers whose facts didn't come back
+   contradicted (verified or unable-to-verify both still get a supervisor attempt). */
+function vrTier2Eval(c){
+  const cfg=vrCfg();
+  const targets=(c.st.employers||[]).filter(e=>e.v==='ok'||e.v==='no');
+  const reached=targets.filter(e=>e.t2status==='reached').length;
+  const exhausted=targets.every(e=>e.t2status==='reached'||e.t2status==='unable');
+  const done=reached>=cfg.minSupervisors||exhausted;
+  const next=targets.find(e=>e.t2status!=='reached'&&e.t2status!=='unable')||null;
+  return{reached,need:cfg.minSupervisors,done,exhausted,next,targets};
+}
+/* Bucket + primary for the 'Verify employers' stage — the action engine calls this. While Tier-1
+   facts are out at Yardstik, the candidate sits LOCKED in 'checks'; the moment Tier-1 resolves it
+   flips to 'action' and the independent-reference work unlocks. */
+function vrAction(c,info){
+  vrInit(c.st);const cfg=vrCfg();const tier=c.st.vr.tier||1;
+  if(tier>=2){
+    const t2=vrTier2Eval(c);
+    if(t2.done)return{bucket:'action',timing:_dn('Independent refs done → candidate refs','pnew'),info,primary:{kind:'advance-stage',advanceTo:'References',label:'→ Candidate references →',cls:'grn'}};
+    const lbl=t2.next?('Call supervisor @ '+(t2.next.name||'employer')):'Find a supervisor';
+    return{bucket:'action',timing:_dn(lbl+' ('+t2.reached+'/'+t2.need+')','pa'),info,primary:{kind:'verify',label:'Open independent reference hub',cls:'sky'}};
+  }
+  const t1=vrTier1Eval(c);
+  if(t1.state==='empty')return{bucket:'action',timing:_dn('Add past employers to verify','pnew'),info,primary:{kind:'verify',label:'Open verify hub',cls:'sky'}};
+  if(t1.state==='contradicted')return{bucket:'action',timing:_dn('⚠ Employment contradicted — fabrication','pr2'),info,primary:{kind:'verify',label:'⚠ Review contradiction',cls:'red'}};
+  if(t1.state==='running'){
+    if(cfg.t1Source==='yardstik')return{bucket:'checks',timing:_dn('Verifying employment (Yardstik) '+t1.resolved+'/'+t1.total,'psoft'),info,primary:{kind:'lock',label:'🔒 Awaiting verification',cls:'lock'}};
+    return{bucket:'action',timing:_dn('Verify employers '+t1.resolved+'/'+t1.total,'pnew'),info,primary:{kind:'verify',label:'Continue verification',cls:'sky'}};
+  }
+  if(t1.state==='disqualify')return{bucket:'action',timing:_dn(t1.pct+'% unable to verify — disqualify','pr2'),info,primary:{kind:'verify',label:'Review — verification failed',cls:'red'}};
+  if(t1.state==='manual')return{bucket:'action',timing:_dn(t1.pct+'% unable — needs your call','pa'),info,primary:{kind:'verify',label:'Review verification',cls:'gold'}};
+  /* pass → unlock Tier 2 */
+  return{bucket:'action',timing:_dn('✓ Facts verified → independent refs','pnew'),info,primary:{kind:'verify',label:'Open independent reference hub',cls:'grn'}};
+}
+/* ---- timers ---- */
+function vrElapsedH(iso){return iso?((Date.now()-new Date(iso).getTime())/3600000):null;}
+function vrTimer(elapsedH,budgetH,vendor){
+  if(elapsedH==null)return '';
+  const h=Math.max(0,Math.floor(elapsedH));
+  if(vendor)return `<span class="pill psoft" style="font-size:10px">waiting on Yardstik · ${h}h</span>`;
+  if(budgetH==null)return `<span class="pill psoft" style="font-size:10px">${h}h elapsed</span>`;
+  const over=elapsedH>budgetH;
+  return `<span class="pill ${over?'pr2':'pg'}" style="font-size:10px">${h}h / ${budgetH}h${over?' · over budget':''}</span>`;
+}
+/* ---- handlers (operate on the open workspace candidate W) ---- */
+function vrLogT1Attempt(i){
+  const e=W.st.employers[i];if(!e)return;e.t1n=(e.t1n||0)+1;
+  const cfg=vrCfg();
+  if(e.t1n>=cfg.attemptsPerEmployer&&!e.v){e.v='no';toast('Marked unable after '+e.t1n+' attempts');}
+  else toast('Logged attempt '+e.t1n+'/'+cfg.attemptsPerEmployer);
+  saveW(true);renderWorkspace();
+}
+function vrT1Advance(){W.st.vr.tier=2;W.st.vr.t2StartedAt=new Date().toISOString();saveW(true);toast('→ Tier 2: independent references');renderWorkspace();}
+function vrT1Back(){W.st.vr.tier=1;saveW(true);renderWorkspace();}
+function vrSupAttempt(i){
+  const e=W.st.employers[i];if(!e)return;e.t2n=(e.t2n||0)+1;
+  const cfg=vrCfg();
+  if(e.t2n>=cfg.attemptsPerEmployer&&e.t2status!=='reached'){e.t2status='unable';toast('Supervisor unreachable after '+e.t2n+' attempts — moving on');}
+  else toast('Logged supervisor attempt '+e.t2n+'/'+cfg.attemptsPerEmployer);
+  saveW(true);renderWorkspace();
+}
+function vrSupReached(i){const e=W.st.employers[i];if(!e)return;e.t2status='reached';saveW(true);renderWorkspace();}
+function vrSupReset(i){const e=W.st.employers[i];if(!e)return;e.t2status='';e.t2n=0;saveW(true);renderWorkspace();}
+function vrSetRehire(i,val){const e=W.st.employers[i];if(!e)return;e.rehire=val;saveW(true);renderWorkspace();}
+function vrT2Advance(){advanceWS('References','Independent references complete');}
+function vrDisqualify(){if(confirm('Disqualify — employment could not be verified?'))quickDecline(W.excelRow);}
+
+/* Three-tier verification + reference hub (replaces the old flat verify list). */
+function verifyBlock(){
+  vrInit(W.st);
+  const emp=W.st.employers||[];
+  const cfg=vrCfg();
+  const tier=W.st.vr.tier||1;
+  /* tier stepper header */
+  const step=(n,label,active,done)=>`<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;${active?'background:#C59B4E;color:#fff':done?'background:#EBF5EA;color:#3D7A34':'background:#F1EFEA;color:#9A958C'}">${done?'✓':n}&nbsp;${label}</span>`;
+  const t1done=tier>=2;
+  const header=`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+    ${step(1,'Facts',tier===1,t1done)}<span style="color:var(--soft)">→</span>
+    ${step(2,'Independent refs',tier===2,false)}<span style="color:var(--soft)">→</span>
+    ${step(3,'Candidate refs',false,false)}</div>`;
+  if(!emp.length){
+    return `<div class="wscard" id="ws-verify"><h3>Verify past employers</h3>${header}`+
+      emptyCard('🏢','No past employers on file','+ add employer',"W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:'',source:'manual'});renderWorkspace()")+
+      `<div class="brow" style="margin-top:6px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Skipped employer verify')" style="flex:0 0 auto;padding:8px 14px">Skip → candidate references →</button></div></div>`;
+  }
+  if(tier>=2)return `<div class="wscard" id="ws-verify"><h3>Independent references</h3>${header}${vrTier2View(emp,cfg)}</div>`;
+  return `<div class="wscard" id="ws-verify"><h3>Verify past employers</h3>${header}${vrTier1View(emp,cfg)}</div>`;
+}
+
+/* ---------- TIER 1 : hard facts ---------- */
+function vrTier1View(emp,cfg){
+  const t1=vrTier1Eval(W);
+  const yard=cfg.t1Source==='yardstik';
+  const timer=vrTimer(vrElapsedH(W.st.vr.t1StartedAt),cfg.t1BudgetH,yard&&t1.state==='running');
+  const srcNote=yard
+    ? `<div style="font-size:12px;color:var(--mid);background:var(--sky-pale);padding:8px 12px;border-radius:7px;margin-bottom:10px;border-left:3px solid var(--sky-deep)">Facts source: <b>Yardstik</b>. ${timer} Statuses populate as Yardstik returns each employer. Switch to manual any time below.</div>`
+    : `<div style="font-size:12px;color:var(--soft);margin-bottom:10px">Confirm the hard facts for each employer — dates &amp; title. ${timer} <b>"Contradicted"</b> = they say the candidate never worked there (fabrication, hard stop). Silence ≠ failure: after ${cfg.attemptsPerEmployer} tries it auto-marks <b>unable</b> and keeps moving.</div>`;
+  const rows=emp.map((e,i)=>{
     const num=(e.phone||'').replace(/[^0-9+]/g,'');
     const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
-    const gvUrl=num?'https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164):'';
-    const callBtn=num?`<button class="btn-sm" onclick="openLinkPopup('${esc(gvUrl)}','gvoice',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Call via Google Voice">☎</button>`:'';
-    const ziBtn=(e.name||'').trim().length>2?`<button class="btn-sm" onclick="ziLookupEmployer(${i})" style="background:linear-gradient(135deg,#E8B84B,#C59B4E);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Look up this employer in ZoomInfo">🔍 ZI</button>`:'';
-    /* Only render the ZoomInfo line when there's actually something to display. Without this
-       guard, an enrich call that returned empty/sparse data still shows "ZoomInfo:" with nothing
-       after the colon — confusing to the user. Check for at least one non-empty data field. */
-    const hasZi=e.zi&&(e.zi.name||e.zi.website||e.zi.address||e.zi.employees||e.zi.phone);
-    const ziInfo=hasZi?`<div style="grid-column:1/-1;font-size:11px;color:var(--soft);padding:6px 0 0;border-top:1px dashed var(--border-soft);margin-top:4px"><b style="color:var(--gold-deep,#8B6500)">ZoomInfo:</b> ${esc(e.zi.name||'')}${e.zi.website?' · <a href="https://'+esc(e.zi.website)+'" onclick="event.preventDefault();openLinkPopup(\'https://'+esc(e.zi.website).replace(/'/g,"\\'")+'\',\'website\',1100,800)" style="color:var(--sky-deep)">'+esc(e.zi.website)+'</a>':''}${e.zi.phone?' · 📞 '+esc(e.zi.phone):''}${e.zi.address?' · '+esc(e.zi.address):''}${e.zi.employees?' · '+esc(e.zi.employees)+' employees':''}</div>`:'';
-    /* "From application" badge + tenure dates if candidate self-reported */
-    const fromApp=e.source==='application';
+    const gv=num?'https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164):'';
+    const callBtn=num?`<button class="btn-sm" onclick="openLinkPopup('${esc(gv)}','gvoice',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Call via Google Voice">☎</button>`:'';
+    const findPhone=(!e.phone&&(e.name||'').trim().length>2)?`<button class="btn-sm" onclick="openLinkPopup('https://www.google.com/search?q=${encodeURIComponent((e.name||'').trim()+' phone number')}','findphone',900,720)" style="background:#FAF6EE;color:#8B6500;border:1.5px solid var(--gold-mid);cursor:pointer;flex:0 0 auto;font-size:11.5px" title="Search Google for this company's phone">🔎 Find phone</button>`:'';
     const dateRange=(e.startYear||e.endYear||e.current)?`${e.startYear||'?'} → ${e.current?'<b style="color:var(--grn)">Present</b>':(e.endYear||'?')}`:'';
-    const yearsCount=e.years?` <b>${esc(String(e.years))} yr${e.years===1?'':'s'}</b>`:'';
-    const tenureLine=(dateRange||yearsCount||fromApp)?`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--soft);margin-bottom:6px">
-      ${fromApp?'<span class="pill psoft" style="font-size:9px;padding:2px 6px">FROM APPLICATION</span>':''}
-      ${dateRange?'<span>'+dateRange+'</span>':''}
-      ${yearsCount?'<span>'+yearsCount+'</span>':''}
-    </div>`:'';
-    /* 3-state verification: verified / unable to verify / didn't work there */
+    const fromApp=e.source==='application'?'<span class="pill psoft" style="font-size:9px;padding:2px 6px">FROM APPLICATION</span>':'';
+    const attemptN=e.t1n?`<span style="font-size:10.5px;color:var(--soft)">tried ${e.t1n}/${cfg.attemptsPerEmployer}</span>`:'';
     const vBtns=`<span class="vbtns" style="flex:0 0 auto;display:flex;gap:3px">
-      <button class="ok ${e.v==='ok'?'on':''}" onclick="vset(${i},'ok')" title="Confirmed they worked here">verified</button>
-      <button class="no ${e.v==='no'?'on':''}" onclick="vset(${i},'no')" title="Couldn't reach anyone to verify">unable</button>
-      <button class="denied ${e.v==='denied'?'on':''}" onclick="vset(${i},'denied')" title="Employer says candidate never worked here — RED FLAG">didn't work here</button>
+      <button class="ok ${e.v==='ok'?'on':''}" onclick="vset(${i},'ok')" title="Facts confirmed">clear</button>
+      <button class="no ${e.v==='no'?'on':''}" onclick="vset(${i},'no')" title="Couldn't reach / confirm">unable</button>
+      <button class="denied ${e.v==='denied'?'on':''}" onclick="vset(${i},'denied')" title="Employer says candidate never worked here — RED FLAG">contradicted</button>
     </span>`;
-    /* Find-phone helper — when the phone field is empty AND we have a company name, give the
-       user a one-click Google search. Phone numbers for small healthcare facilities are sparse
-       in ZoomInfo's basic tier, so a quick web lookup is often faster than digging through ZI. */
-    const findPhoneBtn=(!e.phone&&(e.name||'').trim().length>2)?(function(){
-      const city=(e.zi&&e.zi.address?e.zi.address.split(',')[1]:'')||'';
-      const q=encodeURIComponent((e.name||'').trim()+' phone number'+(city?' '+city.trim():''));
-      return `<button class="btn-sm" onclick="openLinkPopup('https://www.google.com/search?q=${q}','findphone',900,720)" style="background:#FAF6EE;color:#8B6500;border:1.5px solid var(--gold-mid);cursor:pointer;flex:0 0 auto;font-size:11.5px" title="Search Google for this company's phone">🔎 Find phone</button>`;
-    })():'';
-    /* When marked "didn't work there", show a prominent red warning banner */
-    const deniedBanner=e.v==='denied'?`<div style="grid-column:1/-1;background:#FEE2E2;border-left:3px solid var(--red);padding:7px 11px;margin-top:6px;border-radius:4px;font-size:11.5px;color:#7B1F1F;font-weight:600">⚠ Employer denies candidate worked here. Major red flag — consider declining.</div>`:'';
-    return `<div class="emp-row" style="background:#fff;border:1px solid ${e.v==='denied'?'var(--red)':'var(--border)'};border-radius:9px;padding:10px 12px;margin-bottom:8px;animation:fadeIn .15s ease-out both;animation-delay:${i*30}ms">
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
-        <input value="${esc(e.name||'')}" placeholder="Employer / supervisor name" oninput="W.st.employers[${i}].name=this.value" onblur="saveW(true);renderWorkspace()" style="flex:1;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
-        ${ziBtn}
+    const logBtn=(!e.v)?`<button class="btn-sm bg-cream" onclick="vrLogT1Attempt(${i})" style="cursor:pointer;flex:0 0 auto;font-size:11.5px" title="No answer — log an attempt">+ attempt</button>`:'';
+    const denied=e.v==='denied'?`<div style="grid-column:1/-1;background:#FEE2E2;border-left:3px solid var(--red);padding:7px 11px;margin-top:6px;border-radius:4px;font-size:11.5px;color:#7B1F1F;font-weight:600">⚠ Employment contradicted. Fabrication — hard stop.</div>`:'';
+    return `<div class="emp-row" style="background:#fff;border:1px solid ${e.v==='denied'?'var(--red)':'var(--border)'};border-radius:9px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">
+        <input value="${esc(e.name||'')}" placeholder="Employer name" oninput="W.st.employers[${i}].name=this.value" onblur="saveW(true)" style="flex:1;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
+        ${fromApp}
       </div>
-      ${tenureLine}
+      ${dateRange?`<div style="font-size:11px;color:var(--soft);margin-bottom:6px">${dateRange}</div>`:''}
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-        <input value="${esc(e.phone||'')}" placeholder="Phone number" oninput="W.st.employers[${i}].phone=this.value;renderWorkspace()" onblur="saveW(true)" style="flex:1;min-width:130px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
-        ${findPhoneBtn}
-        ${callBtn}
-        ${vBtns}
+        <input value="${esc(e.phone||'')}" placeholder="Phone" oninput="W.st.employers[${i}].phone=this.value;renderWorkspace()" onblur="saveW(true)" style="flex:1;min-width:120px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
+        ${findPhone}${callBtn}${logBtn}${attemptN}${vBtns}
         <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;flex:0 0 auto" onclick="if(confirm('Remove this employer?')){W.st.employers.splice(${i},1);saveW(true);renderWorkspace();}">×</button>
       </div>
-      ${deniedBanner}
-      ${ziInfo}
+      ${denied}
     </div>`;
   }).join('');
-  const fromAppCount=emp.filter(e=>e.source==='application').length;
-  const deniedCount=emp.filter(e=>e.v==='denied').length;
-  const headerNote=fromAppCount?`<div style="font-size:12px;color:var(--mid);background:var(--sky-pale);padding:8px 12px;border-radius:7px;margin-bottom:12px;border-left:3px solid var(--sky-deep)"><b>${fromAppCount} employer${fromAppCount===1?'':'s'} from application</b> ready to verify. Call each and mark the result.</div>`:'';
-  const warningNote=deniedCount?`<div style="font-size:12px;color:#7B1F1F;background:#FEE2E2;padding:8px 12px;border-radius:7px;margin-bottom:12px;border-left:3px solid var(--red);font-weight:600">⚠ ${deniedCount} employer${deniedCount===1?'':'s'} denied this candidate ever worked there. Consider declining the application.</div>`:'';
-  return `<div class="wscard" id="ws-verify"><h3>Verify past employers <span style="font-size:11px;color:var(--soft);font-weight:600">${emp.length} on file</span></h3>
-    <div style="font-size:12px;color:var(--soft);margin-bottom:10px">Call each prior employer and mark the result. <b>"Didn't work there"</b> is a major red flag — the candidate fabricated employment.</div>
-    ${headerNote}
-    ${warningNote}
-    ${list}
-    <button class="btn-sec bg-cream" style="margin-top:10px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:'',source:'manual'});renderWorkspace()">+ add employer</button>
-    <div class="brow" style="margin-top:14px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Employers verified')">Done → references →</button></div></div>`;
+  /* gate banner */
+  let gate='';
+  if(t1.state==='contradicted')gate=`<div style="background:#FEE2E2;border-left:3px solid var(--red);padding:9px 12px;border-radius:6px;margin:10px 0;font-size:12.5px;color:#7B1F1F;font-weight:600">⚠ An employer contradicted the candidate's claim. This is a fabrication red flag — hard stop. <button class="btn-sm" style="margin-left:8px;color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer" onclick="vrDisqualify()">Disqualify</button></div>`;
+  else if(t1.state==='disqualify')gate=`<div style="background:#FEE2E2;border-left:3px solid var(--red);padding:9px 12px;border-radius:6px;margin:10px 0;font-size:12.5px;color:#7B1F1F;font-weight:600">${t1.pct}% of attempted employers came back unable (over your ${cfg.pctUnableMax}% limit). Set to auto-disqualify. <button class="btn-sm" style="margin-left:8px;color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer" onclick="vrDisqualify()">Disqualify</button></div>`;
+  else if(t1.state==='manual')gate=`<div style="background:#FEF7E8;border-left:3px solid var(--gold-mid);padding:9px 12px;border-radius:6px;margin:10px 0;font-size:12.5px;color:#8B6500;font-weight:600">${t1.pct}% unable to verify (over your ${cfg.pctUnableMax}% limit) — needs your judgment before advancing. Proceed to independent references anyway, or disqualify. <button class="btn-sm" style="margin-left:8px;color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer" onclick="vrDisqualify()">Disqualify</button></div>`;
+  else if(t1.state==='pass')gate=`<div style="background:#EBF5EA;border-left:3px solid var(--grn);padding:9px 12px;border-radius:6px;margin:10px 0;font-size:12.5px;color:#3D7A34;font-weight:600">✓ Facts not contradicted. Ready for independent supervisor references.</div>`;
+  const canAdvance=(t1.state==='pass'||t1.state==='manual');
+  const advBtn=canAdvance?`<button class="btn-primary bg-grn" onclick="vrT1Advance()">Continue → independent references →</button>`:`<button class="btn-primary bg-cream" disabled style="opacity:.55">Resolve every employer to continue</button>`;
+  return `${srcNote}${rows}
+    <button class="btn-sec bg-cream" style="margin-top:6px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:'',source:'manual'});renderWorkspace()">+ add employer</button>
+    ${gate}
+    <div class="brow" style="margin-top:12px">${advBtn}</div>`;
+}
+
+/* ---------- TIER 2 : independent supervisor opinion ---------- */
+function vrTier2View(emp,cfg){
+  const t2=vrTier2Eval(W);
+  const timer=vrTimer(vrElapsedH(W.st.vr.t2StartedAt),cfg.t2BudgetH,false);
+  const intro=`<div style="font-size:12px;color:var(--soft);margin-bottom:10px">Reach a <b>supervisor the candidate did not name</b> at ${cfg.minSupervisors>1?cfg.minSupervisors+' of':''} these past employers for an independent read. ${timer} After ${cfg.attemptsPerEmployer} tries with no luck it moves to the next employer on its own. Where HR blocks opinions, just get the one question they'll answer: <b>is she eligible for rehire?</b></div>`;
+  const targets=emp.filter(e=>e.v==='ok'||e.v==='no');
+  const rows=targets.map(e=>{
+    const i=emp.indexOf(e);
+    const reached=e.t2status==='reached',unable=e.t2status==='unable';
+    const statusPill=reached?'<span class="pill pg" style="font-size:10px">✓ reached</span>':unable?'<span class="pill psoft" style="font-size:10px">unable — skipped</span>':'<span class="pill pa" style="font-size:10px">pending</span>';
+    const attemptN=e.t2n?`<span style="font-size:10.5px;color:var(--soft)">tried ${e.t2n}/${cfg.attemptsPerEmployer}</span>`:'';
+    const num=(e.sup&&e.sup.phone||e.phone||'').replace(/[^0-9+]/g,'');
+    const e164=num.startsWith('+')?num:('+1'+num.replace(/^1/,''));
+    const gv=num?'https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164):'';
+    const callBtn=num?`<button class="btn-sm" onclick="openLinkPopup('${esc(gv)}','gvoice',420,640)" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Call supervisor">☎</button>`:'';
+    const zi=(e.name||'').trim().length>2?`<button class="btn-sm" onclick="ziLookupEmployer(${i})" style="background:linear-gradient(135deg,#E8B84B,#C59B4E);color:#fff;border:none;cursor:pointer;flex:0 0 auto" title="Find a contact via ZoomInfo">🔍 find contact</button>`:'';
+    const findName=(e.name||'').trim().length>2?`<button class="btn-sm" onclick="openLinkPopup('https://www.google.com/search?q=${encodeURIComponent((e.name||'').trim()+' director of nursing OR staffing manager OR supervisor')}','findsup',900,720)" style="background:#FAF6EE;color:#8B6500;border:1.5px solid var(--gold-mid);cursor:pointer;flex:0 0 auto;font-size:11px" title="Search for a supervisor name">🔎 web</button>`:'';
+    const supObj=e.sup||{};
+    const rehire=`<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11.5px"><span style="color:var(--soft);font-weight:600">Rehire-eligible?</span>
+      <button class="btn-sm ${e.rehire==='yes'?'bg-grn':'bg-cream'}" onclick="vrSetRehire(${i},'yes')" style="cursor:pointer;padding:3px 9px">yes</button>
+      <button class="btn-sm ${e.rehire==='no'?'bg-cream':'bg-cream'}" onclick="vrSetRehire(${i},'no')" style="cursor:pointer;padding:3px 9px;color:${e.rehire==='no'?'#fff':'var(--red)'};background:${e.rehire==='no'?'var(--red)':'#fff'};border:1px solid var(--red)">no</button>
+      <button class="btn-sm ${e.rehire==='unknown'?'bg-sky-l':'bg-cream'}" onclick="vrSetRehire(${i},'unknown')" style="cursor:pointer;padding:3px 9px">wouldn't say</button></div>`;
+    const opinion=`<textarea placeholder="What did the supervisor say? (specifics: a time a family was upset, what they'd not assign her to, hesitations…)" oninput="W.st.employers[${i}].t2note=this.value" onblur="saveW(true)" style="width:100%;margin-top:6px;padding:7px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;min-height:54px;resize:vertical">${esc(e.t2note||'')}</textarea>`;
+    const actions=reached?`<button class="btn-sm bg-cream" onclick="vrSupReset(${i})" style="cursor:pointer">↺ reopen</button>`:
+      `<button class="btn-sm bg-cream" onclick="vrSupAttempt(${i})" style="cursor:pointer" title="No answer — log an attempt">+ attempt</button>
+       <button class="btn-sm bg-grn" onclick="vrSupReached(${i})" style="cursor:pointer">✓ reached</button>`;
+    return `<div class="emp-row" style="background:#fff;border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:8px;opacity:${unable?'.6':'1'}">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><b style="flex:1;font-size:13px">${esc(e.name||'(employer)')}</b>${statusPill}${attemptN}</div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <input value="${esc(supObj.name||'')}" placeholder="Supervisor name" oninput="W.st.employers[${i}].sup=W.st.employers[${i}].sup||{};W.st.employers[${i}].sup.name=this.value" onblur="saveW(true)" style="flex:1;min-width:120px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
+        <input value="${esc(supObj.title||'')}" placeholder="Title" oninput="W.st.employers[${i}].sup=W.st.employers[${i}].sup||{};W.st.employers[${i}].sup.title=this.value" onblur="saveW(true)" style="flex:1;min-width:100px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
+        ${zi}${findName}
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px">
+        <input value="${esc(supObj.phone||e.phone||'')}" placeholder="Direct phone" oninput="W.st.employers[${i}].sup=W.st.employers[${i}].sup||{};W.st.employers[${i}].sup.phone=this.value;renderWorkspace()" onblur="saveW(true)" style="flex:1;min-width:120px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
+        ${callBtn}${actions}
+      </div>
+      ${rehire}${opinion}
+    </div>`;
+  }).join('');
+  let banner='';
+  if(t2.done)banner=`<div style="background:#EBF5EA;border-left:3px solid var(--grn);padding:9px 12px;border-radius:6px;margin:10px 0;font-size:12.5px;color:#3D7A34;font-weight:600">✓ ${t2.reached} independent read${t2.reached===1?'':'s'} secured${t2.exhausted&&t2.reached<t2.need?' (employers exhausted)':''}. Ready for candidate references.</div>`;
+  const advBtn=t2.done?`<button class="btn-primary bg-grn" onclick="vrT2Advance()">Continue → candidate references →</button>`:`<button class="btn-primary bg-cream" disabled style="opacity:.55">Reach ${t2.need} supervisor${t2.need===1?'':'s'} (or exhaust the list)</button>`;
+  return `${intro}<button class="btn-sm bg-cream" style="margin-bottom:10px;cursor:pointer" onclick="vrT1Back()">← back to facts</button>${rows}${banner}<div class="brow" style="margin-top:12px">${advBtn}</div>`;
 }
 function vset(i,v){W.st.employers[i].v=W.st.employers[i].v===v?'':v;saveW(true);renderWorkspace();}
 /* Render a compact trail of stage reports that have been auto-saved for this candidate. Reads
@@ -8257,6 +8525,7 @@ const SETTINGS_SECTIONS=[
   {key:'scripts',   label:'Call scripts',         icon:'☎'},
   {key:'pipeline',  label:'Pipeline config',      icon:'⚙'},
   {key:'scoring',   label:'Scoring engine',       icon:'⚖'},
+  {key:'verify',    label:'Verification & refs',  icon:'🧾'},
   {key:'referrals', label:'Referral program',     icon:'🎁'},
   {key:'calendars', label:'Cal.com booking URLs', icon:'📅'},
   {key:'bgchecks',  label:'Background registries',icon:'🛡'},
@@ -8364,6 +8633,7 @@ function renderSettings(){
   else if(settingsSection==='scripts') body=renderSettingsScripts();
   else if(settingsSection==='pipeline') body=renderSettingsPipeline();
   else if(settingsSection==='scoring') body=renderSettingsScoring();
+  else if(settingsSection==='verify') body=renderSettingsVerification();
   else if(settingsSection==='referrals') body=renderSettingsReferrals();
   else if(settingsSection==='calendars') body=renderSettingsCalendars();
   else if(settingsSection==='bgchecks') body=renderSettingsBgChecks();
@@ -9052,6 +9322,61 @@ function renderSettingsPipeline(){
 }
 
 /* ----- SCORING ENGINE section ----- */
+function renderSettingsVerification(){
+  const v=(SETTINGS.config&&SETTINGS.config.vr)||{};
+  const g=(k,d)=>v[k]!=null?v[k]:d;
+  const sel=(cur,opts)=>opts.map(o=>`<option value="${o[0]}" ${cur===o[0]?'selected':''}>${o[1]}</option>`).join('');
+  return `<h2 class="set-h2">Verification &amp; references</h2>
+  <p class="set-sub">The three-tier engine: hard facts (Tier 1) gate independent supervisor references (Tier 2), which gate candidate-provided references (Tier 3). Everything below is tunable.</p>
+
+  <div class="wscard"><h3>🧾 Tier 1 — hard facts</h3>
+    <p class="set-help">Confirm dates &amp; title. The gate is "not contradicted," not "fully confirmed" — silence never freezes a candidate; only a caught fabrication halts.</p>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px">
+      <label class="set-field"><span>Facts source</span><select id="cfg_vr_src">${sel(g('t1Source','manual'),[['manual','Manual (you call / record)'],['yardstik','Yardstik employment verification']])}</select></label>
+      <label class="set-field"><span>Attempts before "unable"</span><input type="number" min="1" max="10" id="cfg_vr_att" value="${g('attemptsPerEmployer',3)}"></label>
+      <label class="set-field"><span style="display:flex;justify-content:space-between"><span>Max % unable</span><span style="color:var(--soft);font-size:11px">default 50</span></span><input type="number" min="0" max="100" id="cfg_vr_pct" value="${g('pctUnableMax',50)}"></label>
+      <label class="set-field"><span>If over the limit</span><select id="cfg_vr_pctact">${sel(g('pctAction','manual'),[['manual','Route to manual review'],['disqualify','Auto-disqualify']])}</select></label>
+    </div>
+    <label class="set-field" style="flex-direction:row;align-items:center;gap:8px;margin-top:8px"><input type="checkbox" id="cfg_vr_mr" ${g('mostRecentMustClear',false)?'checked':''} style="width:auto"> <span>Most-recent employer <b>must</b> verify (recency matters more than old gigs)</span></label>
+  </div>
+
+  <div class="wscard"><h3>🗣 Tier 2 — independent supervisor references</h3>
+    <p class="set-help">Reach a supervisor the candidate didn't name. Auto-advances to the next employer after the attempt limit so it never stalls.</p>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px">
+      <label class="set-field"><span>Minimum supervisor reads</span><input type="number" min="1" max="5" id="cfg_vr_minsup" value="${g('minSupervisors',1)}"></label>
+      <label class="set-field" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="cfg_vr_auto" ${g('autoSurface',true)!==false?'checked':''} style="width:auto"> <span>Auto-surface Tier 2 when Tier 1 clears</span></label>
+    </div>
+  </div>
+
+  <div class="wscard"><h3>⏱ Time budgets</h3>
+    <p class="set-help">The legs you drive get a clock. Tier 1 via Yardstik is left blank — you can't make a third party answer faster, so it's shown as "waiting," not a breach. Target overall: ≤ 36 h on your legs.</p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px">
+      <label class="set-field"><span style="display:flex;justify-content:space-between"><span>Tier 1 budget (h)</span><span style="color:var(--soft);font-size:11px">blank=vendor</span></span><input type="number" min="0" max="336" id="cfg_vr_t1b" value="${v.t1BudgetH!=null?v.t1BudgetH:''}"></label>
+      <label class="set-field"><span>Tier 2 budget (h)</span><input type="number" min="0" max="336" id="cfg_vr_t2b" value="${g('t2BudgetH',24)}"></label>
+      <label class="set-field"><span>Tier 3 budget (h)</span><input type="number" min="0" max="336" id="cfg_vr_t3b" value="${g('t3BudgetH',12)}"></label>
+    </div>
+  </div>
+
+  <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveVerification()">Save verification settings</button></div>`;
+}
+async function saveVerification(){
+  const get=id=>document.getElementById(id);
+  const num=(id,d)=>{const el=get(id);if(!el||el.value==='')return d;const n=parseInt(el.value,10);return isNaN(n)?d:n;};
+  SETTINGS.config.vr=SETTINGS.config.vr||{};
+  const v=SETTINGS.config.vr;
+  v.t1Source=get('cfg_vr_src').value;
+  v.attemptsPerEmployer=num('cfg_vr_att',3);
+  v.pctUnableMax=num('cfg_vr_pct',50);
+  v.pctAction=get('cfg_vr_pctact').value;
+  v.mostRecentMustClear=get('cfg_vr_mr').checked;
+  v.minSupervisors=num('cfg_vr_minsup',1);
+  v.autoSurface=get('cfg_vr_auto').checked;
+  const t1=get('cfg_vr_t1b');v.t1BudgetH=(t1&&t1.value!=='')?parseInt(t1.value,10):null;
+  v.t2BudgetH=num('cfg_vr_t2b',24);
+  v.t3BudgetH=num('cfg_vr_t3b',12);
+  await saveSettings();toast('✓ Verification settings saved');renderWorkspace&&(typeof render==='function'&&render());
+}
+
 function renderSettingsScoring(){
   const qw=Object.assign({},QW_DEFAULTS,(SETTINGS.config.qualityWeights||{}));
   const rw=Object.assign({},RW_DEFAULTS,(SETTINGS.config.retentionWeights||{}));
@@ -9086,7 +9411,17 @@ function renderSettingsScoring(){
     <p class="set-help" style="margin-top:8px">Bands: <b>HIRE TRACK</b> if Q≥hireQ AND R≥hireR · <b>CONDITIONAL</b> if Q≥hireQ AND R≥condR · <b>HOLD / DEVELOP</b> if Q≥holdQ AND R≥hireR · <b>DECLINE</b> otherwise.</p>
   </div>
 
-  <div class="wscard"><h3>💬 Interview / screening questions</h3>
+  <div class="wscard"><h3>\u26A1 Fast-track lane</h3>
+    <p class="set-help">Surfaces your strongest candidates so they jump the queue and get a same-day move. A candidate is fast-tracked when their <b>progressive</b> Q and R both clear the thresholds below \u2014 so strong applicants surface early, before competitors grab them, not only after the full interview.</p>
+    <label class="set-field" style="flex-direction:row;align-items:center;gap:8px;margin-top:6px"><input type="checkbox" id="cfg_ft_on" ${SETTINGS.config.fastTrackEnabled===false?'':'checked'} style="width:auto"> <span>Enable fast-track lane (card badge, queue priority &amp; top banner)</span></label>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px">
+      <label class="set-field"><span style="display:flex;justify-content:space-between"><span>Fast-track Q threshold</span><span style="color:var(--soft);font-size:11px">default 70</span></span><input type="number" min="0" max="100" id="cfg_ft_q" value="${SETTINGS.config.fastTrackQ!=null?SETTINGS.config.fastTrackQ:70}"></label>
+      <label class="set-field"><span style="display:flex;justify-content:space-between"><span>Fast-track R threshold</span><span style="color:var(--soft);font-size:11px">default 70</span></span><input type="number" min="0" max="100" id="cfg_ft_r" value="${SETTINGS.config.fastTrackR!=null?SETTINGS.config.fastTrackR:70}"></label>
+    </div>
+    <p class="set-help" style="margin-top:8px">Lower the thresholds to fast-track more people (e.g. 65/65 to pull in strong CONDITIONAL candidates); raise them to reserve the lane for only your very best.</p>
+  </div>
+
+  <div class="wscard"><h3>\U0001F4AC Interview / screening questions</h3>
     <p class="set-help">Edit the question text and option labels below. Each option's score (1-5) is fixed — change the labels and meaning, not the math. To add or remove questions entirely, use the Import/Export tab to edit raw JSON.</p>
     ${QBANK.map(it=>{
       const customText=customQ[it.id]?(customQ[it.id].q||it.q):it.q;
@@ -9115,6 +9450,10 @@ async function saveScoringEngine(){
   /* Band thresholds */
   SETTINGS.config.bandThresholds={};
   ['hireQ','hireR','condR','holdQ'].forEach(k=>{const el=get('cfg_bt_'+k);if(el)SETTINGS.config.bandThresholds[k]=parseInt(el.value,10);});
+  /* Fast-track lane */
+  {const on=get('cfg_ft_on');if(on)SETTINGS.config.fastTrackEnabled=on.checked;
+   const fq=get('cfg_ft_q');if(fq&&fq.value!=='')SETTINGS.config.fastTrackQ=parseInt(fq.value,10);
+   const fr=get('cfg_ft_r');if(fr&&fr.value!=='')SETTINGS.config.fastTrackR=parseInt(fr.value,10);}
   /* Question text overrides */
   SETTINGS.config.customQuestions=SETTINGS.config.customQuestions||{};
   document.querySelectorAll('.qedit-text').forEach(el=>{
