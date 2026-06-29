@@ -1610,7 +1610,14 @@ async function onSignedIn(){setConn(true);
        the inbox view if that's where the user is — otherwise the just-loaded emails sit in memory
        but the UI keeps showing the stale (often empty) state. */
     pollInboxForCandidateEmails()
-      .then(()=>{if(view==='inbox')renderInbox();updateInboxBadge();})
+      .then(()=>{
+        updateInboxBadge();
+        if(view==='inbox'){renderInbox();return;}
+        /* New mail landed in candidate state — repaint whatever the user is actually looking at so it
+           shows up without needing to visit the Emails tab (was gated to inbox-only). */
+        const _wsEl=document.getElementById('workspace');
+        if(_wsEl&&_wsEl.classList.contains('open'))renderWorkspace();else render();
+      })
       .catch(e=>console.warn('Inbox poll:',e.message));
   }catch(e){toast(e.message);}
 }
@@ -6908,6 +6915,10 @@ async function markCurrentEmailUnread(){
 }
 
 async function openEmailDetail(messageId){
+  /* A locally-logged send carries a synthetic id ('local-'/'mass-') — it isn't a real Graph message,
+     so fetching it returns 400. Detect it up front: show the stored copy, skip the Graph calls. The
+     next inbox poll reconciles it to the real message. */
+  const _isLocalMsg=typeof messageId==='string'&&(messageId.indexOf('local-')===0||messageId.indexOf('mass-')===0);
   /* Mark this email as seen on the candidate (across any candidates that have it) so
      the "new email" action surfacer clears once user opens it. */
   let anyMarked=false;
@@ -6924,7 +6935,7 @@ async function openEmailDetail(messageId){
   /* ALSO mark as read in Outlook itself — Graph PATCH /me/messages/{id} with isRead:true.
      The user explicitly asked: when reading an email through the portal it should be marked as
      read automatically in Outlook. This keeps Outlook's unread counter accurate. */
-  gfetch(GR+'/me/messages/'+messageId,{
+  if(!_isLocalMsg)gfetch(GR+'/me/messages/'+messageId,{
     method:'PATCH',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({isRead:true})
@@ -6934,6 +6945,16 @@ async function openEmailDetail(messageId){
   document.getElementById('em-body').innerHTML='<div style="color:var(--soft);text-align:center;padding:40px">Fetching message…</div>';
   document.getElementById('em-attach').style.display='none';
   document.getElementById('email-modal').classList.add('open');
+  if(_isLocalMsg){
+    /* Render the stored copy directly — Graph would 400 on this synthetic id. */
+    let _le=null;for(const _c of pipeline){const _e=(_c.st.emails||[]).find(x=>x.id===messageId);if(_e){_le=_e;break;}}
+    document.getElementById('em-subject').textContent=(_le&&_le.subject)||'(no subject)';
+    document.getElementById('em-meta').innerHTML='To: <b>'+esc((_le&&_le.to)||'')+'</b><br>'+esc(_le&&_le.received?new Date(_le.received).toLocaleString():'')+' \u00b7 <span style="color:var(--soft)">just sent \u2014 syncing to Outlook\u2026</span>';
+    document.getElementById('em-body').innerHTML='<div style="white-space:pre-wrap">'+esc((_le&&_le.preview)||'(message sent \u2014 full copy will appear once Outlook syncs)')+'</div>';
+    document.getElementById('em-attach').style.display='none';
+    _currentEmailMsgId=null;
+    return;
+  }
   try{
     let msg=_emailCache[messageId];
     if(!msg){
@@ -7407,6 +7428,14 @@ async function pollInboxForCandidateEmails(){
         const c=byEmail[matchedAddr];
         c.st.emails=c.st.emails||[];
         if(c.st.emails.some(e=>e.id===m.id))continue;
+        /* Reconcile: a send we logged locally (synthetic 'local-'/'mass-' id, no Outlook link) is the
+           SAME message now returning from Sent Items with its real Graph id. Replace the placeholder
+           instead of adding a second copy — this is what produced "every sent email twice, one that
+           400s on open". Match on recipient + subject within a 15-minute window. */
+        const _subjN=(m.subject||'').trim().toLowerCase();
+        const _sentMs=new Date(m.sentDateTime||0).getTime();
+        const _li=c.st.emails.findIndex(e=>e&&e.direction==='out'&&typeof e.id==='string'&&(e.id.indexOf('local-')===0||e.id.indexOf('mass-')===0)&&((e.to||'').toLowerCase()===matchedAddr)&&((e.subject||'').trim().toLowerCase()===_subjN)&&Math.abs(new Date(e.received||0).getTime()-_sentMs)<15*60000);
+        if(_li>=0)c.st.emails.splice(_li,1);
         c.st.emails.unshift({
           id:m.id,direction:'out',
           subject:(m.subject||'').slice(0,140),
