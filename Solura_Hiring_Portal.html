@@ -1603,7 +1603,9 @@ async function onSignedIn(){setConn(true);
     const r=await gfetch(GR+'/shares/'+encodeShareUrl(FILE_URL)+'/driveItem?$select=id,parentReference,name');
     if(!r.ok)throw new Error('Could not open the file ('+r.status+')');
     const j=await r.json();itemId=j.id;driveId=j.parentReference.driveId;
-    await loadData();await loadAvailability();await loadSettings();
+    /* Settings MUST load before data so the first pipeline render uses them — otherwise the UI
+       paints with defaults and the user has to reload to see their saved settings applied. */
+    await loadSettings();await loadData();await loadAvailability();
     /* fire-and-forget email poll so signin isn't blocked by it. After it completes, force-render
        the inbox view if that's where the user is — otherwise the just-loaded emails sit in memory
        but the UI keeps showing the stale (often empty) state. */
@@ -1989,7 +1991,10 @@ async function saveSettings(){
   const looksLikeDefaults=!(
     (SETTINGS.sequence&&SETTINGS.sequence.length)||
     (SETTINGS.templates&&Object.keys(SETTINGS.templates).length)||
-    (SETTINGS.config&&(SETTINGS.config.admins||SETTINGS.config.payFloor!==undefined||SETTINGS.config.serviceZips))||
+    (SETTINGS.config&&(SETTINGS.config.admins||SETTINGS.config.payFloor!==undefined||SETTINGS.config.serviceZips||
+      SETTINGS.config.vr||SETTINGS.config.bandThresholds||SETTINGS.config.qualityWeights||SETTINGS.config.retentionWeights||
+      SETTINGS.config.customQuestions||SETTINGS.config.fastTrackEnabled!==undefined||SETTINGS.config.ziToken||
+      SETTINGS.config.calScreenUrl||SETTINGS.config.calInterviewUrl||SETTINGS.config.calOnboardingUrl))||
     (SETTINGS.scoringWeights)||
     (SETTINGS.flow&&SETTINGS.flow.custom&&SETTINGS.flow.custom.length)||
     (SETTINGS.massSends&&SETTINGS.massSends.length)||
