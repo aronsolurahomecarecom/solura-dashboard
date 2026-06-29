@@ -8358,77 +8358,66 @@ async function sendMassEmail(){
   const subTpl=document.getElementById('mass-sub').value;
   const bodyTpl=document.getElementById('mass-body-text').value;
   if(!subTpl||!bodyTpl){toast('Subject + body required');return;}
-  /* Read send-mode (text vs HTML). In HTML mode, sendMailViaGraph gets isHtml=true and Graph
-     sends contentType:HTML; recipients see the rendered HTML. */
+  /* Read send-mode (text vs HTML). In HTML mode, sendMailViaGraph gets isHtml=true. */
   const isHtml=window._massMode==='html';
   const candidates=pipeline.filter(c=>c.stage!=='Hired'&&c.stage!=='Declined'&&matchFilters(c)&&c.email&&c.email.trim());
   if(!candidates.length){toast('No recipients');return;}
   if(!confirm('Send '+(isHtml?'HTML':'plain text')+' email to '+candidates.length+' candidate'+(candidates.length===1?'':'s')+'? This cannot be undone.'))return;
-  const btn=document.getElementById('mass-send');btn.disabled=true;btn.textContent='Sending…';
+  const btn=document.getElementById('mass-send');
   const progress=document.getElementById('mass-progress');
-  /* Allocate a blast ID that ties every per-candidate email entry back to the parent blast.
-     The blast itself is recorded in SETTINGS.massSends as a single audit record — that's what
-     the Sent tab collapses into one row instead of N separate entries. */
+  /* Null-guarded UI helpers + a guaranteed button reset. Previously, ANY throw inside the loop left
+     the button stuck on "Sending…" forever (the reported bug); the finally block below makes that
+     impossible. */
+  const setProgress=html=>{if(progress)progress.innerHTML=html;};
+  const resetBtn=()=>{if(btn){btn.disabled=false;btn.textContent='\u2709 Send to '+candidates.length+' candidate'+(candidates.length===1?'':'s');}};
+  if(btn){btn.disabled=true;btn.textContent='Sending\u2026';}
+  /* Per-send timeout — one stalled Graph request must not freeze the whole blast. fetch has no
+     default timeout, so a single hung send was the other way this got stuck "sending forever". */
+  const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timed out after '+Math.round(ms/1000)+'s')),ms))]);
   const blastId='blast-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);
   const filterSummary=_describeActiveFilters();
-  const blast={
-    id:blastId,
-    sentAt:new Date().toISOString(),
-    sentBy:window.userEmail||'',
-    subjectTemplate:subTpl,
-    bodyTemplate:bodyTpl,
-    isHtml:isHtml,
-    filterSummary:filterSummary,
-    recipientCount:candidates.length,
-    /* Per-recipient outcomes — populated as the send loop runs */
-    recipients:[]
-  };
+  const blast={id:blastId,sentAt:new Date().toISOString(),sentBy:window.userEmail||'',subjectTemplate:subTpl,bodyTemplate:bodyTpl,isHtml:isHtml,filterSummary:filterSummary,recipientCount:candidates.length,recipients:[]};
   let sent=0,failed=0;
-  for(const c of candidates){
-    const subj=substituteLive(subTpl,c);
-    const body=substituteLive(bodyTpl,c);
-    const recipientRecord={
-      row:c.excelRow,name:c.name,email:c.email,stage:c.stage,
-      subject:subj.slice(0,140),sentAt:new Date().toISOString(),success:false,error:''
-    };
-    try{
-      await sendMailViaGraph(c.email,subj,body,isHtml,[]);
-      sent++;
-      recipientRecord.success=true;
-      c.st.emails=c.st.emails||[];
-      /* Tag with blastId so the global Sent view can dedupe these into one blast row, while
-         each candidate's individual workspace email history still shows the message. */
-      c.st.emails.unshift({
-        id:'mass-'+Date.now()+'-'+sent,
-        direction:'out',
-        subject:subj.slice(0,140),
-        preview:body.slice(0,200),
-        to:c.email,
-        received:new Date().toISOString(),
-        seen:true,
-        blastId:blastId,
-        blastSubject:subj.slice(0,80)
-      });
-      patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(e=>{});
-    }catch(e){
-      failed++;
-      recipientRecord.error=e.message;
-      console.warn('Mass send failed for '+c.email+':',e.message);
+  try{
+    for(const c of candidates){
+      const recipientRecord={row:c.excelRow,name:c.name,email:c.email,stage:c.stage,subject:'',sentAt:new Date().toISOString(),success:false,error:''};
+      try{
+        /* Substitution is INSIDE the try now — a single candidate with data that breaks the template
+           used to throw out of the whole loop and freeze the blast. Now it just fails that one. */
+        const subj=substituteLive(subTpl,c);
+        const body=substituteLive(bodyTpl,c);
+        recipientRecord.subject=subj.slice(0,140);
+        await withTimeout(sendMailViaGraph(c.email,subj,body,isHtml,[]),20000);
+        sent++;
+        recipientRecord.success=true;
+        c.st.emails=c.st.emails||[];
+        c.st.emails.unshift({id:'mass-'+Date.now()+'-'+sent,direction:'out',subject:subj.slice(0,140),preview:body.slice(0,200),to:c.email,received:new Date().toISOString(),seen:true,blastId:blastId,blastSubject:subj.slice(0,80)});
+        patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(e=>{});
+      }catch(e){
+        failed++;
+        recipientRecord.error=e.message;
+        console.warn('Mass send failed for '+c.email+':',e.message);
+      }
+      blast.recipients.push(recipientRecord);
+      /* Show processed/total (sent+failed) so the bar advances even when sends are failing. */
+      setProgress('Sending\u2026 <b>'+(sent+failed)+' / '+candidates.length+'</b>'+(failed?' \u00b7 '+failed+' failed':''));
+      await new Promise(r=>setTimeout(r,500));
     }
-    blast.recipients.push(recipientRecord);
-    progress.innerHTML='Sending… <b>'+sent+' / '+candidates.length+'</b>'+(failed?' · '+failed+' failed':'');
-    await new Promise(r=>setTimeout(r,500));
+    SETTINGS.massSends=SETTINGS.massSends||[];
+    SETTINGS.massSends.unshift(blast);
+    if(SETTINGS.massSends.length>200)SETTINGS.massSends=SETTINGS.massSends.slice(0,200);
+    markSettingsDirty();
+    setProgress('<span style="color:var(--grn-deep);font-weight:600">\u2713 Sent '+sent+'</span>'+(failed?' \u00b7 <span style="color:var(--red)">'+failed+' failed</span>':''));
+    toast('\u2713 Mass email: '+sent+' sent'+(failed?', '+failed+' failed':''));
+    if(!failed)setTimeout(closeMassModal,2000);
+  }catch(fatal){
+    /* Last-resort guard: even an unexpected error outside the per-send try won't strand the button. */
+    console.error('Mass send aborted:',fatal);
+    setProgress('<span style="color:var(--red)">Stopped: '+esc(fatal.message||'error')+' \u00b7 '+sent+' sent before stopping</span>');
+    toast('Mass send stopped \u2014 '+sent+' sent');
+  }finally{
+    resetBtn();
   }
-  /* Persist the blast record. SETTINGS.massSends is capped to the last 200 to keep the settings
-     file from ballooning over time — older blasts are still in candidate email history. */
-  SETTINGS.massSends=SETTINGS.massSends||[];
-  SETTINGS.massSends.unshift(blast);
-  if(SETTINGS.massSends.length>200)SETTINGS.massSends=SETTINGS.massSends.slice(0,200);
-  markSettingsDirty();
-  btn.disabled=false;btn.textContent='✉ Send to '+candidates.length+' candidate'+(candidates.length===1?'':'s');
-  progress.innerHTML='<span style="color:var(--grn-deep);font-weight:600">✓ Sent '+sent+'</span>'+(failed?' · <span style="color:var(--red)">'+failed+' failed</span>':'');
-  toast('✓ Mass email: '+sent+' sent'+(failed?', '+failed+' failed':''));
-  if(!failed)setTimeout(closeMassModal,2000);
 }
 
 /* Build a short human-readable summary of which filters are currently active. Captured at send
