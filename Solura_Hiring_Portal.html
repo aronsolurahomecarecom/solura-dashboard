@@ -1430,6 +1430,7 @@ select.app-edit-input{cursor:pointer;}
       <div class="meta" id="em-meta"></div>
     </div>
     <div class="email-modal-body" id="em-body"><div style="color:var(--soft);text-align:center;padding:40px">Fetching message…</div></div>
+    <div class="email-modal-attach" id="em-await" style="display:none"></div>
     <div class="email-modal-attach" id="em-attach" style="display:none"><h4>Attachments</h4><div id="em-attach-list"></div></div>
     <div class="email-modal-foot">
       <button class="btn-primary bg-sky-l" id="em-reply" onclick="replyToCurrentEmail()" style="padding:8px 16px;background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer">↩ Reply</button>
@@ -3909,7 +3910,7 @@ function renderNudgeBanner(){
      scratch and loses the user's "review ▾" expansion — annoying when they're mid-batch. */
   const wasOpen=window._nudgeListOpen===true;
   banner.innerHTML=`<div class="nudge-box">
-    <div class="nudge-head"><span class="nudge-icon">🔔</span><span class="nudge-title">${nudges.length} candidate${nudges.length===1?'':'s'} ready to nudge — idle ${ndays}+ days</span><button class="nudge-toggle" onclick="_toggleNudgeList()">${wasOpen?'collapse ▴':'review ▾'}</button></div>
+    <div class="nudge-head"><span class="nudge-icon">🔔</span><span class="nudge-title">${nudges.length} candidate${nudges.length===1?'':'s'} ready to nudge — idle ${ndays}+ days</span><button class="nudge-toggle" onclick="nudgeOneByOne()" title="Review and nudge one at a time">one-by-one →</button><button class="nudge-toggle" onclick="nudgeAll()" title="Send a nudge to everyone idle" style="color:var(--grn-deep);font-weight:700">⚡ nudge all</button><button class="nudge-toggle" onclick="_toggleNudgeList()">${wasOpen?'collapse ▴':'review ▾'}</button></div>
     <div class="nudge-list${wasOpen?' open':''}" id="nudge-list">${items}${more}</div>
   </div>`;
 }
@@ -3921,7 +3922,98 @@ function _toggleNudgeList(){
   /* Update toggle button label */
   const btn=document.querySelector('.nudge-toggle');if(btn)btn.textContent=willOpen?'collapse ▴':'review ▾';
 }
+/* ===================== nudge: send-all + one-by-one ===================== */
+/* Headless nudge — composes the stage-appropriate nudge template and sends WITHOUT opening the
+   compose modal, so we can batch or step through many. Mirrors reallySend's bookkeeping (sent flag,
+   local email entry with a 'local-' id the inbox poll reconciles, activity log, AJ persist). */
+async function _sendNudgeHeadless(c){
+  if(!c||!c.email)throw new Error('no email on file');
+  const tpl=_nudgeTplFor(c.stage);
+  if(!tpl)throw new Error('no nudge template for '+c.stage);
+  const t=getEffectiveTemplate(tpl,c);
+  const subj=substituteLive(t.s||'',c);
+  const body=substituteLive(t.b||'',c);
+  await sendMailViaGraph(c.email,subj,body,false,[]);
+  c.st=c.st||{};
+  c.st.sent=c.st.sent||{};c.st.sent[tpl]=today();
+  c.st.emails=c.st.emails||[];
+  c.st.emails.unshift({id:'local-'+Date.now()+'-'+c.excelRow,direction:'out',subject:(subj||'').slice(0,140),preview:(body||'').slice(0,200),from:'careers@solurahomecare.com',to:c.email,received:new Date().toISOString(),seen:true});
+  if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
+  c.st.log=c.st.log||[];c.st.log.unshift({t:stamp(),x:'\ud83d\udd14 Nudge sent: '+tpl.replace(/_/g,' ')});
+  await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+}
+/* Nudge ALL idle candidates — resilient batch (per-send timeout + guaranteed toast/re-render). */
+async function nudgeAll(){
+  const cands=findNudgeCandidates();
+  if(!cands.length){toast('No one to nudge right now');return;}
+  if(!confirm('Send a nudge to all '+cands.length+' idle candidate'+(cands.length===1?'':'s')+'?'))return;
+  const title=document.querySelector('#nudge-banner .nudge-title');
+  const setP=t=>{if(title)title.textContent=t;};
+  const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timed out')),ms))]);
+  let sent=0,failed=0;
+  try{
+    for(const c of cands){
+      try{ await withTimeout(_sendNudgeHeadless(c),20000); sent++; }
+      catch(e){ failed++; console.warn('Nudge failed for',c.name,e&&e.message); }
+      setP('Nudging\u2026 '+(sent+failed)+' / '+cands.length+(failed?' \u00b7 '+failed+' failed':''));
+      await new Promise(r=>setTimeout(r,400));
+    }
+  }finally{
+    toast('\ud83d\udd14 Nudged '+sent+(failed?' \u00b7 '+failed+' failed':''));
+    render();
+  }
+}
+/* Nudge ONE-BY-ONE — a focused stepper: review each candidate's nudge, then Send & next or Skip. */
+function nudgeOneByOne(){
+  window._nudgeQ=findNudgeCandidates().map(c=>c.excelRow);
+  window._nudgeI=0;
+  if(!window._nudgeQ.length){toast('No one to nudge right now');return;}
+  _renderNudgeStepper();
+}
+function _renderNudgeStepper(){
+  const q=window._nudgeQ||[],i=window._nudgeI||0;
+  let host=document.getElementById('nudge-stepper');
+  if(i>=q.length){ if(host)host.remove(); toast('\ud83d\udd14 Nudge run complete'); render(); return; }
+  const c=pipeline.find(x=>x.excelRow===q[i]);
+  if(!c){window._nudgeI=i+1;return _renderNudgeStepper();}
+  if(!host){host=document.createElement('div');host.id='nudge-stepper';host.style.cssText='position:fixed;inset:0;background:rgba(20,18,14,.45);display:flex;align-items:center;justify-content:center;z-index:9999';host.onclick=function(e){if(e.target===host)_nudgeStepClose();};document.body.appendChild(host);}
+  const tpl=_nudgeTplFor(c.stage);const t=tpl?getEffectiveTemplate(tpl,c):{s:'',b:''};
+  const subj=esc(substituteLive(t.s||'',c));
+  const body=esc(substituteLive(t.b||'',c)).replace(/\n/g,'<br>');
+  const days=computeIdleDays(c);
+  host.innerHTML='<div style="background:#fff;border-radius:14px;max-width:560px;width:92%;max-height:86vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.3)">'+
+    '<div style="display:flex;align-items:center;gap:8px;padding:14px 18px;border-bottom:1px solid var(--border)">'+
+      '<span style="font-size:18px">\ud83d\udd14</span>'+
+      '<div style="flex:1"><div style="font-weight:700;font-size:15px">'+esc(c.name)+'</div><div style="font-size:12px;color:var(--soft)">'+esc(c.stage)+' \u00b7 idle '+days+'d</div></div>'+
+      '<span style="font-size:12px;color:var(--soft);font-weight:600">'+(i+1)+' of '+q.length+'</span>'+
+      '<button onclick="_nudgeStepClose()" style="background:none;border:none;font-size:20px;color:var(--soft);cursor:pointer;line-height:1">\u00d7</button>'+
+    '</div>'+
+    '<div style="padding:16px 18px">'+
+      '<div style="font-size:11px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Subject</div>'+
+      '<div style="font-weight:600;margin-bottom:12px">'+(subj||'<span style="color:var(--red)">No nudge template for this stage</span>')+'</div>'+
+      '<div style="font-size:11px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Message</div>'+
+      '<div style="font-size:13px;line-height:1.5;color:var(--mid);background:var(--cream);border-radius:8px;padding:12px;max-height:240px;overflow:auto">'+(body||'\u2014')+'</div>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;padding:14px 18px;border-top:1px solid var(--border)">'+
+      '<button onclick="_nudgeStepSkip()" class="btn-sec bg-cream" style="flex:0 0 auto;padding:9px 16px">Skip \u2192</button>'+
+      '<div style="flex:1"></div>'+
+      '<button onclick="_nudgeStepSend()" class="btn-primary bg-grn" style="padding:9px 18px"'+(tpl?'':' disabled')+'>Send & next \u2192</button>'+
+    '</div></div>';
+}
+async function _nudgeStepSend(){
+  const q=window._nudgeQ||[],i=window._nudgeI||0;const c=pipeline.find(x=>x.excelRow===q[i]);
+  if(c){
+    const sendBtn=document.querySelector('#nudge-stepper .btn-primary');if(sendBtn){sendBtn.disabled=true;sendBtn.textContent='Sending\u2026';}
+    try{ await _sendNudgeHeadless(c); toast('\u2713 Nudged '+c.name); }
+    catch(e){ toast('Failed: '+(e&&e.message||'error')); }
+  }
+  window._nudgeI=i+1;_renderNudgeStepper();
+}
+function _nudgeStepSkip(){window._nudgeI=(window._nudgeI||0)+1;_renderNudgeStepper();}
+function _nudgeStepClose(){const h=document.getElementById('nudge-stepper');if(h)h.remove();render();}
+
 function sendNudge(row){
+
   const c=pipeline.find(x=>x.excelRow===row);if(!c)return;
   const tpl=_nudgeTplFor(c.stage)||'request_resume';
   loadW(row);doEmail(tpl);
@@ -4388,7 +4480,78 @@ async function clearManualBookingTime(){
 /* Awaiting-items pill — shows the list of things we've requested from this candidate but
    haven't received yet. Populated by reallySend() when a request template is sent, drained
    by the email attachment assignment flow. User can also manually add/remove items here. */
+/* ===================== #9 mark-received + auto-release (mirrors _doAssignment) ===================== */
+/* Mark one awaiting item received WITHOUT a file — for when the candidate replied with the info in
+   the body, completed a form, or otherwise fulfilled the request. Removes the item, logs an optional
+   note (where the info went), auto-releases from awaiting when the queue drains, persists, and keeps
+   an open workspace copy in sync. cand is a pipeline candidate. */
+async function _markReceivedCore(cand,idx,note){
+  cand.st=cand.st||{};
+  const items=cand.st.awaitingItems||[];
+  const item=items[idx];
+  if(!item)return false;
+  const wasParked=!!cand.st.manualAwaiting;
+  cand.st.awaitingItems=items.filter((_,i)=>i!==idx);
+  cand.st.log=cand.st.log||[];
+  cand.st.log.unshift({t:stamp(),x:'\u2713 Received: '+_awaitingItemLabel(item)+(note?(' \u2014 '+note):'')});
+  const queueEmpty=cand.st.awaitingItems.length===0;
+  if(wasParked&&queueEmpty){
+    delete cand.st.manualAwaiting;
+    delete cand.st.awaitingReason;
+    delete cand.st.awaitingUntil;
+    delete cand.st.awaitingSince;
+    delete cand.st.awaitingItemsInitialCount;
+    delete cand.st.lastAwaitingReview;
+    cand.st.log.unshift({t:stamp(),x:'\u2705 Auto-released from awaiting \u2014 all requested items received'});
+  }
+  cand.st.lastAssignmentAt=new Date().toISOString();
+  await patchRange('AJ'+cand.excelRow,[[JSON.stringify(cand.st)]]);
+  /* If the workspace is showing this candidate as a separate object, keep it in sync. */
+  if(W&&W.row===cand.excelRow&&W.st!==cand.st)W.st=cand.st;
+  return true;
+}
+/* Mark received from the workspace awaiting pill. */
+async function markAwaitingReceivedWS(idx){
+  if(!W)return;
+  const cand=pipeline.find(x=>x.excelRow===W.row)||W;
+  const item=(cand.st.awaitingItems||[])[idx];if(!item)return;
+  const note=prompt('Mark "'+_awaitingItemLabel(item)+'" received.\nOptional \u2014 note what they sent / where it went (availability saved, SSN on file, form done\u2026):','');
+  if(note===null)return;
+  await _markReceivedCore(cand,idx,note.trim());
+  toast('\u2713 '+_awaitingItemLabel(item)+' received');
+  renderWorkspace();
+  render();
+}
+/* Render "mark received" controls in the open email — for INBOUND replies, even with no attachment. */
+function _renderEmailAwait(messageId){
+  const host=document.getElementById('em-await');if(!host)return;
+  const cand=pipeline.find(c=>(c.st.emails||[]).some(e=>e.id===messageId));
+  const entry=cand?(cand.st.emails||[]).find(e=>e.id===messageId):null;
+  const inbound=entry&&entry.direction==='in';
+  const items=(cand&&inbound)?(cand.st.awaitingItems||[]):[];
+  if(!items.length){host.style.display='none';host.innerHTML='';return;}
+  host.style.display='block';
+  host.innerHTML='<h4>Did they send what you asked for?</h4>'+
+    '<div style="font-size:11.5px;color:var(--soft);margin:-4px 0 8px">Put it in the right place, then mark it received \u2014 the request clears and stops nagging you.</div>'+
+    items.map((it,idx)=>'<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px dashed var(--border-soft)">'+
+      '<span style="flex:1;font-size:12.5px">'+esc(_awaitingItemLabel(it))+'</span>'+
+      '<button class="btn-sm bg-grn" style="cursor:pointer;flex:0 0 auto" onclick="markAwaitingReceivedFromEmail('+cand.excelRow+','+idx+')">\u2713 mark received</button>'+
+    '</div>').join('');
+}
+async function markAwaitingReceivedFromEmail(row,idx){
+  const cand=pipeline.find(x=>x.excelRow===row);if(!cand)return;
+  const item=(cand.st.awaitingItems||[])[idx];if(!item)return;
+  const note=prompt('Mark "'+_awaitingItemLabel(item)+'" received.\nOptional \u2014 note what they sent / where it went:','');
+  if(note===null)return;
+  await _markReceivedCore(cand,idx,note.trim());
+  toast('\u2713 '+_awaitingItemLabel(item)+' received');
+  _renderEmailAwait(_currentEmailMsgId);  /* refresh the buttons — item is gone now */
+  if(W&&W.row===row)renderWorkspace();
+  render();
+}
+
 function _awaitingItemsPill(){
+
   if(!W)return '';
   const items=W.st.awaitingItems||[];
   if(!items.length)return `<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--soft)">
@@ -4401,6 +4564,7 @@ function _awaitingItemsPill(){
     return `<span style="background:#FFF6E6;border:1px solid var(--gold-mid);color:#8B6500;padding:3px 9px;border-radius:5px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:6px;margin-right:4px;margin-bottom:4px">
       <span>${esc(label)}</span>
       ${ageDays?'<span style="font-size:9.5px;color:#B98C20;font-weight:500">'+ageDays+'d</span>':''}
+      <button onclick="markAwaitingReceivedWS(${idx})" style="background:none;border:none;color:var(--grn);font-size:13px;cursor:pointer;padding:0 2px;margin:0;line-height:1;font-weight:800" title="They sent it — mark received">✓</button>
       <button onclick="removeAwaitingItem(${idx})" style="background:none;border:none;color:#8B6500;font-size:14px;cursor:pointer;padding:0;margin:0;line-height:1" title="Mark as no longer awaited">×</button>
     </span>`;
   }).join('');
@@ -4411,7 +4575,7 @@ function _awaitingItemsPill(){
       <button class="btn-sm" style="font-size:10px;padding:2px 7px;background:#fff;border:1px solid var(--gold-mid);color:#8B6500;cursor:pointer;font-weight:600" onclick="addAwaitingItem()">+ add</button>
     </div>
     <div>${pills}</div>
-    <div style="font-size:10.5px;color:var(--soft);margin-top:4px;font-style:italic">When the candidate replies with an attachment, click "Assign as…" in the email view to fulfill these.</div>
+    <div style="font-size:10.5px;color:var(--soft);margin-top:4px;font-style:italic">When they reply, open the email and tap ✓ to mark each item received — or click "Assign as…" on an attachment.</div>
   </div>`;
 }
 async function addAwaitingItem(){
@@ -6941,6 +7105,7 @@ async function openEmailDetail(messageId){
     body:JSON.stringify({isRead:true})
   }).catch(err=>console.warn('Outlook mark-read:',err.message));
   document.getElementById('em-subject').textContent='Loading…';
+  {const _aw=document.getElementById('em-await');if(_aw){_aw.style.display='none';_aw.innerHTML='';}}
   document.getElementById('em-meta').textContent='';
   document.getElementById('em-body').innerHTML='<div style="color:var(--soft);text-align:center;padding:40px">Fetching message…</div>';
   document.getElementById('em-attach').style.display='none';
@@ -7014,6 +7179,8 @@ async function openEmailDetail(messageId){
       const attRows=atts.map((a,i)=>_renderAttachmentRow(a,i,messageId,candForEmail,awaiting)).join('');
       document.getElementById('em-attach-list').innerHTML=awaitingHeader+attRows;
     }
+    /* #9 — mark-received controls for any outstanding awaiting items (works even with no attachment) */
+    _renderEmailAwait(messageId);
   }catch(e){
     document.getElementById('em-body').innerHTML='<div style="color:var(--red);text-align:center;padding:30px">Could not load message: '+esc(e.message)+'</div>';
   }
@@ -7081,6 +7248,8 @@ const ASSIGNMENT_KINDS=[
   {key:'application_pdf',label:'Application document',icon:'📋',filename:c=>'application-'+safeFileName(c.name)+'.pdf'},
   {key:'bg_consent',label:'Background check consent',icon:'🛡',filename:c=>'bg-consent-'+today()+'.pdf'},
   {key:'reference_form',label:'Reference form',icon:'👥',filename:c=>'reference-'+today()+'.pdf'},
+  {key:'form',label:'Form / questionnaire',icon:'📝',filename:(c,name)=>'form-'+(name?safeFileName(name):'form')+'-'+today()+'.pdf'},
+  {key:'info',label:'Info reply (no document)',icon:'✍️',filename:c=>'info-'+today()+'.txt'},
   {key:'other',label:'Other document',icon:'📎',filename:(c,name)=>(name?safeFileName(name):'document')+'-'+today()+'.pdf'}
 ];
 
