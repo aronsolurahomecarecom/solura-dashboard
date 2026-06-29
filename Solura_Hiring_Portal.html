@@ -2277,11 +2277,13 @@ async function loadData(){
        (2) awaitingItems contains a resume entry but hasResume=Y (drain it)
        (3) manualAwaiting=true with empty awaitingItems queue (initial count > 0)
      Each heal calls patchRange asynchronously so the load doesn't block on N writes. */
-  let healed=0;
+  let healed=0;let dupSwept=0;
   for(const c of pipeline){
-    if(!c.st||!c.st.manualAwaiting)continue;
-    const hasResume=(c.row[6]==='Y')||c.st.hasResume;
+    if(!c.st)continue;
     let touched=false;
+    /* ── stuck-awaiting auto-heal (only candidates parked in awaiting) ── */
+    if(c.st.manualAwaiting){
+    const hasResume=(c.row[6]==='Y')||c.st.hasResume;
     /* Case (2): awaitingItems still contains resume but candidate has one */
     if(hasResume&&(c.st.awaitingItems||[]).some(a=>a.kind==='resume')){
       c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='resume');
@@ -2314,12 +2316,38 @@ async function loadData(){
       touched=true;
       healed++;
     }
+    }
+    /* ── one-time sweep of PRE-EXISTING duplicate sent emails ──
+       The inbox-poll reconciliation only de-dupes sends going FORWARD; pairs that landed before
+       that fix shipped (a synthetic 'local-'/'mass-' copy AND the real Sent-Items copy of the
+       same message) still sit side by side — the synthetic one 400s on open. Drop the synthetic
+       placeholder, keep the real copy (opens cleanly, carries the Outlook webLink). Match mirrors
+       the live reconciliation: same recipient + subject within a 15-minute window. Idempotent —
+       once swept there are no synthetic+real twins left, so later loads are no-ops. */
+    if(Array.isArray(c.st.emails)&&c.st.emails.length>=2){
+      const _synth=e=>e&&typeof e.id==='string'&&(e.id.indexOf('local-')===0||e.id.indexOf('mass-')===0);
+      const _reals=c.st.emails.filter(e=>e&&e.direction==='out'&&!_synth(e));
+      if(_reals.length){
+        let _removed=0;
+        c.st.emails=c.st.emails.filter(e=>{
+          if(!e||e.direction!=='out'||!_synth(e))return true;
+          const subjN=(e.subject||'').trim().toLowerCase();
+          const ms=new Date(e.received||0).getTime();
+          const twin=_reals.find(r=>((r.to||'').toLowerCase()===((e.to||'').toLowerCase()))&&((r.subject||'').trim().toLowerCase()===subjN)&&Math.abs(new Date(r.received||0).getTime()-ms)<15*60000);
+          if(twin){_removed++;return false;}
+          return true;
+        });
+        if(_removed){dupSwept+=_removed;touched=true;}
+      }
+    }
     if(touched){
-      /* Fire-and-forget persist — load shouldn't block. */
-      patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(e=>console.warn('Heal write failed for row '+c.excelRow+':',e.message));
+      /* Fire-and-forget persist — load shouldn't block. Single write per candidate covers both
+         the awaiting heal and the email sweep, so the two can't race on the same AJ cell. */
+      patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(e=>console.warn('Heal/sweep write failed for row '+c.excelRow+':',e.message));
     }
   }
   if(healed)console.info('Auto-healed '+healed+' stuck awaiting candidate'+(healed===1?'':'s'));
+  if(dupSwept)console.info('Swept '+dupSwept+' pre-existing duplicate sent email'+(dupSwept===1?'':'s'));
   document.getElementById('sync-time').textContent='Synced '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
   render();
 }
@@ -8957,7 +8985,7 @@ function _seqStageCard(stage,idx,total,tplOptions,trigOptions){
   const kindBadge=isTimeBased?'<span class="pill psoft" style="font-size:9px">⏱ TIME-BASED</span>':isRuleBased?'<span class="pill psoft" style="font-size:9px">⑂ BRANCHING</span>':'<span class="pill psoft" style="font-size:9px">→ STANDARD</span>';
 
   const header=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-    <span class="seq-drag" draggable="true" ondragstart="seqDragStart(event,${i})" ondragend="seqDragEnd(event)" style="cursor:grab;font-size:14px;color:var(--soft);padding:4px 2px;user-select:none" title="Drag to reorder">⋮⋮</span>
+    <span class="seq-drag" draggable="true" ondragstart="seqCardDragStart(event,${i})" ondragend="seqCardDragEnd(event)" style="cursor:grab;font-size:14px;color:var(--soft);padding:4px 2px;user-select:none" title="Drag to reorder">⋮⋮</span>
     <input value="${esc(stage.icon||'')}" onchange="seqEdit(${i},'icon',this.value)" style="width:36px;text-align:center;padding:4px;border:1.5px solid var(--border);border-radius:6px;font-size:16px" maxlength="2">
     <input value="${esc(stage.key)}" onchange="seqEdit(${i},'key',this.value)" style="flex:1;padding:6px 10px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:13.5px;font-weight:700" placeholder="Stage key">
     ${kindBadge}
@@ -8973,9 +9001,9 @@ function _seqStageCard(stage,idx,total,tplOptions,trigOptions){
   else body=_seqStandardBody(stage,i,tplOptions,trigOptions);
 
   return `<div class="seq-card" data-seq-idx="${i}"
-    ondragover="seqDragOver(event,${i})"
-    ondragleave="seqDragLeave(event)"
-    ondrop="seqDrop(event,${i})"
+    ondragover="seqCardDragOver(event,${i})"
+    ondragleave="seqCardDragLeave(event)"
+    ondrop="seqCardDrop(event,${i})"
     style="background:#fff;border:1px solid var(--border);border-radius:9px;padding:11px 13px;transition:all .15s">
     ${header}
     ${body}
@@ -9253,17 +9281,17 @@ function seqJsonDownload(){
 
 /* ----- HTML5 drag-drop reorder ----- */
 let _seqDragFrom=null;
-function seqDragStart(e,idx){
+function seqCardDragStart(e,idx){
   _seqDragFrom=idx;
   e.dataTransfer.effectAllowed='move';
   try{e.dataTransfer.setData('text/plain',String(idx));}catch(err){}
   e.target.closest('.seq-card').style.opacity='0.4';
 }
-function seqDragEnd(e){
+function seqCardDragEnd(e){
   const card=e.target.closest&&e.target.closest('.seq-card');if(card)card.style.opacity='';
   document.querySelectorAll('.seq-card').forEach(c=>{c.style.borderTopColor='';c.style.borderBottomColor='';c.style.transform='';});
 }
-function seqDragOver(e,idx){
+function seqCardDragOver(e,idx){
   e.preventDefault();
   e.dataTransfer.dropEffect='move';
   if(_seqDragFrom==null||_seqDragFrom===idx)return;
@@ -9273,12 +9301,12 @@ function seqDragOver(e,idx){
   card.style.borderTopColor=above?'var(--gold)':'';
   card.style.borderBottomColor=!above?'var(--gold)':'';
 }
-function seqDragLeave(e){
+function seqCardDragLeave(e){
   const card=e.currentTarget;
   card.style.borderTopColor='';
   card.style.borderBottomColor='';
 }
-function seqDrop(e,idx){
+function seqCardDrop(e,idx){
   e.preventDefault();
   if(_seqDragFrom==null||_seqDragFrom===idx){_seqDragFrom=null;return;}
   const d=_seqEnsureWritable();
@@ -9620,59 +9648,65 @@ function renderSettingsScoring(){
   </div>
 
   <div class="wscard"><h3>\U0001F4AC Interview / screening questions</h3>
-    <p class="set-help">Edit the question text and option labels below. Each option's score (1-5) is fixed — change the labels and meaning, not the math. To add or remove questions entirely, use the Import/Export tab to edit raw JSON.</p>
+    <p class="set-help">Edit the question text and option labels below. Built-in option scores (1-5) are fixed \u2014 change the labels, not the math. Use <b>+ Add a question</b> to create your own (you choose its stage, dimension &amp; option labels); added questions show up in the matching hub and on the PDFs automatically.</p>
     ${QBANK.map(it=>{
+      if(it._added){
+        const stOpts=['Phone Screen','Interview','Reference','Onboarding'].map(sg=>`<option value="${sg}" ${it.st===sg?'selected':''}>${sg}</option>`).join('');
+        const dimMap=Object.assign({},QW_LABELS,RW_LABELS);
+        const dimOpts=Object.keys(dimMap).map(d=>`<option value="${d}" ${it.dim===d?'selected':''}>${esc(dimMap[d])}</option>`).join('');
+        return `<div style="background:#FFFBF0;border:1px solid var(--gold-mid);border-radius:8px;padding:11px 13px;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px;flex-wrap:wrap">
+            <span style="font-size:10px;font-weight:700;color:var(--gold-deep);text-transform:uppercase;letter-spacing:.05em">Added</span>
+            <select class="qadd-st" data-qid="${it.id}" style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;font-family:inherit">${stOpts}</select>
+            <select class="qadd-dim" data-qid="${it.id}" style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;font-family:inherit">${dimOpts}</select>
+            <div style="flex:1"></div>
+            <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;font-size:11px" onclick="qDeleteAdded('${it.id}')" title="Delete this question">\u00d7 delete</button>
+          </div>
+          <input type="text" class="qadd-text" data-qid="${it.id}" value="${esc(it.q)}" placeholder="Question text" style="width:100%;padding:7px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;outline:none;margin-bottom:7px;font-weight:600">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${it.o.map((o,oi)=>`<div style="display:flex;align-items:center;gap:4px;flex:1;min-width:140px"><input type="text" class="qadd-opt" data-qid="${it.id}" data-oi="${oi}" data-score="${o[1]}" value="${esc(o[0])}" style="flex:1;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:11.5px"><span style="font-size:10px;font-weight:700;color:var(--soft);width:18px;text-align:center;background:#fff;border-radius:4px;padding:2px 0">${o[1]}</span></div>`).join('')}
+          </div>
+        </div>`;
+      }
       const customText=customQ[it.id]?(customQ[it.id].q||it.q):it.q;
       const customOpts=customQ[it.id]?(customQ[it.id].o||it.o):it.o;
       return `<div style="background:var(--cream);border-radius:8px;padding:11px 13px;margin-bottom:10px">
-        <div style="font-size:10.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${esc(it.st)} · ${esc(QW_LABELS[it.dim]||RW_LABELS[it.dim]||it.dim)} <span style="color:var(--gold-deep)">${it.id}</span></div>
+        <div style="font-size:10.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${esc(it.st)} \u00b7 ${esc(QW_LABELS[it.dim]||RW_LABELS[it.dim]||it.dim)} <span style="color:var(--gold-deep)">${it.id}</span></div>
         <input type="text" class="qedit-text" data-qid="${it.id}" value="${esc(customText)}" placeholder="Question text" style="width:100%;padding:7px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;outline:none;margin-bottom:7px;font-weight:600">
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           ${customOpts.map((o,oi)=>`<div style="display:flex;align-items:center;gap:4px;flex:1;min-width:140px"><input type="text" class="qedit-opt" data-qid="${it.id}" data-oi="${oi}" data-score="${o[1]}" value="${esc(o[0])}" style="flex:1;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:11.5px"><span style="font-size:10px;font-weight:700;color:var(--soft);width:18px;text-align:center;background:#fff;border-radius:4px;padding:2px 0">${o[1]}</span></div>`).join('')}
         </div>
       </div>`;
     }).join('')}
+    <button class="btn-sec bg-cream" style="margin-top:4px;padding:7px 13px;cursor:pointer" onclick="qAddQuestion()">+ Add a question</button>
   </div>
 
   <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveScoringEngine()">Save scoring engine</button></div>`;
 }
 
 async function saveScoringEngine(){
-  const get=id=>document.getElementById(id);
-  /* Quality weights */
-  SETTINGS.config.qualityWeights={};
-  Object.keys(QW_DEFAULTS).forEach(k=>{const el=get('cfg_qw_'+k);if(el)SETTINGS.config.qualityWeights[k]=parseInt(el.value,10)||0;});
-  /* Retention weights */
-  SETTINGS.config.retentionWeights={};
-  Object.keys(RW_DEFAULTS).forEach(k=>{const el=get('cfg_rw_'+k);if(el)SETTINGS.config.retentionWeights[k]=parseInt(el.value,10)||0;});
-  /* Band thresholds */
-  SETTINGS.config.bandThresholds={};
-  ['hireQ','hireR','condR','holdQ'].forEach(k=>{const el=get('cfg_bt_'+k);if(el)SETTINGS.config.bandThresholds[k]=parseInt(el.value,10);});
-  /* Fast-track lane */
-  {const on=get('cfg_ft_on');if(on)SETTINGS.config.fastTrackEnabled=on.checked;
-   const fq=get('cfg_ft_q');if(fq&&fq.value!=='')SETTINGS.config.fastTrackQ=parseInt(fq.value,10);
-   const fr=get('cfg_ft_r');if(fr&&fr.value!=='')SETTINGS.config.fastTrackR=parseInt(fr.value,10);}
-  /* Question text overrides */
-  SETTINGS.config.customQuestions=SETTINGS.config.customQuestions||{};
-  document.querySelectorAll('.qedit-text').forEach(el=>{
-    const qid=el.dataset.qid;
-    SETTINGS.config.customQuestions[qid]=SETTINGS.config.customQuestions[qid]||{};
-    SETTINGS.config.customQuestions[qid].q=el.value;
-  });
-  document.querySelectorAll('.qedit-opt').forEach(el=>{
-    const qid=el.dataset.qid,oi=parseInt(el.dataset.oi,10),score=parseInt(el.dataset.score,10);
-    SETTINGS.config.customQuestions[qid]=SETTINGS.config.customQuestions[qid]||{};
-    SETTINGS.config.customQuestions[qid].o=SETTINGS.config.customQuestions[qid].o||[];
-    SETTINGS.config.customQuestions[qid].o[oi]=[el.value,score];
-  });
-  /* Apply overrides to live QBANK for immediate effect */
-  applyQuestionOverrides();
+  _captureScoringEdits();
   await saveSettings();toast('✓ Scoring engine saved');
 }
 
 /* Apply user's customQuestions overrides to the in-memory QBANK so the workspace shows them
    immediately without page refresh. Called after saveScoringEngine() and from loadSettings(). */
 function applyQuestionOverrides(){
+  /* Merge user-ADDED questions into the live QBANK (idempotent — add new, sync edits, drop deleted). */
+  const added=(SETTINGS.config&&SETTINGS.config.addedQuestions)||[];
+  const addedIds=new Set(added.map(a=>a&&a.id).filter(Boolean));
+  for(let i=QBANK.length-1;i>=0;i--){if(QBANK[i]._added&&!addedIds.has(QBANK[i].id))QBANK.splice(i,1);}
+  added.forEach(a=>{
+    if(!a||!a.id)return;
+    let it=QBANK.find(x=>x.id===a.id);
+    if(!it){it={id:a.id};QBANK.push(it);}
+    it._added=true;
+    it.st=a.st||'Phone Screen';
+    it.dim=a.dim||'exp';
+    it.q=a.q||'';
+    it.o=(Array.isArray(a.o)&&a.o.length)?a.o:[['Strong',5],['Okay',3],['Weak',1]];
+  });
+  /* Then apply text/option overrides (built-in AND added questions). */
   const customQ=(SETTINGS.config&&SETTINGS.config.customQuestions)||{};
   QBANK.forEach(it=>{
     if(customQ[it.id]){
@@ -9680,6 +9714,51 @@ function applyQuestionOverrides(){
       if(customQ[it.id].o&&Array.isArray(customQ[it.id].o))it.o=customQ[it.id].o.filter(x=>x);
     }
   });
+}
+
+/* Capture all scoring-settings edits from the DOM into SETTINGS (no persistence) — shared by
+   saveScoringEngine and the add/delete-question actions so unsaved edits survive a re-render. */
+function _captureScoringEdits(){
+  const get=id=>document.getElementById(id);
+  SETTINGS.config.qualityWeights={};
+  Object.keys(QW_DEFAULTS).forEach(k=>{const el=get('cfg_qw_'+k);if(el)SETTINGS.config.qualityWeights[k]=parseInt(el.value,10)||0;});
+  SETTINGS.config.retentionWeights={};
+  Object.keys(RW_DEFAULTS).forEach(k=>{const el=get('cfg_rw_'+k);if(el)SETTINGS.config.retentionWeights[k]=parseInt(el.value,10)||0;});
+  SETTINGS.config.bandThresholds={};
+  ['hireQ','hireR','condR','holdQ'].forEach(k=>{const el=get('cfg_bt_'+k);if(el)SETTINGS.config.bandThresholds[k]=parseInt(el.value,10);});
+  {const on=get('cfg_ft_on');if(on)SETTINGS.config.fastTrackEnabled=on.checked;
+   const fq=get('cfg_ft_q');if(fq&&fq.value!=='')SETTINGS.config.fastTrackQ=parseInt(fq.value,10);
+   const fr=get('cfg_ft_r');if(fr&&fr.value!=='')SETTINGS.config.fastTrackR=parseInt(fr.value,10);}
+  /* Built-in question overrides */
+  SETTINGS.config.customQuestions=SETTINGS.config.customQuestions||{};
+  document.querySelectorAll('.qedit-text').forEach(el=>{const qid=el.dataset.qid;SETTINGS.config.customQuestions[qid]=SETTINGS.config.customQuestions[qid]||{};SETTINGS.config.customQuestions[qid].q=el.value;});
+  document.querySelectorAll('.qedit-opt').forEach(el=>{const qid=el.dataset.qid,oi=parseInt(el.dataset.oi,10),score=parseInt(el.dataset.score,10);SETTINGS.config.customQuestions[qid]=SETTINGS.config.customQuestions[qid]||{};SETTINGS.config.customQuestions[qid].o=SETTINGS.config.customQuestions[qid].o||[];SETTINGS.config.customQuestions[qid].o[oi]=[el.value,score];});
+  /* Added questions — store st/dim/q/o directly */
+  const added=SETTINGS.config.addedQuestions||[];const byId={};added.forEach(a=>{if(a&&a.id)byId[a.id]=a;});
+  document.querySelectorAll('.qadd-st').forEach(el=>{const a=byId[el.dataset.qid];if(a)a.st=el.value;});
+  document.querySelectorAll('.qadd-dim').forEach(el=>{const a=byId[el.dataset.qid];if(a)a.dim=el.value;});
+  document.querySelectorAll('.qadd-text').forEach(el=>{const a=byId[el.dataset.qid];if(a)a.q=el.value;});
+  document.querySelectorAll('.qadd-opt').forEach(el=>{const a=byId[el.dataset.qid];if(a){const oi=parseInt(el.dataset.oi,10),score=parseInt(el.dataset.score,10);a.o=a.o||[];a.o[oi]=[el.value,score];}});
+  applyQuestionOverrides();
+}
+
+/* Add a new, user-defined scoring question. Captures current edits first so nothing is lost. */
+function qAddQuestion(){
+  _captureScoringEdits();
+  SETTINGS.config.addedQuestions=SETTINGS.config.addedQuestions||[];
+  const id='cq-'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+  SETTINGS.config.addedQuestions.push({id,st:'Phone Screen',dim:'exp',q:'',o:[['Strong',5],['Okay',3],['Weak',1]]});
+  applyQuestionOverrides();
+  markSettingsDirty();
+  renderSettings();
+}
+function qDeleteAdded(qid){
+  if(!confirm('Delete this question?'))return;
+  _captureScoringEdits();
+  SETTINGS.config.addedQuestions=(SETTINGS.config.addedQuestions||[]).filter(a=>a.id!==qid);
+  applyQuestionOverrides();
+  markSettingsDirty();
+  renderSettings();
 }
 
 /* ----- REFERRAL PROGRAM section ----- */
@@ -10535,26 +10614,6 @@ function patternEditor(){
 async function togPatternShift(day,sh){AVAIL.pattern[day]=AVAIL.pattern[day]||[];const i=AVAIL.pattern[day].indexOf(sh);if(i<0)AVAIL.pattern[day].push(sh);else AVAIL.pattern[day].splice(i,1);
   if(!AVAIL.pattern[day].length)delete AVAIL.pattern[day];await saveAvailability();renderCalendar();}
 
-/* push the portal's permanent schedule into Microsoft Bookings as business hours */
-async function syncToBookings(){
-  const dayMap={Mon:'monday',Tue:'tuesday',Wed:'wednesday',Thu:'thursday',Fri:'friday',Sat:'saturday',Sun:'sunday'};
-  let hasOvernight=false;
-  const businessHours=DAYS.map(d=>{const shifts=AVAIL.pattern[d]||[];const slots=[];
-    shifts.forEach(sh=>{const r=shiftToRange(sh);if(!r)return;
-      if(r.s>=r.e){hasOvernight=true;slots.push({startTime:r.s+':00.0000000',endTime:'23:59:00.0000000'});}
-      else slots.push({startTime:r.s+':00.0000000',endTime:r.e+':00.0000000'});});
-    slots.sort((a,b)=>a.startTime<b.startTime?-1:1);return {day:dayMap[d],timeSlots:slots};});
-  if(hasOvernight&&!confirm('Overnight shifts span midnight, which Bookings doesn\'t handle as one slot — they\'ll be truncated at 11:59pm. Continue?'))return;
-  const btn=document.getElementById('sync-btn');if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span> Syncing…';}
-  try{const r=await gfetch(GR+'/solutions/bookingBusinesses/'+encodeURIComponent(BOOKING_ID),{method:'PATCH',body:JSON.stringify({businessHours:businessHours})});
-    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||('Sync failed '+r.status));}
-    toast('✓ Synced to Bookings');
-  }catch(e){
-    if(/Bookings|consent|permission|forbidden|unauthorized/i.test(e.message))toast('Sign out & back in to grant the new Bookings permission');
-    else toast('Sync failed: '+e.message);
-  }
-  if(btn){btn.disabled=false;btn.innerHTML='⟲ Sync to Bookings';}
-}
 function renderCalDay(base,off){
   const d=new Date(base);d.setDate(d.getDate()+off);const iso=d.toISOString().slice(0,10);
   const isToday=iso===today();
