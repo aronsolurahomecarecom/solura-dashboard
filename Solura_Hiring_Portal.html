@@ -1328,6 +1328,223 @@ select.app-edit-input{cursor:pointer;}
 @keyframes pipeRowFade{from{opacity:0}to{opacity:1}}
 .pcard,.prow{animation:pipeRowFade .18s ease-out both;}
 
+/* ===== Animation pass 2 — interaction polish + entrances + state transitions =====
+   Everything below is pure CSS, scoped to specific interactions or one-shot entrances. None of
+   this fires on every render. All easings use cubic-bezier for organic motion (linear feels mechanical).
+   Categorized: HOVER/FOCUS · ENTRANCE · STATE-CHANGE · INPUT FEEDBACK · MICRO-INTERACTIONS. */
+
+/* ---- HOVER & FOCUS lifts ---- */
+/* Buttons get a tiny lift on hover with a soft shadow bloom. Active state pushes back down. */
+.btn-primary,.btn-sec,.cal-btn,.preset-btn,.ph-btn,.block-chip,.ph-chip,.btn-sm{
+  transition:transform .15s cubic-bezier(.22,.61,.36,1),box-shadow .15s cubic-bezier(.22,.61,.36,1),background-color .15s ease,border-color .15s ease,color .15s ease;
+}
+.btn-primary:hover:not(:disabled),.btn-sec:hover:not(:disabled),.cal-btn:hover:not(:disabled),.btn-sm:hover:not(:disabled){
+  transform:translateY(-1px);
+  box-shadow:0 3px 10px rgba(30,78,140,.12);
+}
+.btn-primary:active:not(:disabled),.btn-sec:active:not(:disabled),.cal-btn:active:not(:disabled),.btn-sm:active:not(:disabled){
+  transform:translateY(0);
+  transition-duration:.05s;
+}
+.preset-btn:hover,.ph-btn:hover,.block-chip:hover,.ph-chip:hover{transform:translateY(-1px) scale(1.02);}
+
+/* Pipeline cards lift slightly on hover so they feel tactile. */
+.pcard,.prow{transition:transform .22s cubic-bezier(.22,.61,.36,1),box-shadow .22s cubic-bezier(.22,.61,.36,1),border-color .15s ease;}
+.pcard:hover,.prow:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(30,78,140,.10);}
+
+/* Workspace cards: subtle border-glow on hover. Not lift (would disturb the staggered entrance). */
+.wscard{transition:border-color .2s ease,box-shadow .25s cubic-bezier(.22,.61,.36,1);}
+.wscard:hover{border-color:var(--sky);box-shadow:0 4px 14px rgba(30,78,140,.06);}
+
+/* Inputs and textareas glow softly when focused. */
+input[type="text"]:focus,input[type="email"]:focus,input[type="tel"]:focus,input[type="number"]:focus,input[type="time"]:focus,input[type="date"]:focus,textarea:focus,select:focus{
+  outline:none;
+  box-shadow:0 0 0 3px rgba(100,163,209,.18);
+  transition:box-shadow .2s ease,border-color .15s ease;
+}
+
+/* ---- ENTRANCE animations ---- */
+/* Drawers/overlays already animate; add per-section fade-up inside them. */
+@keyframes sectionFadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.ws-this,.kvrow,.gateitem,.checkin-entry,.logentry{animation:sectionFadeUp .35s cubic-bezier(.22,.61,.36,1) both;}
+.kvrow:nth-child(1){animation-delay:.04s}
+.kvrow:nth-child(2){animation-delay:.08s}
+.kvrow:nth-child(3){animation-delay:.12s}
+.kvrow:nth-child(4){animation-delay:.16s}
+.kvrow:nth-child(5){animation-delay:.20s}
+.kvrow:nth-child(n+6){animation-delay:.24s}
+
+/* Stepper segments slide in left-to-right when workspace opens. */
+@keyframes stepperSlide{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
+.stepper-ws .step{animation:stepperSlide .3s cubic-bezier(.22,.61,.36,1) both;}
+.stepper-ws .step:nth-child(1){animation-delay:.10s}
+.stepper-ws .step:nth-child(2){animation-delay:.13s}
+.stepper-ws .step:nth-child(3){animation-delay:.16s}
+.stepper-ws .step:nth-child(4){animation-delay:.19s}
+.stepper-ws .step:nth-child(5){animation-delay:.22s}
+.stepper-ws .step:nth-child(6){animation-delay:.25s}
+.stepper-ws .step:nth-child(7){animation-delay:.28s}
+.stepper-ws .step:nth-child(8){animation-delay:.31s}
+.stepper-ws .step:nth-child(n+9){animation-delay:.34s}
+
+/* Score badges pop in with a soft scale. */
+@keyframes badgePopIn{0%{opacity:0;transform:scale(.7)}60%{transform:scale(1.06)}100%{opacity:1;transform:scale(1)}}
+.sbadge,.bandpill,.pill,.xpill,.cbadge{animation:badgePopIn .32s cubic-bezier(.34,1.56,.64,1) both;animation-delay:.12s;}
+
+/* Settings sidebar items slide in from left. */
+@keyframes settingsItemSlide{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
+.set-nav a,.set-nav button{animation:settingsItemSlide .3s ease-out both;}
+.set-nav a:nth-child(1),.set-nav button:nth-child(1){animation-delay:.02s}
+.set-nav a:nth-child(2),.set-nav button:nth-child(2){animation-delay:.05s}
+.set-nav a:nth-child(3),.set-nav button:nth-child(3){animation-delay:.08s}
+.set-nav a:nth-child(4),.set-nav button:nth-child(4){animation-delay:.11s}
+.set-nav a:nth-child(5),.set-nav button:nth-child(5){animation-delay:.14s}
+.set-nav a:nth-child(6),.set-nav button:nth-child(6){animation-delay:.17s}
+.set-nav a:nth-child(7),.set-nav button:nth-child(7){animation-delay:.20s}
+.set-nav a:nth-child(n+8),.set-nav button:nth-child(n+8){animation-delay:.23s}
+
+/* Modal body content fades up after the modal shell finishes scaling in. */
+@keyframes modalBodyFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.mbody{animation:modalBodyFade .35s cubic-bezier(.22,.61,.36,1) both;animation-delay:.12s;}
+
+/* Email cards slide in from below in inbox view. */
+@keyframes emailCardSlide{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.email-card{animation:emailCardSlide .28s cubic-bezier(.22,.61,.36,1) both;}
+.email-card:nth-child(1){animation-delay:.02s}
+.email-card:nth-child(2){animation-delay:.05s}
+.email-card:nth-child(3){animation-delay:.08s}
+.email-card:nth-child(4){animation-delay:.11s}
+.email-card:nth-child(5){animation-delay:.14s}
+.email-card:nth-child(n+6){animation-delay:.17s}
+
+/* ---- TAB SWITCH cross-fade ---- */
+/* When the user switches between Pipeline / Inbox / Calendar / Active / Referrals, the new view
+   fades in. Existing scrollers slide nicely; this adds a subtle opacity ramp. */
+@keyframes viewFadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+#pipeline-view.show,#inbox-view.show,#calendar-view.show,#active-view.show,#referrals-view.show{animation:viewFadeIn .28s cubic-bezier(.22,.61,.36,1) both;}
+
+/* ---- STATE-CHANGE feedback ---- */
+/* When a candidate's stage badge updates, give it a soft glow pulse so the change registers. */
+@keyframes stageBadgeFlash{0%{box-shadow:0 0 0 0 rgba(197,155,78,0)}40%{box-shadow:0 0 0 6px rgba(197,155,78,.25)}100%{box-shadow:0 0 0 0 rgba(197,155,78,0)}}
+.stage-changed{animation:stageBadgeFlash .9s ease-out 1;}
+
+/* When a gate flips Y/N, the cell glows briefly. */
+@keyframes gateFlip{0%{transform:scale(1)}50%{transform:scale(1.08)}100%{transform:scale(1)}}
+.y.on,.n.on{transition:background-color .2s ease,color .2s ease;}
+.gate-just-set{animation:gateFlip .3s cubic-bezier(.34,1.56,.64,1) 1;}
+
+/* Toast variants — success and error have distinct entrances. */
+@keyframes toastSuccessIn{0%{opacity:0;transform:translateY(20px) scale(.9)}50%{opacity:1;transform:translateY(-4px) scale(1.03)}100%{opacity:1;transform:none}}
+@keyframes toastErrorIn{0%{opacity:0;transform:translateX(-8px) scale(.95)}20%{transform:translateX(8px) scale(.97)}40%{transform:translateX(-4px) scale(.99)}100%{opacity:1;transform:none}}
+#toast.show.success{animation:toastSuccessIn .42s cubic-bezier(.34,1.56,.64,1) both;}
+#toast.show.error{animation:toastErrorIn .5s cubic-bezier(.36,.07,.19,.97) both;}
+
+/* ---- INPUT FEEDBACK ---- */
+/* Checkboxes pulse softly when toggled. */
+@keyframes checkBlip{0%{transform:scale(1)}50%{transform:scale(1.18)}100%{transform:scale(1)}}
+input[type="checkbox"]:checked{animation:checkBlip .24s cubic-bezier(.34,1.56,.64,1) 1;}
+
+/* Search inputs grow a subtle background on focus. */
+input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
+
+/* ---- MICRO-INTERACTIONS ---- */
+/* Spinning refresh button on click. */
+@keyframes refreshSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+.spinning{animation:refreshSpin .6s cubic-bezier(.4,0,.2,1) infinite;}
+
+/* Tooltip-like reveal for titles. (Native tooltip is jarring; subtle hover-grow on truncated names is friendlier.) */
+.nm,.pname{transition:color .2s ease;}
+.pcard:hover .nm,.prow:hover .nm{color:var(--sky-deep);}
+
+/* Numbers in score cards roll on update via the .num-roll class JS can toggle. */
+@keyframes numRoll{0%{opacity:.4;transform:translateY(-6px)}100%{opacity:1;transform:none}}
+.num-roll{animation:numRoll .35s cubic-bezier(.22,.61,.36,1) 1;}
+
+/* Sticky footer in workspace slides up on open. */
+@keyframes footerSlide{from{transform:translateY(100%)}to{transform:none}}
+#ws-footer{animation:footerSlide .35s cubic-bezier(.22,.61,.36,1) both;animation-delay:.4s;}
+
+/* Documents list rows fade in as they load. */
+@keyframes docRowFade{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+#ws-doclist > div{animation:docRowFade .22s ease-out both;}
+#ws-doclist > div:nth-child(1){animation-delay:.04s}
+#ws-doclist > div:nth-child(2){animation-delay:.08s}
+#ws-doclist > div:nth-child(3){animation-delay:.12s}
+#ws-doclist > div:nth-child(4){animation-delay:.16s}
+#ws-doclist > div:nth-child(n+5){animation-delay:.20s}
+
+/* Quick-action buttons under primary cascade in. */
+@keyframes quickActionFade{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:none}}
+.ws-quick button{animation:quickActionFade .28s cubic-bezier(.22,.61,.36,1) both;}
+.ws-quick button:nth-child(1){animation-delay:.18s}
+.ws-quick button:nth-child(2){animation-delay:.22s}
+.ws-quick button:nth-child(3){animation-delay:.26s}
+
+/* Awaiting items pill expansion. */
+@keyframes pillExpand{from{transform:scaleX(.85);opacity:0}to{transform:scaleX(1);opacity:1}}
+._awaitingItems-pill,.awaiting-pill{animation:pillExpand .3s cubic-bezier(.22,.61,.36,1) both;animation-delay:.15s;transform-origin:left center;}
+
+/* Settings section content cross-fade when changing sections. */
+@keyframes setBodyFade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+#set-body{animation:setBodyFade .28s cubic-bezier(.22,.61,.36,1) both;}
+
+/* Composer body — already on .mbody but extend to the dashboard-style flex container too. */
+.mbody > div[style*="flex-direction:column"] > div{animation:sectionFadeUp .32s cubic-bezier(.22,.61,.36,1) both;}
+.mbody > div[style*="flex-direction:column"] > div:nth-child(1){animation-delay:.08s}
+.mbody > div[style*="flex-direction:column"] > div:nth-child(2){animation-delay:.12s}
+.mbody > div[style*="flex-direction:column"] > div:nth-child(3){animation-delay:.16s}
+.mbody > div[style*="flex-direction:column"] > div:nth-child(4){animation-delay:.20s}
+.mbody > div[style*="flex-direction:column"] > div:nth-child(5){animation-delay:.24s}
+.mbody > div[style*="flex-direction:column"] > div:nth-child(6){animation-delay:.28s}
+.mbody > div[style*="flex-direction:column"] > div:nth-child(7){animation-delay:.32s}
+
+/* Modal close button rotates on hover for a touch of life. */
+.mclose,.dclose{transition:background .15s ease,color .15s ease,transform .25s cubic-bezier(.22,.61,.36,1);}
+.mclose:hover,.dclose:hover{transform:rotate(90deg);}
+
+/* Header tabs underline-slide on hover. Generic glow on the active tab. */
+.tab{position:relative;transition:color .2s ease,background-color .2s ease;}
+.tab::after{content:'';position:absolute;left:50%;right:50%;bottom:0;height:2px;background:var(--gold);transition:left .25s cubic-bezier(.22,.61,.36,1),right .25s cubic-bezier(.22,.61,.36,1);}
+.tab:hover::after,.tab.on::after{left:18%;right:18%;}
+
+/* Score number changes — when scoreCard re-renders with different score, JS can toggle .num-roll
+   on the .num element to trigger the roll animation. */
+.scorebig .num{transition:color .3s ease;}
+
+/* Stage info phase pill (Phase: ...) gets a subtle background-shift when stage changes. */
+.phasebar{transition:background-color .4s ease;}
+
+/* Drawer arrival — the workspace drawer already slides; layer a subtle fade-up on the header
+   element for added polish without delaying interactivity. */
+@keyframes wsHeaderArrive{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+#ws-name,#ws-sub{animation:wsHeaderArrive .32s cubic-bezier(.22,.61,.36,1) both;}
+#ws-sub{animation-delay:.08s}
+
+/* ---- KEYFRAMED ATTENTION SPOTLIGHTS ---- */
+/* For special moments — JS adds .spotlight when something deserves a pulse */
+@keyframes spotlightGlow{0%{box-shadow:0 0 0 0 rgba(197,155,78,.6)}50%{box-shadow:0 0 0 12px rgba(197,155,78,0)}100%{box-shadow:0 0 0 0 rgba(197,155,78,0)}}
+.spotlight{animation:spotlightGlow 1.5s cubic-bezier(.4,0,.2,1) 1;}
+
+/* Action button transitions when its content changes — using attribute selector so changes register */
+.ws-pri{transition:background .25s ease,color .25s ease,transform .15s cubic-bezier(.22,.61,.36,1),box-shadow .2s ease;}
+.ws-pri:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(197,155,78,.25);}
+.ws-pri:active{transform:translateY(0);transition-duration:.05s;}
+
+/* Bind reduced-motion contract: kill every new animation if user opted out. The earlier block
+   already disables most; this is a belt-and-braces additional sweep covering everything we added. */
+@media (prefers-reduced-motion: reduce){
+  .wsgrid > div > .wscard,.ws-this,.stepper-ws .step,.kvrow,.gateitem,.checkin-entry,.logentry,
+  .sbadge,.bandpill,.pill,.xpill,.cbadge,.set-nav a,.set-nav button,.mbody,.email-card,
+  .ws-quick button,#ws-doclist > div,#ws-name,#ws-sub,#set-body,#ws-footer,._awaitingItems-pill{
+    animation:none !important;
+  }
+  .btn-primary:hover,.btn-sec:hover,.cal-btn:hover,.btn-sm:hover,.pcard:hover,.prow:hover{
+    transform:none !important;
+    box-shadow:none !important;
+  }
+  .mclose:hover,.dclose:hover{transform:none !important;}
+}
+
 /* ===== #1 motion polish — tasteful, not blanket. Respect reduced-motion; give the newest
    components (nudge stepper, email "mark received" panel) the same entrance language as the
    rest of the app instead of popping in. No animation added to bulk re-renders. ===== */
