@@ -1495,6 +1495,9 @@ let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{},sc
   customerReferralEnabled:true,customerReferralPayoutEnabled:true,
   customerReferralAmount:100,customerReferralRetentionDays:30,
   showLeaderboardPills:true,referralInConfirmEmail:true,
+  /* Where referral / "apply" links land. The bare domain root serves the dashboard repo page, so
+     this MUST point at the deployed application FORM file (sibling of the references form). */
+  applyFormUrl:'https://apply.solurahomecare.com/Solura_Application_Form.html',
   /* Required certifications for hire eligibility */
   requiredCerts:['CPR','First Aid'],
   requiredCertGroups:[{label:'Care credential (one minimum)',options:['HHA','STNA','CNA','RN','LPN']}],
@@ -2013,7 +2016,7 @@ async function saveSettings(){
     (SETTINGS.config&&(SETTINGS.config.admins||SETTINGS.config.payFloor!==undefined||SETTINGS.config.serviceZips||
       SETTINGS.config.vr||SETTINGS.config.bandThresholds||SETTINGS.config.qualityWeights||SETTINGS.config.retentionWeights||
       SETTINGS.config.customQuestions||SETTINGS.config.fastTrackEnabled!==undefined||SETTINGS.config.ziToken||
-      SETTINGS.config.calScreenUrl||SETTINGS.config.calInterviewUrl||SETTINGS.config.calOnboardingUrl))||
+      SETTINGS.config.calScreenUrl||SETTINGS.config.calInterviewUrl||SETTINGS.config.calOnboardingUrl||SETTINGS.config.applyFormUrl))||
     (SETTINGS.scoringWeights)||
     (SETTINGS.flow&&SETTINGS.flow.custom&&SETTINGS.flow.custom.length)||
     (SETTINGS.massSends&&SETTINGS.massSends.length)||
@@ -4386,6 +4389,16 @@ function buildReferencesLink(c){
   return 'https://apply.solurahomecare.com/Solura_References_Form.html?'+params.join('&');
 }
 
+/* Where referral / "apply" links should land. The bare domain root (apply.solurahomecare.com/)
+   serves the dashboard repo page, so links must target the deployed application FORM file.
+   Configurable in Settings -> Referral program; falls back to the conventional form name. */
+function _applyFormUrl(){return (SETTINGS.config&&SETTINGS.config.applyFormUrl&&SETTINGS.config.applyFormUrl.trim())||'https://apply.solurahomecare.com/Solura_Application_Form.html';}
+function buildReferralLink(code){
+  if(!code)return '';
+  const base=_applyFormUrl();
+  return base+(base.indexOf('?')>=0?'&':'?')+'ref='+encodeURIComponent(code);
+}
+
 const TEMPLATES={
  /* Auto-sent by the worker on application submission. Edit in Settings → Email templates. */
  application_confirmation:c=>({s:'We received your application — Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying with Solura Home Care. Your application is in and someone from our team will reach out shortly about the next step.\n\nIf you don't hear from us within a few business days, feel free to reply to this email.\n\n🎁 Refer a friend, get priority — share your personal link with other caregivers:\n{referralLink}\n\nMeir Schwimer\nSolura Home Care\n(216) 770-4886`}),
@@ -4679,9 +4692,9 @@ function getEffectiveTemplate(tplKey,c){
     /* Candidate's PERSONAL referral link — share with friends to earn referral points.
        This is different from refLink (references form). */
     const referralCode=c&&c.st&&c.st.refCode?c.st.refCode:'';
-    const referralLink=referralCode?'https://apply.solurahomecare.com/?ref='+encodeURIComponent(referralCode):'';
+    const referralLink=buildReferralLink(referralCode);
     /* Application form link — useful for re-engaging applicants or sharing with leads */
-    const appLink='https://apply.solurahomecare.com/';
+    const appLink=_applyFormUrl();
     /* All supported placeholders. Order matters slightly — longer keys before shorter ones to avoid partial collisions. */
     const sub=t=>String(t||'')
       .replace(/\{onboardingLink\}/g,cfg.calOnboardingUrl||'')
@@ -4726,13 +4739,13 @@ function substituteLive(text,candidate){
   const cfg=SETTINGS.config||{};
   const refLink=buildReferencesLink(c);
   const referralCode=c.st&&c.st.refCode?c.st.refCode:'';
-  const referralLink=referralCode?'https://apply.solurahomecare.com/?ref='+encodeURIComponent(referralCode):'';
+  const referralLink=buildReferralLink(referralCode);
   return String(text||'')
     .replace(/\{onboardingLink\}/g,cfg.calOnboardingUrl||'')
     .replace(/\{interviewLink\}/g,cfg.calInterviewUrl||BOOK_LINK)
     .replace(/\{screenLink\}/g,cfg.calScreenUrl||BOOK_LINK)
     .replace(/\{referralLink\}/g,referralLink)
-    .replace(/\{appLink\}/g,'https://apply.solurahomecare.com/')
+    .replace(/\{appLink\}/g,_applyFormUrl())
     .replace(/\{bookLink\}/g,BOOK_LINK)
     .replace(/\{refLink\}/g,refLink)
     .replace(/\{name\}/g,fullName)
@@ -5611,7 +5624,7 @@ function referralsPreviewCard(c){
   if(refs.length)summary.push(`<span class="pill psoft" style="font-size:9px">${refs.length} caregiver ref${refs.length===1?'':'s'}</span>`);
   if(custRefs.length)summary.push(`<span class="pill pg" style="font-size:9px">💰 ${custRefs.length} customer ref${custRefs.length===1?'':'s'} · $${cashEarned}</span>`);
   if(!summary.length)summary.push(`<span class="pill psoft" style="font-size:9px">No activity yet</span>`);
-  const refLink=refCode?'https://apply.solurahomecare.com/?ref='+refCode:'';
+  const refLink=buildReferralLink(refCode);
   return `<div class="wscard"><h3>Referrals & rewards <span style="font-size:11px;color:var(--soft);font-weight:600">code ${esc(refCode||'—')}</span></h3>
     <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">${summary.join('')}</div>
     ${refLink?`<div style="background:#FAF6EE;border:1px solid var(--gold-mid);border-radius:7px;padding:7px 10px;display:flex;gap:6px;align-items:center;margin-bottom:8px">
@@ -5747,7 +5760,7 @@ function rewardsBlock(c){
   const enabled=SETTINGS.config.referralEnabled;
   const awardOn=SETTINGS.config.referralAwardPoints;
   const refCode=c.st&&c.st.refCode;
-  const refLink=refCode?'https://apply.solurahomecare.com/?ref='+refCode:'';
+  const refLink=buildReferralLink(refCode);
   const rc=(c.st&&c.st.referralCount)||{submitted:0,screened:0,hired:0};
   const refs=(c.st&&c.st.referrals)||[];
   const custRefs=(c.st&&c.st.customerReferrals)||[];
@@ -9818,6 +9831,12 @@ function renderSettingsReferrals(){
     <p class="set-help" style="margin-top:6px">Currently flagging: <b>${(SETTINGS.config.adminPhones||'').split(',').filter(x=>x.trim()).length} numbers</b>. Any reference whose phone matches will be rejected at submission AND flagged with a red warning if it slipped through.</p>
   </div>
 
+  <div class="wscard"><h3>🔗 Application form link</h3>
+    <p class="set-help">Referral and "apply" links point here. Set this to your <b>deployed application form</b> — the bare domain root (<code>apply.solurahomecare.com/</code>) serves the dashboard page, so a link to the root just lands there instead of the form. Referral links append <code>?ref=CODE</code> automatically.</p>
+    <label class="set-field">Application form URL<input type="text" id="cfg_applyFormUrl" value="${esc(c.applyFormUrl||'https://apply.solurahomecare.com/Solura_Application_Form.html')}" placeholder="https://apply.solurahomecare.com/Solura_Application_Form.html" style="width:100%"></label>
+    <p class="set-help" style="margin-top:6px">Example referral link: <code>${esc(c.applyFormUrl||'https://apply.solurahomecare.com/Solura_Application_Form.html')}?ref=A7K2P9</code></p>
+  </div>
+
   <div class="wscard"><h3>🔑 Backfill missing refCodes</h3>
     <p class="set-help">Some older candidates may not have a personal refCode (the 6-char identifier used in references-form links and referral URLs). This utility scans every candidate and generates a unique refCode for anyone missing one. Safe to run repeatedly — already-coded candidates are skipped.</p>
     <div id="refcode-scan-result" style="font-size:12px;color:var(--soft);margin:10px 0;padding:10px 12px;background:var(--cream);border:1px solid var(--border);border-radius:8px">${(function(){
@@ -10571,6 +10590,7 @@ function saveConfigSilent(){
   if(get('cfg_customerReferralRetentionDays'))SETTINGS.config.customerReferralRetentionDays=parseInt(get('cfg_customerReferralRetentionDays').value,10)||30;
   if(get('cfg_showLeaderboardPills'))SETTINGS.config.showLeaderboardPills=get('cfg_showLeaderboardPills').checked;
   if(get('cfg_referralInConfirmEmail'))SETTINGS.config.referralInConfirmEmail=get('cfg_referralInConfirmEmail').checked;
+  if(get('cfg_applyFormUrl'))SETTINGS.config.applyFormUrl=get('cfg_applyFormUrl').value.trim();
   if(get('cfg_adminPhones'))SETTINGS.config.adminPhones=get('cfg_adminPhones').value.trim();
   if(get('cfg_screenNoShowLimit'))SETTINGS.config.screenNoShowLimit=parseInt(get('cfg_screenNoShowLimit').value,10)||3;
   if(get('cfg_interviewNoShowLimit'))SETTINGS.config.interviewNoShowLimit=parseInt(get('cfg_interviewNoShowLimit').value,10)||2;
