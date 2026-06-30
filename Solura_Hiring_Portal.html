@@ -5363,8 +5363,8 @@ function renderWorkspace(){_memGen++;
   document.getElementById('ws-body').innerHTML=`
     ${thisStep}
     <div class="wsgrid">
-      <div>${gatesCard}${_bgFindingsCard}${_credentialsCard}${work}${_appSnap}${docs}${emailsCard}${activity}</div>
-      <div>${identity}${scoreCard}${_yardstikPrev}${_empPrev}${_refPrev}${refsPreviewCard}</div>
+      <div>${gatesCard}${_bgFindingsCard}${_credentialsCard}${work}${_appSnap}${docs}${activity}</div>
+      <div>${identity}${scoreCard}${_yardstikPrev}${_empPrev}${_refPrev}${refsPreviewCard}${emailsCard}</div>
     </div>`;
   /* sticky footer with primary action — always visible */
   const ftext=`<div class="ftext">Next step<b>${esc(a.info.next||'—')}</b></div>`;
@@ -8876,6 +8876,27 @@ const TEMPLATE_LABELS={
  request_resume:'Request résumé',
  request_updated_credential:'Request updated credential (renewal)'
 };
+/* Metadata about WHEN each template fires — used by the editor to surface badges and group the
+   list. Empty entries mean "manual send via the email composer". The full template surface is
+   already complete (every TEMPLATES key has a label and every label has a template); this just
+   makes it easier to find a specific one. */
+const TEMPLATE_META={
+  application_confirmation:{badge:'AUTO',badgeCls:'pa',hint:'Sent automatically by the worker when a new application arrives. You can still edit the wording here.'},
+  screen_invite:           {badge:'STAGE',badgeCls:'pg',hint:'Manual send via composer or Sequence engine.'},
+  screen_nudge:            {badge:'NUDGE',badgeCls:'psoft',hint:'Used by the "nudge" button for idle Screen-invite candidates.'},
+  missed_screen:           {badge:'REBOOK',badgeCls:'psoft',hint:'Auto-opens after a no-show at the phone screen.'},
+  ask_references:          {badge:'STAGE',badgeCls:'pg',hint:'Sent at Ask references / Verify employers stages.'},
+  interview_invite:        {badge:'STAGE',badgeCls:'pg',hint:'Manual send via composer or Sequence engine.'},
+  bg_request:              {badge:'STAGE',badgeCls:'pg',hint:'BG-check + cert request. Manual send via composer.'},
+  missed_interview:        {badge:'REBOOK',badgeCls:'psoft',hint:'Auto-opens after a no-show at the interview.'},
+  offer:                   {badge:'STAGE',badgeCls:'pg',hint:'Sent when BG check clears.'},
+  onboarding:              {badge:'STAGE',badgeCls:'pg',hint:'Onboarding invite with Cal.com link.'},
+  missed_onboarding:       {badge:'REBOOK',badgeCls:'psoft',hint:'Auto-opens after a no-show at onboarding.'},
+  reject:                  {badge:'',badgeCls:'',hint:'Manual send via composer.'},
+  missing:                 {badge:'',badgeCls:'',hint:'Used to request missing application info.'},
+  request_resume:          {badge:'NUDGE',badgeCls:'psoft',hint:'Sent when a candidate has no résumé on file.'},
+  request_updated_credential:{badge:'',badgeCls:'',hint:'Sent for credential renewals.'}
+};
 function defaultTplFor(k){const dummy={name:'John Smith',email:'',phone:'',source:'',st:{refCode:'A7K2P9'},__missing:['Work authorization']};return (TEMPLATES[k]||TEMPLATES.screen_invite)(dummy);}
 /* ===================== SETTINGS — sidebar-driven page ===================== */
 let settingsSection='workflow';
@@ -9261,6 +9282,37 @@ function _seqRuleBody(stage,i,tplOptions,trigOptions){
   <button class="btn-sm bg-cream" onclick="seqAddRule(${i})" style="margin-top:4px">+ Add rule</button>`;
 }
 
+/* ===================== Workflow ↔ Sequence bidirectional sync =====================
+   The Workflow editor and Sequence engine editor edit overlapping concepts: both touch stage
+   identity (the key) and ordering. Previously they wrote to different settings without telling
+   each other. So renaming a stage's key in the Sequence editor left the Workflow's order/labels
+   untouched (and vice versa). These helpers keep both in sync so the user sees their change
+   reflected immediately wherever they look. */
+function _syncSeqToFlow(){
+  /* Sequence engine just changed stage keys/order. Reflect that into SETTINGS.flow.order so the
+     Workflow editor (and flowOrder() which the rest of the app reads) sees the same list. */
+  if(!SETTINGS.sequence||!SETTINGS.sequence.length)return;
+  const keys=SETTINGS.sequence.map(st=>st&&st.key).filter(Boolean);
+  if(!keys.length)return;
+  SETTINGS.flow=SETTINGS.flow||{};
+  /* Only override flow.order if the sequence list differs from FLOW (the built-in default). */
+  const isSameAsDefault=keys.length===FLOW.length&&keys.every((k,i)=>k===FLOW[i]);
+  SETTINGS.flow.order=isSameAsDefault?null:keys;
+}
+function _syncFlowToSeq(){
+  /* Workflow editor just changed order/labels/custom. Reflect ordering into SETTINGS.sequence so
+     the Sequence engine editor sees the same stage list. Per-stage configs (timings, actions)
+     survive — we only rearrange and add/remove entries by key. */
+  if(!SETTINGS.sequence||!Array.isArray(SETTINGS.sequence)||!SETTINGS.sequence.length)return;
+  const desired=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order.slice():FLOW.slice();
+  const byKey={};SETTINGS.sequence.forEach(st=>{if(st&&st.key)byKey[st.key]=st;});
+  const next=desired.map(k=>{
+    if(byKey[k])return byKey[k];
+    const def=SEQUENCE_DEFAULTS.find(s=>s.key===k);
+    return def?JSON.parse(JSON.stringify(def)):{key:k,icon:'',action:null};
+  });
+  SETTINGS.sequence=next;
+}
 /* No draft — every edit writes directly to SETTINGS.sequence and triggers debounced auto-save.
    This is simpler than the draft-then-save flow and gives the user immediate confidence that
    their changes persisted. On first edit, if SETTINGS.sequence isn't yet a deep copy of defaults,
@@ -9277,7 +9329,24 @@ function _reEsc(s){return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
 function seqEdit(idx,field,value){
   const d=_seqEnsureWritable();
   if(!d[idx])return;
+  const oldKey=d[idx].key;
   d[idx][field]=value;
+  /* Stage-key rename must propagate: flow.labels rekey, references in other sequence entries,
+     and flow.order. */
+  if(field==='key'&&value&&value!==oldKey){
+    SETTINGS.flow=SETTINGS.flow||{};
+    SETTINGS.flow.labels=SETTINGS.flow.labels||{};
+    if(SETTINGS.flow.labels[oldKey]){SETTINGS.flow.labels[value]=SETTINGS.flow.labels[oldKey];delete SETTINGS.flow.labels[oldKey];}
+    SETTINGS.sequence.forEach(st=>{
+      if(!st)return;
+      if(st.advanceTo===oldKey)st.advanceTo=value;
+      if(st.nextStageOnRun===oldKey)st.nextStageOnRun=value;
+      if(Array.isArray(st.rules))st.rules.forEach(r=>{if(r&&r.action&&r.action.advanceTo===oldKey)r.action.advanceTo=value;});
+      if(st.action&&st.action.advanceTo===oldKey)st.action.advanceTo=value;
+      if(st.readyAction&&st.readyAction.advanceTo===oldKey)st.readyAction.advanceTo=value;
+    });
+    _syncSeqToFlow();
+  }
   markSettingsDirty();
 }
 function seqEditAction(idx,field,value){
@@ -9340,6 +9409,7 @@ function seqMove(idx,delta){
   if(newIdx<0||newIdx>=d.length)return;
   const item=d.splice(idx,1)[0];
   d.splice(newIdx,0,item);
+  _syncSeqToFlow();
   markSettingsDirty();
   renderSettings();
 }
@@ -9347,6 +9417,7 @@ function seqRemove(idx){
   const d=_seqEnsureWritable();
   if(!confirm('Remove stage "'+d[idx].key+'"? Candidates currently in this stage will lose their next-step button.'))return;
   d.splice(idx,1);
+  _syncSeqToFlow();
   markSettingsDirty();
   renderSettings();
 }
@@ -9356,6 +9427,7 @@ function seqDuplicate(idx){
   const clone=JSON.parse(JSON.stringify(d[idx]));
   clone.key=clone.key+' (copy)';
   d.splice(idx+1,0,clone);
+  _syncSeqToFlow();
   markSettingsDirty();
   renderSettings();
 }
@@ -9454,6 +9526,7 @@ function seqCardDrop(e,idx){
   const item=d.splice(_seqDragFrom,1)[0];
   d.splice(adjusted,0,item);
   _seqDragFrom=null;
+  _syncSeqToFlow();
   markSettingsDirty();
   renderSettings();
 }
@@ -9505,16 +9578,26 @@ function renderSettingsTemplates(){
   _activeTpl=cur;
   const tpl=SETTINGS.templates[cur]||defaultTplFor(cur);
   const isEdited=!!SETTINGS.templates[cur];
-  const list=keys.map(k=>`<button class="tpl-list-item ${k===cur?'on':''}" onclick="setActiveTpl('${k}')">
-    <span class="tpl-name">${esc(TEMPLATE_LABELS[k])}</span>
-    ${SETTINGS.templates[k]?'<span class="pill pa" style="font-size:8.5px;font-weight:700">EDITED</span>':''}
-  </button>`).join('');
+  /* Filter is purely a DOM hide/show — no re-render needed on each keystroke. */
+  const filter=(window._tplFilter||'').trim().toLowerCase();
+  const list=keys.map(k=>{
+    const lbl=TEMPLATE_LABELS[k]||k;
+    const meta=(typeof TEMPLATE_META!=='undefined'?TEMPLATE_META[k]:null)||{};
+    const matches=!filter||lbl.toLowerCase().includes(filter)||k.toLowerCase().includes(filter)||(meta.hint||'').toLowerCase().includes(filter);
+    const badge=meta.badge?`<span class="pill ${meta.badgeCls||'psoft'}" style="font-size:8.5px;font-weight:700;margin-left:5px">${esc(meta.badge)}</span>`:'';
+    return `<button class="tpl-list-item ${k===cur?'on':''}" onclick="setActiveTpl('${k}')" title="${esc(meta.hint||'')}" style="${matches?'':'display:none'}">
+      <span class="tpl-name">${esc(lbl)}</span>${badge}
+      ${SETTINGS.templates[k]?'<span class="pill pa" style="font-size:8.5px;font-weight:700;margin-left:5px">EDITED</span>':''}
+    </button>`;
+  }).join('');
+  const searchBox=`<input type="text" id="tpl-search" placeholder="🔍 Search templates…" value="${esc(window._tplFilter||'')}" oninput="_onTplFilter(this.value)" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;outline:none;margin-bottom:8px">`;
   const phChips=Object.entries(TEMPLATE_PLACEHOLDERS).map(([k,desc])=>`<button class="ph-chip" onclick="insertPlaceholder('tpl_b_${cur}','${k}')" title="${esc(desc)}">${esc(k)}</button>`).join('');
   const blockChips=TEMPLATE_BLOCKS.map(b=>`<button class="block-chip" onclick="insertTemplateBlock('tpl_b_${cur}','${b.key}')" title="${esc(b.text.replace(/\n/g,' ').slice(0,80))}">${esc(b.label)}</button>`).join('');
 
   return `<div class="tpl-editor">
     <aside class="tpl-list">
-      <div class="tpl-list-head">Templates</div>
+      <div class="tpl-list-head">Templates <span style="font-weight:500;color:var(--soft);font-size:10.5px">${keys.length}</span></div>
+      ${searchBox}
       ${list}
     </aside>
     <section class="tpl-edit-pane">
@@ -9541,9 +9624,20 @@ function renderSettingsTemplates(){
       </div>
 
       <label class="tpl-label">Body</label>
+      ${(typeof TEMPLATE_META!=='undefined'&&TEMPLATE_META[cur]&&TEMPLATE_META[cur].hint)?`<div style="font-size:11px;color:var(--soft);background:var(--cream);padding:6px 10px;border-radius:6px;margin-bottom:6px;line-height:1.45">ℹ ${esc(TEMPLATE_META[cur].hint)}</div>`:''}
       <textarea id="tpl_b_${cur}" class="tpl-body-input">${esc(tpl.b)}</textarea>
     </section>
   </div>`;
+}
+
+/* Filter handler — DOM-level hide/show via re-render; cheap and avoids losing the active selection. */
+function _onTplFilter(v){
+  window._tplFilter=v;
+  /* Re-render the editor body only (the active template's editor state survives because _activeTpl
+     is preserved). renderSettings() also restores keyboard focus to the search input afterward. */
+  renderSettings();
+  const inp=document.getElementById('tpl-search');
+  if(inp){inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length);}
 }
 
 function insertPlaceholder(textareaId,ph){
@@ -10845,11 +10939,12 @@ async function seqSave(){
   SETTINGS.flow.order=isSameAsDefault?null:_seqWorkingOrder.slice();
   SETTINGS.flow.labels=Object.assign({},_seqWorkingLabels);
   SETTINGS.flow.custom=_seqWorkingCustom.slice();
+  /* Reflect the workflow change into the Sequence engine's per-stage list so renderSettingsSequence
+     sees the same stages in the same order. Per-stage timings/actions survive intact. */
+  _syncFlowToSeq();
   await saveSettings();
-  /* also extend STAGEINFO at runtime for any custom milestones so the action engine has a label/color */
   applyCustomStagesToInfo();
   toast('✓ Sequence saved');
-  /* refresh portal renders */
   render();renderSettings();
 }
 function seqResetDefault(){
@@ -10946,14 +11041,30 @@ function renderCalDay(base,off){
   const d=new Date(base);d.setDate(d.getDate()+off);const iso=d.toISOString().slice(0,10);
   const isToday=iso===today();
   const opens=slotsForDay(iso);
+  /* Bookings are stored as full UTC ISO strings (toISOString() always yields Z-suffixed UTC).
+     Comparing the first 10 chars against the local-date iso compares apples to oranges: a 10pm
+     local booking becomes 02:00 UTC the next day, so it shows up on the wrong day; even when the
+     day is right, slicing chars 11..16 yields the UTC hour, not the local hour. Fix: parse through
+     Date and use local-zone year/month/day for the day-match, fmtTime() (toLocaleTimeString) for
+     display, and Date.getTime() for sort. */
+  const pad2=n=>String(n).padStart(2,'0');
+  const _localIso=dt=>dt.getFullYear()+'-'+pad2(dt.getMonth()+1)+'-'+pad2(dt.getDate());
   const booked=[];
-  pipeline.forEach(c=>{if(c.stage==='Declined')return;if(c.st.booking&&c.st.booking.slice(0,10)===iso)booked.push({c,t:c.st.booking.slice(11,16)});});
-  booked.sort((a,b)=>a.t<b.t?-1:1);
+  pipeline.forEach(c=>{
+    if(c.stage==='Declined')return;
+    if(!c.st||!c.st.booking)return;
+    const dt=new Date(c.st.booking);
+    if(isNaN(dt.getTime()))return;
+    if(_localIso(dt)===iso)booked.push({c,t:dt.getTime(),iso:c.st.booking});
+  });
+  booked.sort((a,b)=>a.t-b.t);
   const fmt12=t=>new Date('2000-01-01T'+t).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
   const openRows=opens.map(slot=>{const ts=slot.s.slice(11,16),te=slot.e.slice(11,16);
     const src=slot.src==='pattern'?'<span style="font-size:10px;color:var(--soft);font-style:normal;margin-left:6px">• from schedule</span>':'';
     return `<div class="cal-slot open"><div class="t" style="width:auto;min-width:140px">${fmt12(ts)} – ${fmt12(te)}</div><div class="who">Available — open for booking${src}</div><div class="act"><button class="close-btn" onclick="closeSlotAt('${iso}','${ts}')">Close</button></div></div>`;}).join('');
-  const bookRows=booked.map(({c,t})=>{return `<div class="cal-slot booked"><div class="t" style="width:auto;min-width:80px">${fmt12(t)}</div><div class="who"><span class="nm">${esc(c.name)}</span> <span class="pill pa" style="font-size:9px">${esc(c.stage)}</span><span class="ph">${esc(c.phone||'')}</span></div><div class="act"><button class="open-btn" onclick="openWorkspace(${c.excelRow})">Open</button></div></div>`;}).join('');
+  /* `t` is now a Date.getTime() number used only for sorting; for display, format the original
+     ISO through fmtTime() so the calendar shows local-zone time consistently with the rest of the UI. */
+  const bookRows=booked.map(({c,iso})=>{return `<div class="cal-slot booked"><div class="t" style="width:auto;min-width:80px">${fmtTime(iso)}</div><div class="who"><span class="nm">${esc(c.name)}</span> <span class="pill pa" style="font-size:9px">${esc(c.stage)}</span><span class="ph">${esc(c.phone||'')}</span></div><div class="act"><button class="open-btn" onclick="openWorkspace(${c.excelRow})">Open</button></div></div>`;}).join('');
   const addForm=`<div class="addslot-form"><label style="font-size:10.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.08em">from</label><input type="time" id="atimes_${iso}" style="max-width:120px"><label style="font-size:10.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.08em">to</label><input type="time" id="atimee_${iso}" style="max-width:120px"><button onclick="addOneOffSlot('${iso}')">+ add block</button></div>`;
   return `<div class="cal-day ${isToday?'today':''}"><h3>${fmtDayLong(iso)} ${isToday?'<span class="today-tag">TODAY</span>':''}</h3>
     ${(openRows+bookRows)||'<div class="cal-empty">No availability. Add a time block below or set your permanent schedule.</div>'}
