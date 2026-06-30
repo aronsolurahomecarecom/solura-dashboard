@@ -1328,6 +1328,23 @@ select.app-edit-input{cursor:pointer;}
 @keyframes pipeRowFade{from{opacity:0}to{opacity:1}}
 .pcard,.prow{animation:pipeRowFade .18s ease-out both;}
 
+/* ===== WYSIWYG email composer toolbar (matches leads dashboard pattern) ===== */
+.email-toolbar{display:flex;align-items:center;gap:4px;padding:6px 8px;background:var(--cream);border:1.5px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;flex-wrap:wrap;}
+.email-toolbar button{min-width:30px;height:28px;padding:0 8px;background:transparent;color:var(--mid);border:1px solid transparent;border-radius:5px;font-family:inherit;font-size:13px;cursor:pointer;transition:all .12s ease;display:inline-flex;align-items:center;justify-content:center;}
+.email-tb-imgbtn{min-width:30px;height:28px;padding:0 8px;background:transparent;color:var(--mid);border:1px solid transparent;border-radius:5px;font-family:inherit;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:all .12s ease;}
+.email-tb-imgbtn:hover{background:#fff;border-color:var(--border);color:var(--ink);}
+.email-toolbar button:hover{background:#fff;border-color:var(--border);color:var(--ink);}
+.email-toolbar button:active{transform:scale(.92);}
+.email-tb-sep{width:1px;height:18px;background:var(--border);margin:0 4px;}
+.email-body{width:100%;min-height:220px;max-height:420px;overflow-y:auto;padding:12px 14px;border:1.5px solid var(--border);border-radius:0 0 8px 8px;font-family:inherit;font-size:13px;line-height:1.55;background:#fff;color:var(--ink);outline:none;transition:border-color .15s;}
+.email-body:focus{border-color:var(--sky-deep);}
+.email-body p{margin:0 0 8px;}
+.email-body p:last-child{margin-bottom:0;}
+.email-body ul,.email-body ol{margin:6px 0 8px 24px;padding:0;}
+.email-body a{color:var(--sky-deep);text-decoration:underline;}
+.email-body img{max-width:100%;height:auto;display:inline-block;border-radius:4px;margin:4px 0;}
+.email-body[contenteditable=true]:empty:before{content:attr(data-placeholder);color:var(--soft);font-style:italic;pointer-events:none;}
+
 /* ===== Animation pass 2 — interaction polish + entrances + state transitions =====
    Everything below is pure CSS, scoped to specific interactions or one-shot entrances. None of
    this fires on every render. All easings use cubic-bezier for organic motion (linear feels mechanical).
@@ -1962,12 +1979,17 @@ async function sendMailViaGraph(to,subject,bodyContent,isHtml,attachments){
     const sz=Math.floor((a.contentBase64||'').length*0.75); /* base64 → bytes */
     if(sz<3*1024*1024&&inlineTotalBytes+sz<3*1024*1024){
       inlineTotalBytes+=sz;
-      smallAtts.push({
+      const attRec={
         '@odata.type':'#microsoft.graph.fileAttachment',
         name:a.name,
         contentType:a.contentType||'application/octet-stream',
         contentBytes:a.contentBase64
-      });
+      };
+      /* Preserve inline-image metadata so Outlook renders the image embedded rather than as a
+         separate file attachment. Required when the body HTML references the attachment via cid:CID. */
+      if(a.isInline){attRec.isInline=true;}
+      if(a.contentId){attRec.contentId=a.contentId;}
+      smallAtts.push(attRec);
     }else{
       largeAtts.push(a);
     }
@@ -5025,6 +5047,15 @@ function emailModal(tpl,subj,body,advanceTo){
      or placeholder" toggle so by default the writer's eye lands on the message field. */
   const _hasEmail = !!(W.email && W.email.trim());
   const _toDisplay = _hasEmail ? (W.name ? esc(W.name)+' &lt;'+esc(W.email)+'&gt;' : esc(W.email)) : '<span style="color:var(--red)">(no email on file — add one before sending)</span>';
+  /* Convert template plaintext to HTML for the contenteditable. Detect if body already looks like
+     HTML (has tags); if so, use as-is. Otherwise wrap in <p> per double-newline-separated block,
+     with single newlines becoming <br>. */
+  const _initialBodyHtml = (function(){
+    const raw = String(body||'');
+    if(/<[a-z][\s\S]*?>/i.test(raw))return raw; /* already HTML — preserve */
+    /* Plaintext: paragraphs separated by blank lines; single newlines = <br> */
+    return raw.split(/\n\n+/).map(p=>'<p>'+esc(p).replace(/\n/g,'<br>')+'</p>').join('');
+  })();
 
   document.getElementById('m-body').innerHTML=`
     <div style="display:flex;flex-direction:column;gap:14px">
@@ -5040,13 +5071,24 @@ function emailModal(tpl,subj,body,advanceTo){
       </div>
 
       <div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:5px">
-          <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--soft)">Message</div>
-          <label style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--soft);cursor:pointer;text-transform:uppercase;letter-spacing:.05em;font-weight:600">
-            <input type="checkbox" id="e-html" style="width:12px;height:12px;cursor:pointer;accent-color:var(--sky-deep);margin:0"><span>HTML</span>
+        <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--soft);margin-bottom:5px">Message</div>
+        <div class="email-toolbar">
+          <button type="button" onclick="_emailFmt('bold')" title="Bold (Ctrl+B)"><b>B</b></button>
+          <button type="button" onclick="_emailFmt('italic')" title="Italic (Ctrl+I)"><i>I</i></button>
+          <button type="button" onclick="_emailFmt('underline')" title="Underline (Ctrl+U)"><u>U</u></button>
+          <div class="email-tb-sep"></div>
+          <button type="button" onclick="_emailFmt('insertUnorderedList')" title="Bullet list">•—</button>
+          <button type="button" onclick="_emailFmt('insertOrderedList')" title="Numbered list">1.</button>
+          <div class="email-tb-sep"></div>
+          <button type="button" onclick="_emailInsertLink()" title="Insert link">🔗</button>
+          <label class="email-tb-imgbtn" title="Insert inline image">
+            <input type="file" id="e-image-input" accept="image/*" style="display:none" onchange="_emailInsertInlineImage(this.files[0]);this.value=''">
+            🖼
           </label>
+          <button type="button" onclick="_emailPasteHtml()" title="Paste HTML template (designer hand-off, etc.)">&lt;/&gt;</button>
+          <button type="button" onclick="_emailFmt('removeFormat')" title="Clear formatting" style="margin-left:auto;color:var(--soft)">Tx</button>
         </div>
-        <textarea id="e-body" style="width:100%;padding:12px 14px;background:#fff;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;min-height:220px;resize:vertical;outline:none;line-height:1.55;transition:border-color .15s" onfocus="this.style.borderColor='var(--sky-deep)'" onblur="this.style.borderColor='var(--border)'">${esc(body)}</textarea>
+        <div id="e-body" class="email-body" contenteditable="true" spellcheck="true" data-placeholder="Write your message…">${_initialBodyHtml}</div>
       </div>
 
       <details style="background:var(--cream);border:1px solid var(--border);border-radius:8px;padding:0;overflow:hidden">
@@ -5092,17 +5134,94 @@ function _insertPlaceholder(token){
   const id=_lastFocusedField||'e-body';
   const el=document.getElementById(id);
   if(!el)return;
-  const s=el.selectionStart||0,e=el.selectionEnd||0;
-  el.value=el.value.slice(0,s)+token+el.value.slice(e);
-  /* Restore cursor after the inserted token */
-  el.focus();el.selectionStart=el.selectionEnd=s+token.length;
+  /* Subject is still a plain input — use the old selectionStart/End path. Body is now a
+     contenteditable div — use document.execCommand('insertText') which respects the live cursor. */
+  if(el.tagName==='INPUT'||el.tagName==='TEXTAREA'){
+    const s=el.selectionStart||0,e=el.selectionEnd||0;
+    el.value=el.value.slice(0,s)+token+el.value.slice(e);
+    el.focus();el.selectionStart=el.selectionEnd=s+token.length;
+  }else{
+    el.focus();
+    try{document.execCommand('insertText',false,token);}
+    catch(e){ /* fallback: append at end */ el.appendChild(document.createTextNode(token)); }
+  }
+}
+
+/* ===== Composer rich-text toolbar handlers =====
+   execCommand-based formatting. Yes, it's deprecated — but it still works in every current browser
+   and the alternative (Slate/ProseMirror/Quill) is a 100KB dependency for what amounts to bold,
+   italic, lists, and links. Mirrors the pattern used in the leads-dashboard composer. */
+function _emailFmt(cmd){
+  const bodyEl=document.getElementById('e-body');
+  if(!bodyEl)return;
+  bodyEl.focus();
+  try{document.execCommand(cmd,false,null);}catch(e){}
+}
+function _emailInsertLink(){
+  const sel=window.getSelection();
+  const hasSel=sel&&sel.toString().length>0;
+  let url=prompt('Enter URL (include https://):','https://');
+  if(!url)return;
+  if(!/^https?:\/\//i.test(url))url='https://'+url;
+  const bodyEl=document.getElementById('e-body');
+  bodyEl.focus();
+  try{
+    if(hasSel){
+      document.execCommand('createLink',false,url);
+    }else{
+      document.execCommand('insertHTML',false,'<a href="'+esc(url)+'">'+esc(url)+'</a>');
+    }
+  }catch(e){}
+}
+function _emailPasteHtml(){
+  const html=prompt('Paste raw HTML to insert at cursor (e.g. from a designer or another email):','');
+  if(!html||!html.trim())return;
+  const bodyEl=document.getElementById('e-body');
+  if(!bodyEl)return;
+  bodyEl.focus();
+  try{document.execCommand('insertHTML',false,html);}catch(e){toast('Paste failed: '+e.message);}
+}
+async function _emailInsertInlineImage(file){
+  if(!file)return;
+  if(file.size>10*1024*1024){toast('Image too large — max 10MB inline');return;}
+  const bodyEl=document.getElementById('e-body');
+  if(!bodyEl)return;
+  bodyEl.focus();
+  try{
+    /* Read as base64 + insert via blob URL for immediate preview. Add to the standard attachment
+       list with the inline flag set so reallySend can swap blob URL → cid: at send time. */
+    const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});
+    const cid='inline-'+Date.now()+'-'+Math.floor(Math.random()*10000);
+    const blobUrl=URL.createObjectURL(file);
+    window._emailAttachments=window._emailAttachments||[];
+    window._emailAttachments.push({
+      name:file.name||'image.png',
+      contentType:file.type||'image/png',
+      contentBase64:b64,
+      size:file.size,
+      isInline:true,
+      contentId:cid
+    });
+    const imgHtml='<img src="'+blobUrl+'" data-cid="'+cid+'" alt="'+esc(file.name||'image')+'" style="max-width:100%;height:auto">';
+    document.execCommand('insertHTML',false,imgHtml);
+    _renderAttachList();
+    toast('✓ Image inserted');
+  }catch(e){toast('Image insert failed: '+e.message);}
 }
 function loadPresetIntoComposer(key,advanceTo){
   /* Replace the current subject + body with the preset template's content. Doesn't clear
-     attachments or other field state — those persist across preset switches. */
+     attachments. Body is now a contenteditable — convert plaintext templates to paragraph HTML
+     so the editor renders them as proper paragraphs/breaks. */
   const t=getEffectiveTemplate(key,W);
   document.getElementById('e-sub').value=t.s;
-  document.getElementById('e-body').value=t.b;
+  const bodyEl=document.getElementById('e-body');
+  if(bodyEl){
+    const raw=String(t.b||'');
+    const html=/<[a-z][\s\S]*?>/i.test(raw)
+      ? raw
+      : raw.split(/\n\n+/).map(p=>'<p>'+esc(p).replace(/\n/g,'<br>')+'</p>').join('');
+    bodyEl.innerHTML=html;
+  }
   /* Update preset button highlight */
   document.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
   const newActive=Array.from(document.querySelectorAll('.preset-btn')).find(b=>b.getAttribute('onclick')&&b.getAttribute('onclick').includes("'"+key+"'"));
@@ -5114,12 +5233,14 @@ function loadPresetIntoComposer(key,advanceTo){
 
 /* Modal preview — shows what the email will look like AFTER all placeholders are substituted. */
 function previewSubstituted(){
+  /* The body is now always HTML (contenteditable). Subject stays text. Run substituteLive on both;
+     the body's HTML stays HTML in preview. */
   const subj=document.getElementById('e-sub').value;
-  const body=document.getElementById('e-body').value;
-  const isHtml=!!(document.getElementById('e-html')&&document.getElementById('e-html').checked);
+  const bodyEl=document.getElementById('e-body');
+  const body=bodyEl?bodyEl.innerHTML:'';
   const previewSubj=substituteLive(subj);
   const previewBody=substituteLive(body);
-  const renderBody=isHtml?previewBody:('<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#111;line-height:1.5">'+esc(previewBody).replace(/\n/g,'<br>')+'</div>');
+  const renderBody='<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#111;line-height:1.5">'+previewBody+'</div>';
   const win=window.open('','preview','width=720,height=720');
   if(!win){toast('Popup blocked — allow popups to preview');return;}
   win.document.write(`<html><head><title>Preview · ${esc(previewSubj)}</title></head><body style="font-family:'Segoe UI',Calibri,sans-serif;background:#f5f5f0;padding:24px"><div style="max-width:640px;margin:0 auto;background:#fff;padding:24px 28px;border-radius:10px;box-shadow:0 4px 24px rgba(0,0,0,.08)"><div style="font-size:11px;color:#999;margin-bottom:6px;text-transform:uppercase">Subject</div><div style="font-weight:700;font-size:16px;margin-bottom:18px;border-bottom:1px solid #eee;padding-bottom:12px">${esc(previewSubj)}</div>${renderBody}</div></body></html>`);
@@ -5152,9 +5273,24 @@ async function reallySend(tpl,advanceTo){
   /* Substitute any placeholders in subject/body BEFORE sending. This makes the placeholder
      buttons work even for free-typed text that includes tokens like {first} or {appLink}. */
   const subj=substituteLive(document.getElementById('e-sub').value);
-  const body=substituteLive(document.getElementById('e-body').value);
-  const isHtml=!!(document.getElementById('e-html')&&document.getElementById('e-html').checked);
-  const atts=(window._emailAttachments||[]).slice();
+  const _bodyEl=document.getElementById('e-body');
+  /* Body is now a contenteditable div — read its innerHTML (always HTML). The HTML-mode toggle is
+     gone; the WYSIWYG editor always emits HTML, with sendMailViaGraph's HTML path. */
+  let body=substituteLive(_bodyEl?_bodyEl.innerHTML:'');
+  const isHtml=true;
+  let atts=(window._emailAttachments||[]).slice();
+  /* Inline image swap: any <img data-cid="X" src="blob:..."> in the body needs its src rewritten to
+     "cid:X" so the recipient's mail client renders the attached image inline instead of trying to
+     fetch the local-only blob URL. The matching attachment is already marked isInline:true with
+     contentId:X by _emailInsertInlineImage; this just rewrites the HTML to reference it. */
+  if(/<img[^>]+data-cid=/i.test(body)){
+    body=body.replace(/<img\b([^>]*?)\sdata-cid=["']([^"']+)["']([^>]*?)>/gi,(match,pre,cid,post)=>{
+      /* Strip the blob src and any other src attrs, replace with cid:CID */
+      const cleanPre=pre.replace(/\ssrc=["'][^"']*["']/gi,'');
+      const cleanPost=post.replace(/\ssrc=["'][^"']*["']/gi,'');
+      return '<img'+cleanPre+' src="cid:'+cid+'"'+cleanPost+'>';
+    });
+  }
   const b=document.getElementById('sendbtn');b.disabled=true;b.innerHTML='<span class="spin"></span> Sending…';
   try{
     await sendMailViaGraph(W.email,subj,body,isHtml,atts);
