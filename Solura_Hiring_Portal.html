@@ -6070,7 +6070,11 @@ function cancelAppEdits(){W._editingApp=false;W._appDraft=null;renderWorkspace()
 
 async function persistAppChanges(changes){
   /* Map top-level fields to sheet columns when they change. Falls back to AJ-only write otherwise. */
-  const COL_MAP={name:'C',email:'F',phone:'E',source:'I',credential:'BL'};
+  /* Column map MUST match cardOf's row[] reads: C=name, D=phone, E=email, F=source.
+     Previously this had email/phone swapped and source pointed at column I — every profile
+     edit wrote fields into the wrong cells, eventually wiping a candidate's email so
+     orderYardstikCheck couldn't address the Yardstik intake to them. */
+  const COL_MAP={name:'C',phone:'D',email:'E',source:'F',credential:'BL'};
   const row=W.row;
   for(const ch of changes){
     if(!ch.field.startsWith('st.')){
@@ -6574,6 +6578,13 @@ function yardstikBlock(){
 }
 
 async function orderYardstikCheck(){
+  /* Yardstik addresses the SSN/DOB intake form to the candidate's email. Without a valid email
+     the order is meaningless — surface that BEFORE the confirm dialog so the user knows what to
+     fix instead of seeing "...will email them at " with a blank gap and proceeding anyway. */
+  if(!W.email||!W.email.trim()){
+    toast('Can\'t order — no email on file for '+(W.name||'this candidate')+'. Edit the candidate to add one.');
+    return;
+  }
   if(!confirm('Order a Yardstik background check for '+W.name+'?\n\nYardstik will email them at '+W.email+' with a secure intake form. You can monitor status here.'))return;
   const tok=(SETTINGS.config||{}).ziToken||'';
   if(!tok){toast('Set internal worker token first in Settings → 🔍 ZoomInfo integration (token is shared across all integrations)');return;}
@@ -6628,6 +6639,10 @@ async function orderYardstikCheck(){
    ordered candidates, so the Tier-1 UI behaves identically. */
 async function orderYardstikVerification(){
   if(!W){toast('No candidate open');return;}
+  if(!W.email||!W.email.trim()){
+    toast('Can\'t order verification — no email on file for '+(W.name||'this candidate')+'. Edit the candidate to add one.');
+    return;
+  }
   const cfg=SETTINGS.config||{};
   const accountId=cfg.yardstikAccountId, verifyPackageId=cfg.yardstikVerifyPackageId;
   if(!accountId||!verifyPackageId){toast('Set a verification package first in Settings → Yardstik');return;}
