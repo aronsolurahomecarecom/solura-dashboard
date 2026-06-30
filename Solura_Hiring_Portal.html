@@ -4656,7 +4656,10 @@ function buildReferencesLink(c){
   const refCode=c.st&&c.st.refCode;
   if(refCode)params.push('ref='+encodeURIComponent(refCode));
   if(c.email)params.push('email='+encodeURIComponent(c.email));
-  if(!params.length)return '';  /* candidate has neither — link would be unusable */
+  /* If neither refCode nor email is available, return a CLEARLY-broken sentinel rather than '' —
+     this surfaces the bug in the composer preview / inbox display instead of shipping a blank gap
+     to the candidate (which is what the user was hitting with old imports that had no refCode). */
+  if(!params.length)return '[MISSING REFERENCE LINK — candidate has no refCode or email on file]';
   return 'https://apply.solurahomecare.com/Solura_References_Form.html?'+params.join('&');
 }
 
@@ -4680,8 +4683,13 @@ const TEMPLATES={
  missed_onboarding:c=>{const url=(SETTINGS.config&&SETTINGS.config.calOnboardingUrl)||BOOK_LINK;return {s:'Rescheduling onboarding — Solura Home Care',b:`Hi ${first(c)},\n\nYou missed the orientation session today. Please rebook here:\n${url}\n\nThis is the final step before starting. If you're no longer interested, reply and let us know.\n\nSolura Home Care`};},
  screen_invite:c=>{const url=(SETTINGS.config&&SETTINGS.config.calScreenUrl)||BOOK_LINK;return {s:'Next step with Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying. Let's set up a quick 15-minute call — pick a time here:\n${url}\n\nSolura Home Care Hiring`};},
  screen_nudge:c=>({s:'Still interested? — Solura Home Care',b:`Hi ${first(c)},\n\nJust following up — pick a 15-minute slot whenever it's convenient:\n${BOOK_LINK}\n\nSolura Home Care`}),
- ask_references:c=>{const refLink=buildReferencesLink(c);
-   return {s:'Quick form — your references — Solura Home Care',b:`Hi ${first(c)},\n\nGreat speaking with you. To move forward, please share 2–3 professional references using this short form:\n\n${refLink}\n\nIt takes about 90 seconds. You'll need their name, phone, and how you know them. We do the actual calling.\n\nThanks!\nSolura Home Care`};},
+ ask_references:c=>{
+   /* The link is intentionally written as the {refLink} placeholder rather than interpolated at
+      template-function-call time. Why: when the user edits this template in Settings, the editor
+      displays defaultTplFor's output — and if we interpolated here, the edited body would store
+      a hard-coded URL for whatever candidate happened to be open when the editor first showed.
+      By using {refLink}, the substitution always runs at send time against the REAL candidate. */
+   return {s:'Quick form — your references — Solura Home Care',b:`Hi ${first(c)},\n\nGreat speaking with you. To move forward, please share 2–3 professional references using this short form:\n\n{refLink}\n\nIt takes about 90 seconds. You'll need their name, phone, and how you know them. We do the actual calling.\n\nThanks!\nSolura Home Care`};},
  interview_invite:c=>{
    const url=(SETTINGS.config&&SETTINGS.config.calInterviewUrl)||BOOK_LINK;
    const yardstikEnabled=SETTINGS.config&&SETTINGS.config.yardstikEnabled&&SETTINGS.config.yardstikAccountId&&SETTINGS.config.yardstikPackageId;
@@ -6575,7 +6583,14 @@ function vrAction(c,info){
   if(t1.state==='empty')return{bucket:'action',timing:_dn('Add past employers to verify','pnew'),info,primary:{kind:'verify',label:'Open verify hub',cls:'sky'}};
   if(t1.state==='contradicted')return{bucket:'action',timing:_dn('⚠ Employment contradicted — fabrication','pr2'),info,primary:{kind:'verify',label:'⚠ Review contradiction',cls:'red'}};
   if(t1.state==='running'){
-    if(cfg.t1Source==='yardstik')return{bucket:'checks',timing:_dn('Verifying employment (Yardstik) '+t1.resolved+'/'+t1.total,'psoft'),info,primary:{kind:'lock',label:'🔒 Awaiting verification',cls:'lock'}};
+    /* Decide bucket per-candidate, not per-global-setting. If ALL unresolved employers are out at
+       Yardstik (ySrc='yardstik', yStatus='ordered'|'running'), the user has nothing manual to do
+       and the right surface is the 'checks' bucket with a lock — same as a BG check in flight.
+       Otherwise (manual verification, or mixed manual+yardstik) we surface 'Continue verification'. */
+    const emp=c.st.employers||[];
+    const unresolved=emp.filter(e=>e&&(e.name||'').trim()&&!e.v);
+    const allOutAtYardstik=unresolved.length>0&&unresolved.every(e=>e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running'));
+    if(cfg.t1Source==='yardstik'||allOutAtYardstik)return{bucket:'checks',timing:_dn('Verifying employment (Yardstik) '+t1.resolved+'/'+t1.total,'psoft'),info,primary:{kind:'lock',label:'🔒 Awaiting verification',cls:'lock'}};
     return{bucket:'action',timing:_dn('Verify employers '+t1.resolved+'/'+t1.total,'pnew'),info,primary:{kind:'verify',label:'Continue verification',cls:'sky'}};
   }
   if(t1.state==='disqualify')return{bucket:'action',timing:_dn(t1.pct+'% unable to verify — disqualify','pr2'),info,primary:{kind:'verify',label:'Review — verification failed',cls:'red'}};
@@ -7843,8 +7858,15 @@ function _renderAttachmentRow(a,i,messageId,cand,awaiting){
         <option value="">— or assign as… —</option>
         ${ASSIGNMENT_KINDS.map(k=>`<option value="${k.key}">${k.icon} ${esc(k.label)}</option>`).join('')}
       </select>
-      <input id="${certNameId}" type="text" placeholder="Cert name (e.g. CPR, STNA)" style="display:none;padding:5px 9px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px;width:160px">
+      <select id="${certNameId}" style="display:none;padding:5px 9px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px;background:#fff;min-width:180px" onchange="_onCertNameChange(${i},this.value)">
+        <option value="">— Pick cert from application —</option>
+        ${(cand&&cand.st&&Array.isArray(cand.st.certs)?cand.st.certs.filter(x=>x&&x.trim()):[]).map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+        ${(cand&&cand.st&&Array.isArray(cand.st.certs)&&cand.st.certs.length)?'<option value="" disabled>──────────</option>':''}
+        <option value="__OTHER__">+ Other (type in)…</option>
+      </select>
+      <input id="att-certname-other-${i}" type="text" placeholder="Cert name (e.g. CPR, STNA)" style="display:none;padding:5px 9px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px;width:160px">
       <input id="${customNameId}" type="text" placeholder="Custom file name" style="display:none;padding:5px 9px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px;width:160px">
+      <span id="att-cert-hint-${i}" style="display:none;font-size:10.5px;color:var(--gold-deep);font-style:italic">✓ Adds to Cert Center</span>
       <button id="att-go-${i}" style="display:none;padding:5px 12px;border:none;background:var(--grn);color:#fff;border-radius:5px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer" onclick="_assignAttachmentCustom('${esc(messageId)}',${i},${cand?cand.excelRow:'null'})">Assign &amp; save</button>
       <button onclick="saveAttachment('${esc(messageId)}',${i})" id="att-btn-${i}" style="padding:5px 11px;border:1.5px solid var(--border);background:#fff;color:var(--soft);border-radius:5px;font-family:inherit;font-size:11px;cursor:pointer" title="Save with original filename, don't assign to a doc slot">Just save</button>
     </div>
@@ -7852,11 +7874,35 @@ function _renderAttachmentRow(a,i,messageId,cand,awaiting){
 }
 function _onAssignKindChange(i,kind){
   const certIn=document.getElementById('att-certname-'+i);
+  const certOther=document.getElementById('att-certname-other-'+i);
+  const certHint=document.getElementById('att-cert-hint-'+i);
   const customIn=document.getElementById('att-custom-'+i);
   const go=document.getElementById('att-go-'+i);
-  certIn.style.display=(kind==='cert')?'inline-block':'none';
+  /* Cert: show the dropdown, reset its value, hide the "other" free-text until user picks it. */
+  if(kind==='cert'){
+    certIn.style.display='inline-block';
+    certIn.value='';
+    if(certOther){certOther.style.display='none';certOther.value='';}
+    if(certHint)certHint.style.display='inline';
+  }else{
+    certIn.style.display='none';
+    if(certOther)certOther.style.display='none';
+    if(certHint)certHint.style.display='none';
+  }
   customIn.style.display=(kind==='other')?'inline-block':'none';
   go.style.display=kind?'inline-block':'none';
+}
+/* When the user picks "Other..." from the cert dropdown, reveal a free-text input. Picking anything
+   else hides it (and uses the dropdown value as the cert name). */
+function _onCertNameChange(i,value){
+  const certOther=document.getElementById('att-certname-other-'+i);
+  if(!certOther)return;
+  if(value==='__OTHER__'){
+    certOther.style.display='inline-block';
+    certOther.focus();
+  }else{
+    certOther.style.display='none';
+  }
 }
 
 /* Assign attachment to whatever's at the top of the awaiting queue */
@@ -7875,8 +7921,19 @@ async function _assignAttachmentCustom(messageId,attIdx,row){
   if(!kind){toast('Pick what to assign it as');return;}
   let name='';
   if(kind==='cert'){
-    name=document.getElementById('att-certname-'+attIdx).value.trim();
-    if(!name){toast('Enter the cert name');return;}
+    /* Read from the cert dropdown. If user picked "Other...", read from the free-text input. */
+    const certSel=document.getElementById('att-certname-'+attIdx);
+    const certOther=document.getElementById('att-certname-other-'+attIdx);
+    const picked=certSel?certSel.value:'';
+    if(picked==='__OTHER__'){
+      name=certOther?certOther.value.trim():'';
+      if(!name){toast('Type the cert name');return;}
+    }else if(picked){
+      name=picked;
+    }else{
+      toast('Pick a cert from the dropdown (or "Other" to type your own)');
+      return;
+    }
   }else if(kind==='other'){
     name=document.getElementById('att-custom-'+attIdx).value.trim();
     if(!name){toast('Enter a file name');return;}
