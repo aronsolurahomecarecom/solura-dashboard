@@ -7661,6 +7661,48 @@ async function diagnoseInboxPoll(){
   }
 }
 
+/* ───── Stale-write race protector ─────
+   The poll only mutates a few fields (emails[], hasResume, awaitingItems/manualAwaiting/awaitingReason,
+   log[]). Meanwhile the Cloudflare worker writes directly to AJ from Cal.com + Yardstik webhooks
+   (interview bookings, BG-check status). If we write back a stale snapshot we clobber those server
+   writes — exact symptom: "interview time lost, BG check shows not started, jumped back to resume
+   received." Fix: re-read the row's AJ right before writing, then overlay only the fields the poll
+   touched. Server-owned fields (booking, yardstik, tpCheck, …) survive untouched. */
+async function _pollMergeFreshAJ(excelRow, mutated){
+  try{
+    const sid=await getWorkbookSession();const h=sid?{'workbook-session-id':sid}:{};
+    const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+"/range(address='AJ"+excelRow+"')?$select=values",{headers:h});
+    if(!r.ok)return mutated;
+    const vals=(await r.json()).values||[[]];
+    const raw=vals[0]&&vals[0][0];
+    if(!raw)return mutated;
+    let fresh;
+    try{fresh=JSON.parse(raw);}catch(e){return mutated;}
+    if(!fresh||typeof fresh!=='object')return mutated;
+    /* Overlay the small set of fields the poll is allowed to change. Everything else (st.booking,
+       st.yardstik, st.tpCheck, st.credentials, st.refs, st.employers, …) comes from fresh. */
+    const merged=Object.assign({},fresh);
+    if(Array.isArray(mutated.emails))merged.emails=mutated.emails;
+    if(mutated.hasResume===true)merged.hasResume=true;
+    if(Array.isArray(mutated.log))merged.log=mutated.log;
+    /* Awaiting fields: only carry over the *deletions* the poll did (e.g. resume detected →
+       cleared manualAwaiting). If mutated has them missing and fresh has them present, honor the
+       deletion intent. If mutated has them present, take fresh's (poll didn't touch them). */
+    ['manualAwaiting','awaitingReason','awaitingUntil','awaitingSince','awaitingItemsInitialCount','lastAwaitingReview'].forEach(k=>{
+      if(mutated[k]===undefined&&fresh[k]!==undefined&&mutated.hasResume===true&&fresh.hasResume!==true){
+        /* The poll specifically deletes these when it auto-detects a resume arrival. Preserve that
+           deletion intent (drop the field) instead of restoring fresh's value. */
+        delete merged[k];
+      }
+    });
+    if(Array.isArray(mutated.awaitingItems))merged.awaitingItems=mutated.awaitingItems;
+    return merged;
+  }catch(e){
+    console.warn('pollMergeFreshAJ row',excelRow,'failed:',e.message);
+    return mutated; /* fall back to the original behavior — better than crashing the poll */
+  }
+}
+
 async function pollInboxForCandidateEmails(){
   if(!pipeline.length)return;
   /* index candidates by lowercased email for O(1) match */
@@ -7748,20 +7790,23 @@ async function pollInboxForCandidateEmails(){
       }
     }
 
-    /* batch write only changed candidates — SANITIZE before write so a bloated state on any one
-       candidate can't take down the whole poll cycle */
+    /* batch write only changed candidates — SANITIZE before write, then MERGE with a fresh AJ read
+       to avoid clobbering server-side writes (Cal.com/Yardstik webhooks). See _pollMergeFreshAJ. */
     let inboundCount=0;
     let writeFailCount=0;
     for(const [row,c] of changedRows){
       try{
         const sanitized=sanitizeState(c.st);
-        const json=JSON.stringify(sanitized);
+        /* Race protector: re-read AJ now, overlay only the fields the poll touched. */
+        const merged=await _pollMergeFreshAJ(row, sanitized);
+        const json=JSON.stringify(merged);
         if(json.length<=32000){
           await patchRange('AJ'+row,[[json]]);
-          c.st=sanitized;
+          /* Adopt the merged state in memory so the next poll sees fresh server fields too. */
+          c.st=merged;
         }else{
           writeFailCount++;
-          console.warn('Poll: skipped row',row,'— state too large after sanitize:',json.length);
+          console.warn('Poll: skipped row',row,'— state too large after merge:',json.length);
         }
       }catch(e){writeFailCount++;console.warn('Poll write row',row,'failed:',e.message);}
       if((c.st.emails||[]).some(e=>e.direction==='in'&&!e.seen))inboundCount++;
