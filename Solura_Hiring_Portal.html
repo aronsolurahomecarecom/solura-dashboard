@@ -1297,6 +1297,37 @@ select.app-edit-input{cursor:pointer;}
 .floating-doc-btn:hover{transform:translateY(-1px) scale(1.02);box-shadow:0 6px 16px rgba(0,0,0,.24);filter:brightness(1.05);}
 .floating-doc-btn:active{transform:translateY(0) scale(.98);}
 
+/* ===== #5 animations — workspace card stagger entrance + toast slide-in + action transitions =====
+   Pure CSS. Respects the prefers-reduced-motion block defined earlier (motion collapses to instant
+   for users who opt out). Carefully scoped: only entrance animations, never per-render flashes. */
+@keyframes cardSlipIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.wsgrid > div > .wscard{animation:cardSlipIn .42s cubic-bezier(.22,.61,.36,1) both;}
+.wsgrid > div > .wscard:nth-child(1){animation-delay:.02s}
+.wsgrid > div > .wscard:nth-child(2){animation-delay:.08s}
+.wsgrid > div > .wscard:nth-child(3){animation-delay:.14s}
+.wsgrid > div > .wscard:nth-child(4){animation-delay:.20s}
+.wsgrid > div > .wscard:nth-child(5){animation-delay:.26s}
+.wsgrid > div > .wscard:nth-child(6){animation-delay:.32s}
+.wsgrid > div > .wscard:nth-child(7){animation-delay:.38s}
+.wsgrid > div > .wscard:nth-child(n+8){animation-delay:.44s}
+/* The This-step panel above the grid gets its own gentler entrance so it feels like the page lead. */
+.ws-this{animation:cardSlipIn .35s cubic-bezier(.22,.61,.36,1) both;}
+
+/* Toast: instead of just popping in, slide up from the bottom-edge with a slight overshoot. */
+@keyframes toastSlideIn{0%{opacity:0;transform:translateY(20px) scale(.96)}60%{opacity:1;transform:translateY(-3px) scale(1.01)}100%{opacity:1;transform:none}}
+#toast.show{animation:toastSlideIn .32s cubic-bezier(.18,.89,.32,1.28) both;}
+
+/* Action primary button — when the primary action card's state changes (e.g. BG check clears, the
+   button text + cls change), give it a soft pulse so the user notices without it being noisy.
+   Only fires on a *changed* button via the .ws-pri-pulse class which JS adds when state changes. */
+@keyframes priPulse{0%{box-shadow:0 0 0 0 rgba(112,165,77,.5)}70%{box-shadow:0 0 0 8px rgba(112,165,77,0)}100%{box-shadow:0 0 0 0 rgba(112,165,77,0)}}
+.ws-pri-pulse{animation:priPulse 1.3s ease-out 1;}
+
+/* Pipeline row entrance — when filtering or sorting changes the visible cards, fade them in
+   instead of an abrupt snap. Subtle; ≤180ms so it doesn't slow perceived interaction. */
+@keyframes pipeRowFade{from{opacity:0}to{opacity:1}}
+.pcard,.prow{animation:pipeRowFade .18s ease-out both;}
+
 /* ===== #1 motion polish — tasteful, not blanket. Respect reduced-motion; give the newest
    components (nudge stepper, email "mark received" panel) the same entrance language as the
    rest of the app instead of popping in. No animation added to bulk re-renders. ===== */
@@ -4771,40 +4802,61 @@ function emailModal(tpl,subj,body,advanceTo){
   /* Placeholder insertion row — clicking inserts the token at the cursor in the focused field. */
   const phRow=COMPOSER_PLACEHOLDERS.map(([l,v])=>`<button class="ph-btn" onclick="_insertPlaceholder('${v}')" title="Inserts ${v}">${esc(l)}</button>`).join('');
 
-  document.getElementById('m-body').innerHTML=`<div style="font-size:12px;color:var(--soft);margin-bottom:10px">To: ${esc(W.email||'(no email on file)')}</div>
+  /* Field-section style: SectionLabel above, generous breathing room. Mirrors the lead-dashboard
+     composer screenshot — clean label / readable input / no side-by-side controls competing for
+     space. Functional surface (presets, placeholders) collapses behind a single "+ Insert template
+     or placeholder" toggle so by default the writer's eye lands on the message field. */
+  const _hasEmail = !!(W.email && W.email.trim());
+  const _toDisplay = _hasEmail ? (W.name ? esc(W.name)+' &lt;'+esc(W.email)+'&gt;' : esc(W.email)) : '<span style="color:var(--red)">(no email on file — add one before sending)</span>';
 
-    <div style="background:var(--cream);border:1px solid var(--border);border-radius:7px;padding:8px;margin-bottom:12px">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:6px;letter-spacing:.05em">Quick load preset</div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px">${presetRow}</div>
-    </div>
+  document.getElementById('m-body').innerHTML=`
+    <div style="display:flex;flex-direction:column;gap:14px">
 
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Subject</div>
-    <input id="e-sub" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none;margin-bottom:12px" value="${esc(subj)}">
+      <div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--soft);margin-bottom:5px">To</div>
+        <div style="padding:9px 12px;background:#F0EBE0;border:1.5px solid transparent;border-radius:8px;font-size:13px;color:var(--ink)">${_toDisplay}</div>
+      </div>
 
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft)">Message</div>
-      <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--soft);cursor:pointer">
-        <input type="checkbox" id="e-html" style="width:14px;height:14px;cursor:pointer;accent-color:var(--sky-deep);margin:0"><span>HTML mode</span>
-      </label>
-    </div>
-    <textarea id="e-body" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;min-height:200px;resize:vertical;outline:none">${esc(body)}</textarea>
+      <div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--soft);margin-bottom:5px">Subject</div>
+        <input id="e-sub" style="width:100%;padding:9px 12px;background:#fff;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;transition:border-color .15s" value="${esc(subj)}" onfocus="this.style.borderColor='var(--sky-deep)'" onblur="this.style.borderColor='var(--border)'">
+      </div>
 
-    <div style="margin-top:10px;background:#F7F2E5;border:1px solid var(--gold-mid);border-radius:7px;padding:8px">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#8B6500;margin-bottom:6px;letter-spacing:.05em">📌 Insert placeholder at cursor</div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px">${phRow}</div>
-    </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:5px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--soft)">Message</div>
+          <label style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--soft);cursor:pointer;text-transform:uppercase;letter-spacing:.05em;font-weight:600">
+            <input type="checkbox" id="e-html" style="width:12px;height:12px;cursor:pointer;accent-color:var(--sky-deep);margin:0"><span>HTML</span>
+          </label>
+        </div>
+        <textarea id="e-body" style="width:100%;padding:12px 14px;background:#fff;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;min-height:220px;resize:vertical;outline:none;line-height:1.55;transition:border-color .15s" onfocus="this.style.borderColor='var(--sky-deep)'" onblur="this.style.borderColor='var(--border)'">${esc(body)}</textarea>
+      </div>
 
-    <div style="margin-top:10px">
-      <label for="e-attach-input" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:var(--cream);border:1.5px solid var(--border);border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;color:var(--mid)">📎 Add attachment</label>
-      <input type="file" id="e-attach-input" multiple style="display:none" onchange="_attachFiles(this.files)">
-      <span style="font-size:11px;color:var(--soft);margin-left:8px">Up to 150MB total · PDFs, images, docs</span>
-      <div id="e-attach-list" style="margin-top:8px"></div>
-    </div>
-    ${showParkOpt?`<label style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:9px 12px;background:#FAF6EE;border:1px solid var(--gold-mid);border-radius:8px;cursor:pointer;font-size:13px;color:var(--mid)"><input type="checkbox" id="e-park" style="cursor:pointer;width:16px;height:16px;accent-color:#8B6500;margin:0"><span>⏸ <b>Park in awaiting</b> after sending — pause this candidate until they respond or you resume them manually</span></label>`:''}
-    <div class="brow" style="margin-top:14px;gap:8px">
-      <button class="btn-primary bg-grn" id="sendbtn" onclick="reallySend('${tpl}','${advanceTo||''}')">✉ Send via Outlook</button>
-      <button class="btn-sec" style="flex:0 0 auto;background:#FAF6EE;color:#8B6500;border:1.5px solid var(--gold-mid)" onclick="previewSubstituted()">👁 Preview substituted</button>
-      <button class="btn-sec bg-cream" style="flex:0 0 auto" onclick="closeModal()">Cancel</button>
+      <details style="background:var(--cream);border:1px solid var(--border);border-radius:8px;padding:0;overflow:hidden">
+        <summary style="cursor:pointer;padding:9px 13px;font-size:11.5px;font-weight:600;color:var(--mid);user-select:none;list-style:none;display:flex;align-items:center;gap:8px"><span style="font-size:13px">+</span><span>Insert template or placeholder</span></summary>
+        <div style="padding:0 13px 13px">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--soft);margin:6px 0 5px;letter-spacing:.06em">Load preset</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">${presetRow}</div>
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#8B6500;margin:14px 0 5px;letter-spacing:.06em">📌 Insert placeholder at cursor</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">${phRow}</div>
+        </div>
+      </details>
+
+      <div>
+        <label for="e-attach-input" style="display:inline-flex;align-items:center;gap:6px;padding:7px 13px;background:transparent;border:1.5px dashed var(--gold-mid);border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;color:var(--gold-deep);transition:background .15s" onmouseover="this.style.background='#FFFAEB'" onmouseout="this.style.background='transparent'">📎 Attach file</label>
+        <input type="file" id="e-attach-input" multiple style="display:none" onchange="_attachFiles(this.files)">
+        <span style="font-size:11px;color:var(--soft);margin-left:10px">Up to 150MB · PDFs, images, docs</span>
+        <div id="e-attach-list" style="margin-top:8px"></div>
+      </div>
+
+      ${showParkOpt?`<label style="display:flex;align-items:center;gap:8px;padding:10px 13px;background:#FAF6EE;border:1px solid var(--gold-mid);border-radius:8px;cursor:pointer;font-size:12.5px;color:var(--mid)"><input type="checkbox" id="e-park" style="cursor:pointer;width:15px;height:15px;accent-color:#8B6500;margin:0"><span>⏸ <b>Park in awaiting</b> after sending</span></label>`:''}
+
+      <div style="display:flex;align-items:center;gap:10px;padding-top:6px;border-top:1px solid var(--border-soft)">
+        <button class="btn-primary bg-gold" id="sendbtn" onclick="reallySend('${tpl}','${advanceTo||''}')" style="padding:11px 22px;font-size:13px">✉ Send via Outlook</button>
+        <button class="btn-sec bg-cream" style="padding:11px 18px" onclick="previewSubstituted()" title="Preview with all placeholders substituted">👁 Preview</button>
+        <div style="flex:1"></div>
+        <button class="btn-sec" style="background:transparent;border:1.5px solid var(--border);color:var(--mid);padding:11px 18px" onclick="closeModal()">Cancel</button>
+      </div>
     </div>`;
   document.getElementById('modal').classList.add('open');
   _trackLastFocused();
