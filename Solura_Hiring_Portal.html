@@ -6280,8 +6280,15 @@ function vrTier1View(emp,cfg){
   else if(t1.state==='pass')gate=`<div style="background:#EBF5EA;border-left:3px solid var(--grn);padding:9px 12px;border-radius:6px;margin:10px 0;font-size:12.5px;color:#3D7A34;font-weight:600">✓ Facts not contradicted. Ready for independent supervisor references.</div>`;
   const canAdvance=(t1.state==='pass'||t1.state==='manual');
   const advBtn=canAdvance?`<button class="btn-primary bg-grn" onclick="vrT1Advance()">Continue → independent references →</button>`:`<button class="btn-primary bg-cream" disabled style="opacity:.55">Resolve every employer to continue</button>`;
+  /* Retroactive Yardstik trigger — only meaningful when a verification package is configured AND
+     there are unresolved employers. The button stays hidden otherwise so the row doesn't get noisy
+     for the manual-only path. */
+  const _vcfg=SETTINGS.config||{};
+  const _hasVerify=!!(_vcfg.yardstikAccountId&&_vcfg.yardstikVerifyPackageId);
+  const _unresolved=emp.filter(e=>e&&(e.name||'').trim()&&!e.v&&!(e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running'))).length;
+  const _verifyBtn=(_hasVerify&&_unresolved)?`<button class="btn-sec" style="margin-top:6px;width:auto;padding:7px 13px;background:linear-gradient(135deg,#FFFCF5,#FAF6EE);border:1.5px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer;font-weight:600" onclick="orderYardstikVerification()" title="Have Yardstik verify the ${_unresolved} unresolved employer${_unresolved===1?'':'s'} via the configured verification package">🛡 Verify ${_unresolved} via Yardstik</button>`:'';
   return `${srcNote}${rows}
-    <button class="btn-sec bg-cream" style="margin-top:6px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:'',source:'manual'});renderWorkspace()">+ add employer</button>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-sec bg-cream" style="margin-top:6px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:'',source:'manual'});renderWorkspace()">+ add employer</button>${_verifyBtn}</div>
     ${gate}
     <div class="brow" style="margin-top:12px">${advBtn}</div>`;
 }
@@ -6609,6 +6616,56 @@ async function orderYardstikCheck(){
     logW(verifyPackageId&&employers.length?'🛡 BG check + employment verification ordered':'🛡 Yardstik check ordered · candidate '+data.candidateId.slice(0,8)+'…');
     await saveW(true);
     toast('✓ Yardstik check ordered — '+esc(W.email)+' will get the intake email shortly');
+    renderWorkspace();
+  }catch(e){toast('✗ Order failed: '+e.message);}
+}
+
+/* Retroactive trigger — used by candidates ALREADY in the Verify-employers stage who didn't have
+   the verification package configured when their BG check was first ordered (or where verification
+   wasn't bundled). Places a verify-only order for employers still unresolved (no e.v set). The
+   worker side reads `verifyOnly:true` + `employers[]` and places ONLY the verification package
+   (no BG-check re-order). Mirrors the in-flight marking that orderYardstikCheck does for newly
+   ordered candidates, so the Tier-1 UI behaves identically. */
+async function orderYardstikVerification(){
+  if(!W){toast('No candidate open');return;}
+  const cfg=SETTINGS.config||{};
+  const accountId=cfg.yardstikAccountId, verifyPackageId=cfg.yardstikVerifyPackageId;
+  if(!accountId||!verifyPackageId){toast('Set a verification package first in Settings → Yardstik');return;}
+  const tok=cfg.ziToken||'';
+  if(!tok){toast('Set internal worker token first in Settings → 🔍 ZoomInfo integration');return;}
+  /* Targets: employers without a verdict AND not already Yardstik-in-flight. Manual-cleared
+     rows are left alone — user already did the work, don't re-order on top of that. */
+  const targets=(W.st.employers||[]).filter(e=>e&&(e.name||'').trim()&&!e.v&&!(e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running')));
+  if(!targets.length){toast('No unresolved employers to verify');return;}
+  if(!confirm('Order Yardstik employment verification for '+targets.length+' employer'+(targets.length===1?'':'s')+'?\n\nYardstik will contact each and report back per-employer; results auto-populate the verdicts below.'))return;
+  toast('🛡 Ordering employment verification…');
+  try{
+    const r=await fetch(ZI_WORKER_URL+'/yardstik/order',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-Solura-Token':tok},
+      body:JSON.stringify({
+        candidateEmail:W.email,
+        candidateName:W.name,
+        candidatePhone:W.phone||'',
+        excelRow:W.row,
+        accountId:accountId,
+        verifyPackageId:verifyPackageId,
+        verifyOnly:true,
+        employers:targets.map(e=>({name:(e.name||'').trim(),startYear:e.startYear||'',endYear:e.endYear||'',current:!!e.current,title:e.title||''}))
+      })
+    });
+    const data=await r.json();
+    if(!r.ok){toast('✗ Order failed: '+(data.error||r.status));return;}
+    /* Mark each ordered employer as Yardstik-in-flight. Persist verify state alongside any
+       existing W.st.yardstik (BG-check state untouched). */
+    W.st.yardstik=W.st.yardstik||{};
+    W.st.yardstik.verifyReportId=data.verifyReportId||W.st.yardstik.verifyReportId||null;
+    W.st.yardstik.verifyPackageId=verifyPackageId;
+    W.st.yardstik.verifyOrderedAt=new Date().toISOString();
+    targets.forEach(t=>{const emp=W.st.employers.find(e=>e===t);if(emp){emp.ySrc='yardstik';emp.yStatus='ordered';}});
+    logW('🔍 Employment verification ordered · '+targets.length+' employer'+(targets.length===1?'':'s'));
+    await saveW(true);
+    toast('✓ Verification ordered for '+targets.length+' employer'+(targets.length===1?'':'s'));
     renderWorkspace();
   }catch(e){toast('✗ Order failed: '+e.message);}
 }
