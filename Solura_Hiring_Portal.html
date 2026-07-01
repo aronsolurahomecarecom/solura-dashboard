@@ -1710,6 +1710,7 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
     <div class="email-modal-attach" id="em-attach" style="display:none"><h4>Attachments</h4><div id="em-attach-list"></div></div>
     <div class="email-modal-foot">
       <button class="btn-primary bg-sky-l" id="em-reply" onclick="replyToCurrentEmail()" style="padding:8px 16px;background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer">↩ Reply</button>
+      <button class="btn-sec bg-cream" id="em-open-candidate" onclick="openCandidateFromCurrentEmail()" style="padding:8px 14px;cursor:pointer" title="Open this candidate's workspace">👤 Open candidate</button>
       <button class="btn-sec bg-cream" onclick="markCurrentEmailUnread()" style="padding:8px 14px;cursor:pointer" title="Mark as unread in Outlook">✉ Mark unread</button>
       <button id="em-outlook-btn" class="btn-sec bg-cream" style="padding:8px 14px;cursor:pointer">Open in Outlook ↗</button>
       <button class="btn-sec bg-cream" onclick="closeEmailDetail()" style="padding:8px 18px">Close</button>
@@ -2189,6 +2190,8 @@ async function loadSettings(){
      (e.g., synthetic events from DOM hydration) are silently dropped by markSettingsDirty's
      guard, so we don't accidentally clobber the just-loaded data. */
   _settingsLoadComplete=true;
+  /* Stash the loaded state as the baseline for save-preview diffing (see saveSettings). */
+  window._settingsBaseline=(typeof _deepClone==='function')?_deepClone(SETTINGS):JSON.parse(JSON.stringify(SETTINGS));
 }
 
 /* ===================== AUTO-SAVE INFRASTRUCTURE =====================
@@ -2265,6 +2268,124 @@ function _updateAutosaveStatus(state,detail){
 }
 
 async function saveSettings(){
+  /* #3: Meta-work before persisting.
+     - If save-preview is on: compare against a stashed baseline, show a diff modal, wait for confirm.
+     - Snapshot into undo history so this change can be stepped back.
+     - Then invoke _saveSettingsInternal() which writes to localStorage + worker + AL1. */
+  const prefs=_prefsMeta();
+  if(prefs.savePreview==='diff'&&window._settingsBaseline){
+    const diff=_diffConfig(window._settingsBaseline,SETTINGS);
+    if(diff.length){
+      const ok=await _showSavePreview(diff);
+      if(!ok){
+        toast('Save cancelled');
+        return {cancelled:true};
+      }
+    }
+  }
+  /* Push undo snapshot BEFORE the write so we can step back if we want */
+  _pushUndoSnapshot('save');
+  const result=await _saveSettingsInternal();
+  /* Update the baseline snapshot so the NEXT save shows a diff against this state */
+  window._settingsBaseline=_deepClone(SETTINGS);
+  return result;
+}
+function _prefsMeta(){
+  const p=(SETTINGS&&SETTINGS.config&&SETTINGS.config.uiPrefs)||{};
+  return {
+    helpVisibility: p.helpVisibility||'non-obvious',   /* 'all' | 'non-obvious' | 'hidden' */
+    savePreview:    p.savePreview||'diff',              /* 'diff' | 'toast' | 'silent' */
+    undoHistoryDepth: p.undoHistoryDepth!=null?p.undoHistoryDepth:10  /* # of snapshots to keep */
+  };
+}
+/* Deep-clone a JSON-serializable object without pulling in a library. Used to snapshot SETTINGS. */
+function _deepClone(obj){try{return JSON.parse(JSON.stringify(obj));}catch(e){return obj;}}
+/* Push a snapshot onto the undo history stack. Bounded by depth setting. Stored on the SETTINGS
+   itself so it persists across sessions (each entry carries a timestamp + section label). */
+function _pushUndoSnapshot(reason){
+  SETTINGS._undoHistory=Array.isArray(SETTINGS._undoHistory)?SETTINGS._undoHistory:[];
+  const snap={
+    at:new Date().toISOString(),
+    reason:String(reason||'save'),
+    /* We snapshot only the CONFIGURATION portions, not massSends/templates which can be large */
+    settings:{
+      config:_deepClone(SETTINGS.config||{}),
+      sequence:_deepClone(SETTINGS.sequence||[]),
+      templates:_deepClone(SETTINGS.templates||{}),
+      scripts:_deepClone(SETTINGS.scripts||{}),
+      flow:_deepClone(SETTINGS.flow||{}),
+      scoringWeights:_deepClone(SETTINGS.scoringWeights||{})
+    }
+  };
+  SETTINGS._undoHistory.unshift(snap);
+  const depth=_prefsMeta().undoHistoryDepth;
+  if(SETTINGS._undoHistory.length>depth)SETTINGS._undoHistory=SETTINGS._undoHistory.slice(0,depth);
+}
+/* Compute a shallow-ish diff between two config-shaped objects. Returns a flat list of
+   {path, before, after} entries. Only shows paths that changed. Used by the save-preview modal. */
+function _diffConfig(before,after,prefix){
+  const results=[];
+  const beforeK=Object.keys(before||{});
+  const afterK=Object.keys(after||{});
+  const allKeys=Array.from(new Set(beforeK.concat(afterK)));
+  for(const k of allKeys){
+    const b=before?before[k]:undefined;
+    const a=after?after[k]:undefined;
+    const path=prefix?prefix+'.'+k:k;
+    if(b===a)continue;
+    if(b&&a&&typeof b==='object'&&typeof a==='object'&&!Array.isArray(b)&&!Array.isArray(a)){
+      /* recurse into nested config objects */
+      results.push(..._diffConfig(b,a,path));
+    }else if(JSON.stringify(b)===JSON.stringify(a)){
+      /* deep-equal (handles arrays / primitives that reference-differ but value-equal) */
+      continue;
+    }else{
+      results.push({path,before:b,after:a});
+    }
+  }
+  return results;
+}
+/* Show the save-preview diff modal. If user confirms, resolve(true); on cancel, resolve(false).
+   Called before persisting when uiPrefs.savePreview === 'diff'. */
+function _showSavePreview(diff){
+  return new Promise(resolve=>{
+    if(!diff.length){resolve(true);return;} /* nothing changed, skip modal */
+    const rows=diff.slice(0,40).map(d=>{
+      const b=d.before===undefined?'—':(typeof d.before==='object'?JSON.stringify(d.before).slice(0,80):String(d.before).slice(0,80));
+      const a=d.after===undefined?'—':(typeof d.after==='object'?JSON.stringify(d.after).slice(0,80):String(d.after).slice(0,80));
+      return `<div style="padding:8px 12px;border-top:1px solid var(--border);font-size:12px">
+        <div style="font-family:ui-monospace,SF Mono,Consolas,monospace;color:var(--soft);font-size:10.5px;margin-bottom:3px">${esc(d.path)}</div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <span style="flex:1;background:#FDECEA;padding:4px 8px;border-radius:4px;color:#8B3D1F;text-decoration:line-through">${esc(b)}</span>
+          <span style="color:var(--soft)">\u2192</span>
+          <span style="flex:1;background:#EBF5EA;padding:4px 8px;border-radius:4px;color:#3D7A34">${esc(a)}</span>
+        </div>
+      </div>`;
+    }).join('');
+    const more=diff.length>40?`<div style="padding:8px;text-align:center;font-size:11px;color:var(--soft);font-style:italic">+ ${diff.length-40} more changes</div>`:'';
+    const host=document.createElement('div');
+    host.id='save-preview-modal';
+    host.style.cssText='position:fixed;inset:0;background:rgba(20,18,14,.5);display:flex;align-items:center;justify-content:center;z-index:10001';
+    host.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:640px;width:92%;max-height:80vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.35)">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+        <div style="font-size:18px">\u23F8</div>
+        <div>
+          <div style="font-weight:700;font-size:15px">Review changes before saving</div>
+          <div style="font-size:11.5px;color:var(--soft)">${diff.length} setting${diff.length===1?'':'s'} will change. Confirm to apply.</div>
+        </div>
+      </div>
+      <div style="flex:1;overflow-y:auto">${rows}${more}</div>
+      <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn-sec bg-cream" style="padding:8px 16px" onclick="document.getElementById('save-preview-modal').remove();window._savePreviewResolve&&window._savePreviewResolve(false)">Cancel</button>
+        <button class="btn-primary bg-grn" style="padding:8px 20px" onclick="document.getElementById('save-preview-modal').remove();window._savePreviewResolve&&window._savePreviewResolve(true)">Apply changes</button>
+      </div>
+    </div>`;
+    document.body.appendChild(host);
+    window._savePreviewResolve=resolve;
+  });
+}
+/* Original save logic — wrapped so we can add undo/diff/preview before calling. */
+async function _saveSettingsInternal(){
   const json=JSON.stringify(SETTINGS);
   /* Track exactly where the settings made it so the diagnostic panel can show truth, not hope. */
   const status={
@@ -2446,7 +2567,20 @@ function _scoreRowC(c){const row=c.row,q={rel:n(row[13]),com:n(row[14]),jud:n(ro
     av: ov.av||baseGates.av
   };
   const Q=progressive(q,QW),R=progressive(r,RW);
-  return{Q,R,q,r,g,baseGates,dec:decide(Q,R,q,r,gateState(g),(c.st&&c.st.certs)||[]),gateStatus:gateState(g),missingGates:missingGateLabels(g)};}
+  /* #4: apply reconciliation penalty. If the candidate has been caught in a discrepancy vs
+     employer verification, deduct from the configured dimension. Floor at 0 so scores never go
+     negative. Applied to the final Q/R progressive score so it reflects in decision bands and
+     fast-track eligibility. */
+  const _rcPenalty=(c.st&&c.st.reconcilePenalty)||0;
+  const _rcCfg=(SETTINGS.config&&SETTINGS.config.reconcile)||{};
+  const _rcTarget=_rcCfg.affectsScore||'rel';
+  const Q_dims=['rel','com','jud','doc','ref','cmp','phn'];
+  let Qadj=Q,Radj=R;
+  if(_rcPenalty>0){
+    if(Q_dims.includes(_rcTarget))Qadj=Math.max(0,Q-_rcPenalty);
+    else Radj=Math.max(0,R-_rcPenalty);
+  }
+  return{Q:Qadj,R:Radj,q,r,g,baseGates,dec:decide(Qadj,Radj,q,r,gateState(g),(c.st&&c.st.certs)||[]),gateStatus:gateState(g),missingGates:missingGateLabels(g),reconcilePenalty:_rcPenalty};}
 
 /* ===================== question bank ===================== */
 const QBANK=[
@@ -2551,6 +2685,21 @@ async function loadData(){
        (3) manualAwaiting=true with empty awaitingItems queue (initial count > 0)
      Each heal calls patchRange asynchronously so the load doesn't block on N writes. */
   let healed=0;let dupSwept=0;
+  /* #8 diagnostics — instrument the backfill loop with enough detail that when blast grouping
+     doesn't work, we can see *why* from a single banner. Captures: total sent emails scanned,
+     how many got stamped in this load, how many blast records exist, how many candidates were
+     recipients, and (if nothing matched) sample failure reasons. */
+  const _blastDiag={
+    outsScanned:0,        /* total non-synthetic outbound emails across all candidates */
+    outsWithoutBlast:0,   /* subset that lacked a blastId at load start */
+    outsAlreadyTagged:0,  /* subset that already had a blastId */
+    stampedThisLoad:0,    /* how many the backfill added blastId to */
+    blastsInSettings:(SETTINGS.massSends||[]).length,
+    recipientsAcrossBlasts:0,   /* sum of recipients.length across all blasts */
+    failureReasons:[],    /* first ~5 mismatches with why */
+    matchAttempts:0
+  };
+  (SETTINGS.massSends||[]).forEach(b=>{if(b&&Array.isArray(b.recipients))_blastDiag.recipientsAcrossBlasts+=b.recipients.length;});
   for(const c of pipeline){
     if(!c.st)continue;
     let touched=false;
@@ -2574,6 +2723,31 @@ async function loadData(){
     if(stagePastRefs&&(c.st.awaitingItems||[]).some(a=>a.kind==='reference_form')){
       c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='reference_form');
       touched=true;
+    }
+    /* Case (2d): if stage has advanced past 'Screen invite' (i.e. Screen booked or later), any
+       cert_question awaiting item is stale — the user progressed past the "vetting minimums" gate,
+       so whatever certs were being asked about are no longer blocking. This was the "Lexus Ferguson"
+       bug: user sent missing-certs email, cert_question queued, candidate advanced through screen
+       to Interview without recording an answer — the stale cert_question kept surfacing as if
+       something had just arrived. Drain it. */
+    const stagePastScreen=['Screen booked','Ask references','Verify employers','References','Interview invite','Interview booked','Offer','Onboarding','Onboarding booked','Hired'].includes(c.stage);
+    if(stagePastScreen&&(c.st.awaitingItems||[]).some(a=>a.kind==='cert_question')){
+      c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='cert_question');
+      touched=true;
+    }
+    /* Case (2e): manualAwaiting is set but the candidate has advanced past 'Screen invite'.
+       They can't legitimately still be parked for Applied-stage reasons; the parking is stale
+       from earlier in the pipeline that they've since progressed past. Release. */
+    if(c.st.manualAwaiting&&stagePastScreen&&(!c.st.awaitingItems||c.st.awaitingItems.length===0)){
+      delete c.st.manualAwaiting;
+      delete c.st.awaitingReason;
+      delete c.st.awaitingUntil;
+      delete c.st.awaitingSince;
+      delete c.st.awaitingItemsInitialCount;
+      delete c.st.lastAwaitingReview;
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-healed — advanced past screen invite, released stale parking'});
+      touched=true;
+      healed++;
     }
     /* Case (1b): legacy reference-parking with no awaitingItems tracking — release if reason
        mentions references and refs are now on file. */
@@ -2658,7 +2832,11 @@ async function loadData(){
        subject prefix + 15-min window around blast.sentAt. Idempotent (skips if already tagged). */
     if(Array.isArray(c.st.emails)&&Array.isArray(SETTINGS.massSends)&&SETTINGS.massSends.length){
       let _stamped=0;
-      const outsWithoutBlast=c.st.emails.filter(e=>e&&e.direction==='out'&&!e.blastId&&e.id&&e.id.indexOf('local-')!==0&&e.id.indexOf('mass-')!==0);
+      const allOuts=c.st.emails.filter(e=>e&&e.direction==='out'&&e.id&&e.id.indexOf('local-')!==0&&e.id.indexOf('mass-')!==0);
+      const outsWithoutBlast=allOuts.filter(e=>!e.blastId);
+      _blastDiag.outsScanned+=allOuts.length;
+      _blastDiag.outsWithoutBlast+=outsWithoutBlast.length;
+      _blastDiag.outsAlreadyTagged+=allOuts.length-outsWithoutBlast.length;
       if(outsWithoutBlast.length){
         for(const blast of SETTINGS.massSends){
           if(!blast||!Array.isArray(blast.recipients))continue;
@@ -2669,14 +2847,56 @@ async function loadData(){
           if(!targetSubj)continue;
           for(const em of outsWithoutBlast){
             if(em.blastId)continue; /* already stamped by an earlier blast in the same load */
+            _blastDiag.matchAttempts++;
             const emSubj=(em.subject||'').trim().toLowerCase();
             const emMs=new Date(em.received||0).getTime();
-            /* Match: same subject prefix + within 15 min of blast.sentAt */
-            const subjMatch=emSubj===targetSubj||emSubj.indexOf(targetSubj.slice(0,60))===0||targetSubj.indexOf(emSubj.slice(0,60))===0;
-            if(subjMatch&&Math.abs(emMs-blastMs)<15*60000){
+            /* Match: subject overlap + within 30 min of blast.sentAt. Overlap check is more
+               forgiving than strict prefix — it handles the case where Outlook or the Graph
+               response tweaked whitespace, or the client-recorded substituted subject differs
+               by a character (e.g. autocorrect on a placeholder value). Time window widened to
+               30 min to absorb Graph timestamp lag between client-side send and Sent-Items record. */
+            let subjMatch=false;
+            if(emSubj===targetSubj)subjMatch=true;
+            else if(emSubj&&targetSubj){
+              /* Prefix match either direction (first 20 chars) — catches cases where the template
+                 leads with a stable phrase. */
+              if(emSubj.length>=20&&targetSubj.indexOf(emSubj.slice(0,20))===0)subjMatch=true;
+              else if(targetSubj.length>=20&&emSubj.indexOf(targetSubj.slice(0,20))===0)subjMatch=true;
+              /* Middle overlap: any 30+ chunk from one appearing anywhere in the other. Catches
+                 the common template case "Hi {first}, referral program update" where the {first}
+                 substitution varies but the tail is identical. */
+              else if(emSubj.length>=30&&targetSubj.indexOf(emSubj.slice(0,30))>=0)subjMatch=true;
+              else if(targetSubj.length>=30&&emSubj.indexOf(targetSubj.slice(0,30))>=0)subjMatch=true;
+              /* Tail overlap: check longest common suffix. It counts as a match only when
+                 (a) at least 40 chars overlap AND (b) that overlap is at least 60% of the shorter
+                 subject's length. The percentage guard prevents "screen invite ... Solura Home Care"
+                 and "interview invite ... Solura Home Care" from colliding on their shared brand
+                 tail when neither is dominated by that tail. */
+              else{
+                let commonTail=0;
+                const maxCheck=Math.min(emSubj.length,targetSubj.length);
+                while(commonTail<maxCheck&&emSubj[emSubj.length-1-commonTail]===targetSubj[targetSubj.length-1-commonTail])commonTail++;
+                const minLen=Math.min(emSubj.length,targetSubj.length);
+                if(commonTail>=40&&commonTail/minLen>=0.6)subjMatch=true;
+              }
+            }
+            const timeDelta=Math.abs(emMs-blastMs);
+            if(subjMatch&&timeDelta<30*60000){
               em.blastId=blast.id;
               em.blastSubject=(myRecord.subject||'').slice(0,80);
               _stamped++;
+              _blastDiag.stampedThisLoad++;
+            }else if(_blastDiag.failureReasons.length<8){
+              /* Capture the first few failures with why so we can see what's off. */
+              const reason=!subjMatch?'subject mismatch':'time diff '+Math.round(timeDelta/60000)+'min';
+              _blastDiag.failureReasons.push({
+                cand:c.name||'row '+c.excelRow,
+                blastSubj:targetSubj.slice(0,40),
+                emSubj:emSubj.slice(0,40),
+                blastAt:new Date(blastMs).toISOString().slice(0,16),
+                emAt:new Date(emMs).toISOString().slice(0,16),
+                reason
+              });
             }
           }
         }
@@ -2691,6 +2911,15 @@ async function loadData(){
   }
   if(healed)console.info('Auto-healed '+healed+' stuck awaiting candidate'+(healed===1?'':'s'));
   if(dupSwept)console.info('Swept '+dupSwept+' pre-existing duplicate sent email'+(dupSwept===1?'':'s'));
+  /* #8 diagnostics — stash on window and log summary. renderBlastDiagBanner surfaces it. */
+  window._blastDiag=_blastDiag;
+  if(_blastDiag.blastsInSettings>0){
+    console.info('[#8 blast diag] scanned '+_blastDiag.outsScanned+' sent emails, '+_blastDiag.outsAlreadyTagged+' already tagged, '+_blastDiag.outsWithoutBlast+' untagged; stamped '+_blastDiag.stampedThisLoad+' this load ('+_blastDiag.matchAttempts+' match attempts against '+_blastDiag.blastsInSettings+' blast records / '+_blastDiag.recipientsAcrossBlasts+' recipient records).');
+    if(_blastDiag.failureReasons.length){
+      console.info('[#8 blast diag] first mismatches:',_blastDiag.failureReasons);
+    }
+  }
+  renderBlastDiagBanner();
   document.getElementById('sync-time').textContent='Synced '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
   render();
 }
@@ -3090,18 +3319,33 @@ function _actionC(c){
       const subj=(newest.subject||'(no subject)').slice(0,60);
       return{bucket:'action',timing:{txt:'Responded while awaiting',pill:'pa',date:subj},info,primary:{kind:'open-email',emailId:newest.id,label:'✉ Open response ('+unread.length+')',cls:'sky'},manuallyAwaiting:true,awaitingReSurfaceReason:'email'};
     }
+    let _autoReleased=false;
     if(bookingFresh){
-      const m=minsUntil(st.booking);
-      const when=m>0?fmtDay(st.booking):'past due';
-      return{bucket:'action',timing:{txt:'Booking arrived while awaiting',pill:'pnew',date:when},info,primary:{kind:'open',label:'📅 Review new booking',cls:'sky'},manuallyAwaiting:true,awaitingReSurfaceReason:'booking'};
+      /* Booking arrived while parked in awaiting — the desired outcome. Silently release from
+         awaiting so normal stage-driven evaluation takes over below (e.g. "Interview upcoming",
+         which is what the Cal.com webhook advances them to). No manual "Review new booking" action
+         cluttering the queue. Mutation is intentional: this is a one-way transition. */
+      delete st.manualAwaiting;
+      delete st.awaitingReason;
+      delete st.awaitingUntil;
+      delete st.awaitingSince;
+      delete st.awaitingItemsInitialCount;
+      delete st.lastAwaitingReview;
+      st.log=st.log||[];
+      st.log.push({t:stamp(),x:'✓ Auto-released from awaiting — booking arrived'});
+      _autoReleased=true;
+      /* Fall through the rest of the manualAwaiting block; the _autoReleased flag will skip its
+         remaining return paths so stage-driven evaluation runs. */
     }
-    if(assignmentFresh){
+    if(!_autoReleased&&assignmentFresh){
       const remaining=awaitingItems.length;
       return{bucket:'action',timing:{txt:'New document assigned',pill:'pnew',date:remaining+' more awaited'},info,primary:{kind:'open',label:'📎 Review — '+remaining+' awaited remaining',cls:'gold'},manuallyAwaiting:true,awaitingReSurfaceReason:'attachment'};
     }
-    /* No new activity — silently parked. */
-    const awaitingItemsLabel=awaitingItems.length?(' ('+awaitingItems.length+' item'+(awaitingItems.length===1?'':'s')+')'):'';
-    return{bucket:'awaiting',timing:{txt:(st.awaitingReason||'Manually parked')+awaitingItemsLabel,pill:'psoft',date:st.awaitingUntil?('until '+fmtDay(st.awaitingUntil)):''},info,primary:{kind:'release-awaiting',label:'Move out of awaiting',cls:'sky'},manuallyAwaiting:true};
+    if(!_autoReleased){
+      /* No new activity — silently parked. */
+      const awaitingItemsLabel=awaitingItems.length?(' ('+awaitingItems.length+' item'+(awaitingItems.length===1?'':'s')+')'):'';
+      return{bucket:'awaiting',timing:{txt:(st.awaitingReason||'Manually parked')+awaitingItemsLabel,pill:'psoft',date:st.awaitingUntil?('until '+fmtDay(st.awaitingUntil)):''},info,primary:{kind:'release-awaiting',label:'Move out of awaiting',cls:'sky'},manuallyAwaiting:true};
+    }
   }
   /* Email-as-action: unread email overrides whatever stage-driven primary would apply. */
   const emails=(st.emails||[]);
@@ -4298,6 +4542,58 @@ function renderFastTrackBanner(){
 }
 function _toggleFtList(){window._ftListOpen=!(window._ftListOpen===true);renderFastTrackBanner();}
 
+/* Render the blast-grouping diagnostic banner — surfaces above the pipeline view when there are
+   blasts in SETTINGS.massSends. Reports how many sent emails got tagged with blastId this load,
+   what didn't match and why. Dismissible per-session. Purpose: when blast grouping doesn't work,
+   you can see exactly what the backfill saw instead of guessing. */
+function renderBlastDiagBanner(){
+  const d=window._blastDiag;
+  if(!d||!d.blastsInSettings)return;
+  let banner=document.getElementById('blast-diag-banner');
+  if(!banner){
+    banner=document.createElement('div');
+    banner.id='blast-diag-banner';
+    banner.style.cssText='margin:8px 0 10px 0';
+    const pipe=document.getElementById('pipeline-view');
+    if(pipe)pipe.insertBefore(banner,pipe.firstChild);
+    else return;
+  }
+  if(window._blastDiagDismissed){banner.innerHTML='';return;}
+  const healthy=d.stampedThisLoad>0||d.outsAlreadyTagged>0;
+  const noWorkNeeded=d.outsWithoutBlast===0;
+  const status=noWorkNeeded?'ok-nothing':(healthy?'ok-stamped':'problem');
+  const color=status==='problem'?'#8B3D1F':(status==='ok-stamped'?'#3D7A34':'#5C4A1E');
+  const bg=status==='problem'?'linear-gradient(180deg,#FEF6EE,#fff)':(status==='ok-stamped'?'linear-gradient(180deg,#EFF7EE,#fff)':'linear-gradient(180deg,#FBF7EE,#fff)');
+  const border=status==='problem'?'#F0C4B0':(status==='ok-stamped'?'#BBDCB0':'#DECF9F');
+  const wasExpanded=window._blastDiagExpanded===true;
+  const failures=(d.failureReasons||[]).slice(0,5).map(f=>
+    `<div style="padding:4px 0;font-size:11px;color:${color};border-top:1px dashed ${border}">
+      <b>${esc(f.cand)}</b> \u00b7 <span style="color:var(--soft)">${esc(f.reason)}</span><br>
+      <span style="color:var(--soft)">blast:</span> "${esc(f.blastSubj)}" @ ${esc(f.blastAt)}<br>
+      <span style="color:var(--soft)">email:</span> "${esc(f.emSubj)}" @ ${esc(f.emAt)}
+    </div>`).join('');
+  const details=wasExpanded?`<div style="padding:8px 12px;border-top:1px solid ${border};background:rgba(255,255,255,.4)">
+    <div style="font-size:11px;color:${color};margin-bottom:6px">
+      <b>Numbers:</b> ${d.blastsInSettings} blast record${d.blastsInSettings===1?'':'s'} \u00b7 ${d.recipientsAcrossBlasts} recipient entries \u00b7 ${d.outsScanned} sent emails scanned \u00b7 ${d.outsAlreadyTagged} already tagged \u00b7 ${d.outsWithoutBlast} untagged \u00b7 ${d.stampedThisLoad} stamped this load \u00b7 ${d.matchAttempts} match attempts.
+    </div>
+    ${failures?`<div style="margin-top:6px"><div style="font-size:10.5px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">First mismatches (why the backfill couldn't tag them)</div>${failures}</div>`:''}
+  </div>`:'';
+  const headline=status==='problem'
+    ? `Blast grouping problem: ${d.outsWithoutBlast} sent emails still ungrouped, none matched to your ${d.blastsInSettings} blast record${d.blastsInSettings===1?'':'s'}`
+    : status==='ok-stamped'
+    ? `Blast grouping healthy \u00b7 ${d.outsAlreadyTagged} tagged${d.stampedThisLoad>0?', '+d.stampedThisLoad+' newly stamped this load':''}`
+    : `Blast grouping ready \u00b7 ${d.blastsInSettings} blast${d.blastsInSettings===1?'':'s'} on record, no untagged emails need backfilling`;
+  banner.innerHTML=`<div style="background:${bg};border:1px solid ${border};border-radius:10px;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:9px 12px">
+      <span style="font-size:15px">\u{1F4EC}</span>
+      <span style="font-weight:700;color:${color};flex:1">${esc(headline)}</span>
+      <button onclick="window._blastDiagExpanded=!(window._blastDiagExpanded===true);renderBlastDiagBanner()" style="background:none;border:none;color:${color};font-size:12px;font-weight:700;cursor:pointer">${wasExpanded?'hide details \u25B4':'details \u25BE'}</button>
+      <button onclick="window._blastDiagDismissed=true;renderBlastDiagBanner()" title="Dismiss until next refresh" style="background:none;border:none;color:${color};font-size:14px;font-weight:700;cursor:pointer;padding:0 4px">\u2715</button>
+    </div>
+    ${details}
+  </div>`;
+}
+
 function renderNudgeBanner(){
   let banner=document.getElementById('nudge-banner');
   if(!banner){banner=document.createElement('div');banner.id='nudge-banner';banner.style.cssText='margin:8px 0 10px 0';
@@ -4344,7 +4640,7 @@ async function _sendNudgeHeadless(c){
   c.st.emails=c.st.emails||[];
   c.st.emails.unshift({id:'local-'+Date.now()+'-'+c.excelRow,direction:'out',subject:(subj||'').slice(0,140),preview:(body||'').slice(0,200),from:'careers@solurahomecare.com',to:c.email,received:new Date().toISOString(),seen:true});
   if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
-  c.st.log=c.st.log||[];c.st.log.unshift({t:stamp(),x:'\ud83d\udd14 Nudge sent: '+tpl.replace(/_/g,' ')});
+  c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'\ud83d\udd14 Nudge sent: '+tpl.replace(/_/g,' ')});
   await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
 }
 /* Nudge ALL idle candidates — resilient batch (per-send timeout + guaranteed toast/re-render). */
@@ -4937,7 +5233,7 @@ async function _markReceivedCore(cand,idx,note){
   const wasParked=!!cand.st.manualAwaiting;
   cand.st.awaitingItems=items.filter((_,i)=>i!==idx);
   cand.st.log=cand.st.log||[];
-  cand.st.log.unshift({t:stamp(),x:'\u2713 Received: '+_awaitingItemLabel(item)+(note?(' \u2014 '+note):'')});
+  cand.st.log.push({t:stamp(),x:'\u2713 Received: '+_awaitingItemLabel(item)+(note?(' \u2014 '+note):'')});
   const queueEmpty=cand.st.awaitingItems.length===0;
   if(wasParked&&queueEmpty){
     delete cand.st.manualAwaiting;
@@ -4946,7 +5242,7 @@ async function _markReceivedCore(cand,idx,note){
     delete cand.st.awaitingSince;
     delete cand.st.awaitingItemsInitialCount;
     delete cand.st.lastAwaitingReview;
-    cand.st.log.unshift({t:stamp(),x:'\u2705 Auto-released from awaiting \u2014 all requested items received'});
+    cand.st.log.push({t:stamp(),x:'\u2705 Auto-released from awaiting \u2014 all requested items received'});
   }
   cand.st.lastAssignmentAt=new Date().toISOString();
   await patchRange('AJ'+cand.excelRow,[[JSON.stringify(cand.st)]]);
@@ -5646,6 +5942,13 @@ async function reallySend(tpl,advanceTo){
   try{
     await sendMailViaGraph(W.email,subj,body,isHtml,atts);
     W.st.sent=W.st.sent||{};W.st.sent[tpl]=today();
+    /* Alias: a missed-stage rebook email IS functionally the rebook invite. If the user hits
+       "no-show" and sends missed_screen/interview/onboarding, the sequence engine should NOT
+       then surface "Send screen invite" as if nothing was sent — the missed_* email covers it.
+       Backfill the corresponding *_invite sent flag so downstream triggers see a sent invite. */
+    if(tpl==='missed_screen')W.st.sent.screen_invite=W.st.sent.screen_invite||today();
+    if(tpl==='missed_interview')W.st.sent.interview_invite=W.st.sent.interview_invite||today();
+    if(tpl==='missed_onboarding')W.st.sent.onboarding=W.st.sent.onboarding||today();
     /* Push a lightweight copy into the candidate's local emails array so the user sees their sent
        message immediately instead of waiting for the 60s Sent-folder polling cycle. Schema MUST
        match the polling code at line ~3171 (id, direction, subject, preview, received) — earlier
@@ -6048,6 +6351,7 @@ function renderWorkspace(){_memGen++;
     <div class="gatesrow">${gh}</div></div>`;
   const _bgFindingsCard=renderBgFindingsCard(W,sc);
   const _credentialsCard=renderCredentialsCard(W);
+  const _reconciliationCard=_renderReconciliationSummary(W);
   const work=workBlock(a);
   const docs=`<div class="wscard" id="ws-docs"><h3>Documents <input type="file" id="ws-file" multiple style="display:none" onchange="uploadFiles(this.files)"><label for="ws-file" class="uploadbtn">📎 Upload</label></h3>
     <div style="font-size:12px;color:var(--soft);margin-bottom:8px">caregivers › ${esc(W.name)} › onboarding</div>
@@ -6139,7 +6443,7 @@ function renderWorkspace(){_memGen++;
   document.getElementById('ws-body').innerHTML=`
     ${thisStep}
     <div class="wsgrid">
-      <div>${gatesCard}${_bgFindingsCard}${_credentialsCard}${work}${_appSnap}${docs}${activity}</div>
+      <div>${gatesCard}${_bgFindingsCard}${_reconciliationCard}${_credentialsCard}${work}${_appSnap}${docs}${activity}</div>
       <div>${identity}${scoreCard}${_yardstikPrev}${_empPrev}${_refPrev}${refsPreviewCard}${emailsCard}</div>
     </div>`;
   /* sticky footer with primary action — always visible */
@@ -7045,6 +7349,41 @@ function vrTier1View(emp,cfg){
     </span>`;
     const logBtn=(!e.v&&!yInFlight)?`<button class="btn-sm bg-cream" onclick="vrLogT1Attempt(${i})" style="cursor:pointer;flex:0 0 auto;font-size:11.5px" title="No answer — log an attempt">+ attempt</button>`:'';
     const denied=e.v==='denied'?`<div style="grid-column:1/-1;background:#FEE2E2;border-left:3px solid var(--red);padding:7px 11px;margin-top:6px;border-radius:4px;font-size:11.5px;color:#7B1F1F;font-weight:600">⚠ Employment contradicted. Fabrication — hard stop.</div>`:'';
+    /* #4: verified-data panel — collapsible, only meaningful once verification came back 'ok'.
+       Lets the user record what the employer actually confirmed, which the reconciliation engine
+       compares against the candidate's own claim to compute discrepancies. Each field is optional;
+       leaving blank means "not asked / not confirmed" and the reconciler skips it. */
+    const verifiedOpen=window._verifiedOpen&&window._verifiedOpen[i];
+    const verifiedPanel=(e.v==='ok')?`
+      <div style="grid-column:1/-1;margin-top:8px">
+        <button class="btn-sm bg-cream" style="font-size:10.5px;padding:4px 9px" onclick="_toggleVerifiedPanel(${i})">${verifiedOpen?'\u25BE':'\u25B8'} verified data ${_verifiedFieldCount(e)?'('+_verifiedFieldCount(e)+' filled)':''}</button>
+        <div id="verified-panel-${i}" style="display:${verifiedOpen?'block':'none'};margin-top:6px;padding:9px 11px;background:#F5FAF3;border:1px dashed var(--grn);border-radius:6px">
+          <div style="font-size:10.5px;color:var(--grn-deep);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">What the employer confirmed</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px">
+            <label style="font-size:11px;color:var(--soft);display:flex;flex-direction:column;gap:2px">Start year <input type="text" value="${esc(e.verifiedStartYear||'')}" placeholder="${esc(e.startYear||'—')}" oninput="W.st.employers[${i}].verifiedStartYear=this.value" onblur="_reconcileEmployer(${i});saveW(true);renderWorkspace()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:12px"></label>
+            <label style="font-size:11px;color:var(--soft);display:flex;flex-direction:column;gap:2px">End year <input type="text" value="${esc(e.verifiedEndYear||'')}" placeholder="${e.current?'still there':esc(e.endYear||'—')}" oninput="W.st.employers[${i}].verifiedEndYear=this.value" onblur="_reconcileEmployer(${i});saveW(true);renderWorkspace()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:12px"></label>
+            <label style="font-size:11px;color:var(--soft);display:flex;flex-direction:column;gap:2px;grid-column:1/-1">Title <input type="text" value="${esc(e.verifiedTitle||'')}" placeholder="${esc(e.title||'—')}" oninput="W.st.employers[${i}].verifiedTitle=this.value" onblur="_reconcileEmployer(${i});saveW(true);renderWorkspace()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:12px"></label>
+            <label style="font-size:11px;color:var(--soft);display:flex;flex-direction:column;gap:2px">Notice given?
+              <select onchange="W.st.employers[${i}].verifiedNoticeGiven=this.value;_reconcileEmployer(${i});saveW(true);renderWorkspace()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:12px">
+                <option value="" ${!e.verifiedNoticeGiven?'selected':''}>—</option>
+                <option value="yes" ${e.verifiedNoticeGiven==='yes'?'selected':''}>Yes, proper notice</option>
+                <option value="no" ${e.verifiedNoticeGiven==='no'?'selected':''}>No — walked off / no notice</option>
+                <option value="unknown" ${e.verifiedNoticeGiven==='unknown'?'selected':''}>They wouldn't say</option>
+              </select>
+            </label>
+            <label style="font-size:11px;color:var(--soft);display:flex;flex-direction:column;gap:2px">Rehire eligible?
+              <select onchange="W.st.employers[${i}].rehire=this.value;_reconcileEmployer(${i});saveW(true);renderWorkspace()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:12px">
+                <option value="" ${!e.rehire?'selected':''}>—</option>
+                <option value="yes" ${e.rehire==='yes'?'selected':''}>Yes</option>
+                <option value="no" ${e.rehire==='no'?'selected':''}>No</option>
+                <option value="maybe" ${e.rehire==='maybe'?'selected':''}>Maybe / cautious</option>
+              </select>
+            </label>
+            <label style="font-size:11px;color:var(--soft);display:flex;flex-direction:column;gap:2px;grid-column:1/-1">Reason for leaving (verified) <input type="text" value="${esc(e.verifiedReasonForLeaving||'')}" placeholder="e.g. laid off, quit for school, personal" oninput="W.st.employers[${i}].verifiedReasonForLeaving=this.value" onblur="_reconcileEmployer(${i});saveW(true);renderWorkspace()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:12px"></label>
+          </div>
+          ${_renderEmployerDiscrepancies(W,i)}
+        </div>
+      </div>`:'';
     return `<div class="emp-row" style="background:#fff;border:1px solid ${e.v==='denied'?'var(--red)':'var(--border)'};border-radius:9px;padding:10px 12px;margin-bottom:8px">
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">
         <input value="${esc(e.name||'')}" placeholder="Employer name" oninput="W.st.employers[${i}].name=this.value" onblur="saveW(true)" style="flex:1;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
@@ -7057,6 +7396,7 @@ function vrTier1View(emp,cfg){
         <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;flex:0 0 auto" onclick="if(confirm('Remove this employer?')){W.st.employers.splice(${i},1);saveW(true);renderWorkspace();}">×</button>
       </div>
       ${denied}
+      ${verifiedPanel}
     </div>`;
   }).join('');
   /* gate banner */
@@ -7078,6 +7418,173 @@ function vrTier1View(emp,cfg){
     <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-sec bg-cream" style="margin-top:6px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:'',source:'manual'});renderWorkspace()">+ add employer</button>${_verifyBtn}</div>
     ${gate}
     <div class="brow" style="margin-top:12px">${advBtn}</div>`;
+}
+
+/* ============================================================================
+   #4 — Employer verification cross-check (Reconciliation Engine)
+   Compares the candidate's application claims against what employers actually
+   confirmed during verification. Discrepancies are logged to c.st.discrepancies
+   and score deductions are applied to the candidate's honesty ('hon') / retention
+   ('ret') / reliability ('rel') dimensions per the settings config.
+   ============================================================================ */
+
+/* Default reconciliation config — override any/all in Settings → Verification & refs → Reconcile. */
+const DEFAULT_RECONCILE_CFG={
+  enabled:true,
+  dateSlackYears:0,         /* ±N year difference tolerated before flagging a date mismatch */
+  affectsScore:'rel',       /* Which score dimension takes the deduction. Available Q dims: rel/com/jud/doc/ref/cmp/phn. Available R dims: ten/prx/ava/exp. Default 'rel' (reliability) since discrepancies are a reliability signal. */
+  penalties:{
+    titleMismatch:5,
+    dateMismatch:8,
+    longestTenureLie:15,
+    noticeNotGiven:5,
+    noRehire:10,
+    reasonMismatch:5
+  }
+};
+function _reconcileCfg(){
+  const c=(SETTINGS.config&&SETTINGS.config.reconcile)||{};
+  return {
+    enabled:c.enabled!==false,
+    dateSlackYears:c.dateSlackYears!=null?c.dateSlackYears:DEFAULT_RECONCILE_CFG.dateSlackYears,
+    affectsScore:c.affectsScore||DEFAULT_RECONCILE_CFG.affectsScore,
+    penalties:Object.assign({},DEFAULT_RECONCILE_CFG.penalties,c.penalties||{})
+  };
+}
+/* Count how many verified-* fields have data (for the "verified data (N filled)" UI hint). */
+function _verifiedFieldCount(e){
+  if(!e)return 0;
+  return ['verifiedStartYear','verifiedEndYear','verifiedTitle','verifiedNoticeGiven','verifiedReasonForLeaving'].filter(k=>e[k]&&String(e[k]).trim()).length+(e.rehire?1:0);
+}
+function _toggleVerifiedPanel(i){
+  window._verifiedOpen=window._verifiedOpen||{};
+  window._verifiedOpen[i]=!window._verifiedOpen[i];
+  renderWorkspace();
+}
+/* Compare candidate claim vs verified value on a single employer. Returns array of discrepancies. */
+function _reconcileOne(c,empIdx){
+  const cfg=_reconcileCfg();
+  if(!cfg.enabled)return [];
+  const e=c.st.employers[empIdx];if(!e)return [];
+  const D=[];
+  const push=(field,claimed,verified,penaltyKey)=>{
+    D.push({empIdx,empName:e.name||'?',field,claimed:String(claimed||''),verified:String(verified||''),penalty:cfg.penalties[penaltyKey]||0,at:new Date().toISOString()});
+  };
+  /* Start year — parse to int, allow ±dateSlackYears */
+  if(e.verifiedStartYear&&e.startYear){
+    const cy=parseInt(e.startYear,10),vy=parseInt(e.verifiedStartYear,10);
+    if(!isNaN(cy)&&!isNaN(vy)&&Math.abs(cy-vy)>cfg.dateSlackYears){
+      push('startYear',e.startYear,e.verifiedStartYear,'dateMismatch');
+    }
+  }
+  /* End year — same rules */
+  if(e.verifiedEndYear&&(e.endYear||e.current)){
+    const claimedEnd=e.current?'present':e.endYear;
+    if(e.current&&e.verifiedEndYear.toLowerCase()!=='present'&&!/still/i.test(e.verifiedEndYear)){
+      /* Candidate said "still there" but employer gave an end year → likely misrepresentation */
+      push('endYear','present (still there)',e.verifiedEndYear,'dateMismatch');
+    }else if(!e.current&&e.endYear){
+      const cy=parseInt(e.endYear,10),vy=parseInt(e.verifiedEndYear,10);
+      if(!isNaN(cy)&&!isNaN(vy)&&Math.abs(cy-vy)>cfg.dateSlackYears){
+        push('endYear',e.endYear,e.verifiedEndYear,'dateMismatch');
+      }
+    }
+  }
+  /* Title — case-insensitive contains match (either direction). "CNA" is fine vs "Certified Nursing Assistant". */
+  if(e.verifiedTitle&&e.title){
+    const ct=e.title.toLowerCase().trim(),vt=e.verifiedTitle.toLowerCase().trim();
+    if(ct!==vt&&ct.indexOf(vt)<0&&vt.indexOf(ct)<0){
+      push('title',e.title,e.verifiedTitle,'titleMismatch');
+    }
+  }
+  /* Notice given — 'no' is a red flag */
+  if(e.verifiedNoticeGiven==='no'){
+    push('noticeGiven','implied yes','no notice — walked off','noticeNotGiven');
+  }
+  /* Rehire eligibility — 'no' is a red flag */
+  if(e.rehire==='no'){
+    push('rehire','—','not eligible for rehire','noRehire');
+  }
+  return D;
+}
+/* Recompute discrepancies for the FULL candidate (all employers + top-level claims). Called any
+   time verified data changes on any employer. Also handles cross-employer facts like longest tenure. */
+function _reconcileEmployer(empIdx){
+  if(!W)return;
+  const cfg=_reconcileCfg();
+  if(!cfg.enabled)return;
+  W.st.discrepancies=W.st.discrepancies||[];
+  /* Remove old discrepancies for this employer (recompute cleanly) */
+  W.st.discrepancies=W.st.discrepancies.filter(d=>d.empIdx!==empIdx&&d.field!=='longestTenure');
+  const newDs=_reconcileOne(W,empIdx);
+  W.st.discrepancies=W.st.discrepancies.concat(newDs);
+  /* Longest tenure cross-check — if candidate claimed a bucket and verified employer dates say
+     otherwise, that's a big one. Compute the longest verified tenure across all employers. */
+  const buckets={u6:0.5,u12:1,y1:1,y12:1.5,y2:2,y23:2.5,y2p:2.5,y3p:3};
+  const claimedLongest=W.st.longest||(W.st.facts&&W.st.facts.longest);
+  const claimedYears=buckets[claimedLongest];
+  if(claimedYears){
+    let verifiedMax=0;
+    (W.st.employers||[]).forEach(e=>{
+      const sy=parseInt(e.verifiedStartYear||e.startYear,10);
+      const ey=e.current?new Date().getFullYear():parseInt(e.verifiedEndYear||e.endYear,10);
+      if(!isNaN(sy)&&!isNaN(ey)&&ey>=sy)verifiedMax=Math.max(verifiedMax,ey-sy);
+    });
+    /* Only flag as "lie" if we have verified data on the ostensibly-longest job */
+    const anyVerified=(W.st.employers||[]).some(e=>e.verifiedStartYear||e.verifiedEndYear);
+    if(anyVerified&&verifiedMax>0&&claimedYears-verifiedMax>=1){
+      W.st.discrepancies.push({
+        empIdx:-1,empName:'—',field:'longestTenure',
+        claimed:'claimed '+claimedLongest+' (~'+claimedYears+' yr)',
+        verified:'verified max ~'+verifiedMax+' yr',
+        penalty:cfg.penalties.longestTenureLie||0,
+        at:new Date().toISOString()
+      });
+    }
+  }
+  /* Apply total penalty to the configured score dimension (soft floor of 1). */
+  const totalPenalty=W.st.discrepancies.reduce((s,d)=>s+(d.penalty||0),0);
+  W.st.reconcilePenalty=totalPenalty;
+  /* Log first time we accumulate a nonzero penalty */
+  if(totalPenalty>0&&W.st.reconcilePenaltyLogged!==totalPenalty){
+    logW('⚖ Discrepancy penalty: -'+totalPenalty+' from '+cfg.affectsScore+' ('+W.st.discrepancies.length+' finding'+(W.st.discrepancies.length===1?'':'s')+')');
+    W.st.reconcilePenaltyLogged=totalPenalty;
+  }
+}
+/* Render the discrepancy list for a single employer's panel (called from the verifiedPanel HTML). */
+function _renderEmployerDiscrepancies(W,empIdx){
+  const ds=(W.st.discrepancies||[]).filter(d=>d.empIdx===empIdx);
+  if(!ds.length)return '';
+  const rows=ds.map(d=>`<div style="display:flex;gap:8px;padding:5px 0;font-size:11.5px;border-top:1px dashed #F0C4B0">
+    <span style="min-width:100px;font-weight:700;color:#8B3D1F">${esc(_fieldLabel(d.field))}</span>
+    <span style="flex:1;color:var(--ink)">Claim: <b>${esc(d.claimed)}</b> \u2014 Verified: <b>${esc(d.verified)}</b></span>
+    <span style="color:#8B3D1F;font-weight:700">\u2013${d.penalty}</span>
+  </div>`).join('');
+  return `<div style="margin-top:10px;padding:8px 11px;background:#FEF3EC;border:1px solid #F0C4B0;border-radius:6px">
+    <div style="font-size:10.5px;font-weight:700;color:#8B3D1F;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">⚖ Discrepancies</div>
+    ${rows}
+  </div>`;
+}
+function _fieldLabel(f){
+  return ({startYear:'Start date',endYear:'End date',title:'Title',noticeGiven:'Notice',rehire:'Rehire',reason:'Reason for leaving',longestTenure:'Longest tenure'})[f]||f;
+}
+/* Full-candidate discrepancy summary card — surfaces at the top of the workspace when any
+   reconciliation findings exist. */
+function _renderReconciliationSummary(W){
+  const ds=W.st.discrepancies||[];
+  if(!ds.length)return '';
+  const cfg=_reconcileCfg();
+  const total=ds.reduce((s,d)=>s+(d.penalty||0),0);
+  return `<div class="wscard" style="border-color:#F0C4B0;background:linear-gradient(180deg,#FEF6EE,#fff)">
+    <h3 style="color:#8B3D1F">⚖ Discrepancies vs application <span class="pill" style="background:#FEE2CE;color:#8B3D1F;border:1px solid #F0C4B0;font-size:9px;margin-left:6px">${ds.length} finding${ds.length===1?'':'s'} \u00b7 \u2013${total} ${esc(cfg.affectsScore)}</span></h3>
+    <p style="font-size:11.5px;color:var(--soft);margin:-6px 0 8px">What the candidate wrote on their application vs what the employer confirmed.</p>
+    ${ds.map(d=>`<div style="display:flex;gap:8px;padding:6px 0;font-size:12px;border-top:1px dashed #F0C4B0">
+      <span style="min-width:130px;font-weight:700;color:#8B3D1F">${esc(_fieldLabel(d.field))}</span>
+      <span style="color:var(--soft);font-size:11px;min-width:120px">${esc(d.empName)}</span>
+      <span style="flex:1"><span style="color:var(--soft)">Claim:</span> <b>${esc(d.claimed)}</b> \u00b7 <span style="color:var(--soft)">Verified:</span> <b>${esc(d.verified)}</b></span>
+      <span style="color:#8B3D1F;font-weight:700">\u2013${d.penalty}</span>
+    </div>`).join('')}
+  </div>`;
 }
 
 /* ---------- TIER 2 : independent supervisor opinion ---------- */
@@ -7690,23 +8197,46 @@ function renderCredentialsCard(W){
     const fg=_credStatusFg(s.cls);
     const issued=c.issuedAt?'Issued '+esc(c.issuedAt):'';
     const exp=c.expiresAt?'Expires '+esc(c.expiresAt):'';
-    const fileBtn=c.fileUrl?`<a href="${esc(c.fileUrl)}" target="_blank" style="color:var(--sky-deep);font-size:11px;text-decoration:none">📎 ${esc(c.fileName||'open')}</a>`:'';
+    /* #5: prominent SharePoint link when a file is on record. Opens the file directly in SP viewer. */
+    const spLink=c.fileUrl
+      ? `<a href="${esc(c.fileUrl)}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:#EDF3FA;color:var(--sky-deep);border:1px solid #B8D4F0;border-radius:5px;font-size:11px;font-weight:600;text-decoration:none" title="Open in SharePoint">📎 SharePoint</a>`
+      : '';
     const requestBtn=(s.cls==='gold'||s.cls==='red')?`<button class="btn-sm" style="background:var(--gold-mid);color:#fff;border:none;padding:4px 9px;font-size:11px;font-weight:600;cursor:pointer" onclick="requestCredentialRenewal('${esc(c.id)}')" title="Send renewal email">✉ Ask for renewal</button>`:'';
+    /* #5: expandable details section — shows notes (which may include cert number, issuing org),
+       type, remind window. Hidden by default so the primary row stays scannable; user clicks
+       "▸ details" to reveal, which is also how a sensitive cert number stays out of sight until
+       the user asks for it. */
+    const hasDetails=!!(c.notes||c.type||c.remindDaysBefore||c.claimedAt||c.addedBy||c.fileName);
+    const detailRows=hasDetails?[
+      c.type?['Type',esc(c.type).replace(/^./,ch=>ch.toUpperCase())]:null,
+      c.notes?['Number / notes','<span style="font-family:ui-monospace,SF Mono,Consolas,monospace">'+esc(c.notes)+'</span>']:null,
+      c.fileName?['File name',esc(c.fileName)]:null,
+      c.remindDaysBefore?['Remind before',esc(c.remindDaysBefore)+' days']:null,
+      c.claimedAt?['Claimed on',esc(new Date(c.claimedAt).toLocaleDateString())]:null,
+      c.addedAt?['Added on',esc(new Date(c.addedAt).toLocaleDateString())+(c.addedBy?(' by '+esc(c.addedBy)):'')]:null,
+      c.lastRenewalRequestedAt?['Last renewal ask',esc(new Date(c.lastRenewalRequestedAt).toLocaleDateString())]:null
+    ].filter(Boolean):[];
+    const detailsBlock=detailRows.length?`<div id="cred-details-${esc(c.id)}" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:5px;border:1px dashed ${fg}">
+      ${detailRows.map(r=>`<div style="display:flex;gap:8px;font-size:11.5px;padding:2px 0"><span style="color:var(--soft);min-width:110px;font-weight:600">${r[0]}</span><span style="color:var(--ink);flex:1;word-break:break-all">${r[1]}</span></div>`).join('')}
+    </div>`:'';
+    const detailsToggle=detailRows.length?`<button class="btn-sm bg-cream" style="font-size:10.5px;padding:3px 8px" onclick="_toggleCredDetails('${esc(c.id)}',this)">\u25B8 details</button>`:'';
     return `<div style="background:${bg};border:1px solid ${fg};border-radius:7px;padding:8px 11px;margin-bottom:6px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
         <b style="color:var(--ink);font-size:12.5px;flex:1">${esc(c.name)}</b>
         <span style="font-size:10.5px;font-weight:700;color:${fg};text-transform:uppercase;letter-spacing:.04em">${s.label}</span>
       </div>
-      <div style="display:flex;gap:12px;font-size:11px;color:var(--soft);align-items:center;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;font-size:11px;color:var(--soft);align-items:center;flex-wrap:wrap">
         ${issued?'<span>'+issued+'</span>':''}
         ${exp?'<span>'+exp+'</span>':''}
-        ${fileBtn}
+        ${spLink}
         ${c.lastRenewalRequestedAt?'<span style="color:var(--soft);font-style:italic">Last asked '+esc(new Date(c.lastRenewalRequestedAt).toLocaleDateString())+'</span>':''}
         <div style="flex:1"></div>
+        ${detailsToggle}
         ${requestBtn}
         <button class="btn-sm bg-cream" style="font-size:10.5px;padding:3px 7px" onclick="editCredential('${esc(c.id)}')">edit</button>
         <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;font-size:10.5px;padding:3px 7px" onclick="removeCredential('${esc(c.id)}')">×</button>
       </div>
+      ${detailsBlock}
     </div>`;
   }).join('');
 
@@ -7718,6 +8248,16 @@ function renderCredentialsCard(W){
 }
 
 function _credId(){return 'cred-'+Math.random().toString(36).slice(2,10);}
+
+/* Toggle the per-credential details block open/closed. Used by the "▸ details" button on each
+   cert row to reveal notes (cert number, issuing org), type, remind window, etc. */
+function _toggleCredDetails(id,btn){
+  const box=document.getElementById('cred-details-'+id);
+  if(!box)return;
+  const isOpen=box.style.display==='block';
+  box.style.display=isOpen?'none':'block';
+  if(btn)btn.innerHTML=isOpen?'\u25B8 details':'\u25BE hide details';
+}
 
 function addCredential(){_credEditModal(null);}
 function editCredential(id){
@@ -8134,19 +8674,52 @@ function replyToCurrentEmail(){
   }
   const subj=msg.subject||'';
   const replySubj=/^re:/i.test(subj)?subj:'Re: '+subj;
-  /* Format the quoted original cleanly — visual divider, sender name + date header, indented body.
-     Reads like a normal email reply, not a technical dump. */
+  /* Build an HTML-quoted reply body. The composer is now a contenteditable WYSIWYG, so we can put
+     the original message inside a visually-distinct frame (gold-bordered blockquote) below an empty
+     paragraph where the user's cursor lands. Their reply sits ABOVE, the quote below — proper
+     visual separation instead of a divider line ambiguously sharing the cursor's row. */
   const from=((msg.from||{}).emailAddress||{});
   const senderName=from.name||from.address||'them';
   const when=msg.receivedDateTime?new Date(msg.receivedDateTime).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}):'';
   const origText=(msg.body&&msg.body.content)||msg.bodyPreview||'';
-  /* Strip HTML, collapse whitespace, then re-introduce paragraph breaks where there were double-newlines */
-  const stripped=String(origText).replace(/<br\s*\/?>/gi,'\n').replace(/<\/p>/gi,'\n\n').replace(/<[^>]+>/g,'').replace(/\n{3,}/g,'\n\n').replace(/[ \t]+/g,' ').trim();
-  /* Indent each line of the original with a soft prefix so it visually separates from the new reply */
-  const quotedBody=stripped.slice(0,1200).split('\n').map(l=>l.trim()?'    '+l:'').join('\n');
-  const composedBody='\n\n\n────────────────────\nOn '+when+', '+senderName+' wrote:\n────────────────────\n\n'+quotedBody;
+  /* Strip <script> and inline handlers, keep the HTML shape otherwise so paragraphs and bolds render
+     inside the quote frame. */
+  let quoteInner=String(origText).replace(/<script[\s\S]*?<\/script>/gi,'').replace(/\son\w+\s*=\s*"[^"]*"/gi,'').replace(/\son\w+\s*=\s*'[^']*'/gi,'');
+  /* If content wasn't HTML (plain text), convert newlines to <br> so it renders properly */
+  if(!/<[a-z][\s\S]*?>/i.test(quoteInner)){
+    quoteInner=esc(quoteInner).replace(/\n/g,'<br>');
+  }
+  /* Cap the quote at a reasonable length so a huge original doesn't dominate the composer */
+  if(quoteInner.length>3000)quoteInner=quoteInner.slice(0,3000)+'\u2026';
+  const composedBody='<p><br></p><div class="email-quote" style="border-left:3px solid #C59B4E;background:#FDF9F0;padding:10px 14px;margin-top:14px;border-radius:0 6px 6px 0;color:#4A4A4A"><div style="font-size:11px;color:#8B6500;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">On '+esc(when)+', '+esc(senderName)+' wrote:</div><div style="font-size:13px;line-height:1.5">'+quoteInner+'</div></div>';
   closeEmailDetail();
   setTimeout(()=>emailModal('reply',replySubj,composedBody,null),120);
+}
+
+/* Open the candidate's workspace from the email detail modal. If the email has a matching pipeline
+   candidate (by sender address for inbound, or recipient for outbound), load that workspace. */
+function openCandidateFromCurrentEmail(){
+  const msg=_currentEmailMsgId&&_emailCache[_currentEmailMsgId];
+  let candidate=null;
+  if(msg){
+    /* Try inbound: sender address */
+    const fromAddr=((msg.from||{}).emailAddress||{}).address||'';
+    if(fromAddr)candidate=pipeline.find(c=>(c.email||'').toLowerCase()===fromAddr.toLowerCase());
+    /* Try outbound: recipient addresses */
+    if(!candidate&&Array.isArray(msg.toRecipients)){
+      for(const r of msg.toRecipients){
+        const addr=((r.emailAddress||{}).address||'').toLowerCase();
+        if(addr){candidate=pipeline.find(c=>(c.email||'').toLowerCase()===addr);if(candidate)break;}
+      }
+    }
+  }
+  /* Fallback: find any candidate whose emails list contains this messageId */
+  if(!candidate&&_currentEmailMsgId){
+    candidate=pipeline.find(c=>(c.st.emails||[]).some(e=>e.id===_currentEmailMsgId));
+  }
+  if(!candidate){toast('Could not find candidate for this email');return;}
+  closeEmailDetail();
+  setTimeout(()=>openWorkspace(candidate.excelRow),150);
 }
 
 /* ===================== ATTACHMENT ASSIGNMENT =====================
@@ -8607,7 +9180,7 @@ async function pollInboxForCandidateEmails(){
           delete c.st.awaitingReason;
         }
         c.st.log=(c.st.log||[]);
-        c.st.log.unshift({t:stamp(),x:'📎 Résumé detected in inbound email — advancing to Send screen invite'});
+        c.st.log.push({t:stamp(),x:'📎 Résumé detected in inbound email — advancing to Send screen invite'});
       }
       changedRows.set(c.excelRow,c);
     }
@@ -8632,7 +9205,29 @@ async function pollInboxForCandidateEmails(){
            400s on open". Match on recipient + subject within a 15-minute window. */
         const _subjN=(m.subject||'').trim().toLowerCase();
         const _sentMs=new Date(m.sentDateTime||0).getTime();
-        const _li=c.st.emails.findIndex(e=>e&&e.direction==='out'&&typeof e.id==='string'&&(e.id.indexOf('local-')===0||e.id.indexOf('mass-')===0)&&((e.to||'').toLowerCase()===matchedAddr)&&((e.subject||'').trim().toLowerCase()===_subjN)&&Math.abs(new Date(e.received||0).getTime()-_sentMs)<15*60000);
+        /* Match: recipient + subject overlap + 30-min window. Same reasoning as the load-time
+           backfill (see comment there): prefix match is more forgiving than exact-equality, and
+           30-min absorbs Graph timestamp lag. */
+        const _li=c.st.emails.findIndex(e=>{
+          if(!e||e.direction!=='out'||typeof e.id!=='string')return false;
+          if(e.id.indexOf('local-')!==0&&e.id.indexOf('mass-')!==0)return false;
+          if((e.to||'').toLowerCase()!==matchedAddr)return false;
+          if(Math.abs(new Date(e.received||0).getTime()-_sentMs)>=30*60000)return false;
+          const eSubj=(e.subject||'').trim().toLowerCase();
+          if(eSubj===_subjN)return true;
+          if(!eSubj||!_subjN)return false;
+          if(eSubj.length>=20&&_subjN.indexOf(eSubj.slice(0,20))===0)return true;
+          if(_subjN.length>=20&&eSubj.indexOf(_subjN.slice(0,20))===0)return true;
+          if(eSubj.length>=30&&_subjN.indexOf(eSubj.slice(0,30))>=0)return true;
+          if(_subjN.length>=30&&eSubj.indexOf(_subjN.slice(0,30))>=0)return true;
+          /* Tail overlap: longest common suffix must be 40+ chars AND 60%+ of shorter subject. */
+          let commonTail=0;
+          const maxCheck=Math.min(eSubj.length,_subjN.length);
+          while(commonTail<maxCheck&&eSubj[eSubj.length-1-commonTail]===_subjN[_subjN.length-1-commonTail])commonTail++;
+          const minLen=Math.min(eSubj.length,_subjN.length);
+          if(commonTail>=40&&commonTail/minLen>=0.6)return true;
+          return false;
+        });
         /* Preserve mass-blast metadata: the synthetic 'mass-' entry carries blastId+blastSubject
            that the inbox needs to collapse the blast into one anchor row. Extract before splicing. */
         let _preservedBlastId=null,_preservedBlastSubject='';
@@ -9699,6 +10294,11 @@ async function sendMassEmail(){
         c.st.emails=c.st.emails||[];
         c.st.emails.unshift({id:'mass-'+Date.now()+'-'+sent,direction:'out',subject:subj.slice(0,140),preview:body.slice(0,200),to:c.email,received:new Date().toISOString(),seen:true,blastId:blastId,blastSubject:subj.slice(0,80)});
         if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
+        /* Push a log entry so the candidate's idle-days counter resets. Without this, the mass-emailed
+           candidates stay in the nudge strip until their NEXT reply, because computeIdleDays reads
+           the log tail. */
+        c.st.log=c.st.log||[];
+        c.st.log.push({t:stamp(),x:'✉ Mass email sent: '+(subj||'').slice(0,60)});
         patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(e=>{});
       }catch(e){
         failed++;recipientRecord.error=e.message;if(!firstError)firstError=e.message;
@@ -9869,6 +10469,7 @@ let settingsSection='workflow';
 function setSettingsSection(k){settingsSection=k;renderSettings();}
 
 const SETTINGS_SECTIONS=[
+  {key:'preferences',label:'Settings preferences', icon:'🎛'},
   {key:'workflow',  label:'Workflow & stages',    icon:'⚐'},
   {key:'sequence',  label:'Sequence engine',      icon:'⚡'},
   {key:'templates', label:'Email templates',      icon:'✉'},
@@ -9977,6 +10578,7 @@ function renderSettings(){
     const lbl=(SETTINGS_SECTIONS.find(s=>s.key===settingsSection)||{}).label||'';
     body=_renderLockwall(lbl);
   }
+  else if(settingsSection==='preferences') body=renderSettingsPreferences();
   else if(settingsSection==='workflow') body=renderSettingsWorkflow();
   else if(settingsSection==='sequence') body=renderSettingsSequence();
   else if(settingsSection==='templates') body=renderSettingsTemplates();
@@ -10780,6 +11382,23 @@ function renderSettingsVerification(){
     </div>
   </div>
 
+  <div class="wscard"><h3>⚖ Discrepancy scoring (verification vs application)</h3>
+    <p class="set-help">When you record what an employer actually confirmed, the portal cross-checks against what the candidate wrote on their application. Each mismatch deducts from the configured score dimension so lying candidates aren't rewarded. Every penalty is editable — set any to 0 to skip that check.</p>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px">
+      <label class="set-field" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="cfg_rc_enabled" ${(SETTINGS.config&&SETTINGS.config.reconcile&&SETTINGS.config.reconcile.enabled)!==false?'checked':''} style="width:auto"> <span>Enable discrepancy scoring</span></label>
+      <label class="set-field"><span>Deduct from</span><select id="cfg_rc_target">${sel((SETTINGS.config&&SETTINGS.config.reconcile&&SETTINGS.config.reconcile.affectsScore)||'rel',[['rel','Reliability (rel)'],['com','Communication (com)'],['jud','Judgment (jud)'],['doc','Documentation (doc)'],['ref','References (ref)'],['ten','Tenure (ten)'],['exp','Experience (exp)']])}</select></label>
+      <label class="set-field"><span>Date tolerance (± years)</span><input type="number" min="0" max="5" id="cfg_rc_slack" value="${(SETTINGS.config&&SETTINGS.config.reconcile&&SETTINGS.config.reconcile.dateSlackYears!=null)?SETTINGS.config.reconcile.dateSlackYears:0}"></label>
+      <div></div>
+      <label class="set-field"><span>Penalty: title mismatch</span><input type="number" min="0" max="50" id="cfg_rc_p_title" value="${((SETTINGS.config&&SETTINGS.config.reconcile&&SETTINGS.config.reconcile.penalties)||{}).titleMismatch!=null?SETTINGS.config.reconcile.penalties.titleMismatch:5}"></label>
+      <label class="set-field"><span>Penalty: date mismatch</span><input type="number" min="0" max="50" id="cfg_rc_p_date" value="${((SETTINGS.config&&SETTINGS.config.reconcile&&SETTINGS.config.reconcile.penalties)||{}).dateMismatch!=null?SETTINGS.config.reconcile.penalties.dateMismatch:8}"></label>
+      <label class="set-field"><span>Penalty: longest-tenure lie</span><input type="number" min="0" max="50" id="cfg_rc_p_longest" value="${((SETTINGS.config&&SETTINGS.config.reconcile&&SETTINGS.config.reconcile.penalties)||{}).longestTenureLie!=null?SETTINGS.config.reconcile.penalties.longestTenureLie:15}"></label>
+      <label class="set-field"><span>Penalty: no proper notice</span><input type="number" min="0" max="50" id="cfg_rc_p_notice" value="${((SETTINGS.config&&SETTINGS.config.reconcile&&SETTINGS.config.reconcile.penalties)||{}).noticeNotGiven!=null?SETTINGS.config.reconcile.penalties.noticeNotGiven:5}"></label>
+      <label class="set-field"><span>Penalty: not eligible for rehire</span><input type="number" min="0" max="50" id="cfg_rc_p_rehire" value="${((SETTINGS.config&&SETTINGS.config.reconcile&&SETTINGS.config.reconcile.penalties)||{}).noRehire!=null?SETTINGS.config.reconcile.penalties.noRehire:10}"></label>
+      <label class="set-field"><span>Penalty: reason mismatch</span><input type="number" min="0" max="50" id="cfg_rc_p_reason" value="${((SETTINGS.config&&SETTINGS.config.reconcile&&SETTINGS.config.reconcile.penalties)||{}).reasonMismatch!=null?SETTINGS.config.reconcile.penalties.reasonMismatch:5}"></label>
+    </div>
+    <p class="set-help" style="margin-top:8px;font-size:11px">Discrepancies are recorded on each candidate's workspace with the specific claim vs verified value. Total penalty deducts from the final Q or R score depending on which dimension you selected above.</p>
+  </div>
+
   <div class="set-row" style="margin-top:14px"><div style="flex:1"></div><button class="btn-primary bg-grn" onclick="saveVerification()">Save verification settings</button></div>`;
 }
 async function saveVerification(){
@@ -10797,6 +11416,19 @@ async function saveVerification(){
   const t1=get('cfg_vr_t1b');v.t1BudgetH=(t1&&t1.value!=='')?parseInt(t1.value,10):null;
   v.t2BudgetH=num('cfg_vr_t2b',24);
   v.t3BudgetH=num('cfg_vr_t3b',12);
+  /* Persist reconciliation config */
+  SETTINGS.config.reconcile=SETTINGS.config.reconcile||{};
+  const rc=SETTINGS.config.reconcile;
+  rc.enabled=get('cfg_rc_enabled').checked;
+  rc.affectsScore=get('cfg_rc_target').value;
+  rc.dateSlackYears=num('cfg_rc_slack',0);
+  rc.penalties=rc.penalties||{};
+  rc.penalties.titleMismatch=num('cfg_rc_p_title',5);
+  rc.penalties.dateMismatch=num('cfg_rc_p_date',8);
+  rc.penalties.longestTenureLie=num('cfg_rc_p_longest',15);
+  rc.penalties.noticeNotGiven=num('cfg_rc_p_notice',5);
+  rc.penalties.noRehire=num('cfg_rc_p_rehire',10);
+  rc.penalties.reasonMismatch=num('cfg_rc_p_reason',5);
   await saveSettings();toast('✓ Verification settings saved');renderWorkspace&&(typeof render==='function'&&render());
 }
 
@@ -11896,6 +12528,108 @@ function renderSettingsData(){
     <textarea id="import-json" class="tpl-body-input" placeholder='{"templates":{...},"scripts":{...},"config":{...},"flow":{...}}' style="min-height:160px"></textarea>
     <div class="set-row" style="margin-top:10px"><div style="flex:1"></div><button class="btn-primary" style="background:var(--red);color:#fff" onclick="importSettings()">⚠ Overwrite with this JSON</button></div>
   </div>`;
+}
+
+/* #3 — Settings preferences (meta-settings that control how the settings UI itself behaves).
+   Nothing here affects hiring — these knobs are about YOUR settings-editing experience. */
+function renderSettingsPreferences(){
+  const p=_prefsMeta();
+  const history=Array.isArray(SETTINGS._undoHistory)?SETTINGS._undoHistory:[];
+  const historyRows=history.slice(0,15).map((h,i)=>{
+    const when=new Date(h.at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--border-soft);font-size:12px">
+      <span style="color:var(--soft);min-width:110px">${esc(when)}</span>
+      <span style="flex:1;color:var(--ink)">${esc(h.reason)}</span>
+      <button class="btn-sm bg-cream" style="cursor:pointer" onclick="_restoreUndoSnapshot(${i})">\u2190 restore this state</button>
+    </div>`;
+  }).join('');
+  return `
+  <div class="wscard"><h3>\U0001F4A1 Inline help visibility</h3>
+    <p class="set-help">Controls whether short explanation text appears below each setting.</p>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+      <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid ${p.helpVisibility==='all'?'var(--sky-deep)':'var(--border)'};border-radius:8px;cursor:pointer;font-size:13px">
+        <input type="radio" name="prf-help" value="all" ${p.helpVisibility==='all'?'checked':''} onchange="_prefsSetHelp('all')" style="accent-color:var(--sky-deep)">
+        <div><b>Show for all settings</b><br><span style="font-size:11.5px;color:var(--soft)">Every field gets a description. Useful when learning the app.</span></div>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid ${p.helpVisibility==='non-obvious'?'var(--sky-deep)':'var(--border)'};border-radius:8px;cursor:pointer;font-size:13px">
+        <input type="radio" name="prf-help" value="non-obvious" ${p.helpVisibility==='non-obvious'?'checked':''} onchange="_prefsSetHelp('non-obvious')" style="accent-color:var(--sky-deep)">
+        <div><b>Only for non-obvious ones</b> <span style="font-size:11px;color:var(--soft);font-style:italic">(default)</span><br><span style="font-size:11.5px;color:var(--soft)">Descriptions only where labels aren't self-explanatory.</span></div>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid ${p.helpVisibility==='hidden'?'var(--sky-deep)':'var(--border)'};border-radius:8px;cursor:pointer;font-size:13px">
+        <input type="radio" name="prf-help" value="hidden" ${p.helpVisibility==='hidden'?'checked':''} onchange="_prefsSetHelp('hidden')" style="accent-color:var(--sky-deep)">
+        <div><b>Hide all</b><br><span style="font-size:11.5px;color:var(--soft)">Cleanest layout. A "?" icon expands any description on click.</span></div>
+      </label>
+    </div>
+  </div>
+
+  <div class="wscard"><h3>\U0001F4E6 Save preview</h3>
+    <p class="set-help">Controls what happens when you save a settings change.</p>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+      <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid ${p.savePreview==='diff'?'var(--sky-deep)':'var(--border)'};border-radius:8px;cursor:pointer;font-size:13px">
+        <input type="radio" name="prf-save" value="diff" ${p.savePreview==='diff'?'checked':''} onchange="_prefsSetSave('diff')" style="accent-color:var(--sky-deep)">
+        <div><b>Show a diff before saving</b> <span style="font-size:11px;color:var(--soft);font-style:italic">(default)</span><br><span style="font-size:11.5px;color:var(--soft)">See exactly what changed \u2014 old value vs new \u2014 and confirm before applying.</span></div>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid ${p.savePreview==='toast'?'var(--sky-deep)':'var(--border)'};border-radius:8px;cursor:pointer;font-size:13px">
+        <input type="radio" name="prf-save" value="toast" ${p.savePreview==='toast'?'checked':''} onchange="_prefsSetSave('toast')" style="accent-color:var(--sky-deep)">
+        <div><b>Just a toast</b><br><span style="font-size:11.5px;color:var(--soft)">A quick "\u2713 saved" notification, no confirmation modal.</span></div>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid ${p.savePreview==='silent'?'var(--sky-deep)':'var(--border)'};border-radius:8px;cursor:pointer;font-size:13px">
+        <input type="radio" name="prf-save" value="silent" ${p.savePreview==='silent'?'checked':''} onchange="_prefsSetSave('silent')" style="accent-color:var(--sky-deep)">
+        <div><b>Silent</b><br><span style="font-size:11.5px;color:var(--soft)">Save without any visible feedback (autosave indicator still updates).</span></div>
+      </label>
+    </div>
+  </div>
+
+  <div class="wscard"><h3>\u21B6 Settings history</h3>
+    <p class="set-help">Every save creates a snapshot. Click "restore this state" to step back to an earlier configuration. The current state is snapshotted too, so restoring is reversible \u2014 you can restore back to now.</p>
+    <label class="set-field" style="max-width:280px;margin-bottom:12px"><span>How many snapshots to keep</span>
+      <input type="number" min="1" max="50" value="${p.undoHistoryDepth}" onchange="_prefsSetHistoryDepth(parseInt(this.value,10)||10)">
+    </label>
+    ${history.length?historyRows:'<div style="font-size:12px;color:var(--soft);font-style:italic;padding:10px 0">No snapshots yet. Save a settings change to start tracking history.</div>'}
+  </div>`;
+}
+function _prefsSetHelp(v){
+  SETTINGS.config=SETTINGS.config||{};
+  SETTINGS.config.uiPrefs=SETTINGS.config.uiPrefs||{};
+  SETTINGS.config.uiPrefs.helpVisibility=v;
+  markSettingsDirty();
+  renderSettings();
+}
+function _prefsSetSave(v){
+  SETTINGS.config=SETTINGS.config||{};
+  SETTINGS.config.uiPrefs=SETTINGS.config.uiPrefs||{};
+  SETTINGS.config.uiPrefs.savePreview=v;
+  markSettingsDirty();
+  renderSettings();
+}
+function _prefsSetHistoryDepth(n){
+  SETTINGS.config=SETTINGS.config||{};
+  SETTINGS.config.uiPrefs=SETTINGS.config.uiPrefs||{};
+  SETTINGS.config.uiPrefs.undoHistoryDepth=Math.max(1,Math.min(50,n||10));
+  markSettingsDirty();
+}
+/* Restore a snapshot from _undoHistory. Snapshots the CURRENT state first so restoring is reversible. */
+async function _restoreUndoSnapshot(idx){
+  const history=SETTINGS._undoHistory||[];
+  const snap=history[idx];
+  if(!snap){toast('Snapshot not found');return;}
+  const when=new Date(snap.at).toLocaleString();
+  if(!confirm('Restore settings to the state from '+when+'?\n\n('+ (snap.reason||'save') +')\n\nYour current state will be saved as a new snapshot so you can restore back if needed.'))return;
+  /* Snapshot the current state first — restoring becomes reversible. */
+  _pushUndoSnapshot('pre-restore (before restoring '+when+')');
+  /* Apply the snapshot fields */
+  if(snap.settings){
+    if(snap.settings.config)SETTINGS.config=_deepClone(snap.settings.config);
+    if(snap.settings.sequence)SETTINGS.sequence=_deepClone(snap.settings.sequence);
+    if(snap.settings.templates)SETTINGS.templates=_deepClone(snap.settings.templates);
+    if(snap.settings.scripts)SETTINGS.scripts=_deepClone(snap.settings.scripts);
+    if(snap.settings.flow)SETTINGS.flow=_deepClone(snap.settings.flow);
+    if(snap.settings.scoringWeights)SETTINGS.scoringWeights=_deepClone(snap.settings.scoringWeights);
+  }
+  await _saveSettingsInternal();
+  window._settingsBaseline=_deepClone(SETTINGS);
+  toast('\u2713 Restored');
+  renderSettings();
 }
 
 function exportSettings(){
