@@ -4767,7 +4767,8 @@ function rowHtml(c){
     if(custRefs>0)giftPill+='<span class="giftpill customer" title="'+custRefs+' customer referral'+(custRefs===1?'':'s')+'">💰 '+custRefs+'</span>';
   }
   const idline='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">'+band+ftPill+certs+dl+pills+giftPill+'</div>';
-  const sub='<div class="dm-tag" style="margin-top:5px">'+(c.source?esc(c.source)+' · ':'')+'Q <span>'+(sc.Q==null?'—':sc.Q)+'</span> · R <span>'+(sc.R==null?'—':sc.R)+'</span></div>';
+  const _srcTag=candidateSourceLabel(c);
+  const sub='<div class="dm-tag" style="margin-top:5px">'+(_srcTag&&_srcTag!=='—'?esc(_srcTag)+' · ':'')+'Q <span>'+(sc.Q==null?'—':sc.Q)+'</span> · R <span>'+(sc.R==null?'—':sc.R)+'</span></div>';
   const sci=a.info.color;
   const stageBadge='<span class="sbadge" style="background:'+sci[0]+';color:'+sci[1]+';border-color:'+sci[1]+'33">'+esc(stageLabel(c.stage))+'</span>';
   let stageCell=stageBadge;
@@ -6239,7 +6240,7 @@ function questionsHubSideRail(c){
     <div class="kvrow"><span class="lbl">Expertise</span><span class="val" style="text-align:right;font-size:12px">${esc(exp)}</span></div>
     <div class="kvrow"><span class="lbl">Certs</span><span class="val" style="text-align:right;font-size:12px">${esc(certs)}</span></div>
     <div class="kvrow"><span class="lbl">Address</span><span class="val" style="text-align:right;font-size:11.5px">${esc(addr)}</span></div>
-    <div class="kvrow"><span class="lbl">Source</span><span class="val">${esc(c.source||'—')}</span></div>
+    <div class="kvrow"><span class="lbl">Source</span><span class="val">${esc(candidateSourceLabel(c))}${c.st&&c.st.sourceCode?' <span style="font-family:ui-monospace,SF Mono,Consolas,monospace;font-size:10px;color:var(--soft);background:var(--cream);padding:1px 5px;border-radius:3px;margin-left:4px">'+esc(c.st.sourceCode)+'</span>':''}</span></div>
     <button class="btn-sec bg-cream" style="margin-top:8px;padding:6px 12px;font-size:12px;width:100%" onclick="setFocusedHub('application')">✎ Edit application data</button>
   </div>`;
 
@@ -10478,6 +10479,7 @@ const SETTINGS_SECTIONS=[
   {key:'scoring',   label:'Scoring engine',       icon:'⚖'},
   {key:'verify',    label:'Verification & refs',  icon:'🧾'},
   {key:'referrals', label:'Referral program',     icon:'🎁'},
+  {key:'sourcelinks',label:'Source links & tracking', icon:'🔗'},
   {key:'calendars', label:'Cal.com booking URLs', icon:'📅'},
   {key:'bgchecks',  label:'Background registries',icon:'🛡'},
   {key:'yardstik',  label:'Yardstik (background checks)', icon:'🪪'},
@@ -10587,6 +10589,7 @@ function renderSettings(){
   else if(settingsSection==='scoring') body=renderSettingsScoring();
   else if(settingsSection==='verify') body=renderSettingsVerification();
   else if(settingsSection==='referrals') body=renderSettingsReferrals();
+  else if(settingsSection==='sourcelinks') body=renderSettingsSourceLinks();
   else if(settingsSection==='calendars') body=renderSettingsCalendars();
   else if(settingsSection==='bgchecks') body=renderSettingsBgChecks();
   else if(settingsSection==='yardstik') body=renderSettingsYardstik();
@@ -11699,6 +11702,214 @@ async function backfillRefCodes(){
   }
   toast('✓ Backfilled '+done+' refCodes'+(failed?' ('+failed+' failed)':''));
   if(result)result.innerHTML='✓ <b>'+done+'</b> refCodes generated.'+(failed?' '+failed+' failed — check console.':'');
+}
+
+/* ============================================================================
+   SOURCE LINKS & TRACKING
+   Named tracking codes for the application form. Each link is a unique short code
+   appended as ?src=CODE. Applications carry the code so we know which platform/method
+   the candidate came in through, funnel through the pipeline, and hit conversion goals.
+
+   Data model:
+     SETTINGS.config.sourceLinks = [
+       { id, code, platform, method, notes, createdAt, active }
+     ]
+   Codes are 6-char alphanum, unambiguous alphabet (skip 0/O, 1/I/l). Platform is
+   the coarse bucket (Indeed, Facebook, Craigslist); method is the sub-tactic
+   (sponsored post, community group, gig board). Both freetext — no rigid taxonomy.
+
+   The candidate's captured code lives on c.st.sourceCode. Read once, never edited.
+   ============================================================================ */
+const SOURCE_LINK_ALPHABET='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+function _sourceLinkId(){return 'src-'+Math.random().toString(36).slice(2,10);}
+function _sourceLinkCode(existing){
+  /* 6-char alphanum, avoiding confusables. Retry if collides with an existing code. */
+  const used=new Set((existing||[]).map(s=>s.code));
+  for(let tries=0;tries<30;tries++){
+    let c='';for(let i=0;i<6;i++)c+=SOURCE_LINK_ALPHABET[Math.floor(Math.random()*SOURCE_LINK_ALPHABET.length)];
+    if(!used.has(c))return c;
+  }
+  return 'X'+Date.now().toString(36).slice(-5).toUpperCase();  /* fallback — collision-proof but ugly */
+}
+/* Build the full apply URL for a source-link, honoring the same normalization as referral links. */
+function _sourceLinkUrl(code){
+  const base=(typeof _applyFormUrl==='function')?_applyFormUrl():'https://apply.solurahomecare.com/Solura_Application_Form.html';
+  return base+(base.indexOf('?')>=0?'&':'?')+'src='+encodeURIComponent(code);
+}
+/* Look up a source link by code. Returns {platform, method} label pair, or null. */
+function _lookupSourceLink(code){
+  if(!code)return null;
+  const links=(SETTINGS&&SETTINGS.config&&SETTINGS.config.sourceLinks)||[];
+  return links.find(s=>s.code===code)||null;
+}
+/* Human-readable label for a candidate's captured source code (falls back to the coarse
+   c.source column if no matching source-link is on record). */
+function candidateSourceLabel(c){
+  const code=c&&c.st&&c.st.sourceCode;
+  const link=code?_lookupSourceLink(code):null;
+  if(link)return (link.platform||'?')+(link.method?(' / '+link.method):'');
+  return c&&c.source||'—';
+}
+/* Aggregate applied/screened/hired counts by source-link code. Returns:
+   [{link, applied, screened, hired, conversionScreenPct, conversionHirePct}] sorted by applied desc. */
+function _sourceLinkStats(){
+  const links=(SETTINGS&&SETTINGS.config&&SETTINGS.config.sourceLinks)||[];
+  const byCode={};
+  links.forEach(l=>{byCode[l.code]={link:l,applied:0,screened:0,hired:0};});
+  /* Also bucket candidates with a code that doesn't map (deleted link) */
+  const orphan={link:null,applied:0,screened:0,hired:0};
+  const nocode={link:null,applied:0,screened:0,hired:0};
+  const SCREENED_STAGES=new Set(['Screen booked','Ask references','Verify employers','References','Interview invite','Interview booked','Offer','Onboarding','Onboarding booked','Hired']);
+  (pipeline||[]).forEach(c=>{
+    const code=c&&c.st&&c.st.sourceCode;
+    let bucket;
+    if(!code)bucket=nocode;
+    else if(!byCode[code])bucket=orphan;
+    else bucket=byCode[code];
+    bucket.applied++;
+    if(SCREENED_STAGES.has(c.stage))bucket.screened++;
+    if(c.stage==='Hired')bucket.hired++;
+  });
+  const rows=Object.values(byCode).concat(orphan.applied?[orphan]:[]).concat(nocode.applied?[nocode]:[]);
+  return rows
+    .filter(r=>r.applied>0||(r.link&&r.link.active))
+    .map(r=>Object.assign(r,{
+      conversionScreenPct: r.applied?Math.round(r.screened*100/r.applied):0,
+      conversionHirePct: r.applied?Math.round(r.hired*100/r.applied):0
+    }))
+    .sort((a,b)=>b.applied-a.applied);
+}
+
+function renderSettingsSourceLinks(){
+  const links=(SETTINGS.config&&SETTINGS.config.sourceLinks)||[];
+  /* Group by platform so the list stays organized as you add more. Sort platforms alphabetically,
+     methods within each also alphabetically. */
+  const byPlatform={};
+  links.forEach(l=>{const p=l.platform||'(unassigned)';(byPlatform[p]=byPlatform[p]||[]).push(l);});
+  Object.keys(byPlatform).forEach(p=>byPlatform[p].sort((a,b)=>(a.method||'').localeCompare(b.method||'')));
+  const stats=_sourceLinkStats();
+  const statsByCode={};stats.forEach(s=>{if(s.link)statsByCode[s.link.code]=s;});
+
+  const platformSections=Object.keys(byPlatform).sort().map(platform=>{
+    const rows=byPlatform[platform].map(l=>{
+      const s=statsByCode[l.code]||{applied:0,screened:0,hired:0,conversionScreenPct:0,conversionHirePct:0};
+      const url=_sourceLinkUrl(l.code);
+      const inactive=l.active===false;
+      return `<div style="display:grid;grid-template-columns:1fr 90px 90px 90px auto;gap:10px;padding:9px 12px;border-top:1px solid var(--border-soft);align-items:center;font-size:12.5px;${inactive?'opacity:.5':''}">
+        <div>
+          <div style="font-weight:600;color:var(--ink)">${esc(l.method||'—')}</div>
+          <div style="font-size:10.5px;color:var(--soft);margin-top:2px">code <span style="font-family:ui-monospace,SF Mono,Consolas,monospace;background:var(--cream);padding:1px 5px;border-radius:3px">${esc(l.code)}</span>${l.notes?' \u00b7 '+esc(l.notes):''}${inactive?' \u00b7 <b>inactive</b>':''}</div>
+        </div>
+        <div style="text-align:center"><b>${s.applied}</b><div style="font-size:10px;color:var(--soft)">applied</div></div>
+        <div style="text-align:center"><b>${s.screened}</b><div style="font-size:10px;color:var(--soft)">screened ${s.applied?'('+s.conversionScreenPct+'%)':''}</div></div>
+        <div style="text-align:center"><b>${s.hired}</b><div style="font-size:10px;color:var(--soft)">hired ${s.applied?'('+s.conversionHirePct+'%)':''}</div></div>
+        <div style="display:flex;gap:5px">
+          <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcCopy('${esc(l.code)}',this)" title="Copy the tracking URL">\u{1F517} copy</button>
+          <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcEdit('${esc(l.id)}')">edit</button>
+          <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcToggleActive('${esc(l.id)}')" title="${inactive?'Reactivate':'Deactivate'}">${inactive?'\u25B6':'\u23F8'}</button>
+          <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;font-size:10.5px" onclick="_srcDelete('${esc(l.id)}')">\u00d7</button>
+        </div>
+      </div>`;
+    }).join('');
+    const platformTotal=byPlatform[platform].reduce((s,l)=>s+((statsByCode[l.code]||{}).applied||0),0);
+    return `<div class="wscard" style="padding:0;overflow:hidden">
+      <div style="padding:12px 16px;background:linear-gradient(180deg,#FBF7EE,#fff);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+        <span style="font-size:15px">\u{1F517}</span>
+        <b style="flex:1">${esc(platform)}</b>
+        <span style="font-size:11px;color:var(--soft)">${byPlatform[platform].length} link${byPlatform[platform].length===1?'':'s'} \u00b7 ${platformTotal} applied</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 90px 90px 90px auto;gap:10px;padding:6px 12px;font-size:10px;color:var(--soft);font-weight:700;text-transform:uppercase;letter-spacing:.05em">
+        <div>Method</div><div style="text-align:center">Applied</div><div style="text-align:center">Screened</div><div style="text-align:center">Hired</div><div></div>
+      </div>
+      ${rows}
+    </div>`;
+  }).join('');
+
+  /* Orphan / no-code summary at the bottom */
+  const orphanRow=stats.find(s=>!s.link&&s.applied>0);
+  const orphanBlock=orphan_or_nocode_note(stats);
+
+  return `<h2 class="set-h2">Source links &amp; tracking</h2>
+  <p class="set-sub">Named tracking codes for the application form. Each link is a unique URL that identifies where the candidate came from. Create one per posting or campaign, and the funnel numbers reveal what actually works.</p>
+
+  <div class="wscard">
+    <h3>Create a new link</h3>
+    <p class="set-help">Platform is the site (Indeed, Facebook, Craigslist...). Method is the specific way you used it (sponsored post, community group, resume search...). Notes are for you \u2014 e.g. "posted 7/1" or "targeting Cleveland Heights zip".</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;margin-top:10px">
+      <label class="set-field"><span>Platform</span><input type="text" id="src-new-platform" list="src-platform-list" placeholder="Indeed" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px">
+        <datalist id="src-platform-list">${Array.from(new Set(links.map(l=>l.platform).filter(Boolean))).sort().map(p=>`<option value="${esc(p)}">`).join('')}</datalist>
+      </label>
+      <label class="set-field"><span>Method</span><input type="text" id="src-new-method" placeholder="Sponsored post" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px"></label>
+      <label class="set-field"><span>Notes <span style="color:var(--soft);font-size:10px">(optional)</span></span><input type="text" id="src-new-notes" placeholder="Cleveland targeting" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px"></label>
+      <div style="align-self:end"><button class="btn-primary bg-grn" style="padding:8px 16px;height:38px" onclick="_srcCreate()">+ Create link</button></div>
+    </div>
+  </div>
+
+  ${links.length?platformSections:'<div class="wscard" style="text-align:center;padding:32px 20px"><div style="font-size:32px;margin-bottom:8px;opacity:.5">\u{1F517}</div><div style="font-size:13px;color:var(--soft)">No source links yet. Create one above to start tracking where applications come from.</div></div>'}
+
+  ${orphanBlock}
+  `;
+}
+/* Note about applied candidates whose src code doesn't match any link on record. Usually means
+   a link was deleted after receiving applications. */
+function orphan_or_nocode_note(stats){
+  const orphan=stats.find(s=>!s.link&&s.applied>0);
+  if(!orphan)return '';
+  return `<div class="wscard" style="border-color:#DECF9F;background:#FBF7EE">
+    <h3 style="color:#8B6500">\u26A0 Orphaned tracking codes</h3>
+    <p class="set-help" style="color:#8B6500">${orphan.applied} candidate${orphan.applied===1?'':'s'} came in with a tracking code that no longer exists in your source links list (deleted?). Their data still shows the raw code, but funnel breakdown by platform won't include them.</p>
+  </div>`;
+}
+async function _srcCreate(){
+  const platform=(document.getElementById('src-new-platform')||{}).value||'';
+  const method=(document.getElementById('src-new-method')||{}).value||'';
+  const notes=(document.getElementById('src-new-notes')||{}).value||'';
+  if(!platform.trim()||!method.trim()){toast('Platform and method required');return;}
+  SETTINGS.config=SETTINGS.config||{};
+  SETTINGS.config.sourceLinks=SETTINGS.config.sourceLinks||[];
+  const code=_sourceLinkCode(SETTINGS.config.sourceLinks);
+  SETTINGS.config.sourceLinks.push({
+    id:_sourceLinkId(),code:code,
+    platform:platform.trim(),method:method.trim(),notes:notes.trim(),
+    createdAt:new Date().toISOString(),active:true
+  });
+  markSettingsDirty();
+  renderSettings();
+  toast('\u2713 Created \u2014 code '+code);
+  /* Auto-copy the URL of the newly created link so it's ready to paste */
+  try{await navigator.clipboard.writeText(_sourceLinkUrl(code));toast('\u2713 URL copied to clipboard');}catch(e){}
+}
+async function _srcCopy(code,btn){
+  try{
+    await navigator.clipboard.writeText(_sourceLinkUrl(code));
+    if(btn){const orig=btn.innerHTML;btn.innerHTML='\u2713 copied';setTimeout(()=>{btn.innerHTML=orig;},1200);}
+    else toast('\u2713 URL copied');
+  }catch(e){toast('Copy failed: '+e.message);}
+}
+function _srcToggleActive(id){
+  const l=(SETTINGS.config.sourceLinks||[]).find(x=>x.id===id);
+  if(!l)return;
+  l.active=l.active===false; /* toggle: false → true, everything else → false */
+  markSettingsDirty();renderSettings();
+}
+function _srcDelete(id){
+  if(!confirm('Delete this source link? Existing candidates with this code will still show it as raw data.'))return;
+  SETTINGS.config.sourceLinks=(SETTINGS.config.sourceLinks||[]).filter(x=>x.id!==id);
+  markSettingsDirty();renderSettings();
+}
+function _srcEdit(id){
+  const l=(SETTINGS.config.sourceLinks||[]).find(x=>x.id===id);
+  if(!l)return;
+  const newPlatform=prompt('Platform:',l.platform||'');
+  if(newPlatform===null)return;
+  const newMethod=prompt('Method:',l.method||'');
+  if(newMethod===null)return;
+  const newNotes=prompt('Notes:',l.notes||'');
+  if(newNotes===null)return;
+  l.platform=(newPlatform||'').trim();
+  l.method=(newMethod||'').trim();
+  l.notes=(newNotes||'').trim();
+  markSettingsDirty();renderSettings();
 }
 
 /* ----- CALENDARS section ----- */
