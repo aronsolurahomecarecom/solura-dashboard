@@ -2735,20 +2735,11 @@ async function loadData(){
       c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='cert_question');
       touched=true;
     }
-    /* Case (2e): manualAwaiting is set but the candidate has advanced past 'Screen invite'.
-       They can't legitimately still be parked for Applied-stage reasons; the parking is stale
-       from earlier in the pipeline that they've since progressed past. Release. */
-    if(c.st.manualAwaiting&&stagePastScreen&&(!c.st.awaitingItems||c.st.awaitingItems.length===0)){
-      delete c.st.manualAwaiting;
-      delete c.st.awaitingReason;
-      delete c.st.awaitingUntil;
-      delete c.st.awaitingSince;
-      delete c.st.awaitingItemsInitialCount;
-      delete c.st.lastAwaitingReview;
-      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-healed — advanced past screen invite, released stale parking'});
-      touched=true;
-      healed++;
-    }
+    /* Case (2e) REMOVED: previously auto-released any manualAwaiting candidate past 'Screen invite'.
+       That was wrong — parking is legitimate at ANY stage (e.g. "she said give her two weeks" while
+       at Interview invite). The check released legitimately-parked candidates in bulk. DO NOT restore
+       without a strong signal that the specific parking is stale (like case 2d which drains only
+       cert_question items, keyed to a specific workflow context). */
     /* Case (1b): legacy reference-parking with no awaitingItems tracking — release if reason
        mentions references and refs are now on file. */
     const reasonMentionsRefs=c.st.awaitingReason&&/reference|refs/i.test(c.st.awaitingReason);
@@ -12730,7 +12721,25 @@ async function forceSaveAndVerify(){
 
 /* ----- DATA section (export/import) ----- */
 function renderSettingsData(){
-  return `<div class="wscard"><h3>Export settings</h3>
+  /* Recovery card — count affected candidates and render a repair action. */
+  const AUTOHEAL_LOG_MARK='Auto-healed \u2014 advanced past screen invite, released stale parking';
+  const affected=(pipeline||[]).filter(c=>
+    Array.isArray(c.st&&c.st.log)&&
+    c.st.log.some(l=>l&&typeof l.x==='string'&&l.x.indexOf(AUTOHEAL_LOG_MARK)>=0) &&
+    !c.st.manualAwaiting  /* only offer to restore ones currently NOT parked */
+  );
+  const recoveryBlock=affected.length?`<div class="wscard" style="border-color:#F0C4B0;background:linear-gradient(180deg,#FEF6EE,#fff)">
+    <h3 style="color:#8B3D1F">\u26A0 Recovery: restore erroneously auto-released candidates</h3>
+    <p class="set-help" style="color:#8B3D1F">A bug in the 7/1 build auto-released manualAwaiting candidates who were past 'Screen invite'. That was wrong \u2014 parking is legitimate at any stage. <b>${affected.length} candidate${affected.length===1?'':'s'} affected.</b> Clicking below will re-park them and log the recovery action. Original parking reasons weren't preserved, so each will be re-parked with a generic reason \u2014 review the candidate log to remember why they were originally parked.</p>
+    <details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;color:#8B3D1F">Show affected candidates (${affected.length})</summary>
+      <div style="max-height:240px;overflow-y:auto;margin-top:8px;padding:8px 10px;background:#fff;border:1px solid #F0C4B0;border-radius:6px">
+        ${affected.map(c=>`<div style="padding:4px 0;font-size:12px;border-top:1px dashed #F0C4B0"><b>${esc(c.name||'row '+c.excelRow)}</b> <span style="color:var(--soft)">\u00b7 ${esc(c.stage)}</span></div>`).join('')}
+      </div>
+    </details>
+    <div style="margin-top:12px;display:flex;gap:8px"><button class="btn-primary" style="background:#B54A28;color:#fff;padding:8px 16px" onclick="_recoverAutoReleased()">Re-park all ${affected.length} candidate${affected.length===1?'':'s'}</button></div>
+  </div>`:'';
+
+  return recoveryBlock+`<div class="wscard"><h3>Export settings</h3>
     <p class="set-help">Download a JSON snapshot of all settings (templates, scripts, sequence, config). Useful for backup or moving to a new install.</p>
     <button class="btn-primary bg-grn" onclick="exportSettings()">⬇ Export settings.json</button>
   </div>
@@ -12739,6 +12748,39 @@ function renderSettingsData(){
     <textarea id="import-json" class="tpl-body-input" placeholder='{"templates":{...},"scripts":{...},"config":{...},"flow":{...}}' style="min-height:160px"></textarea>
     <div class="set-row" style="margin-top:10px"><div style="flex:1"></div><button class="btn-primary" style="background:var(--red);color:#fff" onclick="importSettings()">⚠ Overwrite with this JSON</button></div>
   </div>`;
+}
+
+/* Re-park candidates who got wrongly released by the buggy case-2e auto-heal. Finds them by
+   the specific log marker the heal wrote, sets manualAwaiting=true with a placeholder reason,
+   logs the recovery, and persists to AJ. Idempotent \u2014 candidates who've already been recovered
+   or re-parked manually get skipped (only touches ones currently NOT parked). */
+async function _recoverAutoReleased(){
+  const AUTOHEAL_LOG_MARK='Auto-healed \u2014 advanced past screen invite, released stale parking';
+  const affected=(pipeline||[]).filter(c=>
+    Array.isArray(c.st&&c.st.log)&&
+    c.st.log.some(l=>l&&typeof l.x==='string'&&l.x.indexOf(AUTOHEAL_LOG_MARK)>=0) &&
+    !c.st.manualAwaiting
+  );
+  if(!affected.length){toast('No candidates to recover');return;}
+  if(!confirm('Re-park '+affected.length+' candidate'+(affected.length===1?'':'s')+'?\n\nEach will be put back into awaiting with a placeholder reason. Review each individually to remember original context.'))return;
+  let done=0,failed=0;
+  for(const c of affected){
+    try{
+      c.st.manualAwaiting=true;
+      c.st.awaitingReason='Restored from erroneous auto-release \u2014 please review original context';
+      c.st.awaitingSince=new Date().toISOString();
+      /* Leave awaitingUntil unset so it doesn't imply a specific timeout the user didn't choose. */
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'\u2705 Restored to awaiting after erroneous auto-release'});
+      await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+      done++;
+    }catch(e){
+      failed++;
+      console.warn('Recovery failed for row '+c.excelRow+':',e.message);
+    }
+  }
+  toast('\u2713 Restored '+done+(failed?(' \u00b7 '+failed+' failed \u2014 check console'):''));
+  renderSettings();
+  if(typeof render==='function')render();
 }
 
 /* #3 — Settings preferences (meta-settings that control how the settings UI itself behaves).
