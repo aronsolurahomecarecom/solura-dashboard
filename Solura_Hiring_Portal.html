@@ -2724,17 +2724,15 @@ async function loadData(){
       c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='reference_form');
       touched=true;
     }
-    /* Case (2d): if stage has advanced past 'Screen invite' (i.e. Screen booked or later), any
-       cert_question awaiting item is stale — the user progressed past the "vetting minimums" gate,
-       so whatever certs were being asked about are no longer blocking. This was the "Lexus Ferguson"
-       bug: user sent missing-certs email, cert_question queued, candidate advanced through screen
-       to Interview without recording an answer — the stale cert_question kept surfacing as if
-       something had just arrived. Drain it. */
-    const stagePastScreen=['Screen booked','Ask references','Verify employers','References','Interview invite','Interview booked','Offer','Onboarding','Onboarding booked','Hired'].includes(c.stage);
-    if(stagePastScreen&&(c.st.awaitingItems||[]).some(a=>a.kind==='cert_question')){
-      c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='cert_question');
-      touched=true;
-    }
+    /* Case (2d) REMOVED: previously drained cert_question awaiting items for anyone past 'Screen
+       invite'. That was wrong — a lingering cert_question means you're still waiting on the
+       candidate's answer about their certs, which is legitimate at ANY stage. Draining it here
+       (a) discarded a real await you set intentionally, and (b) emptied awaitingItems, which then
+       cascaded into Case (3) auto-releasing the candidate entirely. This is exactly the "parked for
+       cert clarification then auto-healed out" bug. cert_question items are now only cleared when
+       you explicitly record the answer (recordCertAnswer) or manually release. DO NOT re-add a
+       stage-based drain. If a stale cert_question surfaces as a phantom action, fix it at the
+       surfacing layer, not by deleting the item. */
     /* Case (2e) REMOVED: previously auto-released any manualAwaiting candidate past 'Screen invite'.
        That was wrong — parking is legitimate at ANY stage (e.g. "she said give her two weeks" while
        at Interview invite). The check released legitimately-parked candidates in bulk. DO NOT restore
@@ -2770,18 +2768,14 @@ async function loadData(){
       touched=true;
       healed++;
     }
-    /* Case (3): awaitingItems is empty (all drained via earlier assignments) but they stayed parked. */
-    else if(c.st.manualAwaiting&&Array.isArray(c.st.awaitingItems)&&c.st.awaitingItems.length===0&&c.st.awaitingItemsInitialCount>0){
-      delete c.st.manualAwaiting;
-      delete c.st.awaitingReason;
-      delete c.st.awaitingUntil;
-      delete c.st.awaitingSince;
-      delete c.st.awaitingItemsInitialCount;
-      delete c.st.lastAwaitingReview;
-      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-healed — awaiting queue empty, released'});
-      touched=true;
-      healed++;
-    }
+    /* Case (3) REMOVED: previously auto-released any parked candidate whose awaitingItems became
+       empty (initialCount>0 but now 0). Redundant AND dangerous: the LEGITIMATE path (marking the
+       last item received in _markReceivedCore) already releases the candidate at that moment, with
+       your action behind it. Case 3 in loadData only fired when the queue emptied by some OTHER
+       means — a bug, a race, a manual item removal, or (as happened) another heal case draining it.
+       That made it a silent amplifier for exactly the "auto-healed out of awaiting" problem. If a
+       parked candidate's queue is empty, they simply stay parked until you release them or mark a
+       received item. No stage- or emptiness-based auto-release remains. */
     }
     /* ── one-time sweep of PRE-EXISTING duplicate sent emails ──
        The inbox-poll reconciliation only de-dupes sends going FORWARD; pairs that landed before
@@ -8737,6 +8731,7 @@ function openCandidateFromCurrentEmail(){
 const ASSIGNMENT_KINDS=[
   {key:'resume',label:'Résumé',icon:'📄',filename:c=>'resume-'+safeFileName(c.name)+'.pdf'},
   {key:'cert',label:'Certificate (CPR, STNA, etc)',icon:'🎓',filename:(c,name)=>'cert-'+(name?safeFileName(name):'cert')+'.pdf'},
+  {key:'cert_clarification',label:'Cert clarification (waiting on their answer)',icon:'❓',filename:(c,name)=>'cert-clarification-'+today()+'.txt'},
   {key:'license',label:'License (driver\'s, professional)',icon:'🪪',filename:c=>'license-'+safeFileName(c.name)+'.pdf'},
   {key:'id',label:'Photo ID',icon:'🆔',filename:c=>'id-'+safeFileName(c.name)+'.pdf'},
   {key:'application_pdf',label:'Application document',icon:'📋',filename:c=>'application-'+safeFileName(c.name)+'.pdf'},
@@ -12720,20 +12715,51 @@ async function forceSaveAndVerify(){
 }
 
 /* ----- DATA section (export/import) ----- */
+/* Log markers written by the auto-heals that released candidates WITHOUT an explicit user action.
+   These are the releases we consider erroneous and offer to reverse. We deliberately EXCLUDE
+   action-driven releases (e.g. "all requested items received" from marking an item received, or
+   "cert claim recorded" from the recorder) — those were things you did on purpose. */
+const _ERRONEOUS_RELEASE_MARKERS=[
+  'advanced past screen invite, released stale parking',  /* Case 2e (the incident) */
+  'awaiting queue empty, released'                        /* Case 3 (the cascade after cert-drain) */
+];
+function _findErroneouslyReleased(){
+  return (pipeline||[]).filter(c=>{
+    if(!c.st||!Array.isArray(c.st.log))return false;
+    if(c.st.manualAwaiting)return false; /* already parked (recovered or re-parked manually) */
+    return c.st.log.some(l=>l&&typeof l.x==='string'&&_ERRONEOUS_RELEASE_MARKERS.some(m=>l.x.indexOf(m)>=0));
+  });
+}
+/* Try to infer WHY a candidate was originally parked, from their log trail. Returns a reason
+   string and (if cert-related) the certs that were being asked about, so we can restore a proper
+   cert_question awaiting item instead of a generic placeholder. */
+function _inferOriginalPark(c){
+  const log=(c.st&&c.st.log)||[];
+  /* Look for the most recent "asked about: X, Y" cert entry, or a park entry mentioning certs. */
+  for(let i=log.length-1;i>=0;i--){
+    const x=(log[i]&&log[i].x)||'';
+    const m=x.match(/asked about:\s*(.+)$/i);
+    if(m&&/cert/i.test(x)){
+      const certs=m[1].split(',').map(s=>s.trim()).filter(Boolean);
+      return {reason:'Awaiting cert clarification — '+certs.join(', '),certs};
+    }
+    if(/parked in awaiting/i.test(x)){
+      /* Reuse whatever reason was logged at park time. */
+      const rm=x.match(/parked in awaiting\s*·\s*([^·]+)/i);
+      if(rm)return {reason:rm[1].trim(),certs:null};
+    }
+  }
+  return {reason:null,certs:null};
+}
 function renderSettingsData(){
   /* Recovery card — count affected candidates and render a repair action. */
-  const AUTOHEAL_LOG_MARK='Auto-healed \u2014 advanced past screen invite, released stale parking';
-  const affected=(pipeline||[]).filter(c=>
-    Array.isArray(c.st&&c.st.log)&&
-    c.st.log.some(l=>l&&typeof l.x==='string'&&l.x.indexOf(AUTOHEAL_LOG_MARK)>=0) &&
-    !c.st.manualAwaiting  /* only offer to restore ones currently NOT parked */
-  );
+  const affected=_findErroneouslyReleased();
   const recoveryBlock=affected.length?`<div class="wscard" style="border-color:#F0C4B0;background:linear-gradient(180deg,#FEF6EE,#fff)">
     <h3 style="color:#8B3D1F">\u26A0 Recovery: restore erroneously auto-released candidates</h3>
-    <p class="set-help" style="color:#8B3D1F">A bug in the 7/1 build auto-released manualAwaiting candidates who were past 'Screen invite'. That was wrong \u2014 parking is legitimate at any stage. <b>${affected.length} candidate${affected.length===1?'':'s'} affected.</b> Clicking below will re-park them and log the recovery action. Original parking reasons weren't preserved, so each will be re-parked with a generic reason \u2014 review the candidate log to remember why they were originally parked.</p>
+    <p class="set-help" style="color:#8B3D1F">A bug in recent builds auto-released parked candidates \u2014 both the "past Screen invite" release and the "awaiting queue empty" cascade (which hit people parked for cert clarification). Both are now fixed. <b>${affected.length} candidate${affected.length===1?'':'s'} affected.</b> Clicking below re-parks them. Where the log shows they were waiting on cert clarification, the original reason and cert list are reconstructed; otherwise a generic reason is used \u2014 review each to confirm.</p>
     <details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;color:#8B3D1F">Show affected candidates (${affected.length})</summary>
       <div style="max-height:240px;overflow-y:auto;margin-top:8px;padding:8px 10px;background:#fff;border:1px solid #F0C4B0;border-radius:6px">
-        ${affected.map(c=>`<div style="padding:4px 0;font-size:12px;border-top:1px dashed #F0C4B0"><b>${esc(c.name||'row '+c.excelRow)}</b> <span style="color:var(--soft)">\u00b7 ${esc(c.stage)}</span></div>`).join('')}
+        ${affected.map(c=>{const inf=_inferOriginalPark(c);return `<div style="padding:4px 0;font-size:12px;border-top:1px dashed #F0C4B0"><b>${esc(c.name||'row '+c.excelRow)}</b> <span style="color:var(--soft)">\u00b7 ${esc(c.stage)}</span>${inf.reason?`<br><span style="font-size:11px;color:#8B6500">will restore: ${esc(inf.reason)}</span>`:''}</div>`;}).join('')}
       </div>
     </details>
     <div style="margin-top:12px;display:flex;gap:8px"><button class="btn-primary" style="background:#B54A28;color:#fff;padding:8px 16px" onclick="_recoverAutoReleased()">Re-park all ${affected.length} candidate${affected.length===1?'':'s'}</button></div>
@@ -12750,27 +12776,33 @@ function renderSettingsData(){
   </div>`;
 }
 
-/* Re-park candidates who got wrongly released by the buggy case-2e auto-heal. Finds them by
-   the specific log marker the heal wrote, sets manualAwaiting=true with a placeholder reason,
-   logs the recovery, and persists to AJ. Idempotent \u2014 candidates who've already been recovered
-   or re-parked manually get skipped (only touches ones currently NOT parked). */
+/* Re-park candidates wrongly released by the auto-heals. Reconstructs cert-clarification context
+   from the log where possible (restoring a cert_question awaiting item), else a generic reason.
+   Idempotent — only touches candidates currently NOT parked that carry an erroneous-release marker. */
 async function _recoverAutoReleased(){
-  const AUTOHEAL_LOG_MARK='Auto-healed \u2014 advanced past screen invite, released stale parking';
-  const affected=(pipeline||[]).filter(c=>
-    Array.isArray(c.st&&c.st.log)&&
-    c.st.log.some(l=>l&&typeof l.x==='string'&&l.x.indexOf(AUTOHEAL_LOG_MARK)>=0) &&
-    !c.st.manualAwaiting
-  );
+  const affected=_findErroneouslyReleased();
   if(!affected.length){toast('No candidates to recover');return;}
-  if(!confirm('Re-park '+affected.length+' candidate'+(affected.length===1?'':'s')+'?\n\nEach will be put back into awaiting with a placeholder reason. Review each individually to remember original context.'))return;
-  let done=0,failed=0;
+  if(!confirm('Re-park '+affected.length+' candidate'+(affected.length===1?'':'s')+'?\n\nCert-clarification parks are reconstructed from the log; others get a generic reason. Review each afterward.'))return;
+  let done=0,failed=0,certRestored=0;
   for(const c of affected){
     try{
+      const inf=_inferOriginalPark(c);
       c.st.manualAwaiting=true;
-      c.st.awaitingReason='Restored from erroneous auto-release \u2014 please review original context';
       c.st.awaitingSince=new Date().toISOString();
-      /* Leave awaitingUntil unset so it doesn't imply a specific timeout the user didn't choose. */
-      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'\u2705 Restored to awaiting after erroneous auto-release'});
+      if(inf.certs&&inf.certs.length){
+        /* Rebuild the cert_question awaiting item so it surfaces the recorder again. */
+        c.st.awaitingItems=c.st.awaitingItems||[];
+        const hasCertQ=c.st.awaitingItems.some(a=>a.kind==='cert_question');
+        if(!hasCertQ){
+          c.st.awaitingItems.push({kind:'cert_question',certsAsked:inf.certs,name:inf.certs.join(', '),requestedAt:new Date().toISOString()});
+        }
+        c.st.awaitingItemsInitialCount=(c.st.awaitingItems||[]).length;
+        c.st.awaitingReason=inf.reason;
+        certRestored++;
+      }else{
+        c.st.awaitingReason=inf.reason||'Restored from erroneous auto-release \u2014 please review original context';
+      }
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'\u2705 Restored to awaiting after erroneous auto-release'+(inf.certs?' (cert clarification reconstructed)':'')});
       await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
       done++;
     }catch(e){
@@ -12778,7 +12810,7 @@ async function _recoverAutoReleased(){
       console.warn('Recovery failed for row '+c.excelRow+':',e.message);
     }
   }
-  toast('\u2713 Restored '+done+(failed?(' \u00b7 '+failed+' failed \u2014 check console'):''));
+  toast('\u2713 Restored '+done+(certRestored?(' ('+certRestored+' with cert context)'):'')+(failed?(' \u00b7 '+failed+' failed \u2014 check console'):''));
   renderSettings();
   if(typeof render==='function')render();
 }
