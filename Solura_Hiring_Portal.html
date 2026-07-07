@@ -2705,7 +2705,7 @@ async function loadData(){
     let touched=false;
     /* ── stuck-awaiting auto-heal (only candidates parked in awaiting) ── */
     if(c.st.manualAwaiting){
-    const hasResume=(c.row[6]==='Y')||c.st.hasResume;
+    const hasResume=!!c.st.hasResume; /* st is the source of truth; row[6] is the STAGE column, never a résumé flag */
     /* Case (2): awaitingItems still contains resume but candidate has one */
     if(hasResume&&(c.st.awaitingItems||[]).some(a=>a.kind==='resume')){
       c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='resume');
@@ -3946,6 +3946,45 @@ function renderActiveCaregivers(){
 function quickEmailCaregiver(row){loadW(row);openCustomEmail();}
 
 /* ===================== Manual awaiting controls ===================== */
+/* Manual stage placement — the escape hatch for when a candidate's stage is wrong (corruption,
+   mistaken advance, restored data). Deliberately MINIMAL side effects: sets the stage, logs, and
+   saves. It does NOT fire the new stage's auto-email, does NOT upload a stage report, and does
+   NOT credit referral milestones — those belong to genuine forward progression via advanceWS,
+   not to manual repositioning. */
+function moveToStageWS(){
+  const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
+  emailModal('move_stage','','',null);
+  document.getElementById('m-title').textContent='Move to stage';
+  document.getElementById('m-body').innerHTML=`
+    <div style="font-size:13px;color:var(--mid);margin-bottom:14px;line-height:1.5">
+      Manually place <b>${esc(W.name)}</b> at any stage. Current: <b>${esc(W.stage)}</b>.<br>
+      <span style="font-size:11.5px;color:var(--soft)">No emails fire and no reports upload — this only repositions them. Use the normal advance buttons for real progression.</span>
+    </div>
+    <select id="move-stage-sel" style="width:100%;padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13.5px">
+      ${flow.map(s=>`<option value="${esc(s)}" ${s===W.stage?'selected':''}>${esc(s)}</option>`).join('')}
+    </select>
+    <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+      <button class="btn-sec" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary bg-grn" onclick="commitMoveToStage()">⇄ Move</button>
+    </div>`;
+}
+async function commitMoveToStage(){
+  const sel=document.getElementById('move-stage-sel');
+  if(!sel)return;
+  const toStage=sel.value;
+  const fromStage=W.stage;
+  closeModal();
+  if(toStage===fromStage){toast('Already at '+toStage);return;}
+  W.stage=toStage;
+  logW('⇄ Manually moved to '+toStage+' (from '+fromStage+')');
+  await saveW(true);
+  const c=pipeline.find(x=>x.excelRow===W.row);
+  if(c){c.stage=toStage;c.row[6]=toStage;}
+  toast('⇄ '+toStage);
+  renderWorkspace();
+  if(typeof render==='function')render();
+}
+
 function parkInAwaiting(){
   /* Small inline modal: reason (optional, free text) + follow-up date + a watch-for picker.
      Both saved to st.awaitingReason / st.awaitingUntil / st.awaitingItems so the awaiting card
@@ -6101,7 +6140,12 @@ async function detectResumeInFolder(c){
     const r=await gfetch(GR+'/drives/'+driveId+'/root:/'+enc+':/children?$select=name,webUrl');
     if(!r.ok)return;
     const items=((await r.json()).value)||[];
-    const isReport=n=>/^(application|phone-screen|interview|interview-report|references-summary|background-summary|activity-log)/i.test(n);
+    /* Exclude EVERY file type the portal itself generates or files into this folder. The old
+       exclusion list only covered report PDFs, so cert-, license-, id-, bg-consent-, reference-
+       and form- files all false-positived as "résumés" — and with the old column-G write bug,
+       that false positive destroyed the candidate's stage. Belt-and-suspenders: broad exclusions
+       here AND no stage-column write anywhere in this path. */
+    const isReport=n=>/^(application|phone-screen|interview|references|reference-|background|activity-log|cert|license|id-|bg-consent|form-|info-|onboarding|offer)/i.test(n);
     const resume=items.find(f=>/resume|cv|curriculum/i.test(f.name))
       ||items.find(f=>/\.(pdf|docx?)$/i.test(f.name)&&!isReport(f.name));
     if(resume){
@@ -6109,8 +6153,10 @@ async function detectResumeInFolder(c){
       c.st.hasResume=true;
       c.st.resumeFile=resume.name;
       c.st.resumeWebUrl=resume.webUrl||'';
-      /* Also flip the row's column G (résumé) so the rest of the engine picks it up immediately. */
-      if(c.row&&c.row[6]!=='Y'){c.row[6]='Y';patchRange('G'+c.excelRow,[['Y']]).catch(e=>{});}
+      /* st.hasResume is the single source of truth for résumé state (persisted in AJ below).
+         DO NOT write 'Y' to column G — G is the STAGE column (loadData: stage:String(row[6])).
+         A prior build believed G was a résumé flag and wrote 'Y' here, which DESTROYED the
+         candidate's stage (the "Michelle Hill / Lexus Ferguson" corruption). */
       /* If candidate was parked waiting for the résumé, drain the awaiting item + auto-release. */
       const hadResumeWait=(c.st.awaitingItems||[]).some(a=>a.kind==='resume');
       if(hadResumeWait){
@@ -6271,7 +6317,7 @@ function renderWorkspace(){_memGen++;
     if(isParked){
       quickActions=`<div class="ws-quick"><button class="btn-sm bg-sky-l" onclick="releaseAwaiting()" title="Move out of awaiting">▶ Resume from awaiting</button><button class="btn-sm" style="background:#fff;border:1px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer" onclick="withdrawCandidate()">↩ Withdraw</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
     }else{
-      quickActions=`<div class="ws-quick"><button class="btn-sm bg-cream" onclick="parkInAwaiting()" title="Move this candidate to Awaiting bucket — pause for follow-up">⏸ Park in awaiting</button><button class="btn-sm" style="background:#fff;border:1px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer" onclick="withdrawCandidate()" title="Candidate withdrew their application">↩ Withdraw</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
+      quickActions=`<div class="ws-quick"><button class="btn-sm bg-cream" onclick="parkInAwaiting()" title="Move this candidate to Awaiting bucket — pause for follow-up">⏸ Park in awaiting</button><button class="btn-sm bg-cream" onclick="moveToStageWS()" title="Manually place this candidate at any pipeline stage">⇄ Move to stage</button><button class="btn-sm" style="background:#fff;border:1px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer" onclick="withdrawCandidate()" title="Candidate withdrew their application">↩ Withdraw</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
     }
   }
   const thisStep=`<div class="ws-this">
@@ -6792,9 +6838,10 @@ async function markResumeReceived(){
     delete W.st.awaitingItemsInitialCount;
     delete W.st.lastAwaitingReview;
   }
-  /* Flip column G so action engine picks up the change immediately */
+  /* st.hasResume (set via W.gates + saveW below) is the source of truth. DO NOT write 'Y' to
+     column G — G is the STAGE column; writing 'Y' here destroyed candidates' stages. */
   if(W.gates)W.gates.hasResume=true;
-  if(W.row&&W.row[6]!=='Y'){W.row[6]='Y';await patchRange('G'+W.excelRow,[['Y']]).catch(e=>{});}
+  W.st.hasResume=true;
   logW('✓ Résumé received (manually marked) — released from awaiting');
   await saveW(true);
   renderWorkspace();
@@ -8897,9 +8944,8 @@ async function _doAssignment(messageId,attIdx,cand,item){
       cand.st.resumeWebUrl=uploaded.webUrl;
       cand.st.resumeFile=finalName;
       cand.st.hasResume=true;
-      /* Also flip the row's resume column (G) so filters/scoring pick it up */
-      cand.row[6]='Y';
-      await patchRange('G'+cand.excelRow,[['Y']]);
+      /* st.hasResume is the source of truth (persisted to AJ by the caller). DO NOT write 'Y'
+         to column G — G is the STAGE column; the old "flip column G" write destroyed stages. */
     }else if(item.kind==='application_pdf'){
       cand.st.applicationPdfUrl=uploaded.webUrl;
       cand.st.applicationPdfFile=finalName;
@@ -12715,10 +12761,98 @@ async function forceSaveAndVerify(){
 }
 
 /* ----- DATA section (export/import) ----- */
-/* Log markers written by the auto-heals that released candidates WITHOUT an explicit user action.
-   These are the releases we consider erroneous and offer to reverse. We deliberately EXCLUDE
-   action-driven releases (e.g. "all requested items received" from marking an item received, or
-   "cert claim recorded" from the recorder) — those were things you did on purpose. */
+/* ============================================================================
+   Corrupted-stage detection + repair (the "Michelle Hill / Lexus Ferguson" bug)
+   A prior build wrote 'Y' into column G believing it was a résumé flag — but G
+   is the STAGE column, so affected candidates' stages became the literal string
+   'Y' (or other junk). The writes are now removed; these helpers find damaged
+   rows and restore the stage from evidence in the candidate's own state.
+   ============================================================================ */
+function _knownStages(){
+  const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
+  return new Set([...flow,'Declined','Withdrawn']);
+}
+function _stageCorrupted(c){
+  return !!c&&!_knownStages().has(String(c.stage||''));
+}
+/* Infer the furthest stage a candidate demonstrably reached, from durable evidence in st.
+   Sources (strongest signal wins = furthest FLOW index):
+   - log entries "Advanced to X" / "Auto-advanced to X" / "→ X" where X is a known stage
+   - structural facts: employer verdicts ⇒ at least Verify employers; refs on file ⇒ at least
+     References; sent.interview_invite ⇒ Interview invite; booking ⇒ its stage; sent.onboarding
+     ⇒ Onboarding; etc.
+   Returns the stage string, or null if no evidence found. */
+function _inferFurthestStage(c){
+  const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
+  const idx=s=>flow.indexOf(s);
+  let best=-1;
+  const consider=s=>{const i=idx(s);if(i>best)best=i;};
+  const st=c.st||{};
+  /* Log-based: parse explicit stage-advance entries. */
+  (st.log||[]).forEach(l=>{
+    const x=(l&&l.x)||'';
+    let m=x.match(/(?:Auto-advanced|Advanced|Manually moved) to ([A-Za-z ]+?)(?:\s+—|\s+\(|$)/);
+    if(m){const s=m[1].trim();if(idx(s)>=0)consider(s);}
+  });
+  /* Structural evidence — durable state that only exists once a stage was genuinely reached. */
+  if(Array.isArray(st.employers)&&st.employers.some(e=>e&&e.v))consider('Verify employers');
+  if(Array.isArray(st.refs)&&st.refs.length>0)consider('References');
+  const sent=st.sent||{};
+  if(sent.screen_invite)consider('Screen invite');
+  if(sent.interview_invite)consider('Interview invite');
+  if(sent.onboarding)consider('Onboarding');
+  if(sent.offer)consider('Offer');
+  if(st.booking&&st.booking.kind==='screen')consider('Screen booked');
+  if(st.booking&&st.booking.kind==='interview')consider('Interview booked');
+  if(st.booking&&st.booking.kind==='onboarding')consider('Onboarding booked');
+  return best>=0?flow[best]:null;
+}
+/* Rebuild st.certs from the candidate's own trail when it's been wiped: union of (a) names in
+   the structured credentials registry, (b) certs parsed from "Cert claim recorded: A, B" log
+   entries. Returns the rebuilt list (does not overwrite non-empty st.certs). */
+function _rebuildCertsFromTrail(c){
+  const st=c.st||{};
+  if(Array.isArray(st.certs)&&st.certs.length)return st.certs; /* already populated — leave alone */
+  const found=new Set();
+  (st.credentials||[]).forEach(cr=>{if(cr&&cr.name)found.add(cr.name);});
+  (st.log||[]).forEach(l=>{
+    const x=(l&&l.x)||'';
+    const m=x.match(/Cert claim recorded:\s*([^—]+?)(?:\s+—|$)/);
+    if(m){m[1].split(',').map(s=>s.trim()).filter(s=>s&&s!=='(nothing claimed)').forEach(s=>found.add(s));}
+  });
+  return Array.from(found);
+}
+/* Repair one candidate: restore stage (from evidence or explicit choice) + rebuild certs.
+   Writes column G + AJ, syncs the open workspace if it's showing this candidate. */
+async function _repairCorruptedStage(row,toStage){
+  const c=pipeline.find(x=>x.excelRow===row);
+  if(!c){toast('Candidate not found');return;}
+  const target=toStage||_inferFurthestStage(c)||'Applied';
+  const fromStage=c.stage;
+  c.stage=target;c.row[6]=target;
+  const rebuilt=_rebuildCertsFromTrail(c);
+  if(rebuilt.length&&(!Array.isArray(c.st.certs)||!c.st.certs.length)){
+    c.st.certs=rebuilt;
+  }
+  c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🛠 Stage repaired: "'+fromStage+'" → '+target+(rebuilt.length?' · certs rebuilt: '+rebuilt.join(', '):'')});
+  await patchRange('G'+row,[[target]]);
+  await patchRange('AJ'+row,[[JSON.stringify(c.st)]]);
+  /* Sync the open workspace so its next saveW doesn't re-write the corrupted stage. */
+  if(W&&W.row===row){W.stage=target;if(W.st!==c.st)W.st=c.st;}
+  toast('🛠 '+(c.name||'Row '+row)+' → '+target);
+  if(typeof render==='function')render();
+  if(W&&W.row===row)renderWorkspace();
+}
+async function _repairAllCorruptedStages(){
+  const damaged=(pipeline||[]).filter(_stageCorrupted);
+  if(!damaged.length){toast('Nothing to repair');return;}
+  if(!confirm('Repair '+damaged.length+' candidate'+(damaged.length===1?'':'s')+' with corrupted stages?\n\nEach is restored to the furthest stage their history proves they reached. Review each afterward.'))return;
+  for(const c of damaged){
+    try{await _repairCorruptedStage(c.excelRow,null);}catch(e){console.warn('Repair failed row '+c.excelRow+':',e.message);}
+  }
+  renderSettings();
+}
+/* Log markers written by the auto-heals that released candidates WITHOUT an explicit user action. */
 const _ERRONEOUS_RELEASE_MARKERS=[
   'advanced past screen invite, released stale parking',  /* Case 2e (the incident) */
   'awaiting queue empty, released'                        /* Case 3 (the cascade after cert-drain) */
@@ -12752,6 +12886,23 @@ function _inferOriginalPark(c){
   return {reason:null,certs:null};
 }
 function renderSettingsData(){
+  /* Corrupted-stage repair card — the column-G 'Y' corruption. */
+  const damaged=(pipeline||[]).filter(_stageCorrupted);
+  const stageRepairBlock=damaged.length?`<div class="wscard" style="border-color:#E3B04B;background:linear-gradient(180deg,#FDF6E7,#fff)">
+    <h3 style="color:#8B6500">🛠 Repair: corrupted stages</h3>
+    <p class="set-help" style="color:#8B6500">A prior build wrote a résumé flag into the STAGE column, destroying these candidates' stages (they show a junk stage like "Y" and fall back to new-applicant behavior — the Michelle Hill / Lexus Ferguson bug). The buggy writes are removed in this build. <b>${damaged.length} candidate${damaged.length===1?'':'s'} affected.</b> Each is restored to the furthest stage their own history proves they reached (employer verdicts, refs on file, invites sent, bookings, log entries). Certs wiped by the same incident are rebuilt from the credentials registry and log trail.</p>
+    <div style="max-height:260px;overflow-y:auto;margin-top:8px;padding:8px 10px;background:#fff;border:1px solid #E3B04B;border-radius:6px">
+      ${damaged.map(c=>{const inf=_inferFurthestStage(c);const certs=_rebuildCertsFromTrail(c);return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;font-size:12px;border-top:1px dashed #E3B04B">
+        <b style="min-width:140px">${esc(c.name||'row '+c.excelRow)}</b>
+        <span style="color:var(--soft)">stage: <span style="font-family:ui-monospace,monospace;background:#FDECEA;color:#8B3D1F;padding:1px 5px;border-radius:3px">${esc(String(c.stage))}</span> → <b style="color:#3D7A34">${esc(inf||'Applied')}</b></span>
+        ${certs.length?`<span style="color:var(--soft);font-size:11px">certs: ${esc(certs.join(', '))}</span>`:''}
+        <div style="flex:1"></div>
+        <button class="btn-sm bg-grn" style="color:#fff;cursor:pointer" onclick="_repairCorruptedStage(${c.excelRow},null)">restore</button>
+      </div>`;}).join('')}
+    </div>
+    <div style="margin-top:12px"><button class="btn-primary bg-grn" style="padding:8px 16px" onclick="_repairAllCorruptedStages()">🛠 Repair all ${damaged.length}</button></div>
+  </div>`:'';
+
   /* Recovery card — count affected candidates and render a repair action. */
   const affected=_findErroneouslyReleased();
   const recoveryBlock=affected.length?`<div class="wscard" style="border-color:#F0C4B0;background:linear-gradient(180deg,#FEF6EE,#fff)">
@@ -12765,7 +12916,7 @@ function renderSettingsData(){
     <div style="margin-top:12px;display:flex;gap:8px"><button class="btn-primary" style="background:#B54A28;color:#fff;padding:8px 16px" onclick="_recoverAutoReleased()">Re-park all ${affected.length} candidate${affected.length===1?'':'s'}</button></div>
   </div>`:'';
 
-  return recoveryBlock+`<div class="wscard"><h3>Export settings</h3>
+  return stageRepairBlock+recoveryBlock+`<div class="wscard"><h3>Export settings</h3>
     <p class="set-help">Download a JSON snapshot of all settings (templates, scripts, sequence, config). Useful for backup or moving to a new install.</p>
     <button class="btn-primary bg-grn" onclick="exportSettings()">⬇ Export settings.json</button>
   </div>
