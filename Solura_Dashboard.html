@@ -344,11 +344,7 @@ td{padding:13px 16px;vertical-align:top;}
 .email-attach-size{font-size:10.5px;color:var(--soft);font-family:'SF Mono',Monaco,monospace;}
 .email-attach-route{font-size:10px;color:var(--sky-deep);background:var(--sky-pale);border:1px solid var(--sky-mid);padding:2px 7px;border-radius:10px;font-weight:600;letter-spacing:.02em;}
 
-/* Notes / suggestions FAB — bottom-left pencil */
-.notes-fab{position:fixed;bottom:22px;left:22px;width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,var(--gold),#D4920F);color:#fff;border:none;cursor:pointer;box-shadow:0 4px 14px rgba(200,135,10,.35),0 2px 4px rgba(0,0,0,.08);display:flex;align-items:center;justify-content:center;z-index:150;transition:all .18s cubic-bezier(.4,0,.2,1);}
-.notes-fab:hover{transform:translateY(-2px) scale(1.05);box-shadow:0 8px 20px rgba(200,135,10,.5),0 3px 6px rgba(0,0,0,.12);}
-.notes-fab:active{transform:translateY(0) scale(.98);}
-@media (max-width:640px){.notes-fab{bottom:16px;left:16px;width:42px;height:42px;}}
+/* Notes / suggestions FAB — bottom-left pencil (REMOVED — replaced by feedback stack) */
 .email-attach-x{background:#FDECEA;color:var(--red);border:1px solid #F0C0BB;border-radius:5px;width:22px;height:22px;cursor:pointer;font-size:13px;line-height:1;transition:all .12s;}
 .email-attach-x:hover{background:var(--red);color:#fff;}
 
@@ -690,34 +686,6 @@ td{padding:13px 16px;vertical-align:top;}
   <div class="dbody" id="d-body"></div>
 </div>
 
-<!-- Suggestions / bug-report widget (bottom-left pencil FAB) -->
-<button class="notes-fab" id="notes-fab" title="Write suggestions or report a problem" data-action="open-notes">
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-</button>
-
-<div class="modal" id="modal-notes">
-  <div class="mbox" style="max-width:640px">
-    <div class="mhead"><div class="mtitle">Suggestions &amp; issues</div><button class="mclose" data-action="close-modal" data-mid="modal-notes">\u2715</button></div>
-    <div class="mbody">
-      <div style="font-size:13px;color:var(--soft);margin-bottom:12px;line-height:1.5">
-        Write out anything you want fixed, improved, or added. When you're done, hit <strong>Download PDF</strong> and drop it into the chat.
-      </div>
-      <textarea id="notes-text" placeholder="e.g.&#10;\u2022 The 'This week' bucket should include next Monday too&#10;\u2022 Bug: after saving Responded, the row jumps to the wrong section&#10;\u2022 Add a 'send to VM' button on the SMS modal" style="width:100%;min-height:320px;padding:14px;border:1.5px solid var(--border);border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13.5px;line-height:1.6;resize:vertical;outline:none;color:var(--dark);background:var(--warm);"></textarea>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--soft)">
-        <span id="notes-count">0 characters \u2022 auto-saved locally</span>
-        <button data-action="clear-notes" style="background:none;border:none;color:var(--soft);font-size:11px;cursor:pointer;padding:2px 6px;text-decoration:underline;">Clear</button>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;margin-top:14px;justify-content:flex-end;">
-        <button data-action="close-modal" data-mid="modal-notes" style="padding:9px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Close</button>
-        <button data-action="download-notes-pdf" style="padding:9px 18px;background:linear-gradient(135deg,var(--gold),#D4920F);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(200,135,10,.25);display:inline-flex;align-items:center;gap:6px;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Download PDF
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <div class="toast" id="toast"></div>
 
 <!-- Call log modal -->
@@ -783,37 +751,51 @@ td{padding:13px 16px;vertical-align:top;}
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
 </button>
 
-<!-- Feedback modal -->
+<!-- Feedback modal — stack-based: add items to a queue, download all as one PDF -->
 <div class="modal" id="modal-feedback">
-  <div class="mbox" style="max-width:560px">
-    <div class="mhead"><div class="mtitle">Report a bug or suggestion</div><button class="mclose" data-action="close-modal" data-mid="modal-feedback">✕</button></div>
+  <div class="mbox" style="max-width:640px">
+    <div class="mhead"><div class="mtitle">Suggestions &amp; issues</div><button class="mclose" data-action="close-modal" data-mid="modal-feedback">✕</button></div>
     <div class="mbody" style="padding:20px 22px 22px">
       <div style="font-size:12.5px;color:var(--soft);margin-bottom:16px;line-height:1.5">
-        Describe what's not working or what could be better. When you download, this becomes a PDF you can upload to a chat to get it fixed.
+        Add each item to your stack. When you're ready, download them all as one PDF — the stack clears itself so you can start fresh next time.
       </div>
 
-      <div style="margin-bottom:14px">
-        <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Type</label>
-        <div style="display:flex;gap:8px">
-          <button type="button" data-fb-type="bug" class="fb-type-btn fb-active" style="flex:1;padding:9px 12px;border:1.5px solid var(--red);background:var(--red-pale);color:var(--red);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">🐛 Bug</button>
-          <button type="button" data-fb-type="suggestion" class="fb-type-btn" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);background:#fff;color:var(--mid);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">💡 Suggestion</button>
-          <button type="button" data-fb-type="question" class="fb-type-btn" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);background:#fff;color:var(--mid);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">❓ Question</button>
+      <!-- Stack summary + bulk actions -->
+      <div id="fb-stack-summary" style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px;margin-bottom:16px;background:var(--warm);border:1px solid var(--border-soft);border-radius:10px;">
+        <div style="font-size:12px;color:var(--mid);"><strong id="fb-stack-count" style="color:var(--dark);">0</strong> items in stack</div>
+        <div style="display:flex;gap:6px;">
+          <button data-action="clear-feedback-stack" id="fb-clear-stack-btn" style="padding:6px 12px;background:none;color:var(--soft);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;opacity:.4;pointer-events:none">Clear all</button>
+          <button data-action="download-feedback-stack" id="fb-download-stack-btn" style="padding:6px 14px;background:linear-gradient(135deg,var(--gold),#D4920F);color:#fff;border:none;border-radius:6px;font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;opacity:.4;pointer-events:none">📄 Download all &amp; wipe</button>
         </div>
       </div>
 
-      <div style="margin-bottom:14px">
-        <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Where in the dashboard</label>
-        <input type="text" id="fb-where" placeholder="e.g. Email composer, lead card, pipeline view" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
-      </div>
+      <!-- Stack list (populated dynamically) -->
+      <div id="fb-stack-list" style="max-height:180px;overflow-y:auto;margin-bottom:16px;"></div>
 
-      <div style="margin-bottom:14px">
-        <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">What's happening / what would help</label>
-        <textarea id="fb-text" rows="8" placeholder="Be specific. Include what you clicked, what you expected, what actually happened. For suggestions: describe the outcome you want." style="width:100%;padding:11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;resize:vertical;line-height:1.5"></textarea>
-      </div>
+      <!-- Add-new form -->
+      <div style="border-top:1px solid var(--border-soft);padding-top:16px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:10px">Add new to stack</div>
 
-      <div style="display:flex;gap:8px;padding-top:6px;border-top:1px solid var(--border-soft);padding-top:16px">
-        <button data-action="download-feedback" style="padding:10px 22px;background:linear-gradient(135deg,var(--gold),#D4920F);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(200,135,10,.3)">📄 Download as PDF</button>
-        <button data-action="close-modal" data-mid="modal-feedback" style="padding:10px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">Cancel</button>
+        <div style="margin-bottom:12px">
+          <div style="display:flex;gap:8px">
+            <button type="button" data-fb-type="bug" class="fb-type-btn fb-active" style="flex:1;padding:9px 12px;border:1.5px solid var(--red);background:var(--red-pale);color:var(--red);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">🐛 Bug</button>
+            <button type="button" data-fb-type="suggestion" class="fb-type-btn" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);background:#fff;color:var(--mid);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">💡 Suggestion</button>
+            <button type="button" data-fb-type="question" class="fb-type-btn" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);background:#fff;color:var(--mid);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">❓ Question</button>
+          </div>
+        </div>
+
+        <div style="margin-bottom:12px">
+          <input type="text" id="fb-where" placeholder="Where in the dashboard? (e.g. Email composer, Overdue bucket)" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+        </div>
+
+        <div style="margin-bottom:12px">
+          <textarea id="fb-text" rows="4" placeholder="What's happening or what would help. Be specific." style="width:100%;padding:11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;resize:vertical;line-height:1.5"></textarea>
+        </div>
+
+        <div style="display:flex;gap:8px;">
+          <button data-action="save-feedback-to-stack" style="padding:10px 22px;background:linear-gradient(135deg,var(--sky-mid),var(--sky));color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(58,125,201,.3)">＋ Add to stack</button>
+          <button data-action="close-modal" data-mid="modal-feedback" style="padding:10px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">Close</button>
+        </div>
       </div>
     </div>
   </div>
@@ -2551,94 +2533,67 @@ function dialHCG(ri){
   window.open('https://voice.google.com/u/0/calls?a=nc,%2B'+clean,'gv','width=400,height=600,noopener');
 }
 
-/* ─── Suggestions / issues notepad ───────────────────────────────────────
- * A bottom-left pencil FAB opens a big textarea where Meir writes up
- * bugs, suggestions, and feature ideas. Contents auto-save to localStorage
- * so nothing's lost on close/refresh. "Download PDF" produces a clean
- * printable HTML page (browser's Print-to-PDF is used, which gives him
- * a real PDF file to drop back into chat).
- * ──────────────────────────────────────────────────────────────────────── */
-var NOTES_LS_KEY='solura_notes_v1';
-function openNotesModal(){
-  var m=el('modal-notes');if(!m)return;
-  var ta=el('notes-text');
-  if(ta){
-    ta.value=localStorage.getItem(NOTES_LS_KEY)||'';
-    updateNotesCount();
-    // Live save + count on input
-    ta.oninput=function(){localStorage.setItem(NOTES_LS_KEY,ta.value);updateNotesCount();};
-    setTimeout(function(){ta.focus();},80);
-  }
-  m.classList.add('open');
-}
-function updateNotesCount(){
-  var ta=el('notes-text'),c=el('notes-count');
-  if(!ta||!c)return;
-  var n=ta.value.length;
-  c.textContent=n+' character'+(n!==1?'s':'')+' \u2022 auto-saved locally';
-}
-function clearNotesText(){
-  var ta=el('notes-text');if(!ta)return;
-  if(!ta.value.trim()){return;}
-  if(!confirm('Clear all notes?'))return;
-  ta.value='';
-  localStorage.removeItem(NOTES_LS_KEY);
-  updateNotesCount();
-  ta.focus();
-}
-function downloadNotesPdf(){
-  var ta=el('notes-text');
-  var content=(ta?ta.value:'').trim();
-  if(!content){toast('Nothing to download yet \u2014 write something first');return;}
-  var now=new Date();
-  var dateStr=now.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
-  var timeStr=now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
-  // Escape user text for HTML then convert newlines to <br>
-  var esc=function(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');};
-  var body=esc(content).replace(/\n/g,'<br>');
-  // Build printable HTML
-  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Solura Dashboard \u2014 Suggestions &amp; Issues \u2014 '+dateStr+'</title>'
-    +'<style>'
-    +'@page{margin:0.75in}'
-    +'body{font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1F2937;max-width:7in;margin:0 auto;padding:0;line-height:1.6;font-size:12pt}'
-    +'.hdr{border-bottom:3px solid #C8870A;padding-bottom:14px;margin-bottom:24px}'
-    +'.brand{font-family:Georgia,serif;color:#C8870A;font-size:22pt;font-weight:500;margin:0}'
-    +'.sub{color:#6B7280;font-size:10pt;margin-top:4px;letter-spacing:.02em}'
-    +'.meta{color:#9CA3AF;font-size:9.5pt;margin-top:12px;display:flex;justify-content:space-between}'
-    +'.notes{background:#FEFCF7;border:1px solid #E5D9C0;border-left:4px solid #C8870A;border-radius:6px;padding:18px 22px;font-size:11pt;color:#1F2937;white-space:pre-wrap;line-height:1.65}'
-    +'.foot{margin-top:30px;padding-top:12px;border-top:1px solid #E5D9C0;font-size:9pt;color:#9CA3AF;text-align:center;font-style:italic}'
-    +'</style></head><body>'
-    +'<div class="hdr">'
-    +'<div class="brand">Solura Home Care</div>'
-    +'<div class="sub">Dashboard \u2014 Suggestions &amp; Issues</div>'
-    +'<div class="meta"><span>'+dateStr+' \u2022 '+timeStr+'</span><span>'+content.length+' characters</span></div>'
-    +'</div>'
-    +'<div class="notes">'+body+'</div>'
-    +'<div class="foot">Generated from the Solura Dashboard notes widget. Drop this PDF into the Claude chat to have it addressed.</div>'
-    +'<script>window.onload=function(){setTimeout(function(){window.print();},250);};<'+'/script>'
-    +'</body></html>';
-  // Open in new window and trigger print (browser's Print-to-PDF creates the file)
-  var w=window.open('','_blank','width=800,height=900');
-  if(!w){toast('Popup blocked \u2014 allow popups so the PDF can open');return;}
-  w.document.open();w.document.write(html);w.document.close();
-  toast('Print dialog opening \u2014 choose "Save as PDF"');
-}
-
-/* ─── Feedback pencil widget ───────────────────────────────────────────
- * Bottom-left floating pencil button opens a form with type / location /
- * description. On download, generates a print-to-PDF page you can drop
- * into a Claude chat to have the item addressed.
+/* ─── Feedback pencil widget — stack model ─────────────────────────────
+ * Bottom-left pencil FAB opens a modal where each entry is added to a
+ * persistent stack (localStorage). When you're ready you download all
+ * stacked items as one multi-section PDF, which then wipes the stack
+ * clean so the next batch starts empty.
+ *
+ * localStorage key: FB_STACK_KEY = 'solura_feedback_stack_v1'
+ * Value: JSON array of { id, type, where, text, addedAt }
  * ─────────────────────────────────────────────────────────────────────── */
+var FB_STACK_KEY='solura_feedback_stack_v1';
 var _fbType='bug';
+var _fbTypeMap={
+  bug:{label:'Bug report',color:'#B03025',bg:'#FDECEA',icon:'🐛'},
+  suggestion:{label:'Suggestion',color:'#8B6500',bg:'#FEF7E8',icon:'💡'},
+  question:{label:'Question',color:'#1E4E8C',bg:'#EBF3FB',icon:'❓'}
+};
+
+function loadFeedbackStack(){
+  try{var s=localStorage.getItem(FB_STACK_KEY);return s?JSON.parse(s):[];}catch(_){return [];}
+}
+function saveFeedbackStack(stack){
+  try{localStorage.setItem(FB_STACK_KEY,JSON.stringify(stack));}catch(_){}
+}
+function renderFeedbackStack(){
+  var stack=loadFeedbackStack();
+  var countEl=el('fb-stack-count');
+  var listEl=el('fb-stack-list');
+  var clearBtn=el('fb-clear-stack-btn');
+  var dlBtn=el('fb-download-stack-btn');
+  if(countEl)countEl.textContent=String(stack.length);
+  var enabled=stack.length>0;
+  [clearBtn,dlBtn].forEach(function(b){if(!b)return;b.style.opacity=enabled?'1':'.4';b.style.pointerEvents=enabled?'auto':'none';});
+  if(!listEl)return;
+  if(!stack.length){
+    listEl.innerHTML='<div style="font-size:12px;color:var(--soft);font-style:italic;text-align:center;padding:14px 0;">Stack is empty — add your first item below.</div>';
+    return;
+  }
+  listEl.innerHTML=stack.map(function(item,i){
+    var tm=_fbTypeMap[item.type]||_fbTypeMap.bug;
+    var when=new Date(item.addedAt);
+    var whenStr=when.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    return '<div style="display:flex;gap:10px;padding:10px 12px;background:#fff;border:1px solid var(--border);border-left:3px solid '+tm.color+';border-radius:8px;margin-bottom:6px;">'
+      +'<div style="flex-shrink:0;font-size:16px;line-height:1.2;">'+tm.icon+'</div>'
+      +'<div style="flex:1;min-width:0;">'
+        +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:'+tm.color+';">'+escapeHtml(tm.label)+(item.where?' · '+escapeHtml(item.where):'')+'</div>'
+        +'<div style="font-size:12.5px;color:var(--dark);margin-top:3px;line-height:1.4;max-height:38px;overflow:hidden;">'+escapeHtml(item.text)+'</div>'
+        +'<div style="font-size:10px;color:var(--soft);margin-top:3px;">added '+whenStr+'</div>'
+      +'</div>'
+      +'<button data-action="remove-feedback-item" data-idx="'+i+'" title="Remove from stack" style="flex-shrink:0;background:none;border:none;color:var(--soft);font-size:16px;cursor:pointer;padding:0 4px;line-height:1;">×</button>'
+    +'</div>';
+  }).join('');
+}
 function openFeedback(){
   _fbType='bug';
-  // Reset UI state
   document.querySelectorAll('.fb-type-btn').forEach(function(b){
     b.classList.toggle('fb-active',b.dataset.fbType==='bug');
   });
   var w=el('fb-where'),t=el('fb-text');
   if(w)w.value='';
   if(t)t.value='';
+  renderFeedbackStack();
   el('modal-feedback').classList.add('open');
   setTimeout(function(){if(t)t.focus();},60);
 }
@@ -2651,49 +2606,257 @@ document.addEventListener('click',function(ev){
     b.classList.toggle('fb-active',b===btn);
   });
 });
-function downloadFeedbackPdf(){
+function saveFeedbackToStack(){
   var whereEl=el('fb-where'),textEl=el('fb-text');
   var where=(whereEl?whereEl.value:'').trim();
   var text=(textEl?textEl.value:'').trim();
-  if(!text){toast('Describe the issue or suggestion first');return;}
-  var typeMap={bug:{label:'Bug report',color:'#B03025',bg:'#FDECEA',icon:'🐛'},suggestion:{label:'Suggestion',color:'#8B6500',bg:'#FEF7E8',icon:'💡'},question:{label:'Question',color:'#1E4E8C',bg:'#EBF3FB',icon:'❓'}};
-  var tm=typeMap[_fbType]||typeMap.bug;
+  if(!text){toast('Describe the item first');return;}
+  var stack=loadFeedbackStack();
+  stack.push({
+    id:Date.now()+'-'+Math.floor(Math.random()*9999),
+    type:_fbType,
+    where:where,
+    text:text,
+    addedAt:new Date().toISOString()
+  });
+  saveFeedbackStack(stack);
+  // Clear form for next entry, reset type to bug, keep modal open
+  if(whereEl)whereEl.value='';
+  if(textEl)textEl.value='';
+  _fbType='bug';
+  document.querySelectorAll('.fb-type-btn').forEach(function(b){
+    b.classList.toggle('fb-active',b.dataset.fbType==='bug');
+  });
+  renderFeedbackStack();
+  if(textEl)textEl.focus();
+  toast('\u2713 Added to stack — '+stack.length+' item'+(stack.length!==1?'s':'')+' queued');
+}
+function removeFeedbackStackItem(idxStr){
+  var idx=parseInt(idxStr,10);
+  if(isNaN(idx))return;
+  var stack=loadFeedbackStack();
+  if(idx<0||idx>=stack.length)return;
+  stack.splice(idx,1);
+  saveFeedbackStack(stack);
+  renderFeedbackStack();
+}
+function clearFeedbackStack(){
+  var stack=loadFeedbackStack();
+  if(!stack.length)return;
+  if(!confirm('Clear all '+stack.length+' item'+(stack.length!==1?'s':'')+' from the stack? This cannot be undone.'))return;
+  saveFeedbackStack([]);
+  renderFeedbackStack();
+  toast('Stack cleared');
+}
+function downloadFeedbackStackPdf(){
+  var stack=loadFeedbackStack();
+  if(!stack.length){toast('Stack is empty — add items first');return;}
   var now=new Date();
   var dateStr=now.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
   var timeStr=now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
-  var esc=function(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');};
-  var body=esc(text).replace(/\n/g,'<br>');
-  // Filename-safe slug from type + date
-  var slug=tm.label.toLowerCase().replace(/\s+/g,'-')+'-'+now.toISOString().slice(0,10);
-  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Solura Dashboard \u2014 '+esc(tm.label)+' \u2014 '+dateStr+'</title>'
+  var esc=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');};
+
+  // Build sections — one per stack item, page-break between
+  var sections=stack.map(function(item,i){
+    var tm=_fbTypeMap[item.type]||_fbTypeMap.bug;
+    var body=esc(item.text).replace(/\n/g,'<br>');
+    var addedAt=new Date(item.addedAt);
+    var addedStr=addedAt.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+addedAt.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    return '<div class="item'+(i>0?' pagebreak':'')+'">'
+      +'<div class="item-num">Item '+(i+1)+' of '+stack.length+'</div>'
+      +'<div class="type-badge" style="color:'+tm.color+';background:'+tm.bg+';border-color:'+tm.color+'33;">'+tm.icon+' &nbsp;'+esc(tm.label)+'</div>'
+      +'<div class="item-meta">added '+esc(addedStr)+'</div>'
+      +(item.where?'<div class="section-label">Where</div><div class="where-line">'+esc(item.where)+'</div>':'')
+      +'<div class="section-label">Details</div><div class="notes" style="border-left-color:'+tm.color+';">'+body+'</div>'
+    +'</div>';
+  }).join('');
+
+  // Cover / TOC
+  var counts={bug:0,suggestion:0,question:0};
+  stack.forEach(function(it){if(counts[it.type]!=null)counts[it.type]++;});
+  var tocRows=stack.map(function(item,i){
+    var tm=_fbTypeMap[item.type]||_fbTypeMap.bug;
+    var snip=(item.text||'').slice(0,80).replace(/\s+/g,' ').trim();
+    return '<tr><td class="toc-num">'+(i+1)+'.</td><td class="toc-type"><span style="color:'+tm.color+';">'+tm.icon+' '+esc(tm.label)+'</span></td><td class="toc-where">'+esc(item.where||'\u2014')+'</td><td class="toc-snip">'+esc(snip)+(item.text.length>80?'\u2026':'')+'</td></tr>';
+  }).join('');
+
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Solura Dashboard \u2014 Feedback batch \u2014 '+dateStr+'</title>'
     +'<style>'
     +'@page{margin:0.75in;size:letter}'
     +'body{font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1F2937;max-width:7in;margin:0 auto;padding:0;line-height:1.6;font-size:12pt}'
     +'.hdr{border-bottom:3px solid #C8870A;padding-bottom:14px;margin-bottom:24px}'
     +'.brand{font-family:Georgia,serif;color:#C8870A;font-size:22pt;font-weight:500;margin:0}'
     +'.sub{color:#6B7280;font-size:10pt;margin-top:4px;letter-spacing:.02em}'
-    +'.type-badge{display:inline-block;padding:4px 12px;border-radius:12px;font-size:10pt;font-weight:700;letter-spacing:.03em;text-transform:uppercase;margin-top:10px;color:'+tm.color+';background:'+tm.bg+';border:1px solid '+tm.color+'33}'
     +'.meta{color:#9CA3AF;font-size:9.5pt;margin-top:10px;display:flex;justify-content:space-between}'
-    +'.section-label{font-size:9pt;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#9CA3AF;margin:20px 0 6px}'
+    +'.summary{background:#FEFCF7;border:1px solid #E5D9C0;border-radius:6px;padding:14px 18px;margin-bottom:22px;font-size:11pt;color:#374151}'
+    +'.summary strong{color:#1F2937}'
+    +'.toc{width:100%;border-collapse:collapse;font-size:10.5pt;margin-bottom:30px}'
+    +'.toc td{padding:6px 8px;border-bottom:1px solid #F0EAD9;vertical-align:top}'
+    +'.toc-num{color:#9CA3AF;width:24px;font-weight:600}'
+    +'.toc-type{width:120px;font-weight:600}'
+    +'.toc-where{width:140px;font-size:9.5pt;color:#6B7280}'
+    +'.toc-snip{color:#374151}'
+    +'.item{margin-top:24px}'
+    +'.pagebreak{page-break-before:always;padding-top:12px}'
+    +'.item-num{font-size:9pt;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#9CA3AF;margin-bottom:8px}'
+    +'.type-badge{display:inline-block;padding:4px 12px;border-radius:12px;font-size:10pt;font-weight:700;letter-spacing:.03em;text-transform:uppercase;border-width:1px;border-style:solid}'
+    +'.item-meta{color:#9CA3AF;font-size:9pt;margin-top:8px}'
+    +'.section-label{font-size:9pt;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#9CA3AF;margin:16px 0 6px}'
     +'.where-line{font-size:11pt;color:#374151;padding:8px 14px;background:#F9FAFB;border-radius:6px;border:1px solid #E5E7EB}'
-    +'.notes{background:#FEFCF7;border:1px solid #E5D9C0;border-left:4px solid '+tm.color+';border-radius:6px;padding:18px 22px;font-size:11pt;color:#1F2937;white-space:pre-wrap;line-height:1.65;margin-top:6px}'
+    +'.notes{background:#FEFCF7;border:1px solid #E5D9C0;border-left-width:4px;border-radius:6px;padding:18px 22px;font-size:11pt;color:#1F2937;white-space:pre-wrap;line-height:1.65;margin-top:6px}'
     +'.foot{margin-top:30px;padding-top:12px;border-top:1px solid #E5D9C0;font-size:9pt;color:#9CA3AF;text-align:center;font-style:italic}'
     +'</style></head><body>'
     +'<div class="hdr">'
     +'<div class="brand">Solura Home Care</div>'
-    +'<div class="sub">Dashboard \u2014 Feedback</div>'
-    +'<div class="type-badge">'+tm.icon+' &nbsp;'+esc(tm.label)+'</div>'
-    +'<div class="meta"><span>'+dateStr+' \u2022 '+timeStr+'</span><span>'+text.length+' characters</span></div>'
+    +'<div class="sub">Dashboard \u2014 Feedback batch</div>'
+    +'<div class="meta"><span>'+dateStr+' \u2022 '+timeStr+'</span><span>'+stack.length+' item'+(stack.length!==1?'s':'')+'</span></div>'
     +'</div>'
-    +(where?'<div class="section-label">Where in the dashboard</div><div class="where-line">'+esc(where)+'</div>':'')
-    +'<div class="section-label">Details</div><div class="notes">'+body+'</div>'
-    +'<div class="foot">Generated from the Solura Dashboard feedback widget. Upload this PDF into a Claude chat to have it addressed. \u2014 '+esc(slug)+'</div>'
-    +'<script>window.onload=function(){setTimeout(function(){window.print();},250);};<'+'/script>'
+    +'<div class="summary"><strong>'+stack.length+' item'+(stack.length!==1?'s':'')+' queued.</strong> '
+      +counts.bug+' bug'+(counts.bug!==1?'s':'')+' \u2022 '
+      +counts.suggestion+' suggestion'+(counts.suggestion!==1?'s':'')+' \u2022 '
+      +counts.question+' question'+(counts.question!==1?'s':'')+'</div>'
+    +'<div class="section-label">Contents</div>'
+    +'<table class="toc"><tbody>'+tocRows+'</tbody></table>'
+    +sections
+    +'<div class="foot">Generated from the Solura Dashboard feedback stack. Upload this PDF into a Claude chat to have items addressed.</div>'
+    +'<script>window.onload=function(){setTimeout(function(){window.print();},300);};<'+'/script>'
     +'</body></html>';
+
   var w=window.open('','_blank','width=800,height=900');
   if(!w){toast('Popup blocked \u2014 allow popups so the PDF can open');return;}
   w.document.open();w.document.write(html);w.document.close();
-  toast('Print dialog opening \u2014 choose "Save as PDF"');
+
+  // Wipe the stack now that it's been rendered.
+  // Do this AFTER the popup writes, so if popup fails we don't lose the data.
+  saveFeedbackStack([]);
+  renderFeedbackStack();
+  toast('Print dialog opening \u2014 stack cleared for next batch');
+}
+
+/* ─── §11c Comms log — silent write to sheet for analytics later ───────
+ * Every outbound email, outbound SMS, inbound email (detected during
+ * polling), and manually logged call gets a row appended to the
+ * "Comms Log" worksheet in the same xlsx. No UI on it — this is data
+ * capture for future analytics. The sheet is lazy-created on first log
+ * write if it doesn't exist yet.
+ *
+ * Failures are non-fatal: the log helper catches errors and does NOT
+ * throw. If the sheet can't be written we lose the record but the user
+ * action (send/log) still completes successfully. Losing an analytics
+ * row is much better than blocking the actual work.
+ *
+ * Schema (A..J):
+ *   Timestamp (ISO) | Direction (in/out) | Channel (email/sms/call)
+ *   Lead Row (excel row #) | Lead Name | Contact (email or phone)
+ *   Subject | Preview (max 500 chars) | Outcome | Message ID
+ * ─────────────────────────────────────────────────────────────────────── */
+var COMMS_LOG_SHEET='Comms Log';
+var _commsLogNextRow=null; // null until initialized
+var _commsLogInFlight=null; // Promise for in-progress ensure() to avoid races
+
+async function ensureCommsLogSheet(){
+  // If we've already initialized this session, return the cached next-row.
+  if(_commsLogNextRow!=null)return _commsLogNextRow;
+  // If someone else is already initializing, await that.
+  if(_commsLogInFlight)return _commsLogInFlight;
+  _commsLogInFlight=(async function(){
+    var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets';
+    var sheetUrl=base+'/'+encodeURIComponent(COMMS_LOG_SHEET);
+    // Check if sheet exists
+    var r=await gfetch(sheetUrl+'?$select=name');
+    if(r.status===404){
+      // Create the sheet
+      var cr=await gfetch(base,{
+        method:'POST',
+        body:JSON.stringify({name:COMMS_LOG_SHEET})
+      });
+      if(!cr.ok){
+        var ce=await cr.json().catch(function(){return{};});
+        throw new Error('Create Comms Log sheet failed: '+(ce.error&&ce.error.message?ce.error.message:cr.status));
+      }
+      // Write headers to A1:J1
+      var headers=['Timestamp','Direction','Channel','Lead Row','Lead Name','Contact','Subject','Preview','Outcome','Message ID'];
+      var hr=await gfetch(sheetUrl+"/range(address='A1:J1')",{
+        method:'PATCH',
+        body:JSON.stringify({values:[headers]})
+      });
+      if(!hr.ok){
+        var he=await hr.json().catch(function(){return{};});
+        throw new Error('Write Comms Log headers failed: '+(he.error&&he.error.message?he.error.message:hr.status));
+      }
+      _commsLogNextRow=2;
+      return 2;
+    }else if(!r.ok){
+      throw new Error('Comms Log check failed: '+r.status);
+    }
+    // Sheet exists — find next empty row via usedRange
+    var ur=await gfetch(sheetUrl+'/usedRange?$select=rowCount');
+    if(!ur.ok){
+      _commsLogNextRow=2;
+      return 2;
+    }
+    var uj=await ur.json();
+    _commsLogNextRow=(uj.rowCount||1)+1;
+    return _commsLogNextRow;
+  })();
+  try{
+    var v=await _commsLogInFlight;
+    _commsLogInFlight=null;
+    return v;
+  }catch(e){
+    _commsLogInFlight=null;
+    throw e;
+  }
+}
+
+async function logComms(entry){
+  // entry: {direction:'in'|'out', channel:'email'|'sms'|'call',
+  //         leadRi, leadName, contact, subject, preview, outcome, messageId}
+  // Non-fatal: catches all errors, never throws.
+  if(!tok||!fid)return;
+  try{
+    var row=await ensureCommsLogSheet();
+    if(!row)return;
+    var leadRow=(entry.leadRi!=null&&entry.leadRi>=0)?(entry.leadRi+1):'';
+    var preview=String(entry.preview||'').slice(0,500);
+    var values=[
+      new Date().toISOString(),
+      entry.direction||'',
+      entry.channel||'',
+      leadRow,
+      String(entry.leadName||''),
+      String(entry.contact||''),
+      String(entry.subject||''),
+      preview,
+      String(entry.outcome||''),
+      String(entry.messageId||'')
+    ];
+    var addr='A'+row+':J'+row;
+    var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
+    var r=await gfetch(base+"/range(address='"+addr+"')",{
+      method:'PATCH',
+      body:JSON.stringify({values:[values]})
+    });
+    if(r.ok){
+      _commsLogNextRow=row+1;
+    }else{
+      // Something's off — reset the counter so next call re-syncs
+      _commsLogNextRow=null;
+    }
+  }catch(e){
+    console.warn('Comms log skipped (non-fatal):',e.message);
+    _commsLogNextRow=null; // re-sync next time
+  }
+}
+
+// Helper: build a comms-log entry from a lead row + additional fields
+function commsEntryForLead(ri,extra){
+  var r=rows[ri]||[];
+  var name=String(r[C.NM]||'').trim();
+  var dm=String(r[C.DM]||'').trim();
+  var e={leadRi:ri,leadName:name||dm||''};
+  Object.keys(extra||{}).forEach(function(k){e[k]=extra[k];});
+  return e;
 }
 
 /* ─── §12 Inbound email polling + activity feed ────────────────────────
@@ -2751,8 +2914,17 @@ async function pollInboundMail(){
     var j=await res.json();
     if(!j.value)return;
     var leadEmails=leadEmailSet();
+    // Build a lookup: normalized email → row index, so we can attach lead
+    // context to logged comms entries
+    var emailToRi={};
+    for(var ri=0;ri<rows.length;ri++){
+      var e=normEmail((rows[ri]||[])[C.EM]);
+      if(e&&emailToRi[e]==null)emailToRi[e]=ri;
+    }
     var newCache={};
     var newlyArrived=[]; // for toast notification
+    var loggedIds=loadLoggedInboundIds();
+    var toLog=[]; // messages we haven't logged before
     j.value.forEach(function(m){
       var senderAddr=(m.from&&m.from.emailAddress&&m.from.emailAddress.address)||'';
       var sender=normEmail(senderAddr);
@@ -2774,9 +2946,44 @@ async function pollInboundMail(){
       if(receivedTs>lastInboundPollAt&&receivedTs>inboxLastReadTs(sender)){
         newlyArrived.push({sender:sender,subject:entry.subject,fromName:entry.fromName});
       }
+      // Comms log dedup: log any message we haven't logged before, regardless
+      // of last-poll timing (so we catch messages that arrived while the
+      // dashboard was closed too)
+      if(!loggedIds[m.id]){
+        toLog.push({message:m,entry:entry,sender:sender,ri:emailToRi[sender]});
+      }
     });
     inboundEmailCache=newCache;
     lastInboundPollAt=Date.now();
+    // Fire-and-forget log inbound messages we haven't logged before.
+    // Sequential to avoid race on the next-row counter.
+    if(toLog.length){
+      (async function(){
+        var newIds={};
+        for(var k=0;k<toLog.length;k++){
+          var m=toLog[k];
+          var senderName=(m.entry.fromName||m.sender);
+          var leadName='';
+          if(m.ri!=null&&m.ri>=0){
+            leadName=String((rows[m.ri]||[])[C.NM]||(rows[m.ri]||[])[C.DM]||'').trim();
+          }
+          await logComms({
+            direction:'in',
+            channel:'email',
+            leadRi:m.ri!=null?m.ri:-1,
+            leadName:leadName||senderName,
+            contact:m.entry.fromAddr,
+            subject:m.entry.subject,
+            preview:m.entry.preview,
+            outcome:'received',
+            messageId:m.message.id
+          });
+          newIds[m.message.id]=Date.now();
+        }
+        // Only mark as logged AFTER attempts complete
+        addLoggedInboundIds(newIds);
+      })();
+    }
     if(newlyArrived.length){
       // Show a single toast noting the count
       var msg=newlyArrived.length===1
@@ -2790,6 +2997,29 @@ async function pollInboundMail(){
       try{refresh();}catch(_){}
     }
   }catch(e){/* silent — polling is best-effort */}
+}
+
+// Track logged inbound message IDs so we don't double-log across sessions.
+// Kept in localStorage as {id: timestamp}; pruned to last 7 days.
+var COMMS_LOGGED_KEY='comms_logged_inbound_v1';
+function loadLoggedInboundIds(){
+  try{
+    var s=localStorage.getItem(COMMS_LOGGED_KEY);
+    if(!s)return {};
+    var obj=JSON.parse(s);
+    // Prune older than 7 days
+    var cutoff=Date.now()-7*24*3600*1000;
+    var kept={};
+    Object.keys(obj).forEach(function(k){if(obj[k]>cutoff)kept[k]=obj[k];});
+    return kept;
+  }catch(_){return {};}
+}
+function addLoggedInboundIds(newIds){
+  try{
+    var existing=loadLoggedInboundIds();
+    Object.keys(newIds).forEach(function(k){existing[k]=newIds[k];});
+    localStorage.setItem(COMMS_LOGGED_KEY,JSON.stringify(existing));
+  }catch(_){}
 }
 
 function startInboundPolling(){
@@ -2897,6 +3127,17 @@ async function saveCallLog(){
     await writeRow(ri,updates);
     closeModal('modal-calllog');
     toast('✓ Call logged');
+    // Fire-and-forget log to Comms Log
+    var phoneVal=String((rows[ri]||[])[C.PH]||'').trim();
+    logComms(commsEntryForLead(ri,{
+      direction:_clDir==='in'?'in':'out',
+      channel:'call',
+      contact:phoneVal,
+      subject:duration||'',
+      preview:notes,
+      outcome:_clOutcome||'',
+      messageId:''
+    }));
     try{await buildUI();}catch(_){}
     _clRi=-1;
   }catch(e){
@@ -2959,6 +3200,15 @@ async function sendSMS(){
     if(!smsr.ok){var se=await smsr.json().catch(function(){return{};});throw new Error('SMS failed: '+(se.message||smsr.status));}
     el('modal-sms').classList.remove('open');
     toast('✓ SMS sent');
+    // Fire-and-forget log to Comms Log
+    logComms(commsEntryForLead(ri,{
+      direction:'out',
+      channel:'sms',
+      contact:phone||'',
+      subject:'',
+      preview:msg,
+      outcome:'sent'
+    }));
     // Auto-advance the sequence
     var u=advanceLead(ri,'SMS');
     if(u){
@@ -3666,6 +3916,15 @@ async function sendEmail(){
     emailAttachments=[];
     origAttachments=[];
     toast(oneDriveShared.length?'\u2713 Email sent \u2014 large files shared via OneDrive':'\u2713 Email sent');
+    // Fire-and-forget log to Comms Log tab for later analytics
+    logComms(commsEntryForLead(ri,{
+      direction:'out',
+      channel:'email',
+      contact:toAddr,
+      subject:subj,
+      preview:bodyEl?bodyEl.textContent.slice(0,500):'',
+      outcome:oneDriveShared.length?'sent+onedrive':'sent'
+    }));
     var u=advanceLead(ri,'Email');
     if(u){try{await writeRow(ri,u);}catch(e){showErr('Email sent but log failed: '+e.message);}}
     await buildUI();
@@ -5089,11 +5348,12 @@ function onClick(ev){
     case 'open-drawer': if(ri!=null)openDrawer(ri); break;
     case 'close-drawer': closeDrawer(); break;
     case 'close-modal': if(mid)closeModal(mid); break;
-    case 'open-notes': openNotesModal(); break;
-    case 'clear-notes': clearNotesText(); break;
-    case 'download-notes-pdf': downloadNotesPdf(); break;
     case 'open-feedback': openFeedback(); break;
     case 'download-feedback': downloadFeedbackPdf(); break;
+    case 'save-feedback-to-stack': saveFeedbackToStack(); break;
+    case 'download-feedback-stack': downloadFeedbackStackPdf(); break;
+    case 'clear-feedback-stack': clearFeedbackStack(); break;
+    case 'remove-feedback-item': removeFeedbackStackItem(t.dataset.idx); break;
     case 'open-calllog': if(ri!=null)openCallLog(ri); break;
     case 'save-calllog': saveCallLog(); break;
     case 'mark-inbox-read':
