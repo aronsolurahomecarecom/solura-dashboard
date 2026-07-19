@@ -316,6 +316,23 @@ td{padding:13px 16px;vertical-align:top;}
 .cl-dir-btn.active[data-dir="out"]{border-color:var(--grn);background:var(--grn-pale);color:var(--grn);}
 .cl-out-btn{padding:8px;border:1.5px solid var(--border);background:#fff;color:var(--mid);border-radius:8px;font-family:inherit;font-size:11.5px;font-weight:600;cursor:pointer;transition:all .12s;}
 .cl-out-btn.active{border-color:var(--gold);background:var(--gold-pale);color:#8B6500;}
+
+/* Engine editor + settings */
+.ee-lbl{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px;}
+.ee-inp{width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;background:#fff;}
+.ee-phase{border:1.5px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px;background:var(--warm);}
+.ee-phase-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.ee-phase-num{width:26px;height:26px;background:var(--gold);color:#fff;border-radius:50%;text-align:center;font-size:12px;font-weight:700;line-height:26px;flex-shrink:0;}
+.ee-mini{padding:4px 9px;background:#fff;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:11px;font-weight:600;color:var(--mid);cursor:pointer;}
+.ee-mini:hover{border-color:var(--gold-mid);color:#8B6500;}
+.ee-step{display:grid;grid-template-columns:44px 1fr 92px auto;gap:6px;align-items:start;margin-bottom:6px;}
+.ee-step .ee-inp{padding:7px 9px;font-size:12.5px;}
+.ee-tpl{width:100%;margin:2px 0 8px;padding:8px 10px;border:1px dashed var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none;resize:vertical;background:#fff;color:var(--mid);}
+.es-eng-row{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#fff;border:1px solid var(--border);border-radius:10px;margin-bottom:6px;flex-wrap:wrap;}
+.es-eng-name{font-size:13px;font-weight:700;color:var(--dark);}
+.es-eng-meta{font-size:11px;color:var(--soft);}
+.es-badge{font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:8px;background:var(--grn-pale);color:var(--grn);}
+.es-assign-row{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:6px;align-items:center;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 
 /* Rich email composer */
@@ -502,6 +519,8 @@ td{padding:13px 16px;vertical-align:top;}
   </div>
   <div class="hdr-r">
     <div class="sync-pill"><div class="sdot" id="sdot"></div><span id="slabel">Not connected</span></div>
+    <button class="hbtn hbtn-ghost" id="btn-settings" style="display:none" data-action="open-settings" title="Settings">⚙</button>
+    <button class="hbtn hbtn-gold" id="btn-addlead" style="display:none" data-action="open-addlead">＋ Add Lead</button>
     <button class="hbtn hbtn-gold" id="btn-refresh" style="display:none" data-action="refresh">↺ Refresh</button>
     <button class="hbtn hbtn-ghost" id="btn-out" style="display:none" data-action="signout">Sign out</button>
   </div>
@@ -688,6 +707,86 @@ td{padding:13px 16px;vertical-align:top;}
 
 <div class="toast" id="toast"></div>
 
+<!-- Add lead modal — manual entry straight into the sheet -->
+<div class="modal" id="modal-addlead">
+  <div class="mbox" style="max-width:620px">
+    <div class="mhead"><div class="mtitle">Add a lead</div><button class="mclose" data-action="close-modal" data-mid="modal-addlead">✕</button></div>
+    <div class="mbody" style="padding:20px 22px 22px">
+      <div style="font-size:12.5px;color:var(--soft);margin-bottom:16px;line-height:1.5">
+        Writes a new row into the sheet and drops the lead into Phase 1 so the sequence starts immediately.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Client name (patient) *</label>
+          <input type="text" id="al-name" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Decision maker</label>
+          <input type="text" id="al-dm" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Phone</label>
+          <input type="tel" id="al-phone" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Email</label>
+          <input type="email" id="al-email" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Relationship</label>
+          <input type="text" id="al-rel" placeholder="Daughter, Son…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Source</label>
+          <select id="al-source" style="width:100%;padding:9px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;background:#fff">
+            <option>A Place for Mom</option>
+            <option>Caring.com</option>
+            <option>Referral</option>
+            <option>Website</option>
+            <option>Yelp</option>
+            <option selected>Other</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Area / ZIP</label>
+          <input type="text" id="al-area" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Hrs / week</label>
+          <input type="text" id="al-hrs" placeholder="20-30" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Services</label>
+          <input type="text" id="al-services" placeholder="Bathing, Transfers…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Est. start</label>
+          <input type="text" id="al-start" placeholder="Immediately" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Pay type</label>
+          <input type="text" id="al-pay" placeholder="Private, LTC…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+        </div>
+      </div>
+      <div style="margin-bottom:14px">
+        <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Notes</label>
+        <textarea id="al-notes" rows="3" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;outline:none;resize:vertical;line-height:1.5"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;padding-top:14px;border-top:1px solid var(--border-soft)">
+        <button data-action="save-addlead" style="padding:10px 22px;background:linear-gradient(135deg,var(--gold),#D4920F);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(200,135,10,.3)">＋ Add lead</button>
+        <button data-action="close-modal" data-mid="modal-addlead" style="padding:10px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">Cancel</button>
+        <span id="al-spin" style="display:none;align-items:center;gap:6px;color:var(--soft);font-size:11px;margin-left:6px"><span class="mspin"></span>Saving…</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Call log modal -->
 <div class="modal" id="modal-calllog">
   <div class="mbox" style="max-width:520px">
@@ -746,6 +845,81 @@ td{padding:13px 16px;vertical-align:top;}
   </div>
 </div>
 
+<!-- Settings modal -->
+<div class="modal" id="modal-settings">
+  <div class="mbox" style="max-width:760px">
+    <div class="mhead"><div class="mtitle">⚙ Settings</div><button class="mclose" data-action="close-modal" data-mid="modal-settings">✕</button></div>
+    <div class="mbody" style="padding:20px 22px 22px;max-height:76vh;overflow-y:auto">
+
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--gold);margin-bottom:10px">Sequence engines</div>
+      <div style="font-size:12px;color:var(--soft);margin-bottom:12px;line-height:1.5">
+        Engines define the outreach sequence. Build from scratch, edit the default, run several side by side, and assign each lead source its own engine. Export any engine as a package — anyone (or Claude) can author one and you import it here.
+      </div>
+      <div id="es-engine-list" style="margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px;margin-bottom:22px">
+        <button data-action="es-new-engine" style="padding:9px 16px;background:linear-gradient(135deg,var(--gold),#D4920F);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">➕ New engine</button>
+        <label style="padding:9px 16px;background:#fff;color:var(--mid);border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">
+          <input type="file" id="eng-import-input" accept=".json,application/json" style="display:none">📥 Import package
+        </label>
+      </div>
+
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--gold);margin-bottom:8px">Engine assignments by source</div>
+      <div style="font-size:12px;color:var(--soft);margin-bottom:10px;line-height:1.5">
+        Leads whose Source matches a rule use that engine; everyone else uses the default. Match is case-insensitive and matches partial text.
+      </div>
+      <div id="es-assign-list" style="margin-bottom:8px"></div>
+      <div style="display:flex;gap:8px;margin-bottom:22px">
+        <button data-action="es-add-assign" style="padding:7px 13px;background:#fff;color:var(--mid);border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:11.5px;font-weight:600;cursor:pointer">＋ Add rule</button>
+        <button data-action="es-save-assign" style="padding:7px 15px;background:linear-gradient(135deg,var(--sky-mid),var(--sky));color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer">💾 Save assignments</button>
+      </div>
+
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--gold);margin-bottom:8px">Email</div>
+      <div style="font-size:12.5px;color:var(--mid);margin-bottom:22px;line-height:1.6">
+        Current message-size ceiling: <strong id="es-emailcap"></strong> (adaptive — shrinks if Exchange rejects a send).
+        <button data-action="es-reset-emailcap" style="margin-left:8px;padding:5px 11px;background:#fff;color:var(--mid);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer">Reset to 10MB</button>
+      </div>
+
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--gold);margin-bottom:8px">About</div>
+      <div style="font-size:12px;color:var(--soft);line-height:1.6">Solura Dashboard · engines are stored in <code style="font-size:11px">Solura_Engines.json</code> on OneDrive · step positions are index-based, so structural edits to an engine with active leads shift their place — the editor warns before saving those.</div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Engine editor — full canvas -->
+<div class="modal" id="modal-engine-editor">
+  <div class="mbox" style="max-width:940px">
+    <div class="mhead"><div class="mtitle" id="ee-title">Engine editor</div><button class="mclose" data-action="ee-cancel">✕</button></div>
+    <div class="mbody" style="padding:18px 22px 22px;max-height:80vh;overflow-y:auto">
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:14px">
+        <div>
+          <label class="ee-lbl">Engine name</label>
+          <input type="text" id="ee-name" class="ee-inp">
+        </div>
+        <div>
+          <label class="ee-lbl">Engine id</label>
+          <input type="text" id="ee-id" class="ee-inp" style="font-family:monospace;font-size:12px">
+        </div>
+      </div>
+      <div id="ee-phases"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin:14px 0 4px">
+        <select id="ee-new-cadence" class="ee-inp" style="width:auto;padding:8px 10px">
+          <option value="action">Manual steps (action)</option>
+          <option value="daily">Daily blitz</option>
+          <option value="weekly">Weekly cadence</option>
+        </select>
+        <button data-action="ee-add-phase" style="padding:9px 16px;background:#fff;color:var(--mid);border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">➕ Add phase</button>
+      </div>
+      <div id="ee-errors" style="color:var(--red);font-size:12px;margin-top:10px;white-space:pre-wrap"></div>
+      <div style="display:flex;gap:8px;padding-top:16px;border-top:1px solid var(--border-soft);margin-top:14px">
+        <button data-action="ee-save-engine" style="padding:10px 24px;background:linear-gradient(135deg,var(--gold),#D4920F);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(200,135,10,.3)">💾 Save engine</button>
+        <button data-action="ee-cancel" style="padding:10px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">Cancel</button>
+        <span id="ee-spin" style="display:none;align-items:center;gap:6px;color:var(--soft);font-size:11px"><span class="mspin"></span>Saving…</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Feedback pencil button (bottom left) — captures suggestions/bugs and downloads as PDF -->
 <button id="feedback-btn" data-action="open-feedback" title="Report a bug or suggestion" aria-label="Feedback">
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
@@ -778,7 +952,7 @@ td{padding:13px 16px;vertical-align:top;}
 
         <div style="margin-bottom:12px">
           <div style="display:flex;gap:8px">
-            <button type="button" data-fb-type="bug" class="fb-type-btn fb-active" style="flex:1;padding:9px 12px;border:1.5px solid var(--red);background:var(--red-pale);color:var(--red);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">🐛 Bug</button>
+            <button type="button" data-fb-type="bug" class="fb-type-btn fb-active" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);background:#fff;color:var(--mid);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">🐛 Bug</button>
             <button type="button" data-fb-type="suggestion" class="fb-type-btn" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);background:#fff;color:var(--mid);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">💡 Suggestion</button>
             <button type="button" data-fb-type="question" class="fb-type-btn" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);background:#fff;color:var(--mid);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">❓ Question</button>
           </div>
@@ -900,29 +1074,168 @@ var tok='', fid='', rows=[], drawerRi=-1, lastLoadAt=null, leadSearchQuery='';
  * Step 31 is sticky — after completing it, step_idx stays at 31 and step_done_at
  * gets updated. The lead loops on Phase 5 forever until they respond or get disqualified.
  * ─────────────────────────────────────────────────────────────────────── */
-var SEQ=[];
-(function(){
-  SEQ.push({ph:1,icon:'💬',text:'Intro text — notify calling in 5 min',type:'sms',trigger:'action',lbl:'Phase 1'});
-  SEQ.push({ph:1,icon:'📞',text:'First call',type:'call',trigger:'action',lbl:'Phase 1'});
-  SEQ.push({ph:1,icon:'📞',text:'Second call attempt',type:'call',trigger:'action',lbl:'Phase 1'});
-  SEQ.push({ph:1,icon:'💬',text:'Missed you text',type:'sms',trigger:'action',lbl:'Phase 1'});
-  for(var d=1;d<=10;d++){
-    var pmIsCall=(d%2!==0);
-    SEQ.push({ph:2,icon:'📞',text:'AM Call — Day '+d,type:'call',trigger:'time',day:d,slot:'am',pmIsCall:pmIsCall,lbl:'Phase 2 · Day '+d});
-    if(pmIsCall){
-      SEQ.push({ph:2,icon:'📞',text:'PM Call — Day '+d,type:'call',trigger:'time',day:d,slot:'pm',pmIsCall:true,lbl:'Phase 2 · Day '+d});
+/* ─── §2b ENGINE SUBSYSTEM ───────────────────────────────────────────────
+ * Sequences are now DATA. An engine is a JSON document with phases; each
+ * phase has a cadence: 'action' (manual steps, NF-driven), 'daily' (N-day
+ * blitz with AM/PM slots + time windows), or 'weekly' (check-in on the
+ * lead's nurture weekday; forever:true = sticky perpetual nurture).
+ *
+ * compileEngine(json) flattens phases into the runtime step list. step_idx
+ * (col Z) indexes into the COMPILED list — so the embedded DEFAULT_ENGINE
+ * below must compile to exactly the legacy 32-step sequence (asserted in
+ * tests). Multiple engines live in Solura_Engines.json on OneDrive;
+ * assignment rules map lead Source (col G) → engine id; unmatched leads
+ * use defaultEngineId. Editing/creating/deleting engines happens in
+ * Settings → Sequence Engines. Engines export/import as .json packages.
+ * ─────────────────────────────────────────────────────────────────────── */
+var ENGINE_FILE='Solura_Engines.json';
+var DEFAULT_ENGINE={
+  id:'solura-default',
+  name:'Solura Default',
+  phases:[
+    {name:'First Contact',phNum:1,cadence:'action',steps:[
+      {icon:'💬',text:'Intro text — notify calling in 5 min',type:'sms'},
+      {icon:'📞',text:'First call',type:'call'},
+      {icon:'📞',text:'Second call attempt',type:'call'},
+      {icon:'💬',text:'Missed you text',type:'sms'}
+    ]},
+    {name:'Daily Blitz',phNum:2,cadence:'daily',daily:{days:10,amType:'call',pmMode:'alternate'}},
+    {name:'Weekly Check-ins',phNum:3,cadence:'weekly',weekly:{entries:[
+      {week:2,type:'sms'},{week:3,type:'sms'},{week:4,type:'sms'},{week:5,type:'sms'},
+      {week:6,type:'call',text:'Week 6 check-in call'}
+    ]}},
+    {name:'Re-Engagement',phNum:4,cadence:'action',steps:[
+      {icon:'📞',text:'6-week re-engagement call',type:'call'},
+      {icon:'💬',text:'Voicemail + follow-up text',type:'sms'}
+    ]},
+    {name:'Long-term Nurture',phNum:5,cadence:'weekly',weekly:{forever:true,type:'sms',text:'Long-term nurture — weekly'}}
+  ]
+};
+// Time windows for daily slots (decimal hours). Same numbers the legacy
+// p2Window used; carried per-step so custom engines can differ later.
+var DAILY_WINDOWS={callAm:[8,13],callPm:[15,21],smsAm:[8,17],smsPm:[14,22]};
+
+function compileEngine(e){
+  if(!e||!e.phases||!e.phases.length)throw new Error('Engine has no phases');
+  var seq=[];
+  e.phases.forEach(function(p,pi){
+    var ph=(p.phNum!=null)?p.phNum:(pi+1);
+    var phName=p.name||('Phase '+ph);
+    if(p.cadence==='action'){
+      var steps=p.steps||[];
+      if(!steps.length)throw new Error('Action phase "'+phName+'" has no steps');
+      steps.forEach(function(s){
+        seq.push({ph:ph,icon:s.icon||(s.type==='call'?'📞':s.type==='email'?'📧':'💬'),
+          text:s.text||'(untitled)',type:s.type||'sms',trigger:'action',
+          lbl:'Phase '+ph,cadence:'action',phName:phName,template:s.template||''});
+      });
+    }else if(p.cadence==='daily'){
+      var d0=p.daily||{};
+      var days=Math.max(1,parseInt(d0.days,10)||1);
+      var amType=d0.amType==='sms'?'sms':'call';
+      var pmMode=d0.pmMode||'alternate'; // alternate|call|sms|none
+      for(var d=1;d<=days;d++){
+        var pmType=pmMode==='none'?null:pmMode==='alternate'?((d%2!==0)?'call':'sms'):pmMode;
+        var pmIsCall=pmType==='call';
+        // Legacy quirk preserved: AM window depends on whether PM is a call
+        // (call-PM days used [8,13] AM; sms-PM days used [8,17] AM).
+        var amWin=pmIsCall?DAILY_WINDOWS.callAm:DAILY_WINDOWS.smsAm;
+        seq.push({ph:ph,icon:amType==='call'?'📞':'💬',
+          text:(amType==='call'?'AM Call':'AM Text')+' — Day '+d,type:amType,trigger:'time',
+          day:d,slot:'am',pmIsCall:pmIsCall,lbl:'Phase '+ph+' · Day '+d,
+          cadence:'daily',phName:phName,window:amWin,maxDay:days});
+        if(pmType){
+          seq.push({ph:ph,icon:pmIsCall?'📞':'💬',
+            text:(pmIsCall?'PM Call':'PM Text')+' — Day '+d,type:pmType,trigger:'time',
+            day:d,slot:'pm',pmIsCall:pmIsCall,lbl:'Phase '+ph+' · Day '+d,
+            cadence:'daily',phName:phName,
+            window:pmIsCall?DAILY_WINDOWS.callPm:DAILY_WINDOWS.smsPm,
+            maxDay:days,lastSlot:true});
+        }else{
+          seq[seq.length-1].lastSlot=true;
+        }
+      }
+    }else if(p.cadence==='weekly'){
+      var w0=p.weekly||{};
+      if(w0.forever){
+        seq.push({ph:ph,icon:(w0.type==='call')?'📞':'💬',
+          text:w0.text||'Weekly nurture',type:w0.type||'sms',trigger:'time',
+          lbl:'Phase '+ph,cadence:'weekly',sticky:true,phName:phName,template:w0.template||''});
+      }else{
+        var entries=w0.entries||[];
+        if(!entries.length)throw new Error('Weekly phase "'+phName+'" has no entries');
+        entries.forEach(function(en){
+          seq.push({ph:ph,icon:(en.type==='call')?'📞':'💬',
+            text:en.text||('Week '+en.week+' check-in'),type:en.type||'sms',trigger:'time',
+            week:en.week,lbl:'Phase '+ph+' · Wk '+en.week,
+            cadence:'weekly',phName:phName,template:en.template||''});
+        });
+      }
     }else{
-      SEQ.push({ph:2,icon:'💬',text:'PM Text — Day '+d,type:'sms',trigger:'time',day:d,slot:'pm',pmIsCall:false,lbl:'Phase 2 · Day '+d});
+      throw new Error('Unknown cadence "'+p.cadence+'" in phase "'+phName+'"');
+    }
+  });
+  if(!seq.length)throw new Error('Engine compiled to zero steps');
+  return {id:e.id,name:e.name||e.id,json:e,seq:seq};
+}
+function validateEngine(e){
+  try{compileEngine(e);return [];}catch(err){return [err.message];}
+}
+
+// Engines document — loaded from OneDrive, seeded with the default.
+var enginesDoc={engines:[DEFAULT_ENGINE],defaultEngineId:'solura-default',assignments:[]};
+var ENGINES={}; // id → compiled
+function applyEnginesDoc(){
+  ENGINES={};
+  var ok=0;
+  (enginesDoc.engines||[]).forEach(function(e){
+    try{ENGINES[e.id]=compileEngine(e);ok++;}
+    catch(err){console.warn('Engine "'+(e&&e.id)+'" failed to compile — skipped:',err.message);}
+  });
+  if(!ok||!ENGINES[enginesDoc.defaultEngineId]){
+    // Hard fallback: embedded default, today's exact behavior.
+    ENGINES['solura-default']=compileEngine(DEFAULT_ENGINE);
+    enginesDoc.defaultEngineId='solura-default';
+  }
+  SEQ=ENGINES[enginesDoc.defaultEngineId].seq;
+}
+function engineIdFor(ri){
+  var src=String(((rows[ri]||[])[C.SO])||'').trim().toLowerCase();
+  if(src){
+    var rules=enginesDoc.assignments||[];
+    for(var i=0;i<rules.length;i++){
+      var m=String(rules[i].match||'').trim().toLowerCase();
+      if(m&&(src===m||src.indexOf(m)>-1)&&ENGINES[rules[i].engineId])return rules[i].engineId;
     }
   }
-  for(var w=2;w<=6;w++){
-    SEQ.push({ph:3,icon:'💬',text:'Week '+w+' check-in',type:'sms',trigger:'time',week:w,lbl:'Phase 3 · Wk '+w});
-  }
-  SEQ.push({ph:4,icon:'📞',text:'6-week re-engagement call',type:'call',trigger:'action',lbl:'Phase 4'});
-  SEQ.push({ph:4,icon:'💬',text:'Voicemail + follow-up text',type:'sms',trigger:'action',lbl:'Phase 4'});
-  SEQ.push({ph:5,icon:'💬',text:'Long-term nurture — weekly',type:'sms',trigger:'time',lbl:'Phase 5'});
-})();
-// Index references for clarity in engine code
+  return enginesDoc.defaultEngineId;
+}
+function engineFor(ri){return ENGINES[engineIdFor(ri)]||ENGINES[enginesDoc.defaultEngineId];}
+function seqFor(ri){return engineFor(ri).seq;}
+
+async function loadEnginesDoc(){
+  try{
+    var r=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/content');
+    if(r.status===404){applyEnginesDoc();return;} // first run — embedded default
+    if(!r.ok){applyEnginesDoc();return;}
+    var j=await r.json();
+    if(j&&j.engines&&j.engines.length){enginesDoc=j;}
+    applyEnginesDoc();
+  }catch(e){console.warn('Engines load failed — using embedded default:',e.message);applyEnginesDoc();}
+}
+async function saveEnginesDoc(){
+  var r=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/content',{
+    method:'PUT',body:JSON.stringify(enginesDoc,null,2)
+  });
+  if(!r.ok){var e=await r.json().catch(function(){return{};});
+    throw new Error('Engines save failed: '+(e.error&&e.error.message?e.error.message:r.status));}
+  applyEnginesDoc();
+}
+
+var SEQ=[];
+applyEnginesDoc(); // SEQ = compiled default until OneDrive doc loads
+// Legacy index constants — valid for the DEFAULT engine only. Every use is
+// guarded to engineIdFor(ri)==='solura-default' (migration + auto-heal paths).
 var STEP_P1_LAST=3;   // index of "Missed you text" — Phase 1 final action
 var STEP_P2_FIRST=4;  // index of first Phase 2 action (AM Day 1)
 var STEP_P2_LAST=23;  // index of last Phase 2 action (PM Day 10)
@@ -1109,6 +1422,8 @@ async function refreshToken(){
 function onSignedIn(){
   el('ls').style.display='none';
   el('btn-refresh').style.display='inline-block';
+  var bal=el('btn-addlead');if(bal)bal.style.display='inline-block';
+  var bst=el('btn-settings');if(bst)bst.style.display='inline-block';
   el('btn-out').style.display='inline-block';
   el('sdot').className='sdot live';
   el('slabel').textContent='Connected to OneDrive';
@@ -1213,6 +1528,8 @@ async function loadData(){
 
     // Load templates from the Templates tab
     try{await loadTemplates();}catch(e){showErr('Templates load failed: '+e.message);}
+    // Load custom sequence engines (falls back to embedded default on any failure)
+    try{await loadEnginesDoc();}catch(e){console.warn('Engines doc:',e.message);}
 
     // Run migration if needed before rendering
     await maybeRunMigration();
@@ -1472,6 +1789,10 @@ async function maybeRunMigration(){
     if(!r)continue;
     var nm=String(r[C.NM]||r[C.DM]||'').trim();
     if(!nm)continue;
+    // Migration + re-anchor are DEFAULT-ENGINE heuristics (they parse the
+    // legacy column-T labels and Phase-2 day math). Custom-engine leads are
+    // never auto-healed.
+    if(engineIdFor(i)!=='solura-default')continue;
     // Already has step_idx?
     var existing=r[C.STEP];
     if(existing!==''&&existing!=null&&!isNaN(parseInt(existing,10))){
@@ -1590,41 +1911,34 @@ function isOffSequence(ri){return getStep(ri)===STEP_OFF_SEQUENCE;}
 function currentAction(ri){
   var step=getStep(ri);
   if(step===STEP_OFF_SEQUENCE)return null;
-  if(step<0)return SEQ[0]; // new lead → intro text
-  if(step>=SEQ.length)return SEQ[SEQ.length-1]; // phase 5 sticky
-  return SEQ[step];
+  var sq=seqFor(ri);
+  if(step<0)return sq[0]; // new lead → first step
+  if(step>=sq.length)return sq[sq.length-1]; // final step sticky
+  return sq[step];
 }
 
 // Phase 2 time windows
 function p2Window(action){
-  // returns {amStart,amEnd,pmStart,pmEnd} hours decimal
-  if(!action||action.ph!==2)return null;
-  if(action.pmIsCall){
-    return {start:action.slot==='am'?8:15, end:action.slot==='am'?13:21};
-  }else{
-    return {start:action.slot==='am'?8:14, end:action.slot==='am'?17:22};
-  }
+  // Time window for a daily-cadence slot, carried on the compiled step.
+  if(!action||action.cadence!=='daily')return null;
+  if(action.window)return {start:action.window[0],end:action.window[1]};
+  // Fallback (shouldn't happen — compiler always stamps window)
+  return {start:action.slot==='am'?8:14,end:action.slot==='am'?17:22};
 }
 
-// Which calendar date does this lead's Phase 2 step belong to?
-// Anchored by step_done_at of the LAST completed step. The first Phase 2
-// action lands on the day AFTER Phase 1 completed (i.e. the day after step
-// 3's done_at).
+// Which calendar date does this lead's daily-cadence step belong to?
+// Anchored by step_done_at of the LAST completed step. The first daily
+// action lands on the day AFTER the previous phase completed.
 function p2DateFor(ri){
   var step=getStep(ri);
-  if(step<STEP_P2_FIRST||step>STEP_P2_LAST)return null;
+  var sq=seqFor(ri);
+  var action=sq[step];
+  if(!action||action.cadence!=='daily')return null;
   var doneAt=getStepDoneAt(ri);
   if(!doneAt)return localToday(); // no anchor → assume today
-  // step_done_at is the timestamp of completing the PREVIOUS step.
-  // For Phase 2 AM, the day is doneAt+1 (because previous step was either
-  // Phase 1 last step or previous day's PM).
-  // For Phase 2 PM same day, the day is the same as doneAt (because previous
-  // step was today's AM).
-  var action=SEQ[step];
-  if(!action)return localToday();
   if(action.slot==='am'){
-    // Previous step was either Missed you text (step 3) or prev day's PM
-    // Either way, today's AM = doneAt + 1 calendar day
+    // Previous step was either the prior phase's last step or prev day's PM.
+    // Either way, today's AM = doneAt + 1 calendar day.
     var doneLocal=new Date(doneAt.getFullYear(),doneAt.getMonth(),doneAt.getDate());
     return addDays(doneLocal,1);
   }else{
@@ -1687,8 +2001,8 @@ function whenToShow(ri){
     return {bucket:'future',at:nf2};
   }
 
-  // Phase 2 — NF drives bucket; time window only refines "today"
-  if(action.ph===2){
+  // Daily cadence — NF drives bucket; time window only refines "today"
+  if(action.cadence==='daily'){
     var nfP2=pd(r[C.NF]);
     // If no NF set, fall back to p2DateFor as a best-effort guess
     var targetDate=nfP2||p2DateFor(ri)||today;
@@ -1713,8 +2027,8 @@ function whenToShow(ri){
     return {bucket:'now',at:today};
   }
 
-  // Phase 3 — weekly check-in on nurtureWeekday
-  if(action.ph===3){
+  // Weekly cadence (finite check-ins) — on nurtureWeekday
+  if(action.cadence==='weekly'&&!action.sticky){
     var weekday=nurtureWeekday(ri);
     var todayDay=today.getDay();
     var doneAt=getStepDoneAt(ri);
@@ -1744,8 +2058,8 @@ function whenToShow(ri){
     return {bucket:'week',at:thisWeekDue};
   }
 
-  // Phase 5 — perpetual weekly nurture, same shape as Phase 3
-  if(action.ph===5){
+  // Sticky weekly cadence — perpetual nurture, same shape as above
+  if(action.cadence==='weekly'&&action.sticky){
     var weekday5=nurtureWeekday(ri);
     var todayDay5=today.getDay();
     var doneAt5=getStepDoneAt(ri);
@@ -1773,20 +2087,23 @@ function whenToShow(ri){
 
 // Human-readable column-T label for a given step index. Mirrors what the
 // engine tracks in step_idx, so the sheet stays a true reflection of state.
-function stepLabel(step){
+function stepLabel(step,seqOpt){
   if(step===STEP_OFF_SEQUENCE)return 'Responded — active conversation';
-  if(step<0||step>=SEQ.length)return '';
-  var a=SEQ[step];
+  var sq=seqOpt||SEQ;
+  if(step<0||step>=sq.length)return '';
+  var a=sq[step];
   if(!a)return '';
-  if(a.ph===1)return 'Phase 1 — Initial Contact';
-  if(a.ph===2){
+  // Legacy label strings preserved verbatim for phases 1-5 (column T mirror
+  // is parsed by migration paths — do not change these formats).
+  if(a.ph===1&&a.cadence==='action')return 'Phase 1 — Initial Contact';
+  if(a.cadence==='daily'){
     var slot=a.slot==='am'?'AM':'PM';
-    return 'Phase 2 — Daily Follow-Up (Day '+a.day+' '+slot+')';
+    return 'Phase '+a.ph+' — Daily Follow-Up (Day '+a.day+' '+slot+')';
   }
-  if(a.ph===3)return 'Phase 3 — Weekly Check-In (Week '+a.week+')';
-  if(a.ph===4)return 'Phase 4 — Re-Engagement';
-  if(a.ph===5)return 'Phase 5 — Long-Term Nurture';
-  return '';
+  if(a.cadence==='weekly'&&!a.sticky)return 'Phase '+a.ph+' — Weekly Check-In (Week '+a.week+')';
+  if(a.ph===4&&a.cadence==='action')return 'Phase 4 — Re-Engagement';
+  if(a.cadence==='weekly'&&a.sticky)return 'Phase '+a.ph+' — Long-Term Nurture';
+  return 'Phase '+a.ph+' — '+(a.phName||'')+(a.text?(' ('+a.text+')'):'');
 }
 
 // Advance the lead's step_idx after an action completes, computing new NF and step_done_at.
@@ -1795,6 +2112,8 @@ function advanceLead(ri,methodUsed){
   var step=getStep(ri);
   if(step===STEP_OFF_SEQUENCE)return null;
   if(step<0)step=0;
+  var sq=seqFor(ri);
+  if(step>=sq.length)step=sq.length-1;
   var u={};
   var t=localToday();
   // Pin step_done_at to noon of today rather than the actual click time.
@@ -1804,38 +2123,43 @@ function advanceLead(ri,methodUsed){
   var todayStr=fd(localToday());
   var tomorrowStr=fd(addDays(localToday(),1));
 
-  // Phase 5 is sticky — re-do the same step
-  if(step===STEP_P5){
-    u[C.STEP]=STEP_P5;
+  var cur=sq[step];
+
+  // Sticky final step (perpetual nurture) — re-do the same step
+  if(cur&&cur.sticky){
+    u[C.STEP]=step;
     u[C.STEP_AT]=noonToday;
     u[C.LC]=todayStr;
-    u[C.SQ]=stepLabel(STEP_P5);
+    u[C.SQ]=stepLabel(step,sq);
     if(methodUsed)u[C.MT]=methodUsed;
-    // Append to human-readable log
     var logHist=String((rows[ri]||[])[C.SL]||'');
-    var actText=SEQ[STEP_P5].text;
-    u[C.SL]=appendLogStr(logHist,actText,methodUsed);
+    u[C.SL]=appendLogStr(logHist,cur.text,methodUsed);
     return u;
   }
 
   var nextStep=step+1;
-  if(nextStep>=SEQ.length)nextStep=SEQ.length-1;
+  if(nextStep>=sq.length)nextStep=sq.length-1;
   u[C.STEP]=nextStep;
   u[C.STEP_AT]=noonToday;
   u[C.LC]=todayStr;
-  u[C.SQ]=stepLabel(nextStep);
+  u[C.SQ]=stepLabel(nextStep,sq);
   if(methodUsed)u[C.MT]=methodUsed;
 
-  var prevAction=SEQ[step];
+  var prevAction=cur;
+  var nextAction=sq[nextStep];
   var logHist2=String((rows[ri]||[])[C.SL]||'');
   u[C.SL]=appendLogStr(logHist2,prevAction.text,methodUsed);
 
-  // NF rules per spec
-  if(step===STEP_P1_LAST){
-    // Just finished Missed you text → Phase 2 starts tomorrow
+  // NF rules — metadata-driven, engine-agnostic. Default engine parity:
+  //  a) daily lastSlot done → next slot is tomorrow      (legacy: Phase 2 PM)
+  //  b) action step done, entering a daily phase          (legacy: P1 last)
+  //  c) timed step done, entering an action phase         (legacy: wk6 → P4,
+  //     kills the "overdue by 35 days" stale-NF bug)
+  if(prevAction.cadence==='daily'&&prevAction.lastSlot){
     u[C.NF]=tomorrowStr;
-  }else if(prevAction.ph===2&&prevAction.slot==='pm'){
-    // Just finished Phase 2 PM → next AM tomorrow
+  }else if(prevAction.trigger==='action'&&nextAction&&nextAction.cadence==='daily'){
+    u[C.NF]=tomorrowStr;
+  }else if(prevAction.trigger!=='action'&&nextAction&&nextAction.trigger==='action'){
     u[C.NF]=tomorrowStr;
   }
   // All other completions: engine does not touch NF.
@@ -1875,6 +2199,9 @@ async function autoExpirePhase2(){
     var nm=String(r[C.NM]||r[C.DM]||'').trim();
     if(!nm)continue;
     if(isExcluded(r[C.ST])||isActive(r[C.ST])||isOffSequence(i))continue;
+    // Auto-heal is a default-engine heuristic (column-T day parsing against
+    // the legacy Phase 2 layout). Custom-engine leads are never auto-healed.
+    if(engineIdFor(i)!=='solura-default')continue;
     var step=getStep(i);
     if(step<STEP_P2_FIRST||step>STEP_P2_LAST)continue;
     var action=SEQ[step];
@@ -2500,6 +2827,13 @@ function getWarmSMS(ri){
 }
 function getSMSText(ri){
   var r=rows[ri]||[];
+  // Custom-engine steps can carry an inline template — it wins over the
+  // Templates-sheet lookup. Default-engine steps have template:'' so the
+  // legacy sheet templates keep working unchanged.
+  if(!(isActive(r[C.ST])||isOffSequence(ri))){
+    var act=currentAction(ri);
+    if(act&&act.template)return fillNames(act.template,getNames(ri));
+  }
   return (isActive(r[C.ST])||isOffSequence(ri))?getWarmSMS(ri):getColdSMS(ri);
 }
 function getEmailContent(ri){
@@ -2859,6 +3193,273 @@ function commsEntryForLead(ri,extra){
   return e;
 }
 
+/* ─── §11d Settings panel + Sequence Engine editor ─────────────────────
+ * Settings: engines manager (list/create/edit/duplicate/export/import/
+ * delete/set-default), source→engine assignment rules, email cap, about.
+ * Engine editor: full canvas — phases are first-class (create/delete/
+ * reorder), three cadence types, steps with inline templates. Save
+ * compiles + validates, persists to Solura_Engines.json, hot-swaps.
+ * Packages: {format:'solura-engine',formatVersion:1,exportedAt,engine}.
+ * ─────────────────────────────────────────────────────────────────────── */
+var esState=null;      // engine JSON being edited (deep copy)
+var esIsNew=false;
+var esPrevLen=0;       // compiled length before edit (structural-change warning)
+var asgnState=[];      // working copy of assignment rules
+
+function deepCopy(o){return JSON.parse(JSON.stringify(o));}
+function setPath(obj,path,value){
+  var parts=path.split('.');
+  var cur=obj;
+  for(var i=0;i<parts.length-1;i++){
+    var k=/^\d+$/.test(parts[i])?parseInt(parts[i],10):parts[i];
+    if(cur[k]==null)cur[k]=/^\d+$/.test(parts[i+1])?[]:{};
+    cur=cur[k];
+  }
+  var last=parts[parts.length-1];
+  cur[/^\d+$/.test(last)?parseInt(last,10):last]=value;
+}
+function slugify(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'engine';}
+function leadsOnEngine(id){
+  var n=0;
+  for(var i=DATA_START;i<rows.length;i++){
+    var r=rows[i];if(!r)continue;
+    if(!String(r[C.NM]||r[C.DM]||'').trim())continue;
+    if(isExcluded(r[C.ST]))continue;
+    if(engineIdFor(i)===id)n++;
+  }
+  return n;
+}
+
+function openSettings(){
+  renderSettingsEngines();
+  asgnState=deepCopy(enginesDoc.assignments||[]);
+  renderAssignments();
+  var cap=el('es-emailcap');if(cap)cap.textContent=asmtFmtSize(EMAIL_MSG_ATTACH_CAP);
+  el('modal-settings').classList.add('open');
+}
+function renderSettingsEngines(){
+  var list=el('es-engine-list');if(!list)return;
+  list.innerHTML=(enginesDoc.engines||[]).map(function(e){
+    var comp=ENGINES[e.id];
+    var meta=comp?(e.phases.length+' phases · '+comp.seq.length+' steps'):'⚠ does not compile';
+    var isDef=e.id===enginesDoc.defaultEngineId;
+    var nLeads=comp?leadsOnEngine(e.id):0;
+    return '<div class="es-eng-row">'
+      +'<div style="flex:1;min-width:180px"><span class="es-eng-name">'+escapeHtml(e.name||e.id)+'</span>'
+      +(isDef?' <span class="es-badge">default</span>':'')
+      +'<div class="es-eng-meta">'+escapeHtml(e.id)+' · '+meta+(nLeads?(' · '+nLeads+' lead'+(nLeads!==1?'s':'')):'')+'</div></div>'
+      +'<button class="ee-mini" data-action="es-edit-engine" data-eid="'+escapeHtml(e.id)+'">✏ Edit</button>'
+      +'<button class="ee-mini" data-action="es-dup-engine" data-eid="'+escapeHtml(e.id)+'">⧉ Duplicate</button>'
+      +'<button class="ee-mini" data-action="es-export-engine" data-eid="'+escapeHtml(e.id)+'">📤 Export</button>'
+      +(!isDef?'<button class="ee-mini" data-action="es-set-default" data-eid="'+escapeHtml(e.id)+'">★ Set default</button>':'')
+      +(!isDef?'<button class="ee-mini" style="color:var(--red)" data-action="es-delete-engine" data-eid="'+escapeHtml(e.id)+'">🗑</button>':'')
+      +'</div>';
+  }).join('')||'<div style="font-size:12px;color:var(--soft);font-style:italic">No engines.</div>';
+}
+function renderAssignments(){
+  var list=el('es-assign-list');if(!list)return;
+  var opts=(enginesDoc.engines||[]).map(function(e){return '<option value="'+escapeHtml(e.id)+'">'+escapeHtml(e.name||e.id)+'</option>';}).join('');
+  list.innerHTML=asgnState.map(function(a,i){
+    return '<div class="es-assign-row">'
+      +'<input type="text" class="ee-inp" placeholder="Source contains… e.g. Caring" value="'+escapeHtml(a.match||'')+'" data-asg="'+i+'.match">'
+      +'<select class="ee-inp" data-asg="'+i+'.engineId">'+opts+'</select>'
+      +'<button class="ee-mini" style="color:var(--red)" data-action="es-del-assign" data-idx="'+i+'">✕</button>'
+      +'</div>';
+  }).join('')||'<div style="font-size:12px;color:var(--soft);font-style:italic;margin-bottom:6px">No rules — every lead uses the default engine.</div>';
+  // Set selects to current values (options render before value assignment)
+  asgnState.forEach(function(a,i){
+    var sel=list.querySelector('[data-asg="'+i+'.engineId"]');
+    if(sel&&a.engineId)sel.value=a.engineId;
+  });
+}
+
+function openEngineEditor(engJson,isNew){
+  esState=deepCopy(engJson);
+  esIsNew=!!isNew;
+  try{esPrevLen=isNew?0:compileEngine(engJson).seq.length;}catch(_){esPrevLen=0;}
+  el('ee-title').textContent=isNew?'New engine':'Edit engine — '+(engJson.name||engJson.id);
+  el('ee-name').value=esState.name||'';
+  el('ee-id').value=esState.id||'';
+  el('ee-id').readOnly=!isNew;
+  el('ee-id').style.background=isNew?'#fff':'var(--cream)';
+  el('ee-errors').textContent='';
+  renderEngineEditor();
+  el('modal-engine-editor').classList.add('open');
+}
+function renderEngineEditor(){
+  var host=el('ee-phases');if(!host||!esState)return;
+  var cadLabel={action:'Manual steps',daily:'Daily blitz',weekly:'Weekly cadence'};
+  host.innerHTML=(esState.phases||[]).map(function(p,pi){
+    var head='<div class="ee-phase-head">'
+      +'<div class="ee-phase-num">'+(pi+1)+'</div>'
+      +'<input type="text" class="ee-inp" style="flex:1" placeholder="Phase name" value="'+escapeHtml(p.name||'')+'" data-esp="phases.'+pi+'.name">'
+      +'<span style="font-size:11px;color:var(--soft);font-weight:600;white-space:nowrap">'+cadLabel[p.cadence]+'</span>'
+      +'<button class="ee-mini" data-action="ee-move-phase" data-pi="'+pi+'" data-dir="-1">↑</button>'
+      +'<button class="ee-mini" data-action="ee-move-phase" data-pi="'+pi+'" data-dir="1">↓</button>'
+      +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-phase" data-pi="'+pi+'">🗑</button>'
+      +'</div>';
+    var body='';
+    if(p.cadence==='action'){
+      body=(p.steps||[]).map(function(s,si){
+        return '<div class="ee-step">'
+          +'<input type="text" class="ee-inp" maxlength="2" value="'+escapeHtml(s.icon||'')+'" data-esp="phases.'+pi+'.steps.'+si+'.icon" title="Icon">'
+          +'<input type="text" class="ee-inp" placeholder="Step label — e.g. First call" value="'+escapeHtml(s.text||'')+'" data-esp="phases.'+pi+'.steps.'+si+'.text">'
+          +'<select class="ee-inp" data-esp="phases.'+pi+'.steps.'+si+'.type">'
+            +'<option value="sms"'+(s.type==='sms'?' selected':'')+'>SMS</option>'
+            +'<option value="call"'+(s.type==='call'?' selected':'')+'>Call</option>'
+            +'<option value="email"'+(s.type==='email'?' selected':'')+'>Email</option>'
+          +'</select>'
+          +'<span style="display:flex;gap:4px">'
+            +'<button class="ee-mini" data-action="ee-move-step" data-pi="'+pi+'" data-si="'+si+'" data-dir="-1">↑</button>'
+            +'<button class="ee-mini" data-action="ee-move-step" data-pi="'+pi+'" data-si="'+si+'" data-dir="1">↓</button>'
+            +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-step" data-pi="'+pi+'" data-si="'+si+'">✕</button>'
+          +'</span>'
+          +'<textarea class="ee-tpl" rows="2" style="grid-column:1/-1" placeholder="Template text (optional — pre-fills the SMS/Email composer for this step)" data-esp="phases.'+pi+'.steps.'+si+'.template">'+escapeHtml(s.template||'')+'</textarea>'
+          +'</div>';
+      }).join('')
+      +'<button class="ee-mini" data-action="ee-add-step" data-pi="'+pi+'">＋ Add step</button>';
+    }else if(p.cadence==='daily'){
+      var d=p.daily||{};
+      body='<div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:10px">'
+        +'<div><label class="ee-lbl">Days</label><input type="number" min="1" max="60" class="ee-inp" value="'+(d.days||10)+'" data-esp="phases.'+pi+'.daily.days"></div>'
+        +'<div><label class="ee-lbl">Morning touch</label><select class="ee-inp" data-esp="phases.'+pi+'.daily.amType">'
+          +'<option value="call"'+(d.amType!=='sms'?' selected':'')+'>Call</option>'
+          +'<option value="sms"'+(d.amType==='sms'?' selected':'')+'>SMS</option></select></div>'
+        +'<div><label class="ee-lbl">Afternoon touch</label><select class="ee-inp" data-esp="phases.'+pi+'.daily.pmMode">'
+          +'<option value="alternate"'+((d.pmMode||'alternate')==='alternate'?' selected':'')+'>Alternate call/text</option>'
+          +'<option value="call"'+(d.pmMode==='call'?' selected':'')+'>Always call</option>'
+          +'<option value="sms"'+(d.pmMode==='sms'?' selected':'')+'>Always text</option>'
+          +'<option value="none"'+(d.pmMode==='none'?' selected':'')+'>Morning only</option></select></div>'
+        +'</div>'
+        +'<div style="font-size:11px;color:var(--soft);margin-top:8px">Time windows: calls 8a–1p / 3p–9p · texts 8a–5p / 2p–10p (same windows the dashboard has always used).</div>';
+    }else if(p.cadence==='weekly'){
+      var w=p.weekly||{};
+      body='<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--mid);font-weight:600;margin-bottom:10px">'
+        +'<input type="checkbox"'+(w.forever?' checked':'')+' data-esp="phases.'+pi+'.weekly.forever"> Forever (sticky — repeats weekly until the lead responds)</label>';
+      if(w.forever){
+        body+='<div style="display:grid;grid-template-columns:120px 1fr;gap:10px">'
+          +'<div><label class="ee-lbl">Type</label><select class="ee-inp" data-esp="phases.'+pi+'.weekly.type">'
+            +'<option value="sms"'+((w.type||'sms')==='sms'?' selected':'')+'>SMS</option>'
+            +'<option value="call"'+(w.type==='call'?' selected':'')+'>Call</option></select></div>'
+          +'<div><label class="ee-lbl">Label</label><input type="text" class="ee-inp" value="'+escapeHtml(w.text||'Weekly nurture')+'" data-esp="phases.'+pi+'.weekly.text"></div>'
+          +'</div>'
+          +'<textarea class="ee-tpl" rows="2" placeholder="Template text (optional)" data-esp="phases.'+pi+'.weekly.template">'+escapeHtml(w.template||'')+'</textarea>';
+      }else{
+        body+=(w.entries||[]).map(function(en,ei){
+          return '<div class="ee-step" style="grid-template-columns:90px 92px 1fr auto">'
+            +'<input type="number" min="1" class="ee-inp" value="'+(en.week||1)+'" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.week" title="Week #">'
+            +'<select class="ee-inp" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.type">'
+              +'<option value="sms"'+((en.type||'sms')==='sms'?' selected':'')+'>SMS</option>'
+              +'<option value="call"'+(en.type==='call'?' selected':'')+'>Call</option></select>'
+            +'<input type="text" class="ee-inp" placeholder="Label (optional — default: Week N check-in)" value="'+escapeHtml(en.text||'')+'" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.text">'
+            +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-wentry" data-pi="'+pi+'" data-si="'+ei+'">✕</button>'
+            +'<textarea class="ee-tpl" rows="2" style="grid-column:1/-1" placeholder="Template text (optional)" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.template">'+escapeHtml(en.template||'')+'</textarea>'
+            +'</div>';
+        }).join('')
+        +'<button class="ee-mini" data-action="ee-add-wentry" data-pi="'+pi+'">＋ Add week</button>';
+      }
+    }
+    return '<div class="ee-phase">'+head+body+'</div>';
+  }).join('')||'<div style="font-size:13px;color:var(--soft);font-style:italic;padding:20px;text-align:center">Empty canvas — add your first phase below.</div>';
+}
+function eeAddPhase(){
+  if(!esState)return;
+  var cad=(el('ee-new-cadence')||{}).value||'action';
+  var p={name:'',cadence:cad};
+  if(cad==='action')p.steps=[{icon:'💬',text:'',type:'sms',template:''}];
+  if(cad==='daily')p.daily={days:5,amType:'call',pmMode:'alternate'};
+  if(cad==='weekly')p.weekly={entries:[{week:1,type:'sms',text:'',template:''}]};
+  (esState.phases=esState.phases||[]).push(p);
+  renderEngineEditor();
+}
+function eeSaveEngine(){
+  if(!esState)return;
+  esState.name=(el('ee-name')||{}).value||'';
+  var idv=slugify((el('ee-id')||{}).value||esState.name);
+  if(esIsNew){
+    while(ENGINES[idv]||(enginesDoc.engines||[]).some(function(e){return e.id===idv;}))idv+='-2';
+  }
+  esState.id=idv;
+  var errs=[];
+  if(!esState.name.trim())errs.push('Engine needs a name');
+  errs=errs.concat(validateEngine(esState));
+  if(errs.length){el('ee-errors').textContent='• '+errs.join('\n• ');return;}
+  // Structural-change warning: step positions are index-based
+  if(!esIsNew){
+    var newLen=compileEngine(esState).seq.length;
+    var n=leadsOnEngine(esState.id);
+    if(n>0&&esPrevLen&&newLen!==esPrevLen){
+      if(!confirm('This edit changes the number of steps ('+esPrevLen+' → '+newLen+') and '+n+' lead'+(n!==1?'s':'')+' sit on this engine. Their positions are index-based and will shift meaning. Continue?'))return;
+    }
+  }
+  var spin=el('ee-spin');if(spin)spin.style.display='inline-flex';
+  (async function(){
+    try{
+      var idx=(enginesDoc.engines||[]).findIndex(function(e){return e.id===esState.id;});
+      if(idx>=0)enginesDoc.engines[idx]=deepCopy(esState);
+      else (enginesDoc.engines=enginesDoc.engines||[]).push(deepCopy(esState));
+      await saveEnginesDoc();
+      closeModal('modal-engine-editor');
+      esState=null;
+      renderSettingsEngines();
+      renderAssignments();
+      toast('✓ Engine saved');
+      try{await buildUI();}catch(_){}
+    }catch(e){el('ee-errors').textContent=e.message;}
+    finally{if(spin)spin.style.display='none';}
+  })();
+}
+function exportEngine(id){
+  var e=(enginesDoc.engines||[]).find(function(x){return x.id===id;});
+  if(!e){toast('Engine not found');return;}
+  var pkg={format:'solura-engine',formatVersion:1,exportedAt:new Date().toISOString(),engine:deepCopy(e)};
+  var blob=new Blob([JSON.stringify(pkg,null,2)],{type:'application/json'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=id+'.solura-engine.json';
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},400);
+  toast('📤 Package downloaded — share it or hand it to Claude');
+}
+async function importEnginePackage(file){
+  try{
+    var text=await file.text();
+    var j=JSON.parse(text);
+    var eng=(j&&j.format==='solura-engine')?j.engine:j; // wrapper or bare engine
+    if(!eng||!eng.phases)throw new Error('Not an engine package (missing phases)');
+    var errs=validateEngine(eng);
+    if(errs.length)throw new Error('Engine does not compile: '+errs.join('; '));
+    eng.id=slugify(eng.id||eng.name||'imported');
+    while(ENGINES[eng.id]||(enginesDoc.engines||[]).some(function(e){return e.id===eng.id;}))eng.id+='-2';
+    if(!eng.name)eng.name=eng.id;
+    (enginesDoc.engines=enginesDoc.engines||[]).push(eng);
+    await saveEnginesDoc();
+    renderSettingsEngines();renderAssignments();
+    toast('✓ Imported "'+eng.name+'"');
+  }catch(e){showErr('Import failed: '+e.message);}
+}
+// Editor + assignments input delegation
+document.addEventListener('input',function(ev){
+  var t=ev.target;
+  if(t&&t.dataset&&t.dataset.esp&&esState){
+    var val=t.type==='checkbox'?t.checked:t.type==='number'?parseInt(t.value,10)||0:t.value;
+    setPath(esState,t.dataset.esp,val);
+    if(t.type==='checkbox')renderEngineEditor(); // forever toggle swaps the panel
+  }
+  if(t&&t.dataset&&t.dataset.asg){
+    var parts=t.dataset.asg.split('.');
+    var i=parseInt(parts[0],10);
+    if(asgnState[i])asgnState[i][parts[1]]=t.value;
+  }
+});
+document.addEventListener('change',function(ev){
+  var t=ev.target;
+  if(t&&t.id==='eng-import-input'&&t.files&&t.files[0]){
+    importEnginePackage(t.files[0]);
+    t.value='';
+  }
+});
+
 /* ─── §12 Inbound email polling + activity feed ────────────────────────
  * Every ~60s while the dashboard is open, poll Graph /me/messages for
  * recent inbound messages and cache any whose sender matches a lead's
@@ -3068,6 +3669,79 @@ function renderActivityForEmail(email){
  * called your cell). Saves as a timestamped line prepended to Notes,
  * plus updates Last Contact and Method columns.
  * ─────────────────────────────────────────────────────────────────────── */
+/* ─── §13b Manual add-lead panel ───────────────────────────────────────
+ * "+ Add Lead" in the header opens a form; on save we append one row to
+ * the Lead Tracker sheet (single range PATCH A..AC), seed the sequence at
+ * step 0 with NF=today so the lead surfaces in Due Now immediately, then
+ * update the local cache and rebuild. Column G gets a real source string
+ * from the dropdown — never a gate value.
+ * ─────────────────────────────────────────────────────────────────────── */
+function openAddLead(){
+  ['al-name','al-dm','al-phone','al-email','al-rel','al-area','al-hrs','al-services','al-start','al-pay','al-notes'].forEach(function(id){var e2=el(id);if(e2)e2.value='';});
+  var src=el('al-source');if(src)src.value='Other';
+  el('modal-addlead').classList.add('open');
+  setTimeout(function(){var n=el('al-name');if(n)n.focus();},60);
+}
+async function saveAddLead(){
+  var name=(el('al-name')||{}).value||'';name=name.trim();
+  if(!name){toast('Client name is required');return;}
+  var v=function(id){return String(((el(id)||{}).value||'')).trim();};
+  var todayStr=fd(localToday());
+  var vals=[
+    '',                    // A  Lead #
+    todayStr,              // B  Date Added
+    name,                  // C  Client Name
+    v('al-phone'),         // D  Phone
+    v('al-email'),         // E  Email
+    v('al-area'),          // F  Area
+    v('al-source')||'Other', // G  Source — real source string, never a gate value
+    v('al-services'),      // H  Services
+    v('al-hrs'),           // I  Hrs/Wk
+    v('al-start'),         // J  Est. Start
+    'Cold',                // K  Status
+    '',                    // L  Last Contact
+    '',                    // M  Method
+    todayStr,              // N  Next Follow-Up — today, so it lands in Due Now
+    v('al-dm'),            // O  Decision Maker
+    v('al-pay'),           // P  Pay Type
+    '',                    // Q  Monthly Value
+    '',                    // R  Agreement Signed
+    v('al-notes'),         // S  Notes
+    stepLabel(0),          // T  Sequence Phase (mirror)
+    '',                    // U  Sequence Log
+    '',                    // V  Seq Date
+    '',                    // W  Safety
+    v('al-rel'),           // X  Relationship
+    '',                    // Y  Next Suggested Method
+    0,                     // Z  step_idx — engine truth, Phase 1 start
+    '',                    // AA step_done_at
+    '',                    // AB nurture_weekday_override
+    ''                     // AC mentioned_conditions
+  ];
+  var ri=rows.length;          // next SheetJS index
+  var exRow=ri+1;              // Excel 1-based row
+  var spin=el('al-spin');if(spin)spin.style.display='inline-flex';
+  try{
+    var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
+    var res=await gfetch(base+"/range(address='A"+exRow+":AC"+exRow+"')",{
+      method:'PATCH',
+      body:JSON.stringify({values:[vals]})
+    });
+    if(!res.ok){
+      var e=await res.json().catch(function(){return{};});
+      throw new Error(e.error?e.error.message:('Write failed: '+res.status));
+    }
+    rows.push(vals.slice());   // local cache in sync
+    closeModal('modal-addlead');
+    toast('\u2713 '+name+' added \u2014 Phase 1 starts now');
+    await buildUI();
+  }catch(err){
+    showErr('Add lead failed: '+err.message);
+  }finally{
+    if(spin)spin.style.display='none';
+  }
+}
+
 var _clDir='in',_clOutcome='talked',_clRi=-1;
 
 function openCallLog(ri){
@@ -5356,6 +6030,95 @@ function onClick(ev){
     case 'remove-feedback-item': removeFeedbackStackItem(t.dataset.idx); break;
     case 'open-calllog': if(ri!=null)openCallLog(ri); break;
     case 'save-calllog': saveCallLog(); break;
+    case 'open-addlead': openAddLead(); break;
+    case 'save-addlead': saveAddLead(); break;
+    case 'open-settings': openSettings(); break;
+    case 'es-new-engine': openEngineEditor({id:'',name:'',phases:[]},true); break;
+    case 'es-edit-engine':
+      var _e1=(enginesDoc.engines||[]).find(function(x){return x.id===t.dataset.eid;});
+      if(_e1)openEngineEditor(_e1,false);
+      break;
+    case 'es-dup-engine':
+      var _e2=(enginesDoc.engines||[]).find(function(x){return x.id===t.dataset.eid;});
+      if(_e2){
+        var cp=deepCopy(_e2);cp.id=cp.id+'-copy';
+        while(ENGINES[cp.id]||(enginesDoc.engines||[]).some(function(x){return x.id===cp.id;}))cp.id+='-2';
+        cp.name=(cp.name||cp.id)+' (copy)';
+        enginesDoc.engines.push(cp);
+        saveEnginesDoc().then(function(){renderSettingsEngines();renderAssignments();toast('✓ Duplicated');}).catch(function(e){showErr(e.message);});
+      }
+      break;
+    case 'es-export-engine': exportEngine(t.dataset.eid); break;
+    case 'es-set-default':
+      enginesDoc.defaultEngineId=t.dataset.eid;
+      saveEnginesDoc().then(function(){renderSettingsEngines();toast('✓ Default engine changed');buildUI();}).catch(function(e){showErr(e.message);});
+      break;
+    case 'es-delete-engine':
+      var did=t.dataset.eid;
+      if(did===enginesDoc.defaultEngineId){alert('Set another engine as default first.');break;}
+      var nOn=leadsOnEngine(did);
+      if(!confirm('Delete this engine'+(nOn?(' ('+nOn+' lead'+(nOn!==1?'s':'')+' currently resolve to it — they will fall back to the default engine)'):'')+'? This cannot be undone.'))break;
+      enginesDoc.engines=(enginesDoc.engines||[]).filter(function(x){return x.id!==did;});
+      enginesDoc.assignments=(enginesDoc.assignments||[]).filter(function(a){return a.engineId!==did;});
+      saveEnginesDoc().then(function(){renderSettingsEngines();asgnState=deepCopy(enginesDoc.assignments||[]);renderAssignments();toast('Engine deleted');buildUI();}).catch(function(e){showErr(e.message);});
+      break;
+    case 'es-add-assign':
+      asgnState.push({match:'',engineId:enginesDoc.defaultEngineId});
+      renderAssignments();
+      break;
+    case 'es-del-assign':
+      asgnState.splice(parseInt(t.dataset.idx,10),1);
+      renderAssignments();
+      break;
+    case 'es-save-assign':
+      enginesDoc.assignments=deepCopy(asgnState.filter(function(a){return String(a.match||'').trim();}));
+      saveEnginesDoc().then(function(){toast('✓ Assignments saved');buildUI();}).catch(function(e){showErr(e.message);});
+      break;
+    case 'es-reset-emailcap':
+      try{sessionStorage.removeItem('emailMsgCap');}catch(_){}
+      EMAIL_MSG_ATTACH_CAP=10*1024*1024;
+      var capEl=el('es-emailcap');if(capEl)capEl.textContent=asmtFmtSize(EMAIL_MSG_ATTACH_CAP);
+      toast('Email cap reset');
+      break;
+    case 'ee-add-phase': eeAddPhase(); break;
+    case 'ee-del-phase':
+      if(esState&&confirm('Delete this phase?')){esState.phases.splice(parseInt(t.dataset.pi,10),1);renderEngineEditor();}
+      break;
+    case 'ee-move-phase':
+      if(esState){
+        var pi1=parseInt(t.dataset.pi,10),d1=parseInt(t.dataset.dir,10),pj=pi1+d1;
+        if(pj>=0&&pj<esState.phases.length){
+          var tmp=esState.phases[pi1];esState.phases[pi1]=esState.phases[pj];esState.phases[pj]=tmp;
+          renderEngineEditor();
+        }
+      }
+      break;
+    case 'ee-add-step':
+      if(esState){var ph1=esState.phases[parseInt(t.dataset.pi,10)];(ph1.steps=ph1.steps||[]).push({icon:'💬',text:'',type:'sms',template:''});renderEngineEditor();}
+      break;
+    case 'ee-del-step':
+      if(esState){esState.phases[parseInt(t.dataset.pi,10)].steps.splice(parseInt(t.dataset.si,10),1);renderEngineEditor();}
+      break;
+    case 'ee-move-step':
+      if(esState){
+        var st1=esState.phases[parseInt(t.dataset.pi,10)].steps;
+        var si1=parseInt(t.dataset.si,10),d2=parseInt(t.dataset.dir,10),sj=si1+d2;
+        if(sj>=0&&sj<st1.length){var tm2=st1[si1];st1[si1]=st1[sj];st1[sj]=tm2;renderEngineEditor();}
+      }
+      break;
+    case 'ee-add-wentry':
+      if(esState){
+        var pw=esState.phases[parseInt(t.dataset.pi,10)].weekly;
+        var maxW=(pw.entries||[]).reduce(function(m,e3){return Math.max(m,e3.week||0);},0);
+        (pw.entries=pw.entries||[]).push({week:maxW+1,type:'sms',text:'',template:''});
+        renderEngineEditor();
+      }
+      break;
+    case 'ee-del-wentry':
+      if(esState){esState.phases[parseInt(t.dataset.pi,10)].weekly.entries.splice(parseInt(t.dataset.si,10),1);renderEngineEditor();}
+      break;
+    case 'ee-save-engine': eeSaveEngine(); break;
+    case 'ee-cancel': closeModal('modal-engine-editor'); esState=null; break;
     case 'mark-inbox-read':
       var em=t.dataset.email;
       if(em){markInboxRead(em);
