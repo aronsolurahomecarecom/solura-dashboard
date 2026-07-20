@@ -954,7 +954,7 @@ html:has(.email-modal.open){overflow:hidden;}
 .email-modal-head .meta{font-size:11.5px;color:rgba(255,255,255,.75);}
 .email-modal-head .close-x{position:absolute;top:14px;right:18px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center;}
 .email-modal-head .close-x:hover{background:rgba(255,255,255,.28);}
-.email-modal-body{padding:20px 22px;overflow-y:auto;flex:1;font-size:13.5px;line-height:1.6;color:var(--dark);}
+.email-modal-body{padding:20px 22px;overflow-y:auto;flex:1;min-height:0;font-size:13.5px;line-height:1.6;color:var(--dark);} /* min-height:0 — without it a long email prevents the flex body from shrinking, pushing the footer buttons out of the clipped card (#10) */
 .email-modal-body img{max-width:100%;height:auto;}
 .email-modal-attach{padding:14px 22px;border-top:1px solid var(--border);background:#FAFAF7;}
 .email-modal-attach h4{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);margin-bottom:10px;font-weight:700;}
@@ -4707,7 +4707,11 @@ async function _sendNudgeHeadless(c){
   const t=getEffectiveTemplate(tpl,c);
   const subj=substituteLive(t.s||'',c);
   const body=substituteLive(t.b||'',c);
-  await sendMailViaGraph(c.email,subj,body,false,[]);
+  /* #5/#13 — HTML templates must go out AS HTML. Same detection the composer uses: if the body
+     contains tags, send rich; otherwise plaintext (Graph wraps it). Previously hardcoded false,
+     so an HTML template arrived as raw visible tags. */
+  const _bodyIsHtml=/<[a-z][\s\S]*?>/i.test(body);
+  await sendMailViaGraph(c.email,subj,body,_bodyIsHtml,[]);
   c.st=c.st||{};
   c.st.sent=c.st.sent||{};c.st.sent[tpl]=today();
   c.st.emails=c.st.emails||[];
@@ -8833,13 +8837,21 @@ function replyToCurrentEmail(){
   /* Strip <script> and inline handlers, keep the HTML shape otherwise so paragraphs and bolds render
      inside the quote frame. */
   let quoteInner=String(origText).replace(/<script[\s\S]*?<\/script>/gi,'').replace(/\son\w+\s*=\s*"[^"]*"/gi,'').replace(/\son\w+\s*=\s*'[^']*'/gi,'');
+  /* #6 — quote only the LATEST message, never the styled back-and-forth chain. If the original
+     body contains our own earlier quote blocks (class="email-quote") or standard blockquotes of
+     older history, strip them so the candidate sees one level of context, like a normal email
+     client, instead of the whole nested thread with internal styling. */
+  quoteInner=quoteInner.replace(/<div[^>]*class=\"?email-quote\"?[\s\S]*?<\/div>\s*<\/div>/gi,'').replace(/<blockquote[\s\S]*?<\/blockquote>/gi,'');
   /* If content wasn't HTML (plain text), convert newlines to <br> so it renders properly */
   if(!/<[a-z][\s\S]*?>/i.test(quoteInner)){
     quoteInner=esc(quoteInner).replace(/\n/g,'<br>');
   }
   /* Cap the quote at a reasonable length so a huge original doesn't dominate the composer */
   if(quoteInner.length>3000)quoteInner=quoteInner.slice(0,3000)+'\u2026';
-  const composedBody='<p><br></p><div class="email-quote" style="border-left:3px solid #C59B4E;background:#FDF9F0;padding:10px 14px;margin-top:14px;border-radius:0 6px 6px 0;color:#4A4A4A"><div style="font-size:11px;color:#8B6500;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">On '+esc(when)+', '+esc(senderName)+' wrote:</div><div style="font-size:13px;line-height:1.5">'+quoteInner+'</div></div>';
+  /* #6 — neutral, standard-email quote styling (gray left border, no brand colors, no uppercase
+     header). What the candidate receives looks like any normal email client's quote, not internal
+     portal graphics. */
+  const composedBody='<p><br></p><div class="email-quote" style="border-left:2px solid #cccccc;padding:6px 0 6px 12px;margin-top:14px;color:#555555"><div style="font-size:12px;color:#777777;margin-bottom:6px">On '+esc(when)+', '+esc(senderName)+' wrote:</div><div style="font-size:13px;line-height:1.5">'+quoteInner+'</div></div>';
   closeEmailDetail();
   setTimeout(()=>emailModal('reply',replySubj,composedBody,null),120);
 }
@@ -8941,7 +8953,7 @@ function _renderAttachmentRow(a,i,messageId,cand,awaiting){
       ${primaryBtn}
       <select id="${dropdownId}" style="padding:5px 9px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px;background:#fff" onchange="_onAssignKindChange(${i},this.value)">
         <option value="">— or assign as… —</option>
-        ${ASSIGNMENT_KINDS.map(k=>`<option value="${k.key}">${k.icon} ${esc(k.label)}</option>`).join('')}
+        ${ASSIGNMENT_KINDS.filter(k=>k.key!=='cert_clarification').map(k=>`<option value="${k.key}">${k.icon} ${esc(k.label)}</option>`).join('')}
       </select>
       <select id="${certNameId}" style="display:none;padding:5px 9px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px;background:#fff;min-width:180px" onchange="_onCertNameChange(${i},this.value)">
         <option value="">— Pick cert from application —</option>
@@ -10165,7 +10177,7 @@ function renderCalendar(){
     ${avPatternOpen?patternEditor():''}
     ${[0,1,2,3,4,5,6].map(off=>renderCalDay(base,off)).join('')}`;
 }
-async function manualRefresh(){const btn=document.getElementById('hdr-refresh');if(btn)btn.classList.add('spinning');try{await loadData();await loadAvailability();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();if(view==='inbox')renderInbox();updateInboxBadge();}finally{if(btn)setTimeout(()=>btn.classList.remove('spinning'),300);}}
+async function manualRefresh(){const btn=document.getElementById('hdr-refresh');if(btn)btn.classList.add('spinning');try{await loadData();await loadAvailability();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();else if(view==='inbox')renderInbox();else if(view==='pipeline'&&typeof render==='function')render();updateInboxBadge();}finally{if(btn)setTimeout(()=>btn.classList.remove('spinning'),300);}}
 
 /* ===== #10 — Assign an unmatched booking to an existing candidate =====
    When someone books via Cal.com using an email that doesn't match anyone in the pipeline, the
@@ -10566,7 +10578,7 @@ function openBlastDetail(blastId){
 /* Background refresh path — fully silent. No toast, no spin, no visible signal at all.
    Refreshes data + availability + inbox so calendar stays in sync with Cal.com bookings landing
    via webhook (which writes to the candidate's AJ cell and may touch AK1 for slot consumption). */
-async function backgroundRefresh(){try{await loadData();await loadAvailability();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();if(view==='inbox')renderInbox();updateInboxBadge();}catch(e){console.warn('Background refresh:',e.message);}}
+async function backgroundRefresh(){try{await loadData();await loadAvailability();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();else if(view==='inbox')renderInbox();else if(view==='pipeline'&&typeof render==='function')render(); /* #17: the poll updates unread/reply state on candidates — without this re-render the pipeline cards stayed stale until you visited the email tab */ updateInboxBadge();}catch(e){console.warn('Background refresh:',e.message);}}
 async function manualBookingsSync(){return manualRefresh();} /* legacy name */
 function openAddFromBooking(name,email,startISO){
   openAdd();
@@ -11292,6 +11304,15 @@ const TEMPLATE_BLOCKS=[
 let _activeTpl='screen_invite';
 function setActiveTpl(k){_activeTpl=k;renderSettings();}
 
+/* Live indicator for the template editor: shows whether the body will send as HTML or plaintext.
+   Pure display — the send paths auto-detect the same way. */
+function _tplHtmlBadge(key,val){
+  const el=document.getElementById('tpl-html-badge-'+key);
+  if(!el)return;
+  const isH=/<[a-z][\s\S]*?>/i.test(val||'');
+  el.textContent=isH?'HTML \u2014 sends as rich email':'PLAIN TEXT \u2014 auto-styled paragraphs';
+  el.style.cssText='font-size:10.5px;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:4px;'+(isH?'background:#EDF3FA;color:var(--sky-deep);border:1px solid #B8D4F0':'background:var(--cream);color:var(--soft);border:1px solid var(--border)');
+}
 function renderSettingsTemplates(){
   const keys=Object.keys(TEMPLATE_LABELS);
   const cur=_activeTpl&&TEMPLATE_LABELS[_activeTpl]?_activeTpl:keys[0];
@@ -11345,7 +11366,11 @@ function renderSettingsTemplates(){
 
       <label class="tpl-label">Body</label>
       ${(typeof TEMPLATE_META!=='undefined'&&TEMPLATE_META[cur]&&TEMPLATE_META[cur].hint)?`<div style="font-size:11px;color:var(--soft);background:var(--cream);padding:6px 10px;border-radius:6px;margin-bottom:6px;line-height:1.45">ℹ ${esc(TEMPLATE_META[cur].hint)}</div>`:''}
-      <textarea id="tpl_b_${cur}" class="tpl-body-input">${esc(tpl.b)}</textarea>
+      <textarea id="tpl_b_${cur}" class="tpl-body-input" oninput="_tplHtmlBadge('${cur}',this.value)">${esc(tpl.b)}</textarea>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:5px">
+        <span id="tpl-html-badge-${cur}" style="font-size:10.5px;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:4px;${/<[a-z][\s\S]*?>/i.test(tpl.b||'')?'background:#EDF3FA;color:var(--sky-deep);border:1px solid #B8D4F0':'background:var(--cream);color:var(--soft);border:1px solid var(--border)'}">${/<[a-z][\s\S]*?>/i.test(tpl.b||'')?'HTML \u2014 sends as rich email':'PLAIN TEXT \u2014 auto-styled paragraphs'}</span>
+        <span class="set-help" style="margin:0;font-size:10.5px">Paste HTML directly (tags are detected automatically) or write plain text. {placeholders} work in both.</span>
+      </div>
     </section>
   </div>`;
 }
