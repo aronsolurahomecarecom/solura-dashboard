@@ -525,6 +525,12 @@ function fileToBase64(file){return new Promise((res,rej)=>{const r=new FileReade
 const REFERRED_BY = (() => {
   try { return new URLSearchParams(window.location.search).get('ref') || ''; } catch (e) { return ''; }
 })();
+/* Source-tracking code from ?src= — set by the per-platform links created in the portal
+   (Settings → Source links & tracking). Sent with the application so the funnel numbers know
+   which posting brought this candidate in. Uppercased to match the portal's stored codes. */
+const SOURCE_CODE = (() => {
+  try { return (new URLSearchParams(window.location.search).get('src') || '').trim().toUpperCase(); } catch (e) { return ''; }
+})();
 
 async function submitForm(e){
   e.preventDefault();
@@ -538,6 +544,8 @@ async function submitForm(e){
   if(!payload.name||!payload.phone){alert('Please fill in your name and phone.');return;}
   /* Attach referral attribution from URL if present */
   if(REFERRED_BY)payload.referredBy=REFERRED_BY;
+  /* Attach source-tracking code if the candidate came in through a tracked link */
+  if(SOURCE_CODE)payload.sourceCode=SOURCE_CODE;
 
   // attach resume if present
   const resumeFile=document.getElementById('resume').files[0];
@@ -585,7 +593,12 @@ async function submitForm(e){
 /* Renders the post-submit confirmation screen. When a refCode comes back, shows the referral
    block with the candidate's personal share link + a copy button. */
 function showDonePage(firstName,refCode){
-  const refLink=refCode?'https://apply.solurahomecare.com/?ref='+refCode:'';
+  /* #16 — build the referral link from THIS page's own address (origin + pathname). The candidate
+     is literally on the working form when this runs, so the link is correct by construction — no
+     hardcoded URL to drift when the file moves or the domain changes. (The old hardcoded bare-root
+     link pointed at the dashboard, so every shared referral link was dead.) */
+  const _formUrl=location.origin+location.pathname;
+  const refLink=refCode?_formUrl+'?ref='+refCode:'';
   const referralBlock=refCode?`
     <div class="ref-block">
       <h3>🎁 Refer a friend, get priority</h3>
