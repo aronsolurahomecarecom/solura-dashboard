@@ -447,6 +447,29 @@ td{padding:13px 16px;vertical-align:top;}
 
 
 
+
+/* ── Gentle pop (global) ─────────────────────────────────────────────────────
+   Every modal / overlay / popover enters with a soft fade + scale instead of a
+   sharp pop. Asked for repeatedly: "when I open anything instead of just a
+   sharp pop it should be a gentle pop up" — applies everywhere via the shared
+   overlay containers. Fast (0.16s) so it never feels laggy; ease-out so the
+   settle is soft. Respects prefers-reduced-motion. */
+@keyframes gentlePopIn{from{opacity:0;transform:scale(.965) translateY(4px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes gentleFadeIn{from{opacity:0}to{opacity:1}}
+#modal.open, #email-modal.open, #massmodal.open, #fb-modal.open, #diag-modal.open,
+#link-booking-modal.open, #zi-modal.open, .wsoverlay.open, .doverlay.open,
+#save-preview-modal{animation:gentleFadeIn .14s ease-out}
+#modal.open>div, #email-modal.open>div, #massmodal.open>div, #fb-modal.open>div,
+#diag-modal.open>div, #link-booking-modal.open>div, #zi-modal.open>div,
+.wsoverlay.open>.wsshell, .wsoverlay.open>div, .doverlay.open>div,
+#save-preview-modal>div{animation:gentlePopIn .16s ease-out}
+@media (prefers-reduced-motion: reduce){
+  #modal.open,#email-modal.open,#massmodal.open,#fb-modal.open,#diag-modal.open,
+  #link-booking-modal.open,#zi-modal.open,.wsoverlay.open,.doverlay.open,#save-preview-modal,
+  #modal.open>div,#email-modal.open>div,#massmodal.open>div,#fb-modal.open>div,
+  #diag-modal.open>div,#link-booking-modal.open>div,#zi-modal.open>div,
+  .wsoverlay.open>.wsshell,.wsoverlay.open>div,.doverlay.open>div,#save-preview-modal>div{animation:none}
+}
 </style>
 <body>
 <style>
@@ -2708,22 +2731,26 @@ async function loadData(){
     const hasResume=!!c.st.hasResume; /* st is the source of truth; row[6] is the STAGE column, never a résumé flag */
     /* Case (2): awaitingItems still contains resume but candidate has one */
     if(hasResume&&(c.st.awaitingItems||[]).some(a=>a.kind==='resume')){
+      const _n=(c.st.awaitingItems||[]).filter(a=>a.kind==='resume').length;
       c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='resume');
+      c.st.awaitingItemsReceived=(c.st.awaitingItemsReceived||0)+_n; /* receipt-evidenced: resume IS on file */
       touched=true;
     }
     /* Case (2b): same pattern for references — refs are on file but reference_form is still queued.
        The worker's REFERENCES_SUBMITTED handler doesn't currently clear this; the portal heals it. */
     if(Array.isArray(c.st.refs)&&c.st.refs.length>0&&(c.st.awaitingItems||[]).some(a=>a.kind==='reference_form')){
+      const _n=(c.st.awaitingItems||[]).filter(a=>a.kind==='reference_form').length;
       c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='reference_form');
+      c.st.awaitingItemsReceived=(c.st.awaitingItemsReceived||0)+_n; /* receipt-evidenced: refs ARE on file */
       touched=true;
     }
-    /* Case (2c): if stage has progressed past 'Ask references', a reference_form awaiting item is
-       stale by definition — the user explicitly advanced the candidate. Drain it. */
-    const stagePastRefs=['Verify employers','References','Interview invite','Interview booked','Offer','Onboarding','Onboarding booked','Hired'].includes(c.stage);
-    if(stagePastRefs&&(c.st.awaitingItems||[]).some(a=>a.kind==='reference_form')){
-      c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='reference_form');
-      touched=true;
-    }
+    /* Case (2c) REMOVED: previously drained reference_form items for anyone at 'Verify employers',
+       'References' or later. That was the last surviving instance of the stage-implies-fulfillment
+       fallacy — being AT the References stage is exactly when you're waiting for the form, so the
+       drain emptied legitimate queues and (combined with the "queue empty = all received" surface)
+       produced the false "✓ All awaited items received — release" action for candidates whose items
+       were never received. Items are only drained on RECEIPT EVIDENCE (2/2b above) or explicit
+       user action. DO NOT re-add any stage-based drain. */
     /* Case (2d) REMOVED: previously drained cert_question awaiting items for anyone past 'Screen
        invite'. That was wrong — a lingering cert_question means you're still waiting on the
        candidate's answer about their certs, which is legitimate at ANY stage. Draining it here
@@ -2748,6 +2775,7 @@ async function loadData(){
       delete c.st.awaitingUntil;
       delete c.st.awaitingSince;
       delete c.st.awaitingItemsInitialCount;
+      delete c.st.awaitingItemsReceived;
       delete c.st.lastAwaitingReview;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-healed — references received, released from awaiting'});
       touched=true;
@@ -2763,6 +2791,7 @@ async function loadData(){
       delete c.st.awaitingUntil;
       delete c.st.awaitingSince;
       delete c.st.awaitingItemsInitialCount;
+      delete c.st.awaitingItemsReceived;
       delete c.st.lastAwaitingReview;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-healed — résumé on file, released from awaiting'});
       touched=true;
@@ -3094,6 +3123,9 @@ const SEQUENCE_DEFAULTS=[
   },
   {
     key:'References',icon:'📋',
+    /* #1/#3 — the hub can't be worked until the candidate's reference form is in. Until then the
+       ball is in THEIR court: awaiting bucket + nudge, not an empty "Open reference hub" action. */
+    preRequisite:{trigger:'hasRefs',label:'Awaiting references from candidate',action:{kind:'email-tpl',tpl:'ask_references',label:'Nudge for references',cls:'gold'}},
     action:{kind:'refs',label:'Open reference hub',cls:'sky'},
     awaitTrigger:'never',
     advanceTo:'Interview invite'
@@ -3195,6 +3227,12 @@ function sequenceAction(c,info){
     return{bucket:'action',timing:_dn(cfg.readyAction.label||cfg.action.label,'pnew'),info,primary:cfg.readyAction};
   }
 
+  /* preRequisite gate: the stage's work needs something from the CANDIDATE first (e.g. the
+     References hub needs their submitted form). Until the trigger is met, they're awaiting
+     candidate — with a nudge as the primary — not an action-needed row. */
+  if(cfg.preRequisite&&!evalTrigger(cfg.preRequisite.trigger,c)){
+    return{bucket:'awaiting',timing:_dn(cfg.preRequisite.label||'Awaiting candidate','psoft'),info,primary:cfg.preRequisite.action||cfg.action};
+  }
   /* Action not yet done → surface primary */
   if(!actionDone&&cfg.action){
     return{bucket:'action',timing:_dn(cfg.action.label||cfg.key,'pnew'),info,primary:cfg.action};
@@ -3293,9 +3331,14 @@ function _actionC(c){
     const bookingFresh=st.booking&&st.bookingReceivedAt&&new Date(st.bookingReceivedAt).getTime()>reviewedAt;
     /* Attachment assigned after review */
     const assignmentFresh=st.lastAssignmentAt&&new Date(st.lastAssignmentAt).getTime()>reviewedAt;
-    /* Awaiting queue fully drained from its initial parked state */
+    /* Awaiting queue fully drained from its initial parked state.
+       GATED on the receipt counter: every legitimate removal path (mark-received, cert answer
+       recorded, resume/refs detected on file) increments st.awaitingItemsReceived. A queue that
+       merely BECAME empty (historical heal damage, manual item deletion, a bug) never reaches
+       the counter threshold, so it shows as silently parked — never as the false
+       "✓ All awaited items received". */
     const awaitingItems=st.awaitingItems||[];
-    const allFulfilled=st.awaitingItemsInitialCount>0&&awaitingItems.length===0;
+    const allFulfilled=st.awaitingItemsInitialCount>0&&awaitingItems.length===0&&(st.awaitingItemsReceived||0)>=st.awaitingItemsInitialCount;
     if(allFulfilled){
       return{bucket:'action',timing:{txt:'✓ All awaited items received',pill:'pg',date:''},info,primary:{kind:'release-awaiting',label:'✓ Release from awaiting',cls:'grn'},manuallyAwaiting:true};
     }
@@ -3315,6 +3358,7 @@ function _actionC(c){
       delete st.awaitingUntil;
       delete st.awaitingSince;
       delete st.awaitingItemsInitialCount;
+      delete st.awaitingItemsReceived;
       delete st.lastAwaitingReview;
       st.log=st.log||[];
       st.log.push({t:stamp(),x:'✓ Auto-released from awaiting — booking arrived'});
@@ -4022,6 +4066,7 @@ async function commitPark(){
   /* Snapshot the awaitingItems count at park time. The action engine uses this to detect
      "all originally-awaited items have been fulfilled" and auto-surface a release suggestion. */
   W.st.awaitingItemsInitialCount=(W.st.awaitingItems||[]).length;
+  W.st.awaitingItemsReceived=0;
   if(reason)W.st.awaitingReason=reason;
   if(until)W.st.awaitingUntil=until;
   const itemLog=picked.length?' · watching for '+picked.map(_awaitingItemLabel).join(', '):'';
@@ -4037,6 +4082,7 @@ async function releaseAwaiting(){
   delete W.st.awaitingUntil;
   delete W.st.awaitingSince;
   delete W.st.awaitingItemsInitialCount;
+  delete W.st.awaitingItemsReceived;
   delete W.st.lastAwaitingReview;
   logW('Resumed from awaiting');
   await saveW(true);
@@ -4475,13 +4521,13 @@ function computeIdleDays(c){
 /* Stages where the system has sent a form/email and the candidate is expected to respond.
    These are the stages where nudging makes sense — auto-reject lives at the far end of the
    same continuum but uses only the highest-stakes invitation stages. */
-const NUDGE_STAGES=['Screen invite','Ask references','Verify employers','Interview invite','Onboarding','Applied'];
+const NUDGE_STAGES=['Screen invite','Ask references','Verify employers','References','Interview invite','Onboarding','Applied'];
 
 /* Match nudge-template to stage so a single "Send nudge" works contextually */
 function _nudgeTplFor(stage){
   if(stage==='Screen invite')return 'screen_nudge';
   if(stage==='Interview invite')return 'interview_invite';
-  if(stage==='Ask references'||stage==='Verify employers')return 'ask_references';
+  if(stage==='Ask references'||stage==='Verify employers'||stage==='References')return 'ask_references';
   if(stage==='Onboarding')return 'onboarding';
   if(stage==='Applied')return 'request_resume';
   return null;
@@ -4494,6 +4540,9 @@ function needsNudge(c){
   const ndays=(SETTINGS.config&&SETTINGS.config.nudgeDays)||3;
   const rdays=(SETTINGS.config&&SETTINGS.config.autoRejectDays)||14;
   if(!NUDGE_STAGES.includes(c.stage))return false;
+  /* At the References stage the nudge only makes sense while the candidate's form is missing —
+     once refs are on file, the idle party is US (calling them), so never nudge the candidate. */
+  if(c.stage==='References'&&Array.isArray(c.st&&c.st.refs)&&c.st.refs.length>0)return false;
   const idle=computeIdleDays(c);
   if(idle<ndays)return false;
   if(idle>=rdays)return false; /* past nudge → auto-reject candidate, not nudge */
@@ -4846,6 +4895,7 @@ function doPrimary(r){_memGen++;const c=pipeline.find(x=>x.excelRow===r);if(!c)r
     delete W.st.awaitingUntil;
     delete W.st.awaitingSince;
     delete W.st.awaitingItemsInitialCount;
+    delete W.st.awaitingItemsReceived;
     logW('Released from awaiting' + ((W.st.awaitingItems||[]).length?' — '+(W.st.awaitingItems||[]).length+' awaiting items kept':''));
     saveW(true).then(()=>{openWorkspace(r);toast('Released from awaiting');});
     return;
@@ -5257,8 +5307,36 @@ async function _markReceivedCore(cand,idx,note){
   if(!item)return false;
   const wasParked=!!cand.st.manualAwaiting;
   cand.st.awaitingItems=items.filter((_,i)=>i!==idx);
+  cand.st.awaitingItemsReceived=(cand.st.awaitingItemsReceived||0)+1;
   cand.st.log=cand.st.log||[];
   cand.st.log.push({t:stamp(),x:'\u2713 Received: '+_awaitingItemLabel(item)+(note?(' \u2014 '+note):'')});
+  /* #4/#12 — receiving an item updates the PROFILE, not just the queue. Marking a résumé
+     received means the candidate HAS a résumé; a cert clarification answered means the cert is
+     on their record. Without this, the profile stayed stale and the engine kept treating the
+     item as missing. Conservative scope: only fields with established semantics. */
+  if(item.kind==='resume'){
+    cand.st.hasResume=true;
+  }
+  if(item.kind==='cert'||item.kind==='cert_clarification'||item.kind==='cert_question'){
+    const certNames=(Array.isArray(item.certsAsked)&&item.certsAsked.length)?item.certsAsked:(item.name?[item.name]:[]);
+    if(certNames.length){
+      cand.st.certs=Array.isArray(cand.st.certs)?cand.st.certs:[];
+      const added=[];
+      certNames.forEach(n=>{
+        const nm=String(n||'').trim();
+        if(nm&&!cand.st.certs.some(x=>String(x).toLowerCase()===nm.toLowerCase())){cand.st.certs.push(nm);added.push(nm);}
+      });
+      /* Mirror into the credentials registry as claimed entries so the Cert Center shows them. */
+      cand.st.credentials=Array.isArray(cand.st.credentials)?cand.st.credentials:[];
+      certNames.forEach(n=>{
+        const nm=String(n||'').trim();
+        if(nm&&!cand.st.credentials.some(cr=>cr&&String(cr.name||'').toLowerCase()===nm.toLowerCase())){
+          cand.st.credentials.push({id:_credId(),name:nm,type:'claimed',claimedAt:new Date().toISOString(),addedBy:'mark-received'});
+        }
+      });
+      if(added.length)cand.st.log.push({t:stamp(),x:'\u2713 Certs added to profile from received item: '+added.join(', ')});
+    }
+  }
   const queueEmpty=cand.st.awaitingItems.length===0;
   if(wasParked&&queueEmpty){
     delete cand.st.manualAwaiting;
@@ -5266,13 +5344,19 @@ async function _markReceivedCore(cand,idx,note){
     delete cand.st.awaitingUntil;
     delete cand.st.awaitingSince;
     delete cand.st.awaitingItemsInitialCount;
+    delete cand.st.awaitingItemsReceived;
     delete cand.st.lastAwaitingReview;
     cand.st.log.push({t:stamp(),x:'\u2705 Auto-released from awaiting \u2014 all requested items received'});
   }
-  cand.st.lastAssignmentAt=new Date().toISOString();
+  /* NOTE: deliberately NOT stamping lastAssignmentAt here — receiving an item is the OPPOSITE of
+     a new assignment arriving; stamping it made the candidate re-surface as "New document
+     assigned" right after you marked something received. */
   await patchRange('AJ'+cand.excelRow,[[JSON.stringify(cand.st)]]);
   /* If the workspace is showing this candidate as a separate object, keep it in sync. */
   if(W&&W.row===cand.excelRow&&W.st!==cand.st)W.st=cand.st;
+  /* Refresh the UI so the profile change is visible immediately (#4: "doesn't update the profile"). */
+  if(typeof render==='function')try{render();}catch(e){}
+  if(W&&W.row===cand.excelRow&&typeof renderWorkspace==='function')try{renderWorkspace();}catch(e){}
   return true;
 }
 /* Mark received from the workspace awaiting pill. */
@@ -5353,6 +5437,7 @@ async function recordCertAnswer(row,idx){
   });
   /* Drop the cert_question item from awaiting. */
   cand.st.awaitingItems=(cand.st.awaitingItems||[]).filter((_,i)=>i!==idx);
+  cand.st.awaitingItemsReceived=(cand.st.awaitingItemsReceived||0)+1; /* answer recorded = received */
   /* Log the answer for the activity trail. */
   cand.st.log=cand.st.log||[];
   cand.st.log.push({t:stamp(),x:'\u2754 Cert claim recorded: '+(claimed.length?claimed.join(', '):'(nothing claimed)')+' \u2014 asked about: '+(item.certsAsked||[]).join(', ')});
@@ -5367,6 +5452,7 @@ async function recordCertAnswer(row,idx){
     delete cand.st.awaitingUntil;
     delete cand.st.awaitingSince;
     delete cand.st.awaitingItemsInitialCount;
+    delete cand.st.awaitingItemsReceived;
     delete cand.st.lastAwaitingReview;
     cand.st.log.push({t:stamp(),x:'\u2713 Released from awaiting \u2014 cert claim recorded'});
   }
@@ -5557,8 +5643,27 @@ async function removeAwaitingItem(idx){
   if(!W||!W.st.awaitingItems||!W.st.awaitingItems[idx])return;
   const item=W.st.awaitingItems[idx];
   if(!confirm('Mark "'+_awaitingItemLabel(item)+'" as no longer awaited?'))return;
+  /* #12 — offer to apply the resolution to the PROFILE, not just drop the queue item. "No longer
+     awaited" usually means the question is settled (they have it / it's confirmed) — so give the
+     option to record that. Declining = plain removal, profile untouched, not counted as received. */
+  const profileKinds=['resume','cert','cert_clarification','cert_question'];
+  let applied=false;
+  if(profileKinds.includes(item.kind)&&confirm('Also record it on their profile? (e.g. they DO have this — updates résumé/cert record)\n\nOK = update profile · Cancel = just stop awaiting')){
+    if(item.kind==='resume'){W.st.hasResume=true;}
+    else{
+      const certNames=(Array.isArray(item.certsAsked)&&item.certsAsked.length)?item.certsAsked:(item.name?[item.name]:[]);
+      W.st.certs=Array.isArray(W.st.certs)?W.st.certs:[];
+      W.st.credentials=Array.isArray(W.st.credentials)?W.st.credentials:[];
+      certNames.forEach(n=>{const nm=String(n||'').trim();
+        if(nm&&!W.st.certs.some(x=>String(x).toLowerCase()===nm.toLowerCase()))W.st.certs.push(nm);
+        if(nm&&!W.st.credentials.some(cr=>cr&&String(cr.name||'').toLowerCase()===nm.toLowerCase()))W.st.credentials.push({id:_credId(),name:nm,type:'claimed',claimedAt:new Date().toISOString(),addedBy:'no-longer-awaited'});
+      });
+    }
+    W.st.awaitingItemsReceived=(W.st.awaitingItemsReceived||0)+1;
+    applied=true;
+  }
   W.st.awaitingItems.splice(idx,1);
-  logW('Stopped awaiting: '+_awaitingItemLabel(item));
+  logW('Stopped awaiting: '+_awaitingItemLabel(item)+(applied?' \u00b7 recorded on profile':''));
   await saveW(true);
   renderWorkspace();
 }
@@ -6042,6 +6147,7 @@ async function reallySend(tpl,advanceTo){
       W.st.manualAwaiting=true;
       W.st.awaitingSince=new Date().toISOString();
       W.st.awaitingItemsInitialCount=(W.st.awaitingItems||[]).length;
+      W.st.awaitingItemsReceived=0;
       W.st.awaitingReason=tpl==='missing'?'Awaiting reply with missing info':tpl==='request_resume'?'Awaiting résumé':('Awaiting reply to "'+(subj||'email').slice(0,60)+'"');
       logW('Parked in awaiting after send');
     }
@@ -6160,13 +6266,16 @@ async function detectResumeInFolder(c){
       /* If candidate was parked waiting for the résumé, drain the awaiting item + auto-release. */
       const hadResumeWait=(c.st.awaitingItems||[]).some(a=>a.kind==='resume');
       if(hadResumeWait){
+        const _n=(c.st.awaitingItems||[]).filter(a=>a.kind==='resume').length;
         c.st.awaitingItems=(c.st.awaitingItems||[]).filter(a=>a.kind!=='resume');
+        c.st.awaitingItemsReceived=(c.st.awaitingItemsReceived||0)+_n; /* résumé detected on file */
         if(c.st.manualAwaiting&&c.st.awaitingItems.length===0){
           delete c.st.manualAwaiting;
           delete c.st.awaitingReason;
           delete c.st.awaitingUntil;
           delete c.st.awaitingSince;
           delete c.st.awaitingItemsInitialCount;
+          delete c.st.awaitingItemsReceived;
           delete c.st.lastAwaitingReview;
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-released — résumé received'});
         }
@@ -6829,13 +6938,16 @@ async function markResumeReceived(){
   if(!W)return;
   W.st.hasResume=true;
   /* Drain awaiting resume request + auto-release if it was the last item */
+  const _nR=(W.st.awaitingItems||[]).filter(a=>a.kind==='resume').length;
   W.st.awaitingItems=(W.st.awaitingItems||[]).filter(a=>a.kind!=='resume');
+  W.st.awaitingItemsReceived=(W.st.awaitingItemsReceived||0)+_nR;
   if(W.st.manualAwaiting&&W.st.awaitingItems.length===0){
     delete W.st.manualAwaiting;
     delete W.st.awaitingReason;
     delete W.st.awaitingUntil;
     delete W.st.awaitingSince;
     delete W.st.awaitingItemsInitialCount;
+    delete W.st.awaitingItemsReceived;
     delete W.st.lastAwaitingReview;
   }
   /* st.hasResume (set via W.gates + saveW below) is the source of truth. DO NOT write 'Y' to
@@ -6853,12 +6965,15 @@ async function skipResumeRequirement(){
   if(!confirm('Skip the résumé requirement and continue without one?'))return;
   W.st.hasResume=true;
   W.st.resumeSkipped=true;
+  const _nS=(W.st.awaitingItems||[]).filter(a=>a.kind==='resume').length;
   W.st.awaitingItems=(W.st.awaitingItems||[]).filter(a=>a.kind!=='resume');
+  W.st.awaitingItemsReceived=(W.st.awaitingItemsReceived||0)+_nS;
   if(W.st.manualAwaiting&&W.st.awaitingItems.length===0){
     delete W.st.manualAwaiting;
     delete W.st.awaitingReason;
     delete W.st.awaitingSince;
     delete W.st.awaitingItemsInitialCount;
+    delete W.st.awaitingItemsReceived;
     delete W.st.lastAwaitingReview;
   }
   logW('→ Résumé requirement skipped — released from awaiting');
@@ -8982,6 +9097,7 @@ async function _doAssignment(messageId,attIdx,cand,item){
     }
     /* Remove this item from awaiting queue */
     cand.st.awaitingItems=(cand.st.awaitingItems||[]).filter(a=>!(a.kind===item.kind&&(a.name||'')===(item.name||'')));
+    cand.st.awaitingItemsReceived=(cand.st.awaitingItemsReceived||0)+1; /* attachment genuinely arrived */
     /* AUTO-RELEASE: if the queue is now empty AND the candidate was parked in awaiting, release
        them automatically. The user's intent when they parked was "wait for this stuff" — once
        all of it has arrived, there's no reason to keep them parked behind a release button. The
@@ -8995,6 +9111,7 @@ async function _doAssignment(messageId,attIdx,cand,item){
       delete cand.st.awaitingUntil;
       delete cand.st.awaitingSince;
       delete cand.st.awaitingItemsInitialCount;
+      delete cand.st.awaitingItemsReceived;
       delete cand.st.lastAwaitingReview;
       cand.st.log=cand.st.log||[];
       cand.st.log.push({t:stamp(),x:'✓ Auto-released from awaiting — all requested items received'});
@@ -9150,7 +9267,7 @@ async function _pollMergeFreshAJ(excelRow, mutated){
     /* Awaiting fields: only carry over the *deletions* the poll did (e.g. resume detected →
        cleared manualAwaiting). If mutated has them missing and fresh has them present, honor the
        deletion intent. If mutated has them present, take fresh's (poll didn't touch them). */
-    ['manualAwaiting','awaitingReason','awaitingUntil','awaitingSince','awaitingItemsInitialCount','lastAwaitingReview'].forEach(k=>{
+    ['manualAwaiting','awaitingReason','awaitingUntil','awaitingSince','awaitingItemsInitialCount','awaitingItemsReceived','lastAwaitingReview'].forEach(k=>{
       if(mutated[k]===undefined&&fresh[k]!==undefined&&mutated.hasResume===true&&fresh.hasResume!==true){
         /* The poll specifically deletes these when it auto-detects a resume arrival. Preserve that
            deletion intent (drop the field) instead of restoring fresh's value. */
@@ -12948,6 +13065,7 @@ async function _recoverAutoReleased(){
           c.st.awaitingItems.push({kind:'cert_question',certsAsked:inf.certs,name:inf.certs.join(', '),requestedAt:new Date().toISOString()});
         }
         c.st.awaitingItemsInitialCount=(c.st.awaitingItems||[]).length;
+        c.st.awaitingItemsReceived=0;
         c.st.awaitingReason=inf.reason;
         certRestored++;
       }else{
