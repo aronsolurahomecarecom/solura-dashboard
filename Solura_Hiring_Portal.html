@@ -4015,9 +4015,13 @@ async function saveSettings(){
      - Snapshot into undo history so this change can be stepped back.
      - Then invoke _saveSettingsInternal() which writes to localStorage + worker + AL1. */
   const prefs=_prefsMeta();
-  if(prefs.savePreview==='diff'&&window._settingsBaseline){
+  /* Calm mode: the diff preview only interrupts for BIGGER saves (4+ settings changing at
+     once — the "did I really mean to change all that" case). One-or-two-field edits save
+     straight through; the autosave pill still shows Saved. "Don't ask again this session"
+     on the modal suppresses it entirely until reload. */
+  if(prefs.savePreview==='diff'&&window._settingsBaseline&&!window._suppressDiffSession){
     const diff=_diffConfig(window._settingsBaseline,SETTINGS);
-    if(diff.length){
+    if(diff.length>=4){
       const ok=await _showSavePreview(diff);
       if(!ok){
         toast('Save cancelled');
@@ -4121,7 +4125,8 @@ function _showSavePreview(diff){
       <div style="flex:1;overflow-y:auto">${rows}${more}</div>
       <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
         <button class="btn-sec bg-cream" style="padding:8px 16px" onclick="document.getElementById('save-preview-modal').remove();window._savePreviewResolve&&window._savePreviewResolve(false)">Cancel</button>
-        <button class="btn-primary bg-grn" style="padding:8px 20px" onclick="document.getElementById('save-preview-modal').remove();window._savePreviewResolve&&window._savePreviewResolve(true)">Apply changes</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--soft);margin-right:auto;cursor:pointer"><input type="checkbox" id="diff-suppress-cb" style="accent-color:var(--sky-deep)"> Don't ask again this session</label>
+        <button class="btn-primary bg-grn" style="padding:8px 20px" onclick="if(document.getElementById('diff-suppress-cb')&&document.getElementById('diff-suppress-cb').checked)window._suppressDiffSession=true;document.getElementById('save-preview-modal').remove();window._savePreviewResolve&&window._savePreviewResolve(true)">Apply changes</button>
       </div>
     </div>`;
     document.body.appendChild(host);
@@ -4782,10 +4787,21 @@ const TRIGGERS={
   never:            c => false
 };
 
-/* Email triggers — auto-derived from TEMPLATE_LABELS so every template gets a "<tpl>Sent" trigger.
-   Lets the sequence config check whether a specific email was sent. */
+/* Merged template registry: built-ins + user-created custom templates.
+   Custom templates live in SETTINGS.customTemplates ({key: label}) with their content in
+   SETTINGS.templates[key] like any edited template. Every picker (composer presets, mass
+   presets, sequence editor, nudges) reads from THIS, so a new template is immediately usable
+   everywhere — including as a sequence-engine email step. */
+function _allTemplateLabels(){
+  const customs=(SETTINGS&&SETTINGS.customTemplates)||{};
+  return Object.assign({},TEMPLATE_LABELS,customs);
+}
+function _isCustomTemplate(k){return !!((SETTINGS&&SETTINGS.customTemplates)||{})[k];}
+/* Email triggers — auto-derived from the MERGED registry so every template (built-in AND
+   custom) gets "<tpl>Sent"/"<tpl>NotSent" triggers for sequence conditions. Re-run after
+   settings load and after creating a template. */
 function _initEmailTriggers(){
-  Object.keys(TEMPLATE_LABELS||{}).forEach(tpl=>{
+  Object.keys(_allTemplateLabels()).forEach(tpl=>{
     TRIGGERS[tpl+'Sent']=c=>!!(c.st&&c.st.sent&&c.st.sent[tpl]);
     TRIGGERS[tpl+'NotSent']=c=>!(c.st&&c.st.sent&&c.st.sent[tpl]);
   });
@@ -7557,8 +7573,9 @@ function emailModal(tpl,subj,body,advanceTo){
 
   /* Preset email row — load any template into the composer with one click. Excludes the
      application_confirmation (auto-sent by worker) and matches whatever's edited in settings. */
-  const presetKeys=Object.keys(TEMPLATE_LABELS).filter(k=>k!=='application_confirmation');
-  const presetRow=presetKeys.map(k=>`<button class="preset-btn${tpl===k?' active':''}" onclick="loadPresetIntoComposer('${k}','${advanceTo||''}')" title="${esc(TEMPLATE_LABELS[k])}">${esc(TEMPLATE_LABELS[k])}</button>`).join('');
+  const _TL=_allTemplateLabels();
+  const presetKeys=Object.keys(_TL).filter(k=>k!=='application_confirmation');
+  const presetRow=presetKeys.map(k=>`<button class="preset-btn${tpl===k?' active':''}" onclick="loadPresetIntoComposer('${k}','${advanceTo||''}')" title="${esc(_TL[k])}">${esc(_TL[k])}</button>`).join('');
 
   /* Placeholder insertion row — clicking inserts the token at the cursor in the focused field. */
   const phRow=COMPOSER_PLACEHOLDERS.map(([l,v])=>`<button class="ph-btn" onclick="_insertPlaceholder('${v}')" title="Inserts ${v}">${esc(l)}</button>`).join('');
@@ -12059,8 +12076,9 @@ function openMassEmailModal(){
   const stageBreakdown={};
   withEmail.forEach(c=>{stageBreakdown[c.stage]=(stageBreakdown[c.stage]||0)+1;});
   const breakdownLines=Object.entries(stageBreakdown).sort((a,b)=>b[1]-a[1]).map(([s,n])=>`<div style="display:flex;justify-content:space-between"><span>${esc(s)}</span><b>${n}</b></div>`).join('');
-  const presetKeys=Object.keys(TEMPLATE_LABELS).filter(k=>k!=='application_confirmation');
-  const presetOptions=presetKeys.map(k=>`<option value="${esc(k)}">${esc(TEMPLATE_LABELS[k])}</option>`).join('');
+  const _TL2=_allTemplateLabels();
+  const presetKeys=Object.keys(_TL2).filter(k=>k!=='application_confirmation');
+  const presetOptions=presetKeys.map(k=>`<option value="${esc(k)}">${esc(_TL2[k])}</option>`).join('');
 
   if(!document.getElementById('massmodal')){
     document.body.insertAdjacentHTML('beforeend','<div class="modal" id="massmodal" onclick="if(event.target===this)closeMassModal()"><div class="mbox" id="massbox" style="max-width:700px"><div class="mhead"><div class="mtitle" id="mass-title">📨 Mass email</div><button class="mclose" onclick="closeMassModal()">✕</button></div><div class="mbody" id="mass-body"></div></div></div>');
@@ -12412,7 +12430,52 @@ const TEMPLATE_META={
   request_resume:          {badge:'NUDGE',badgeCls:'psoft',hint:'Sent when a candidate has no résumé on file.'},
   request_updated_credential:{badge:'',badgeCls:'',hint:'Sent for credential renewals.'}
 };
-function defaultTplFor(k){const dummy={name:'John Smith',email:'',phone:'',source:'',st:{refCode:'A7K2P9'},__missing:['Work authorization']};return (TEMPLATES[k]||TEMPLATES.screen_invite)(dummy);}
+function defaultTplFor(k){
+  /* Custom templates have no built-in default — they start blank. (Falling through to
+     screen_invite here made new customs mysteriously show screen-invite content.) */
+  if(_isCustomTemplate(k)&&!TEMPLATES[k])return {s:'',b:''};
+  const dummy={name:'John Smith',email:'',phone:'',source:'',st:{refCode:'A7K2P9'},__missing:['Work authorization']};return (TEMPLATES[k]||TEMPLATES.screen_invite)(dummy);}
+/* ── Custom template CRUD ──
+   Create: prompts for a label, generates a stable key (custom_<slug>), registers in
+   SETTINGS.customTemplates, seeds an empty body, re-derives <key>Sent triggers so the
+   sequence engine can immediately condition on it, and opens it in the editor.
+   Delete: custom templates only (built-ins are referenced by stage configs and can only be
+   reverted). Blocked while any v2 sequence step references the key — deleting a template out
+   from under a sequence would break its email steps. */
+function createCustomTemplate(){
+  const label=prompt('Name the new template (shown in every picker):','');
+  if(label===null||!label.trim())return;
+  const slug=label.trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40)||('tpl_'+Date.now().toString(36));
+  let key='custom_'+slug,n=2;
+  while(_allTemplateLabels()[key]){key='custom_'+slug+'_'+(n++);}
+  SETTINGS.customTemplates=SETTINGS.customTemplates||{};
+  SETTINGS.customTemplates[key]=label.trim();
+  SETTINGS.templates=SETTINGS.templates||{};
+  SETTINGS.templates[key]={s:'',b:''};
+  _initEmailTriggers(); /* customs get <key>Sent / <key>NotSent triggers immediately */
+  _activeTpl=key;
+  markSettingsDirty();
+  renderSettings();
+  toast('✓ Template created — write the subject and body, then Save');
+}
+function deleteCustomTemplate(key){
+  if(!_isCustomTemplate(key)){toast('Built-in templates can be reverted, not deleted');return;}
+  /* In-use guard: any v2 sequence email/nudge step referencing this key blocks deletion. */
+  const users=[];
+  (SETTINGS.sequences||[]).forEach(q=>(q.steps||[]).forEach(st=>{
+    const tk=(st.email&&st.email.templateKey)||(st.wait&&st.wait.nudge&&st.wait.nudge.templateKey)||st.templateKey;
+    if(tk===key)users.push(q.name||q.id);
+  }));
+  if(users.length){toast('✕ In use by sequence'+(users.length===1?'':'s')+': '+Array.from(new Set(users)).join(', ')+' — remove it from those steps first');return;}
+  if(!confirm('Delete template "'+(_allTemplateLabels()[key]||key)+'"? This cannot be undone (settings history aside).'))return;
+  delete SETTINGS.customTemplates[key];
+  if(SETTINGS.templates)delete SETTINGS.templates[key];
+  delete TRIGGERS[key+'Sent'];delete TRIGGERS[key+'NotSent'];
+  if(_activeTpl===key)_activeTpl=null;
+  markSettingsDirty();
+  renderSettings();
+  toast('🗑 Deleted');
+}
 /* ===================== SETTINGS — sidebar-driven page ===================== */
 let settingsSection='workflow';
 function setSettingsSection(k){settingsSection=k;renderSettings();}
@@ -12602,7 +12665,8 @@ function renderSettings(){
 function renderSettingsSequence(){
   const seq=getActiveSequence();
   const isCustom=!!(SETTINGS.sequence&&Array.isArray(SETTINGS.sequence)&&SETTINGS.sequence.length);
-  const tplOptions=Object.keys(TEMPLATE_LABELS).filter(k=>k!=='application_confirmation').map(k=>`<option value="${esc(k)}">${esc(TEMPLATE_LABELS[k])}</option>`).join('');
+  const _TL3=_allTemplateLabels();
+  const tplOptions=Object.keys(_TL3).filter(k=>k!=='application_confirmation').map(k=>`<option value="${esc(k)}">${esc(_TL3[k])}</option>`).join('');
   const trigOptions=Object.keys(TRIGGERS).sort().map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
   const jsonStr=JSON.stringify(seq,null,2);
 
@@ -13105,15 +13169,17 @@ function _tplHtmlBadge(key,val){
   el.style.cssText='font-size:10.5px;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:4px;'+(isH?'background:#EDF3FA;color:var(--sky-deep);border:1px solid #B8D4F0':'background:var(--cream);color:var(--soft);border:1px solid var(--border)');
 }
 function renderSettingsTemplates(){
-  const keys=Object.keys(TEMPLATE_LABELS);
-  const cur=_activeTpl&&TEMPLATE_LABELS[_activeTpl]?_activeTpl:keys[0];
+  const _TLE=_allTemplateLabels();
+  const keys=Object.keys(_TLE);
+  const cur=_activeTpl&&_TLE[_activeTpl]?_activeTpl:keys[0];
   _activeTpl=cur;
   const tpl=SETTINGS.templates[cur]||defaultTplFor(cur);
   const isEdited=!!SETTINGS.templates[cur];
+  const isCustomCur=_isCustomTemplate(cur);
   /* Filter is purely a DOM hide/show — no re-render needed on each keystroke. */
   const filter=(window._tplFilter||'').trim().toLowerCase();
   const list=keys.map(k=>{
-    const lbl=TEMPLATE_LABELS[k]||k;
+    const lbl=_TLE[k]||k;
     const meta=(typeof TEMPLATE_META!=='undefined'?TEMPLATE_META[k]:null)||{};
     const matches=!filter||lbl.toLowerCase().includes(filter)||k.toLowerCase().includes(filter)||(meta.hint||'').toLowerCase().includes(filter);
     const badge=meta.badge?`<span class="pill ${meta.badgeCls||'psoft'}" style="font-size:8.5px;font-weight:700;margin-left:5px">${esc(meta.badge)}</span>`:'';
@@ -13128,7 +13194,9 @@ function renderSettingsTemplates(){
 
   return `<div class="tpl-editor">
     <aside class="tpl-list">
-      <div class="tpl-list-head">Templates <span style="font-weight:500;color:var(--soft);font-size:10.5px">${keys.length}</span></div>
+      <div class="tpl-list-head" style="display:flex;align-items:center;gap:8px">Templates <span style="font-weight:500;color:var(--soft);font-size:10.5px">${keys.length}</span>
+        <button class="btn-sm bg-grn" style="margin-left:auto;cursor:pointer;font-size:10.5px;padding:3px 9px" onclick="createCustomTemplate()" title="Create a new email template — usable everywhere, including as a sequence-engine email step">+ New</button>
+      </div>
       ${searchBox}
       ${list}
     </aside>
@@ -13139,7 +13207,8 @@ function renderSettingsTemplates(){
         <div style="flex:1"></div>
         <button class="btn-sec bg-cream" onclick="loadDefaultIntoEditor('${cur}')" title="Replace the editor contents with the system default — useful as a starting point">↻ Load default</button>
         <button class="btn-sec bg-cream" onclick="previewTemplate('${cur}')">👁 Preview</button>
-        ${isEdited?`<button class="btn-sec bg-cream" onclick="revertTemplate('${cur}')" style="color:var(--red)">Revert</button>`:''}
+        ${isEdited&&!isCustomCur?`<button class="btn-sec bg-cream" onclick="revertTemplate('${cur}')" style="color:var(--red)">Revert</button>`:''}
+        ${isCustomCur?`<button class="btn-sec" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="deleteCustomTemplate('${cur}')">🗑 Delete</button>`:''}
         <button class="btn-primary bg-grn" onclick="saveTemplate('${cur}')">Save</button>
       </div>
 
@@ -14922,7 +14991,7 @@ function _seqTriggerEval(name,c){
   try{return !!evalTrigger(name,c);}catch(e){return false;}
 }
 function _seqTemplatesList(){
-  try{return Object.keys(TEMPLATE_LABELS).map(k=>({key:k,label:TEMPLATE_LABELS[k]}));}catch(e){return [];}
+  try{const m=_allTemplateLabels();return Object.keys(m).map(k=>({key:k,label:m[k]}));}catch(e){return [];}
 }
 function _seqTriggerList(){
   try{return Object.keys(TRIGGERS);}catch(e){return [];}
@@ -15115,7 +15184,7 @@ function renderSettingsPreferences(){
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
       <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid ${p.savePreview==='diff'?'var(--sky-deep)':'var(--border)'};border-radius:8px;cursor:pointer;font-size:13px">
         <input type="radio" name="prf-save" value="diff" ${p.savePreview==='diff'?'checked':''} onchange="_prefsSetSave('diff')" style="accent-color:var(--sky-deep)">
-        <div><b>Show a diff before saving</b> <span style="font-size:11px;color:var(--soft);font-style:italic">(default)</span><br><span style="font-size:11.5px;color:var(--soft)">See exactly what changed \u2014 old value vs new \u2014 and confirm before applying.</span></div>
+        <div><b>Show a diff before saving</b> <span style="font-size:11px;color:var(--soft);font-style:italic">(default)</span><br><span style="font-size:11.5px;color:var(--soft)">Only for bigger saves (4+ settings changing at once). Small edits save straight through \u2014 no nagging.</span></div>
       </label>
       <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid ${p.savePreview==='toast'?'var(--sky-deep)':'var(--border)'};border-radius:8px;cursor:pointer;font-size:13px">
         <input type="radio" name="prf-save" value="toast" ${p.savePreview==='toast'?'checked':''} onchange="_prefsSetSave('toast')" style="accent-color:var(--sky-deep)">
