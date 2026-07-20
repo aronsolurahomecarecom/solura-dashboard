@@ -2933,7 +2933,9 @@ async function loadData(){
       console.info('[#8 blast diag] first mismatches:',_blastDiag.failureReasons);
     }
   }
-  renderBlastDiagBanner();
+  /* #8: blast diagnostics banner removed from the main pipeline page — blast visibility now
+     lives in the Inbox under the ⚡ Blasts filter. Diagnostics remain available in console via
+     window._blastDiag. */
   document.getElementById('sync-time').textContent='Synced '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
   render();
 }
@@ -3776,7 +3778,7 @@ function updateInboxBadge(){
 }
 
 /* ===================== Inbox tab — central email panel ===================== */
-let _inboxFilter='all'; /* 'all' | 'unread' */
+let _inboxFilter='all'; /* 'all' | 'unread' | 'in' | 'out' | 'blasts' */
 let _inboxSearch='';
 let _inboxSearchTimer=null;
 let _inboxCandidateFilter=''; /* candidate row to filter to, or empty for all */
@@ -3827,6 +3829,7 @@ function renderInbox(){
     if(_inboxFilter==='unread'&&(e.seen||e.direction==='out'))return false;
     if(_inboxFilter==='in'&&e.direction==='out')return false;
     if(_inboxFilter==='out'&&e.direction!=='out')return false;
+    if(_inboxFilter==='blasts'&&!e.isBlastAnchor)return false; /* #8: mass emails grouped here */
     if(_inboxCandidateFilter&&e.candidateRow!==_inboxCandidateFilter)return false;
     if(search){
       const haystack=((e.subject||'')+' '+(e.candidateName||'')+' '+(e.preview||'')+' '+(e.candidateEmail||'')).toLowerCase();
@@ -3858,6 +3861,7 @@ function renderInbox(){
         <button class="${_inboxFilter==='unread'?'on':''}" onclick="setInboxFilter('unread')">Unread (${unreadCount})</button>
         <button class="${_inboxFilter==='in'?'on':''}" onclick="setInboxFilter('in')">📥 Inbound (${inboundTotal})</button>
         <button class="${_inboxFilter==='out'?'on':''}" onclick="setInboxFilter('out')">📤 Sent (${outboundTotal})</button>
+        <button class="${_inboxFilter==='blasts'?'on':''}" onclick="setInboxFilter('blasts')">⚡ Blasts (${collapsed.filter(x=>x.isBlastAnchor).length})</button>
         <input id="inbox-search" placeholder="Search subject, sender, body…" value="${esc(_inboxSearch)}" oninput="setInboxSearch(this.value)" autocomplete="off">
       </div>
       ${candFilterChip}
@@ -3890,6 +3894,7 @@ function renderInboxItem(e){
       <div class="inbox-meta">
         <div class="inbox-when">${when}</div>
         <button class="inbox-row-btn" onclick="event.stopPropagation();openBlastDetail('${esc(e.blastId)}')" title="View recipients">view</button>
+        <button class="inbox-row-btn" style="border-color:var(--gold-mid);color:var(--gold-deep)" onclick="event.stopPropagation();repeatBlast('${esc(e.blastId)}')" title="Open the mass composer prefilled with this blast's subject and body">↻ repeat</button>
       </div>
     </div>`;
   }
@@ -3990,12 +3995,32 @@ function renderActiveCaregivers(){
 function quickEmailCaregiver(row){loadW(row);openCustomEmail();}
 
 /* ===================== Manual awaiting controls ===================== */
+/* #11 — access control for the manual stage mover. Two independent layers, both optional:
+   - allowedUsers: if the list is non-empty, ONLY those signed-in emails see the button at all.
+     Empty list (default) = visible to everyone.
+   - password: if set, using the button prompts for it every time.
+   The password is stored in settings as-is: this is an internal misuse-friction gate for a
+   tool that can rewrite pipeline stages, not a security boundary — anyone with settings access
+   can read it. */
+function _stageMoveAllowed(){
+  const cfg=(SETTINGS.config&&SETTINGS.config.stageMove)||{};
+  const list=Array.isArray(cfg.allowedUsers)?cfg.allowedUsers.filter(Boolean):[];
+  if(!list.length)return true; /* unrestricted by default */
+  return list.map(x=>String(x).trim().toLowerCase()).includes((userEmail||'').toLowerCase());
+}
 /* Manual stage placement — the escape hatch for when a candidate's stage is wrong (corruption,
    mistaken advance, restored data). Deliberately MINIMAL side effects: sets the stage, logs, and
    saves. It does NOT fire the new stage's auto-email, does NOT upload a stage report, and does
    NOT credit referral milestones — those belong to genuine forward progression via advanceWS,
    not to manual repositioning. */
 function moveToStageWS(){
+  if(!_stageMoveAllowed()){toast('Move to stage is restricted — see Settings → Pipeline config');return;}
+  const _smCfg=(SETTINGS.config&&SETTINGS.config.stageMove)||{};
+  if(_smCfg.password){
+    const pw=prompt('Enter the Move-to-stage password:');
+    if(pw===null)return;
+    if(pw!==_smCfg.password){toast('✕ Wrong password');return;}
+  }
   const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
   emailModal('move_stage','','',null);
   document.getElementById('m-title').textContent='Move to stage';
@@ -6430,7 +6455,7 @@ function renderWorkspace(){_memGen++;
     if(isParked){
       quickActions=`<div class="ws-quick"><button class="btn-sm bg-sky-l" onclick="releaseAwaiting()" title="Move out of awaiting">▶ Resume from awaiting</button><button class="btn-sm" style="background:#fff;border:1px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer" onclick="withdrawCandidate()">↩ Withdraw</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
     }else{
-      quickActions=`<div class="ws-quick"><button class="btn-sm bg-cream" onclick="parkInAwaiting()" title="Move this candidate to Awaiting bucket — pause for follow-up">⏸ Park in awaiting</button><button class="btn-sm bg-cream" onclick="moveToStageWS()" title="Manually place this candidate at any pipeline stage">⇄ Move to stage</button><button class="btn-sm" style="background:#fff;border:1px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer" onclick="withdrawCandidate()" title="Candidate withdrew their application">↩ Withdraw</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
+      quickActions=`<div class="ws-quick"><button class="btn-sm bg-cream" onclick="parkInAwaiting()" title="Move this candidate to Awaiting bucket — pause for follow-up">⏸ Park in awaiting</button>${_stageMoveAllowed()?'<button class="btn-sm bg-cream" onclick="moveToStageWS()" title="Manually place this candidate at any pipeline stage">⇄ Move to stage</button>':''}<button class="btn-sm" style="background:#fff;border:1px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer" onclick="withdrawCandidate()" title="Candidate withdrew their application">↩ Withdraw</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
     }
   }
   const thisStep=`<div class="ws-this">
@@ -8013,9 +8038,24 @@ function yardstikBlock(){
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       ${ys.applyUrl?`<a href="${esc(ys.applyUrl)}" target="_blank" class="btn-sm bg-sky-l" style="text-decoration:none">📋 Candidate intake link</a>`:''}
       <button class="btn-sm bg-cream" onclick="refreshYardstik()" style="cursor:pointer">🔄 Refresh status</button>
-      ${ys.reportId?`<a href="https://app.yardstik.com/reports/${esc(ys.reportId)}" target="_blank" class="btn-sm bg-cream" style="text-decoration:none">↗ View in Yardstik</a>`:''}
+      ${ys.reportId?`<a href="https://app.yardstik.com/report/${esc(ys.reportId)}" target="_blank" class="btn-sm bg-cream" style="text-decoration:none">↗ View in Yardstik</a>`:''}
+      ${ys.reportPdfUrl?`<a href="${esc(ys.reportPdfUrl)}" target="_blank" class="btn-sm bg-cream" style="text-decoration:none">📎 Report PDF</a>`:''}
     </div>
     ${ys.lastUpdate?`<div style="font-size:10.5px;color:var(--soft);margin-top:8px">Last update: ${esc(new Date(ys.lastUpdate).toLocaleString())}</div>`:''}
+    ${ys.decision?`<div style="margin-top:10px;padding:9px 12px;border-radius:8px;background:${ys.decision==='proceed'?'#EBF5EA':'#FDECEA'};border:1px solid ${ys.decision==='proceed'?'#B9DBB2':'#F0C4B0'}">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${ys.decision==='proceed'?'#3D7A34':'#B03025'}">Decision: ${esc(ys.decision)}</div>
+      ${ys.decisionNote?`<div style="font-size:12px;color:var(--ink);margin-top:3px">${esc(ys.decisionNote)}</div>`:''}
+      <div style="font-size:10px;color:var(--soft);margin-top:3px">${ys.decisionBy?esc(String(ys.decisionBy).split('@')[0])+' · ':''}${ys.decisionAt?esc(new Date(ys.decisionAt).toLocaleString()):''}</div>
+    </div>`:''}
+    ${(function(){
+      /* #15 — generic details: render every other field the worker captured so richer webhook data
+         (screening breakdowns etc.) appears here automatically without another portal change. */
+      const shown=['status','orderedAt','lastUpdate','applyUrl','reportId','reportPdfUrl','reportPdfFile','decision','decisionNote','decisionAt','decisionBy','decisionRequired','candidateId','invitationId'];
+      const extra=Object.keys(ys).filter(k=>!shown.includes(k)&&ys[k]!=null&&ys[k]!=='');
+      if(!extra.length)return '';
+      const rows=extra.map(k=>`<div style="display:flex;gap:8px;padding:3px 0;border-top:1px dashed var(--border-soft)"><span style="min-width:130px;color:var(--soft);font-size:10.5px;font-weight:700">${esc(k)}</span><span style="font-family:ui-monospace,monospace;font-size:11px;color:var(--ink);word-break:break-all">${esc(typeof ys[k]==='object'?JSON.stringify(ys[k]):String(ys[k]))}</span></div>`).join('');
+      return `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:11px;color:var(--soft)">▸ all report details (${extra.length})</summary><div style="margin-top:6px">${rows}</div></details>`;
+    })()}
   </div>`;
 }
 
@@ -8143,7 +8183,7 @@ function openBgDecisionModal(){
     <div style="background:#FFF6E6;border:1px solid var(--gold-mid);border-radius:9px;padding:12px 14px;margin-bottom:14px">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#8B6500;letter-spacing:.05em;margin-bottom:4px">Yardstik report status</div>
       <div style="font-weight:700;color:var(--ink);font-size:14px;text-transform:capitalize">${esc(statusPretty)}</div>
-      <div style="margin-top:8px">${pdfLink}</div>
+      <div style="margin-top:8px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">${pdfLink}${ys.reportId?'<a href="https://app.yardstik.com/report/'+esc(ys.reportId)+'" target="_blank" style="color:var(--sky-deep);font-weight:600;text-decoration:none">↗ Open report in Yardstik</a>':''}</div>
     </div>
     <div style="font-size:12.5px;color:var(--mid);margin-bottom:14px">Review the report, then decide whether to proceed. Your decision + note will be logged on the candidate.</div>
     <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:5px;letter-spacing:.05em">Decision note (required)</label>
@@ -8176,6 +8216,12 @@ async function decideBgReport(decision){
   }else{
     closeModal();
     toast('✓ Marked as cleared — candidate can move to Offer');
+    /* #14 — the portal can't write adjudications into Yardstik's system (no adjudication API
+       wired), so on proceed we open the report page in Yardstik for you to mirror the decision
+       there. Popup blockers may eat this; the card's "↗ View in Yardstik" button is the fallback. */
+    if(W.st.yardstik&&W.st.yardstik.reportId){
+      try{window.open('https://app.yardstik.com/report/'+encodeURIComponent(W.st.yardstik.reportId),'_blank');}catch(e){}
+    }
     renderWorkspace();
   }
 }
@@ -10284,7 +10330,9 @@ async function commitLinkBooking(candidateExcelRow){
 function openMassEmailModal(){
   if(!isAdmin()){toast('Mass email is restricted to admins');return;}
   /* The currently-filtered candidate set is what we'll send to. Show count + breakdown. */
-  const candidates=pipeline.filter(c=>c.stage!=='Hired'&&c.stage!=='Declined'&&matchFilters(c));
+  /* Hired candidates ARE eligible — referral campaigns target current caregivers. Only Declined
+     (which includes withdrawn) is excluded. Use the stage filters to narrow further. */
+  const candidates=pipeline.filter(c=>c.stage!=='Declined'&&matchFilters(c));
   const withEmail=candidates.filter(c=>c.email&&c.email.trim());
   const stageBreakdown={};
   withEmail.forEach(c=>{stageBreakdown[c.stage]=(stageBreakdown[c.stage]||0)+1;});
@@ -10427,7 +10475,7 @@ async function sendMassEmail(){
   const subTpl=subEl?subEl.value:'',bodyTpl=bodyEl?bodyEl.value:'';
   if(!subTpl||!bodyTpl){toast('Subject + body required');return;}
   const isHtml=window._massMode==='html';
-  const candidates=pipeline.filter(c=>c.stage!=='Hired'&&c.stage!=='Declined'&&matchFilters(c)&&c.email&&c.email.trim());
+  const candidates=pipeline.filter(c=>c.stage!=='Declined'&&matchFilters(c)&&c.email&&c.email.trim());
   if(!candidates.length){toast('No recipients');return;}
   if(!confirm('Send '+(isHtml?'HTML':'plain text')+' email to '+candidates.length+' candidate'+(candidates.length===1?'':'s')+'? This cannot be undone.'))return;
   const btn=document.getElementById('mass-send');
@@ -10509,6 +10557,22 @@ function _describeActiveFilters(){
 /* Blast detail modal — opens when the user clicks a collapsed blast row in the Sent tab.
    Shows: top-level metadata (subject template, filter, who sent it, when), per-recipient
    breakdown grouped by stage, and per-recipient delivery status (sent ✓ or failed with reason). */
+/* #8 — reopen the mass composer prefilled from a past blast (subject, body, html/text mode).
+   Recipients are NOT copied: the composer always targets the CURRENT filtered pipeline, and the
+   normal confirm shows the live recipient count before anything sends. */
+function repeatBlast(blastId){
+  const blast=(SETTINGS.massSends||[]).find(b=>b.id===blastId);
+  if(!blast){toast('Blast record not found');return;}
+  openMassEmailModal();
+  /* openMassEmailModal builds the DOM synchronously — fields exist now. */
+  const subEl=document.getElementById('mass-sub'),bodyEl=document.getElementById('mass-body-text');
+  if(!subEl||!bodyEl){toast('Composer failed to open');return;}
+  if(typeof _massSetMode==='function')_massSetMode(blast.isHtml?'html':'text');
+  subEl.value=blast.subjectTemplate||blast.subject||'';
+  bodyEl.value=blast.bodyTemplate||'';
+  if(blast.isHtml&&typeof _massUpdateHtmlPreview==='function')_massUpdateHtmlPreview();
+  toast('↻ Prefilled from blast — review recipients before sending');
+}
 function openBlastDetail(blastId){
   const blast=(SETTINGS.massSends||[]).find(b=>b.id===blastId);
   if(!blast){toast('Blast record not found — may have been pruned (only the last 200 are kept)');return;}
@@ -10546,6 +10610,7 @@ function openBlastDetail(blastId){
     <div style="background:linear-gradient(135deg,#FAF6EE,#FEF7E8);border:1px solid var(--gold-mid);border-radius:9px;padding:12px 14px;margin-bottom:14px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11.5px">
         <div><span style="color:#8B6500;font-size:10px;font-weight:700;text-transform:uppercase">Subject</span><div style="color:var(--ink);font-weight:600;margin-top:2px">${esc(blast.subjectTemplate||'').slice(0,200)}</div></div>
+        <div style="margin-top:8px"><button class="btn-sm bg-cream" style="cursor:pointer;border-color:var(--gold-mid);color:var(--gold-deep)" onclick="closeModal();repeatBlast('${esc(blast.id)}')">↻ Repeat this blast</button></div>
         <div><span style="color:#8B6500;font-size:10px;font-weight:700;text-transform:uppercase">Sent</span><div style="color:var(--ink);margin-top:2px">${esc(dateStr)}</div></div>
         <div><span style="color:#8B6500;font-size:10px;font-weight:700;text-transform:uppercase">By</span><div style="color:var(--ink);margin-top:2px">${esc(blast.sentBy||'(unknown)')}</div></div>
         <div><span style="color:#8B6500;font-size:10px;font-weight:700;text-transform:uppercase">Recipients</span><div style="color:var(--ink);margin-top:2px"><b>${blast.recipientCount}</b>${failed.length?' · <span style="color:var(--red)">'+failed.length+' failed</span>':' · all delivered'}</div></div>
@@ -11469,7 +11534,15 @@ function renderSettingsScripts(){
 
 /* ----- PIPELINE section ----- */
 function renderSettingsPipeline(){
-  return `<div class="wscard"><h3>Pay range</h3>
+  const _sm=(SETTINGS.config&&SETTINGS.config.stageMove)||{};
+  const stageMoveCard=`<div class="wscard"><h3>⇄ Move-to-stage access</h3>
+    <p class="set-help">The workspace "Move to stage" button can rewrite a candidate's pipeline position, so you can restrict it. <b>Allowed users</b>: comma-separated sign-in emails — leave empty to allow everyone. If configured, the button is hidden for everyone else. <b>Password</b>: if set, it's asked on every use. <span style="color:var(--soft)">Heads-up: the allowed-users check matches the signed-in Microsoft account email — make sure your own email is in the list before saving a non-empty list, or the button disappears for you too.</span></p>
+    <div class="set-grid-2">
+      <label class="set-field">Password (empty = none)<input type="text" id="cfg_stageMovePassword" value="${esc(_sm.password||'')}" onchange="SETTINGS.config.stageMove=SETTINGS.config.stageMove||{};SETTINGS.config.stageMove.password=this.value.trim();markSettingsDirty()"></label>
+      <label class="set-field">Allowed users (comma emails)<input type="text" id="cfg_stageMoveUsers" placeholder="you@solurahomecare.com" value="${esc(((_sm.allowedUsers||[]).join(', ')))}" onchange="SETTINGS.config.stageMove=SETTINGS.config.stageMove||{};SETTINGS.config.stageMove.allowedUsers=this.value.split(',').map(x=>x.trim()).filter(Boolean);markSettingsDirty()"></label>
+    </div>
+  </div>`;
+  return stageMoveCard+`<div class="wscard"><h3>Pay range</h3>
     <p class="set-help">Pay floor/ceiling drive the {pay} placeholder in email templates and the pay band shown to candidates.</p>
     <div class="set-grid-2">
       <label class="set-field">Floor ($/hr)<input type="number" step="0.25" id="cfg_payFloor" value="${SETTINGS.config.payFloor}"></label>
