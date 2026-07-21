@@ -367,17 +367,44 @@ function toggleLiveIn(){
 renderSched();
 
 function updateProgress(){
-  const reqSingle=['age18','workauth','transport','dl','bgcheck','revoked','abuseFinding','years','longest','personalCare','lifting','smoker'];
-  const done=reqSingle.filter(k=>ans[k]).length;
-  const credDone=(ans.cred||[]).length?1:0;
-  const schedDone=Object.keys(dayShifts).length?1:0;
   const f=document.getElementById('form');
-  const fillFields=['firstName','lastName','phone','email'];
-  const filled=fillFields.filter(n=>(f[n]||{}).value).length;
-  const zipF=(f.zip.value||'').length===5?1:0;
-  const total=reqSingle.length+fillFields.length+1+1+1;
-  const got=done+filled+zipF+credDone+schedDone;
+  let total,got;
+  if(FC&&Array.isArray(FC.questions)){
+    /* Config-driven form: progress = answered share of the ACTIVE required questions. */
+    total=0;got=0;
+    FC.questions.forEach(q=>{
+      if(!q.required)return;
+      total++;
+      if(_isAnsweredQ(q,f))got++;
+    });
+    if(!total){total=1;got=1;}
+  }else{
+    /* Baked-in default form — original computation, with existence guards. */
+    const reqSingle=['age18','workauth','transport','dl','bgcheck','revoked','abuseFinding','years','longest','personalCare','lifting','smoker'];
+    const done=reqSingle.filter(k=>ans[k]).length;
+    const credDone=(ans.cred||[]).length?1:0;
+    const schedDone=Object.keys(dayShifts).length?1:0;
+    const fillFields=['firstName','lastName','phone','email'];
+    const filled=fillFields.filter(n=>(f[n]||{}).value).length;
+    const zipF=((f.zip&&f.zip.value)||'').length===5?1:0;
+    total=reqSingle.length+fillFields.length+1+1+1;
+    got=done+filled+zipF+credDone+schedDone;
+  }
   document.getElementById('prog').style.width=Math.round(got/total*100)+'%';
+}
+/* Is this config question answered? Used only for the progress bar (soft guidance —
+   submit stays as lax as the original form: name + phone are the hard requirements). */
+function _isAnsweredQ(q,f){
+  const id=q.id;
+  if(id==='employers')return true;                       /* optional by design */
+  if(id==='resume')return true;
+  if(id==='dayShifts')return Object.keys(dayShifts).length>0;
+  if(FORM_IDENTITY_IDS.includes(id)){const el=f&&f.elements&&f.elements[id];return !!(el&&el.value&&el.value.trim());}
+  if(/^fq-/.test(id)&&['text','textarea','number','date'].includes(q.type)){
+    const el=document.querySelector('[data-cq="'+id+'"]');return !!(el&&el.value&&el.value.trim());
+  }
+  const v=ans[id];
+  return Array.isArray(v)?v.length>0:(v!==undefined&&v!==null&&v!=='');
 }
 document.querySelectorAll('[name=firstName],[name=lastName],[name=phone],[name=email],[name=zip]').forEach(i=>i.addEventListener('input',updateProgress));
 function fileChosen(el){if(el.files[0]){document.getElementById('fileT').textContent=el.files[0].name;document.getElementById('fileS').textContent='Ready to send';}}
@@ -417,14 +444,30 @@ function rateAvailability(dayShifts){
 }
 function buildPayload(){
   const f=document.getElementById('form');
-  const fullName=(f.firstName.value.trim()+' '+f.lastName.value.trim()).trim();
+  /* Guarded field read — under a custom form config (see applyFormConfig) any non-locked field
+     can be deactivated and absent from the DOM, so never assume an input exists. */
+  const gv=n=>{const el=f&&f.elements&&f.elements[n];return el&&el.value?el.value.trim():'';};
+  const fullName=(gv('firstName')+' '+gv('lastName')).trim();
   const creds=ans.cred||[];
+  /* Split answers: built-in raw answers ship as `answers` (the worker's config scorer reads
+     them); custom-question answers ('fq-…' ids from the operator's form config) ship as
+     `custom` and land in the sheet's AI answers JSON. */
+  const rawAnswers={},customAns={};
+  Object.keys(ans).forEach(k=>{
+    if(ans[k]===undefined||ans[k]===null)return;
+    if(/^fq-/.test(k))customAns[k]=ans[k];else rawAnswers[k]=ans[k];
+  });
+  /* Free-entry custom questions (text/textarea/number/date) read straight from the DOM. */
+  document.querySelectorAll('[data-cq]').forEach(el=>{
+    const v=(el.value||'').trim();if(v==='')return;
+    customAns[el.dataset.cq]=el.type==='number'?Number(v):v;
+  });
   return {
     name:fullName,
-    firstName:f.firstName.value.trim(),
-    lastName:f.lastName.value.trim(),
-    phone:f.phone.value.trim(), email:f.email.value.trim(),
-    address:f.address.value.trim(), city:f.city.value.trim(), state:f.state.value.trim().toUpperCase(),
+    firstName:gv('firstName'),
+    lastName:gv('lastName'),
+    phone:gv('phone'), email:gv('email'),
+    address:gv('address'), city:gv('city'), state:gv('state').toUpperCase(),
     source:'Application form',
     creds:creds,
     credential:creds[0]||'',
@@ -440,17 +483,20 @@ function buildPayload(){
       wa:ans.workauth,
       cr:creds.length?'Y':'N',
       bg:ans.bgcheck,
-      tr:ans.transport==='none'?'N':'Y',
+      tr:ans.transport===undefined?undefined:(ans.transport==='none'?'N':'Y'),
       av:Object.keys(dayShifts).length?'Y':''
     },
-    facts:{zip:f.zip.value.trim(), years:ans.years, settings:ans.settings, longest:ans.longest},
+    facts:{zip:gv('zip'), years:ans.years, settings:ans.settings, longest:ans.longest},
     employers:collectEmployers(),
     derived:{
-      proximity:rateProximity(f.zip.value.trim()),
+      proximity:rateProximity(gv('zip')),
       competence:rateCompetence(ans.years,ans.settings,creds),
       tenure:rateTenure(ans.longest,collectEmployers()),
       availability:rateAvailability(dayShifts)
-    }
+    },
+    answers:rawAnswers,
+    custom:customAns,
+    references:collectConfigRefs()
   };
 }
 
@@ -635,6 +681,233 @@ function flashCopyBtn(){
   btn.textContent='✓ Copied!';btn.style.background='#70A54D';btn.style.color='#fff';
   setTimeout(()=>{btn.textContent=original;btn.style.background='';btn.style.color='';},1800);
 }
+
+/* ═══════════════════════ FORM CONFIG RUNTIME (operator-customized form) ═══════════════════════
+   On load the form asks the worker for GET /form-config — the public projection of the
+   operator's SETTINGS.formConfig (questions/references/branding ONLY; scoring and gate logic
+   never leave the worker). On success the question area re-renders from the config. On ANY
+   failure — timeout, non-200, bad JSON, null config — the baked-in static form above stays
+   exactly as-is, so the form NEVER renders blank because the worker hiccuped.
+   Contract: form_config_schema.md in the solura-hiring repo. */
+let FC=null;                                   /* active form config (null = baked-in defaults) */
+const FORM_IDENTITY_IDS=['firstName','lastName','phone','email','address','city','state','zip'];
+function escF(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+/* Default section hints, reused when a config section matches a built-in card. */
+const SECTION_HINTS={
+  'The essentials':'These tell us if the role is a fit.',
+  'Past employers':'List the places you’ve worked as a caregiver. We may contact them to verify your experience. <b>Optional, but it speeds up your hire.</b>',
+  'Your expertise':'Helps us match you with the right patient. Pick everything you’ve actually done.',
+  'Your availability':'Tell us each day separately — patients have different schedules.',
+  'Résumé':'PDF only — optional, but it helps us move faster.'
+};
+
+/* Built-in default option lists by question id (fallback when the config carries no options). */
+function _fcDefaultOptions(id){
+  switch(id){
+    case 'cred':return Q.credCommon.concat(Q.credMore);
+    case 'expertise':return Q.expCommon.concat(Q.expMore);
+    case 'languages':return Q.languages.concat(Q.languagesMore);
+    default:return Q[id]||null;
+  }
+}
+/* Resolve [label,value] pairs for a choice question: config options win, defaults fall back. */
+function _fcPairs(q){
+  if(Array.isArray(q.options)&&q.options.length)return q.options.map(o=>[o.label||o.value,o.value]);
+  const d=_fcDefaultOptions(q.id);
+  if(d)return d;
+  if(q.type==='yesno')return [['Yes','Y'],['No','N']];
+  return [];
+}
+
+/* Render one question's inner HTML (label + control). Structural built-ins reproduce the
+   original widgets byte-for-byte so all the existing wiring functions keep working. */
+function _fcQuestionHtml(q){
+  const req=q.required?' <span class="req">*</span>':'';
+  const hint=q.hint?' <span class="hint" style="display:inline">'+escF(q.hint)+'</span>':'';
+  const label='<label>'+escF(q.label)+req+hint+'</label>';
+  if(q.id==='employers'){
+    return '<div id="employers-list" style="margin-top:14px"></div>'+
+      '<button type="button" class="more-btn" onclick="addEmployer()" style="margin-top:8px">+ Add employer</button>';
+  }
+  if(q.id==='dayShifts'){
+    return `<label class="live-in-toggle" id="liveInToggle">
+        <input type="checkbox" id="liveInCheck" onchange="toggleLiveIn()">
+        <span class="live-in-icon">⌂</span>
+        <span class="live-in-text"><b>Live-in availability</b><br><small>I'm available to live in the home, 24/7, all days of the week</small></span>
+      </label>
+      <div id="schedSection">
+        <div class="sched-quick">
+          <button type="button" onclick="schedQuick('weekdays')">All weekdays, all shifts</button>
+          <button type="button" onclick="schedQuick('all')">Everything</button>
+          <button type="button" onclick="schedQuick('clear')">Clear</button>
+        </div>
+        <div class="sched" id="sched-matrix"></div>
+      </div>`;
+  }
+  if(q.id==='resume'){
+    return `<label class="file"><input type="file" id="resume" accept=".pdf,application/pdf" onchange="fileChosen(this)">
+        <span class="ic">↑</span><span><span class="t" id="fileT">Upload your résumé</span><br><span class="s" id="fileS">PDF only · optional</span></span></label>
+      <div style="background:#FEF7E8;border:1px solid #E8B84B;color:#8B6500;padding:11px 14px;border-radius:9px;font-size:11.5px;margin-top:14px;line-height:1.55">
+        <b>⚠ All information is verified.</b> We check certifications, prior employers, references, and run background checks. Misrepresentation results in immediate disqualification.
+      </div>`;
+  }
+  if(FORM_IDENTITY_IDS.includes(q.id)){
+    const auto={firstName:'given-name',lastName:'family-name',phone:'tel',email:'email',address:'street-address',city:'address-level2',state:'address-level1',zip:'postal-code'}[q.id]||'';
+    if(q.id==='phone')return '<div class="q">'+label+'<input type="tel" name="phone" '+(q.required?'required ':'')+'placeholder="(216) 000-0000" autocomplete="tel" oninput="formatPhone(this)" maxlength="14"></div>';
+    if(q.id==='email')return '<div class="q">'+label+'<input type="email" name="email" '+(q.required?'required ':'')+'placeholder="you@example.com" autocomplete="email"></div>';
+    if(q.id==='zip')return '<div class="q">'+label+'<input type="text" inputmode="numeric" maxlength="5" name="zip" id="zip" '+(q.required?'required ':'')+'autocomplete="postal-code"></div>';
+    if(q.id==='state')return '<div class="q">'+label+'<input type="text" name="state" maxlength="2" placeholder="OH" autocomplete="address-level1"></div>';
+    return '<div class="q">'+label+'<input type="text" name="'+q.id+'" '+(q.required?'required ':'')+(auto?'autocomplete="'+auto+'" ':'')+'></div>';
+  }
+  /* Custom free-entry types */
+  if(q.type==='textarea')return '<div class="q">'+label+'<textarea data-cq="'+escF(q.id)+'" rows="3" style="width:100%;font-family:inherit;font-size:15px;color:var(--ink);background:var(--warm);border:1px solid var(--softer);border-radius:10px;padding:12px 13px;outline:none;resize:vertical" oninput="updateProgress()"></textarea></div>';
+  if(q.type==='number')return '<div class="q">'+label+'<input type="number" data-cq="'+escF(q.id)+'" style="max-width:180px" oninput="updateProgress()"></div>';
+  if(q.type==='date')return '<div class="q">'+label+'<input type="date" data-cq="'+escF(q.id)+'" style="max-width:220px" oninput="updateProgress()"></div>';
+  if(q.type==='text'&&!FORM_IDENTITY_IDS.includes(q.id)&&!q.builtinChoice)return '<div class="q">'+label+'<input type="text" data-cq="'+escF(q.id)+'" oninput="updateProgress()"></div>';
+  /* Choice types (yesno / select / multiselect) — painted after injection by _wireConfigForm. */
+  const multi=q.type==='multiselect';
+  const addCustomKind={cred:'cred',expertise:'exp',languages:'lang'}[q.id];
+  let html='<div class="q">'+label+'<div class="opts" data-q="'+escF(q.id)+'" '+(multi?'data-multi':'data-single')+'></div>';
+  if(addCustomKind){
+    html+='<div class="add-custom"><input type="text" id="'+addCustomKind+'-custom" placeholder="Add another…"><button type="button" onclick="addCustom(\''+addCustomKind+'\')">Add</button></div>'+
+      '<div id="'+addCustomKind+'-added" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>';
+  }
+  return html+'</div>';
+}
+
+/* Reference sub-forms per config: {enabled, count, fields}. All optional for the candidate;
+   the worker maps filled entries into st.refs. */
+function _fcReferencesHtml(refs){
+  const RELOPTS=[['supervisor','Former supervisor'],['coworker','Coworker'],['patientFamily','Patient or family member'],['case_manager','Case manager'],['personal','Personal'],['other','Other']];
+  const DUROPTS=[['u6','Less than 6 months'],['y1','6–12 months'],['y2','1–2 years'],['y5','2–5 years'],['y5p','5+ years']];
+  const fields=refs.fields&&refs.fields.length?refs.fields:['name','phone','relationship','duration'];
+  let cards='';
+  for(let i=0;i<refs.count;i++){
+    let inner='';
+    if(fields.includes('name'))inner+='<div class="q"><label>Full name</label><input type="text" data-ref="'+i+'" data-rf="name" autocomplete="off"></div>';
+    if(fields.includes('phone'))inner+='<div class="q"><label>Phone</label><input type="tel" data-ref="'+i+'" data-rf="phone" oninput="formatPhone(this)" maxlength="14"></div>';
+    if(fields.includes('email'))inner+='<div class="q"><label>Email</label><input type="email" data-ref="'+i+'" data-rf="email"></div>';
+    if(fields.includes('relationship'))inner+='<div class="q"><label>Relationship to you</label><select data-ref="'+i+'" data-rf="relationship" style="width:100%;font-family:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--softer);border-radius:10px;background:var(--warm)"><option value="">Choose…</option>'+RELOPTS.map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('')+'</select></div>';
+    if(fields.includes('duration'))inner+='<div class="q"><label>How long have they known your work?</label><select data-ref="'+i+'" data-rf="duration" style="width:100%;font-family:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--softer);border-radius:10px;background:var(--warm)"><option value="">Choose…</option>'+DUROPTS.map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('')+'</select></div>';
+    cards+='<div style="background:#FAFAF7;border:1px solid var(--line);border-radius:10px;padding:13px 13px 2px;margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--gold-deep);text-transform:uppercase;letter-spacing:.06em;margin-bottom:9px">Reference '+(i+1)+'</div>'+inner+'</div>';
+  }
+  return cards;
+}
+/* Collect the reference sub-form values → applicant.references[]. Empty when the block is off. */
+function collectConfigRefs(){
+  if(!FC||!FC.references||!FC.references.enabled)return [];
+  const byIdx={};
+  document.querySelectorAll('[data-ref]').forEach(el=>{
+    const i=el.dataset.ref;byIdx[i]=byIdx[i]||{};
+    const v=(el.value||'').trim();if(v)byIdx[i][el.dataset.rf]=v;
+  });
+  return Object.values(byIdx).filter(r=>r.name&&r.phone).map(r=>{
+    const parts=r.name.split(/\s+/);
+    return {firstName:parts[0]||'',lastName:parts.slice(1).join(' '),name:r.name,phone:r.phone,
+            email:r.email||'',relationship:r.relationship||'',duration:r.duration||''};
+  });
+}
+
+/* Rebuild the whole form from config, then re-wire every widget. */
+function applyFormConfig(fc){
+  const f=document.getElementById('form');if(!f)return;
+  FC=fc;
+  /* Branding */
+  if(fc.branding){
+    if(fc.branding.headline){const el=document.querySelector('.brand small');if(el)el.textContent=fc.branding.headline;}
+    if(fc.branding.intro){const el=document.querySelector('.lede');if(el)el.textContent=fc.branding.intro;}
+    if(/^#[0-9a-fA-F]{3,8}$/.test(fc.branding.accentColor||'')){
+      const c=fc.branding.accentColor;
+      document.documentElement.style.setProperty('--navy',c);
+      document.documentElement.style.setProperty('--sky-deep',c);
+    }
+  }
+  /* Snapshot identity values typed before the config arrived, restore after rebuild. */
+  const keep={};
+  FORM_IDENTITY_IDS.forEach(n=>{const el=f.elements&&f.elements[n];if(el&&el.value)keep[n]=el.value;});
+  /* Reset choice state so visuals and state agree post-rebuild (config lands well before
+     anyone can meaningfully answer; identity text is the only thing worth preserving). */
+  Object.keys(ans).forEach(k=>{delete ans[k];});
+  ans.cred=[];ans.expertise=[];ans.languages=[];
+  /* Group active questions into section cards, in `order` order. */
+  const qs=fc.questions.filter(q=>q&&q.id).slice().sort((a,b)=>(a.order||0)-(b.order||0));
+  const sections=[];const byName={};
+  qs.forEach(q=>{
+    let s=byName[q.section];
+    if(!s){s={name:q.section,items:[]};byName[q.section]=s;sections.push(s);}
+    s.items.push(q);
+  });
+  let html='';
+  sections.forEach(sec=>{
+    let inner='';
+    const items=sec.items.slice();
+    for(let i=0;i<items.length;i++){
+      const q=items[i];
+      /* pair firstName+lastName, and city+state(+zip) when adjacent — mirrors the default layout */
+      if(q.id==='firstName'&&items[i+1]&&items[i+1].id==='lastName'){
+        inner+='<div class="q" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+          '<div><label>'+escF(q.label)+(q.required?' <span class="req">*</span>':'')+'</label><input type="text" name="firstName" '+(q.required?'required ':'')+'autocomplete="given-name"></div>'+
+          '<div><label>'+escF(items[i+1].label)+(items[i+1].required?' <span class="req">*</span>':'')+'</label><input type="text" name="lastName" '+(items[i+1].required?'required ':'')+'autocomplete="family-name"></div></div>';
+        i++;continue;
+      }
+      if(q.id==='city'&&items[i+1]&&items[i+1].id==='state'&&items[i+2]&&items[i+2].id==='zip'){
+        const zq=items[i+2];
+        inner+='<div class="q" style="display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:10px">'+
+          '<div><label>'+escF(q.label)+'</label><input type="text" name="city" autocomplete="address-level2"></div>'+
+          '<div><label>'+escF(items[i+1].label)+'</label><input type="text" name="state" maxlength="2" placeholder="OH" autocomplete="address-level1"></div>'+
+          '<div><label>'+escF(zq.label)+(zq.required?' <span class="req">*</span>':'')+'</label><input type="text" inputmode="numeric" maxlength="5" name="zip" id="zip" '+(zq.required?'required ':'')+'autocomplete="postal-code"></div></div>';
+        i+=2;continue;
+      }
+      inner+=_fcQuestionHtml(q); /* structural blocks return bare widgets; the card h2 titles them */
+    }
+    const hint=SECTION_HINTS[sec.name]?'<div class="hint">'+SECTION_HINTS[sec.name]+'</div>':'';
+    html+='<div class="card"><h2>'+escF(sec.name)+'</h2>'+hint+inner+'</div>';
+  });
+  /* References block (operator-controlled) */
+  if(fc.references&&fc.references.enabled){
+    html+='<div class="card"><h2>References</h2><div class="hint">People who can speak to your caregiving work — optional, but it speeds up your hire.</div>'+_fcReferencesHtml(fc.references)+'</div>';
+  }
+  html+='<button class="submit" type="submit">Submit application</button>'+
+    '<p class="foot">Solura Home Care · Cleveland Heights, OH<br>Questions? <a href="mailto:careers@solurahomecare.com" style="color:var(--sky-deep);font-weight:600">careers@solurahomecare.com</a> · We’ll text you about next steps shortly.</p>';
+  f.innerHTML=html;
+  _wireConfigForm(qs);
+  /* Restore identity text typed before the swap */
+  Object.keys(keep).forEach(n=>{const el=f.elements&&f.elements[n];if(el)el.value=keep[n];});
+  updateProgress();
+}
+
+/* Re-wire the rebuilt DOM: paint choice groups from config option lists, re-init the
+   schedule matrix / employers list, and re-bind the progress listeners. */
+function _wireConfigForm(qs){
+  qs.forEach(q=>{
+    if(['employers','dayShifts','resume'].includes(q.id))return;
+    if(FORM_IDENTITY_IDS.includes(q.id))return;
+    if(['text','textarea','number','date'].includes(q.type))return; /* free-entry — no painting */
+    const box=document.querySelector('.opts[data-q="'+q.id+'"]');
+    if(!box)return;
+    paintOpts(box,_fcPairs(q),q.id,q.type==='multiselect');
+  });
+  if(document.getElementById('sched-matrix'))renderSched();
+  if(document.getElementById('employers-list'))renderEmployers();
+  document.querySelectorAll('#form input[name]').forEach(i=>i.addEventListener('input',updateProgress));
+}
+
+/* Kick off the config fetch — 2.5s abort so a slow worker never delays the candidate;
+   the static default form above is already fully interactive while this runs. */
+(function loadFormConfig(){
+  let ctrl=null,timer=null;
+  try{ctrl=new AbortController();timer=setTimeout(()=>ctrl.abort(),2500);}catch(e){}
+  fetch(WEBHOOK_URL+'/form-config',ctrl?{signal:ctrl.signal}:{})
+    .then(r=>{if(!r.ok)throw new Error('status '+r.status);return r.json();})
+    .then(j=>{
+      if(timer)clearTimeout(timer);
+      if(j&&j.ok&&j.formConfig&&Array.isArray(j.formConfig.questions)&&j.formConfig.questions.length){
+        applyFormConfig(j.formConfig);
+      }
+    })
+    .catch(()=>{if(timer)clearTimeout(timer);/* defaults stay — by design */});
+})();
 </script>
 </body>
 </html>
