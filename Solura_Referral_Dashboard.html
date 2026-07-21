@@ -598,6 +598,7 @@ td{padding:13px 16px;vertical-align:top;}
     <button class="hbtn hbtn-ghost" id="btn-settings" style="display:none" data-action="open-settings" title="Settings">⚙</button>
     <button class="hbtn hbtn-gold" id="btn-addlead" style="display:none" data-action="open-addlead">＋ Add Partner</button>
     <button class="hbtn hbtn-gold" id="btn-refresh" style="display:none" data-action="refresh">↺ Refresh</button>
+    <button class="hbtn hbtn-ghost" id="btn-diag" style="display:none" data-action="open-diagnostics" title="Diagnose why the sheet will not load">🩺 Diagnostics</button>
     <button class="hbtn hbtn-ghost" id="btn-out" style="display:none" data-action="signout">Sign out</button>
   </div>
 </div>
@@ -617,6 +618,7 @@ td{padding:13px 16px;vertical-align:top;}
       <svg width="16" height="16" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
       Sign in with Microsoft
     </button>
+    <button class="lbtn" data-action="open-diagnostics" style="margin-top:10px;background:none;color:var(--soft);border:1.5px solid var(--border);box-shadow:none">🩺 Run diagnostics</button>
   </div>
 </div>
 
@@ -1067,6 +1069,27 @@ td{padding:13px 16px;vertical-align:top;}
     <button data-action="ee-save-engine" class="st-btn-gold">💾 Save engine</button>
     <button data-action="ee-cancel" class="st-btn-ghost">Cancel</button>
     <span id="ee-spin" style="display:none;align-items:center;gap:6px;color:var(--soft);font-size:11px"><span class="mspin"></span>Saving…</span>
+  </div>
+</div>
+
+<!-- Diagnostics modal -->
+<div class="modal" id="modal-diag">
+  <div class="mbox" style="max-width:820px">
+    <div class="mhead">
+      <div class="mtitle">🩺 Diagnostics</div>
+      <button class="mclose" data-action="close-modal" data-mid="modal-diag">✕</button>
+    </div>
+    <div class="mbody" style="padding:18px 20px 20px">
+      <div style="font-size:12.5px;color:var(--soft);margin-bottom:12px;line-height:1.5">
+        Walks the whole chain — account, drive, root listing, exact path, search, worksheet tabs — and reports where it breaks. Copy this and send it over.
+      </div>
+      <pre id="diag-body" style="background:var(--cream);border:1px solid var(--border-soft);border-radius:10px;padding:14px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;max-height:56vh;overflow:auto;margin:0">Running…</pre>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button data-action="copy-diagnostics" style="padding:9px 18px;background:linear-gradient(135deg,var(--gold),#D4920F);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">📋 Copy report</button>
+        <button data-action="open-diagnostics" style="padding:9px 14px;background:none;color:var(--mid);border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">↺ Re-run</button>
+        <button data-action="close-modal" data-mid="modal-diag" style="padding:9px 12px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer">Close</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1862,7 +1885,13 @@ async function loadData(){
     var buf=await r2.arrayBuffer();
     var wb=XLSX.read(buf,{type:'array',cellDates:true});
     var ws=wb.Sheets['Lead Tracker'];
-    if(!ws)throw new Error('Sheet "Lead Tracker" not found');
+    if(!ws){
+      // The FILE loaded fine — it's the worksheet TAB that's missing. These two
+      // failures read almost identically to a human, so name the difference.
+      throw new Error('Found and opened the workbook, but it has no tab named "Lead Tracker".\n\n'
+        +'Tabs in this file: '+((wb.SheetNames||[]).join(', ')||'(none)')+'\n\n'
+        +'Rename the correct tab to exactly "Lead Tracker" (case and space matter), or click Diagnostics for detail.');
+    }
     rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
     lastLoadAt=new Date();
     el('sync-time').textContent='Refreshed: '+lastLoadAt.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
@@ -1879,7 +1908,132 @@ async function loadData(){
     try{await runStallTransitions();}catch(e){console.warn('Stall sweep:',e.message);}
 
     buildUI();
-  }catch(e){showErr(e.message);}
+  }catch(e){
+    showErr(e.message);
+    var db=el('btn-diag');if(db)db.style.display='inline-block';
+  }
+}
+
+/* ─── Diagnostics ────────────────────────────────────────────────────────
+ * Answers "why can't it find my sheet" definitively instead of by guesswork.
+ * Walks the whole chain — account, drive, root listing, path lookup, search,
+ * worksheet tabs — and reports where it breaks. Output is copyable.
+ * ─────────────────────────────────────────────────────────────────────── */
+async function runDiagnostics(){
+  var L=[],ok=function(m){L.push('  [ok]   '+m);},bad=function(m){L.push('  [FAIL] '+m);},
+      note=function(m){L.push('         '+m);},hdr=function(m){L.push('');L.push(m);};
+  L.push('SOLURA REFERRAL DASHBOARD — DIAGNOSTICS');
+  L.push(new Date().toString());
+  L.push('Looking for: '+FN);
+  L.push('Engine file: '+ENGINE_FILE);
+
+  hdr('1. SIGNED-IN ACCOUNT');
+  var upn='';
+  try{
+    var me=await gfetch(GR+'/me?$select=displayName,userPrincipalName,mail');
+    if(me.ok){var jm=await me.json();upn=jm.userPrincipalName||jm.mail||'';
+      ok((jm.displayName||'?')+'  <'+(upn||'no address')+'>');
+      note('If this is not the account holding the file, sign out and back in.');
+    }else bad('/me returned HTTP '+me.status+' — token problem, sign out and back in.');
+  }catch(e){bad('/me threw: '+e.message);}
+
+  hdr('2. ONEDRIVE');
+  var driveOk=false;
+  try{
+    var dr=await gfetch(GR+'/me/drive?$select=id,driveType,owner,quota');
+    if(dr.ok){var jd=await dr.json();driveOk=true;
+      ok('type: '+(jd.driveType||'?')+'   owner: '+(((jd.owner||{}).user||{}).displayName||'?'));
+      if(jd.driveType&&jd.driveType!=='business'&&jd.driveType!=='personal')
+        note('Unusual drive type — a SharePoint/Teams library will not work here.');
+    }else bad('/me/drive returned HTTP '+dr.status);
+  }catch(e){bad('/me/drive threw: '+e.message);}
+
+  hdr('3. FILES AT THE ROOT OF ONEDRIVE');
+  var rootNames=[];
+  if(driveOk)try{
+    var rt=await gfetch(GR+'/me/drive/root/children?$select=name,folder,file,size&$top=200');
+    if(rt.ok){
+      var jr=await rt.json(),items=jr.value||[];
+      if(!items.length)bad('Root is empty. The file is not at the top level of this OneDrive.');
+      items.forEach(function(it){
+        rootNames.push(it.name);
+        L.push('         '+(it.folder?'[dir] ':'      ')+it.name);
+      });
+      var near=rootNames.filter(function(n){
+        return n!==FN&&/tracker|solura|referral/i.test(n);});
+      if(near.length){
+        note('');
+        note('Similar names present — check for an exact match:');
+        near.forEach(function(n){note('   -> "'+n+'"   vs expected   "'+FN+'"');});
+      }
+    }else bad('root listing HTTP '+rt.status);
+  }catch(e){bad('root listing threw: '+e.message);}
+
+  hdr('4. EXACT PATH LOOKUP  (/me/drive/root:/'+FN+')');
+  var fileId='';
+  try{
+    var bp=await gfetch(GR+'/me/drive/root:/'+encodeURIComponent(FN));
+    if(bp.ok){var jb=await bp.json();fileId=jb.id;
+      ok('FOUND at root. size '+(jb.size||'?')+' bytes, modified '+(jb.lastModifiedDateTime||'?'));
+    }else if(bp.status===404){
+      bad('Not at the root of OneDrive (404).');
+      note('Either it lives in a folder, or the name differs — see the root listing above.');
+    }else bad('HTTP '+bp.status);
+  }catch(e){bad('threw: '+e.message);}
+
+  hdr('5. DRIVE-WIDE SEARCH');
+  try{
+    var sr=await gfetch(GR+"/me/drive/root/search(q='"+encodeURIComponent(FN)+"')");
+    if(sr.ok){
+      var jsr=await sr.json(),hits=jsr.value||[];
+      if(!hits.length)bad('Search returned nothing. (Search is index-backed and often lags — not conclusive on its own.)');
+      hits.forEach(function(h){
+        var pp='';try{pp=decodeURIComponent(String((h.parentReference&&h.parentReference.path)||''));}catch(_){}
+        L.push('         "'+h.name+'"  in  '+(pp||'?')+(h.name===FN?'   <-- exact match':'   (name differs)'));
+        if(h.name===FN&&!fileId)fileId=h.id;
+      });
+    }else bad('search HTTP '+sr.status);
+  }catch(e){bad('search threw: '+e.message);}
+
+  hdr('6. WORKSHEET TABS  (the other thing "sheet not found" can mean)');
+  if(!fileId)note('Skipped — no file to open.');
+  else try{
+    var wsr=await gfetch(GR+'/me/drive/items/'+fileId+'/workbook/worksheets?$select=name');
+    if(wsr.ok){
+      var jw=await wsr.json(),tabs=(jw.value||[]).map(function(x){return x.name;});
+      L.push('         tabs: '+(tabs.join(' | ')||'(none)'));
+      ['Lead Tracker','Templates','Comms Log'].forEach(function(need){
+        if(tabs.indexOf(need)>-1)ok('"'+need+'" present');
+        else{
+          bad('"'+need+'" MISSING'+(need==='Lead Tracker'?'  <-- this alone breaks loading':''));
+          var loose=tabs.filter(function(t){return t.replace(/\s+/g,'').toLowerCase()===need.replace(/\s+/g,'').toLowerCase();});
+          if(loose.length)note('   but found "'+loose[0]+'" — rename it to exactly "'+need+'"');
+        }
+      });
+    }else if(wsr.status===423)bad('File is LOCKED (423) — it is open in Excel somewhere. Close it everywhere.');
+    else bad('worksheets HTTP '+wsr.status);
+  }catch(e){bad('worksheets threw: '+e.message);}
+
+  hdr('7. ENGINE FILE');
+  try{
+    var ef=await gfetch(GR+'/me/drive/root:/'+encodeURIComponent(ENGINE_FILE));
+    if(ef.ok)ok(ENGINE_FILE+' present at root');
+    else if(ef.status===404)note(ENGINE_FILE+' not at root — harmless, engines fall back to built-in defaults.');
+    else bad('HTTP '+ef.status);
+  }catch(e){bad('threw: '+e.message);}
+
+  L.push('');
+  L.push('END OF REPORT');
+  return L.join('\n');
+}
+
+async function openDiagnostics(){
+  var box=el('diag-body');
+  if(box)box.textContent='Running…';
+  el('modal-diag').classList.add('open');
+  var out='';
+  try{out=await runDiagnostics();}catch(e){out='Diagnostics crashed: '+(e&&e.message);}
+  if(box)box.textContent=out;
 }
 
 /* ─── Workbook lookup ────────────────────────────────────────────────────
@@ -6879,6 +7033,14 @@ function onClick(ev){
         }catch(e){/* Browser refused — class-based fullscreen still works */}
       }
       break;
+    case 'open-diagnostics': openDiagnostics(); break;
+    case 'copy-diagnostics': (function(){
+      var t=(el('diag-body')||{}).textContent||'';
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(t).then(function(){toast('✓ Report copied');},
+          function(){toast('Copy failed — select the text manually');});
+      }else toast('Copy not supported — select the text manually');
+    })(); break;
     case 'open-conditions': if(ri!=null)openConditionsPicker(ri,{fromResponded:false}); break;
     case 'resp-save-conditions': saveConditionsPicker(); break;
     case 'resp-toggle-other': respToggleOther(); break;
@@ -6895,7 +7057,7 @@ var autoRefreshTimer=null;
 var lastHiddenAt=null;
 
 function isModalOpen(){
-  var ids=['modal-assessment','modal-sms','modal-email','modal-script','modal-log-action','modal-conditions'];
+  var ids=['modal-assessment','modal-sms','modal-email','modal-script','modal-log-action','modal-conditions','modal-diag'];
   for(var i=0;i<ids.length;i++){
     var m=el(ids[i]);
     if(m&&m.classList.contains('open'))return true;
