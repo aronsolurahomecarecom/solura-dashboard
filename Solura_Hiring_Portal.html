@@ -1743,8 +1743,11 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════════
-   SEQUENCE ENGINE V2 — embedded verbatim from sequence_engine_v2.js (Claude
-   Code build, 55/55 tests green). DO NOT edit inline: to upgrade, replace this
+   SEQUENCE ENGINE V2 (r2) — embedded from sequence_engine_v2.js (Claude Code
+   build, 55/55 tests green) with ONE documented host extension: the editor's
+   integration provider list now includes 'claude' and 'zoominfo' (canonical
+   copy: sequence_engine_v2_r2.js in outputs — replace this block with THAT
+   file's contents when upgrading). DO NOT edit inline: to upgrade, replace this
    entire script block with the new module file contents. Compute-only module;
    exposes window.SeqEngineV2; never writes columns/state/network — see
    INTEGRATION_NOTES.md. Host bridge lives in the main app script (search
@@ -3100,7 +3103,7 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
           var ir = el('div', { class: 'sqe2-row' });
           ir.appendChild(el('span', { class: 'sqe2-muted', text: 'Provider:' }));
           var pSel = el('select', { onchange: function () { step.integration.provider = pSel.value; } });
-          ['yardstik', 'calcom', 'custom'].forEach(function (p) {
+          ['yardstik', 'calcom', 'claude', 'zoominfo', 'custom'].forEach(function (p) { /* r2: +claude (AI screening), +zoominfo (employer phone lookup) — host executor handles both */
             var o = el('option', { value: p, text: p });
             if (step.integration.provider === p) o.selected = true;
             pSel.appendChild(o);
@@ -4201,7 +4204,7 @@ async function _saveSettingsInternal(){
         status.errors.push('Worker returned '+r.status+': '+t.slice(0,200));
       }
     }else{
-      status.errors.push('No internal worker token — file save skipped. Set token in Settings → ZoomInfo integration.');
+      status.errors.push('No internal worker token — file save skipped. Set token in Settings → 🔌 Integrations.');
     }
   }catch(e){status.errors.push('Worker call failed: '+e.message);}
 
@@ -9809,7 +9812,7 @@ async function orderYardstikCheck(){
   }
   if(!confirm('Order a Yardstik background check for '+W.name+'?\n\nYardstik will email them at '+W.email+' with a secure intake form. You can monitor status here.'))return;
   const tok=(SETTINGS.config||{}).ziToken||'';
-  if(!tok){toast('Set internal worker token first in Settings → 🔍 ZoomInfo integration (token is shared across all integrations)');return;}
+  if(!tok){toast('Set internal worker token first in Settings → 🔌 Integrations (ZoomInfo card — token is shared across all integrations)');return;}
   const accountId=SETTINGS.config.yardstikAccountId, packageId=SETTINGS.config.yardstikPackageId;
   const verifyPackageId=SETTINGS.config.yardstikVerifyPackageId||'';
   if(!accountId||!packageId){toast('Yardstik not fully configured — see Settings');return;}
@@ -9869,7 +9872,7 @@ async function orderYardstikVerification(){
   const accountId=cfg.yardstikAccountId, verifyPackageId=cfg.yardstikVerifyPackageId;
   if(!accountId||!verifyPackageId){toast('Set a verification package first in Settings → Yardstik');return;}
   const tok=cfg.ziToken||'';
-  if(!tok){toast('Set internal worker token first in Settings → 🔍 ZoomInfo integration');return;}
+  if(!tok){toast('Set internal worker token first in Settings → 🔌 Integrations');return;}
   /* Targets: employers without a verdict AND not already Yardstik-in-flight. Manual-cleared
      rows are left alone — user already did the work, don't re-order on top of that. */
   const targets=(W.st.employers||[]).filter(e=>e&&(e.name||'').trim()&&!e.v&&!(e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running')));
@@ -12495,8 +12498,7 @@ const SETTINGS_SECTIONS=[
   {key:'sourcelinks',label:'Source links & tracking', icon:'🔗'},
   {key:'calendars', label:'Cal.com booking URLs', icon:'📅'},
   {key:'bgchecks',  label:'Background registries',icon:'🛡'},
-  {key:'yardstik',  label:'Yardstik (background checks)', icon:'🪪'},
-  {key:'zoominfo',  label:'ZoomInfo integration', icon:'🔍'},
+  {key:'integrations',label:'Integrations',       icon:'🔌'},
   {key:'lists',     label:'Custom lists',         icon:'📋'},
   {key:'access',    label:'Access & lock',        icon:'🔒'},
   {key:'data',      label:'Import / export',      icon:'⬆'}
@@ -12606,8 +12608,7 @@ function renderSettings(){
   else if(settingsSection==='sourcelinks') body=renderSettingsSourceLinks();
   else if(settingsSection==='calendars') body=renderSettingsCalendars();
   else if(settingsSection==='bgchecks') body=renderSettingsBgChecks();
-  else if(settingsSection==='yardstik') body=renderSettingsYardstik();
-  else if(settingsSection==='zoominfo') body=renderSettingsZoomInfo();
+  else if(settingsSection==='integrations'||settingsSection==='yardstik'||settingsSection==='zoominfo') body=renderSettingsIntegrations();
   else if(settingsSection==='lists') body=renderSettingsLists();
   else if(settingsSection==='access') body=renderSettingsAccess();
   else if(settingsSection==='data') body=renderSettingsData();
@@ -14008,7 +14009,7 @@ const ZI_WORKER_URL='https://solura-hiring-webhook.meir-865.workers.dev';
 
 async function ziCall(path,payload){
   const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
-  if(!tok){throw new Error('ZoomInfo token not configured. Go to Settings → ZoomInfo integration.');}
+  if(!tok){throw new Error('ZoomInfo token not configured. Go to Settings → 🔌 Integrations (ZoomInfo card).');}
   const r=await fetch(ZI_WORKER_URL+path,{
     method:'POST',
     headers:{'Content-Type':'application/json','X-Solura-Token':tok},
@@ -14019,6 +14020,39 @@ async function ziCall(path,payload){
   return data;
 }
 
+/* ── Integrations (unified) ──
+   One home for every external service: Claude (AI screening), Yardstik (background checks),
+   ZoomInfo (employer phone lookup). The Yardstik/ZoomInfo cards are the SAME renderers as
+   before — this section just concatenates them, so nothing about their behavior changed.
+   Old section keys ('yardstik','zoominfo') route here for compatibility. */
+function renderSettingsIntegrations(){
+  return _claudeIntegrationCard()+renderSettingsYardstik()+renderSettingsZoomInfo();
+}
+function _claudeIntegrationCard(){
+  return `<div class="wscard">
+    <h3>🤖 Claude — AI screening</h3>
+    <p class="set-help">Screens applications at pipeline entry (and on demand from the workspace): research-backed reliability/integrity/availability flags, résumé cross-check when a PDF is on file, "verify on the phone screen" list. Advisory only — never advances or declines anyone. Available as provider <b>claude</b> in sequence integration steps. ~1¢ per screen.</p>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px">
+      <span id="claude-int-status" class="pill psoft" style="font-size:11px">status unknown — test to check</span>
+      <button class="btn-sm bg-cream" style="cursor:pointer" onclick="_claudeIntStatus()">Test connection</button>
+    </div>
+    <p class="set-help" style="margin-top:8px;font-size:11px">The API key lives on the worker as a secret (<span style="font-family:ui-monospace,monospace">ANTHROPIC_API_KEY</span> — Cloudflare → worker → Settings → Variables and Secrets). It is never stored in portal settings and never touches the browser. Model: claude-sonnet-4-6. Uses the shared internal worker token below (ZoomInfo card) for auth.</p>
+  </div>`;
+}
+async function _claudeIntStatus(){
+  const el=document.getElementById('claude-int-status');
+  const tok=(SETTINGS.config||{}).ziToken||'';
+  if(!tok){if(el){el.textContent='set the internal worker token first (below)';el.className='pill pwarn';}return;}
+  if(el)el.textContent='checking…';
+  try{
+    const r=await fetch(ZI_WORKER_URL+'/ai/status',{headers:{'X-Solura-Token':tok}});
+    const j=await r.json();
+    if(el){
+      if(j.keyConfigured){el.textContent='✓ connected — '+(j.model||'ready');el.className='pill pok';}
+      else{el.textContent='worker reachable, ANTHROPIC_API_KEY not set';el.className='pill pwarn';}
+    }
+  }catch(e){if(el){el.textContent='✕ worker unreachable: '+e.message;el.className='pill pbad';}}
+}
 function renderSettingsYardstik(){
   const cfg=SETTINGS.config||{};
   const accountId=cfg.yardstikAccountId||'';
@@ -14345,7 +14379,7 @@ async function sendRebookEmail(excelRow,which){
 async function testYardstik(){
   const out=document.getElementById('ys-test-result');
   const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
-  if(!tok){out.innerHTML='<span style="color:var(--red);font-weight:600">✗ Set internal worker token first (Settings → 🔍 ZoomInfo integration — the token is shared across all integrations)</span>';return;}
+  if(!tok){out.innerHTML='<span style="color:var(--red);font-weight:600">✗ Set internal worker token first (Settings → 🔌 Integrations, ZoomInfo card — the token is shared across all integrations)</span>';return;}
   out.innerHTML='<span class="spin"></span> Testing…';
   try{
     const r=await fetch(ZI_WORKER_URL+'/yardstik/test',{method:'POST',headers:{'X-Solura-Token':tok}});
@@ -14378,7 +14412,7 @@ async function testYardstik(){
 async function loadYardstikPackages(){
   const out=document.getElementById('ys-package-area');
   const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
-  if(!tok){out.innerHTML='<span style="color:var(--red)">Set internal worker token first (Settings → 🔍 ZoomInfo integration — the token is shared across all integrations)</span>';return;}
+  if(!tok){out.innerHTML='<span style="color:var(--red)">Set internal worker token first (Settings → 🔌 Integrations, ZoomInfo card — the token is shared across all integrations)</span>';return;}
   out.innerHTML='<span class="spin"></span> Loading packages…';
   try{
     const r=await fetch(ZI_WORKER_URL+'/yardstik/packages',{headers:{'X-Solura-Token':tok}});
@@ -15074,6 +15108,13 @@ async function _seqRunIntent(row,intentJson){
   if(t==='integration'){
     if(intent.provider==='yardstik'&&W&&W.row===row){orderYardstikCheck();return;}
     if(intent.provider==='claude'&&intent.action==='resume-screen'){await _claudeResumeScreen(row);return;}
+    if(intent.provider==='zoominfo'){
+      /* ZI lookups are per-employer (phone discovery for verification calls) — they live in the
+         verify hub. Route the operator there rather than pretending a candidate-level call exists. */
+      if(W&&W.row===row&&typeof setFocusedHub==='function'){setFocusedHub('verify');toast('🔍 ZoomInfo lookups are per employer — use the 🔍 button on each employer row');}
+      else toast('Open the candidate workspace → verify hub for ZoomInfo lookups');
+      return;
+    }
     toast('Integration step: '+intent.provider+' · '+(intent.action||''));
     return;
   }
@@ -15087,7 +15128,7 @@ async function _seqRunIntent(row,intentJson){
 async function _claudeResumeScreen(row){
   const cand=pipeline.find(x=>x.excelRow===row);if(!cand){toast('Candidate not found');return;}
   const tok=(SETTINGS.config||{}).ziToken||'';
-  if(!tok){toast('Set the internal worker token first (Settings → ZoomInfo integration — shared across integrations)');return;}
+  if(!tok){toast('Set the internal worker token first (Settings → 🔌 Integrations, ZoomInfo card — shared across integrations)');return;}
   toast('🤖 Claude is screening '+(cand.name||'candidate')+'…');
   /* Compact snapshot: structured application data only. The résumé PDF binary is NOT read —
      most caregiver signal (tenure, availability, certs, care tolerance) is in the answers. */
