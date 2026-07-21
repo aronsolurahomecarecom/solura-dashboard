@@ -1194,7 +1194,8 @@ var C={
   STEP:25,   // Z  step_idx  (NEW — engine state)
   STEP_AT:26,// AA step_done_at  (NEW — when current step was completed)
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
-  MC:28      // AC partner_flags  (comma-separated tags)
+  MC:28,     // AC partner_flags  (legacy alias — same column as ENG)
+  ENG:28     // AC current engine id  (chaining override; blank = category rules)
 };
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
@@ -1291,7 +1292,10 @@ function compileEngine(e){
       steps.forEach(function(s){
         seq.push({ph:ph,icon:s.icon||(s.type==='call'?'📞':s.type==='email'?'📧':'💬'),
           text:s.text||'(untitled)',type:s.type||'sms',trigger:'action',
-          lbl:'Phase '+ph,cadence:'action',phName:phName,template:s.template||''});
+          lbl:'Phase '+ph,cadence:'action',phName:phName,template:s.template||'',
+          // waitDays: days to wait AFTER the previous step before this one is due.
+          // Lets an engine express 3-7-7 style spacing instead of consecutive days.
+          waitDays:(s.waitDays==null?null:Math.max(0,parseInt(s.waitDays,10)||0))});
       });
     }else if(p.cadence==='daily'){
       var d0=p.daily||{};
@@ -1364,7 +1368,72 @@ function compileEngine(e){
     }
   });
   if(!seq.length)throw new Error('Engine compiled to zero steps');
-  return {id:e.id,name:e.name||e.id,json:e,seq:seq};
+  return {id:e.id,name:e.name||e.id,json:e,seq:seq,exits:e.exits||{}};
+}
+
+/* ─── §2c SEQUENCE CHAINING ──────────────────────────────────────────────
+ * An engine is no longer a dead end. Each engine may declare `exits`:
+ *
+ *   exits:{
+ *     onRespond : engineId,                  // partner replied
+ *     onComplete: engineId,                  // ran out of steps, still silent
+ *     onStall   : {days:N, to:engineId},     // sticky step idle N days
+ *     onStatus  : {"referring":engineId}     // status text matched a rule
+ *   }
+ *
+ * transitionEngine() writes the destination engine id into column AC and
+ * resets step_idx to 0, so the partner restarts at step 0 of the new engine.
+ * That column overrides the category-based assignment rules, which means a
+ * partner's CATEGORY (col G) still describes who they are, while their
+ * ENGINE (col AC) describes where they are in the relationship.
+ * ─────────────────────────────────────────────────────────────────────── */
+function currentEngineId(ri){
+  var v=String(((rows[ri]||[])[C.ENG])||'').trim();
+  return (v&&ENGINES[v])?v:'';
+}
+function exitsFor(ri){
+  var e=engineFor(ri);
+  return (e&&e.exits)||{};
+}
+// Resolve the engine a partner should START in, ignoring any override.
+function baseEngineIdFor(ri){
+  var src=String(((rows[ri]||[])[C.SO])||'').trim().toLowerCase();
+  if(src){
+    var rules=enginesDoc.assignments||[];
+    for(var i=0;i<rules.length;i++){
+      var m=String(rules[i].match||'').trim().toLowerCase();
+      if(m&&(src===m||src.indexOf(m)>-1)&&ENGINES[rules[i].engineId])return rules[i].engineId;
+    }
+  }
+  return enginesDoc.defaultEngineId;
+}
+// Build the column updates that move a partner onto a different engine at step 0.
+// Returns null when the destination is missing or already current (no-op).
+function transitionUpdates(ri,toEngineId,reason){
+  if(!toEngineId||!ENGINES[toEngineId])return null;
+  if(currentEngineId(ri)===toEngineId&&getStep(ri)===0)return null;
+  var target=ENGINES[toEngineId];
+  var u={};
+  u[C.ENG]=toEngineId;
+  u[C.STEP]=0;
+  // Pin to noon of the local day, same convention advanceLead uses — keeps all
+  // step_done_at date math invariant to what time of day the action happened.
+  var td=localToday();
+  u[C.STEP_AT]=new Date(td.getFullYear(),td.getMonth(),td.getDate(),12,0,0).toISOString();
+  u[C.SQ]=stepLabel(0,target.seq);
+  // First step of the new engine is due after its own waitDays (default: now).
+  var first=target.seq[0];
+  var wait=(first&&first.waitDays!=null)?first.waitDays:0;
+  u[C.NF]=fd(addDays(localToday(),wait));
+  var hist=String((rows[ri]||[])[C.SL]||'');
+  u[C.SL]=appendLogStr(hist,'\u2192 moved to "'+target.name+'"'+(reason?' ('+reason+')':''),'');
+  return u;
+}
+async function transitionEngine(ri,toEngineId,reason){
+  var u=transitionUpdates(ri,toEngineId,reason);
+  if(!u)return false;
+  await writeRow(ri,u);
+  return true;
 }
 function validateEngine(e){
   try{compileEngine(e);return [];}catch(err){return [err.message];}
@@ -1388,15 +1457,12 @@ function applyEnginesDoc(){
   SEQ=ENGINES[enginesDoc.defaultEngineId].seq;
 }
 function engineIdFor(ri){
-  var src=String(((rows[ri]||[])[C.SO])||'').trim().toLowerCase();
-  if(src){
-    var rules=enginesDoc.assignments||[];
-    for(var i=0;i<rules.length;i++){
-      var m=String(rules[i].match||'').trim().toLowerCase();
-      if(m&&(src===m||src.indexOf(m)>-1)&&ENGINES[rules[i].engineId])return rules[i].engineId;
-    }
-  }
-  return enginesDoc.defaultEngineId;
+  // Column AC (current engine) wins when it names a live engine — that's how a
+  // partner stays on Warm Development even though their category still says
+  // "Hospital Discharge Planner". Falls back to the category rules otherwise.
+  var override=String(((rows[ri]||[])[C.ENG])||'').trim();
+  if(override&&ENGINES[override])return override;
+  return baseEngineIdFor(ri);
 }
 function engineFor(ri){return ENGINES[engineIdFor(ri)]||ENGINES[enginesDoc.defaultEngineId];}
 function seqFor(ri){return engineFor(ri).seq;}
@@ -1549,7 +1615,9 @@ function getTpl(arr,ri){
 function el(id){return document.getElementById(id);}
 function $$(sel,root){return Array.prototype.slice.call((root||document).querySelectorAll(sel));}
 function toast(m){var t=el('toast');if(!t)return;t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},3000);}
-function showErr(m){var e=el('err');if(e){e.textContent='⚠ '+m;e.classList.add('on');}}
+function showErr(m){
+  // Multi-line diagnostics come through with \n — keep them readable.
+  try{var _e=el('err');if(_e)_e.style.whiteSpace='pre-wrap';}catch(_){}var e=el('err');if(e){e.textContent='⚠ '+m;e.classList.add('on');}}
 function clearErr(){var e=el('err');if(e)e.classList.remove('on');}
 function escapeHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 // Normalize all newline forms (\r\n, \r, literal "\n" escapes) to actual
@@ -1783,12 +1851,12 @@ async function gfetch(url,opts){
 async function loadData(){
   clearErr();
   try{
-    var r=await gfetch(GR+"/me/drive/root/search(q='"+encodeURIComponent(FN)+"')");
-    if(!r.ok)throw new Error('Drive search failed: '+r.status);
-    var j=await r.json();
-    var f=(j.value||[]).find(function(x){return x.name===FN;});
-    if(!f)throw new Error(FN+' not found in OneDrive');
+    var f=await findWorkbook();
     fid=f.id;
+    if(f.foundVia==='search'&&f.parentPath){
+      showErr('Heads up: '+FN+' was found in "'+f.parentPath+'" rather than the root of your OneDrive. '
+        +'It works, but moving it to the top level makes loading faster and more reliable.');
+    }
     var r2=await gfetch(GR+'/me/drive/items/'+fid+'/content');
     if(!r2.ok)throw new Error('Download failed: '+r2.status);
     var buf=await r2.arrayBuffer();
@@ -1807,8 +1875,67 @@ async function loadData(){
     // Run migration if needed before rendering
     await maybeRunMigration();
 
+    // Sweep for stalled partners and move them onto their fallback engine.
+    try{await runStallTransitions();}catch(e){console.warn('Stall sweep:',e.message);}
+
     buildUI();
   }catch(e){showErr(e.message);}
+}
+
+/* ─── Workbook lookup ────────────────────────────────────────────────────
+ * Resolve the workbook by PATH first, falling back to search.
+ *
+ * Why: Graph's /search endpoint is backed by an eventually-consistent index.
+ * A file can exist in OneDrive and still be missing from search results —
+ * after a recent edit, during an index rebuild, or when the tenant is being
+ * throttled. That produces exactly the failure mode of "it worked yesterday
+ * and now it can't find the sheet." Path resolution does no indexing: the
+ * file is either at that path or it isn't.
+ *
+ * Search is kept only as a fallback, so a workbook parked in a subfolder
+ * still loads (with a nudge to move it to the root).
+ * ─────────────────────────────────────────────────────────────────────── */
+async function findWorkbook(){
+  // 1 — exact path at the drive root. Deterministic, no index involved.
+  var byPath=await gfetch(GR+'/me/drive/root:/'+encodeURIComponent(FN));
+  if(byPath.ok){
+    var jp=await byPath.json();
+    if(jp&&jp.id)return {id:jp.id,foundVia:'path',parentPath:''};
+  }else if(byPath.status===401){
+    throw new Error('Microsoft rejected the request (401). Sign out and sign back in.');
+  }else if(byPath.status===429||byPath.status===503){
+    throw new Error('Microsoft is throttling requests ('+byPath.status+'). Wait about a minute and hit Refresh.');
+  }else if(byPath.status!==404){
+    throw new Error('Could not reach OneDrive (HTTP '+byPath.status+'). Check your connection and hit Refresh.');
+  }
+
+  // 2 — fallback: search the whole drive.
+  var bySearch=await gfetch(GR+"/me/drive/root/search(q='"+encodeURIComponent(FN)+"')");
+  if(bySearch.ok){
+    var js=await bySearch.json();
+    var hit=(js.value||[]).find(function(x){return x.name===FN;});
+    if(hit){
+      var pp='';
+      try{pp=decodeURIComponent(String((hit.parentReference&&hit.parentReference.path)||'')
+        .replace('/drive/root:','')).replace(/^\//,'');}catch(_){}
+      return {id:hit.id,foundVia:'search',parentPath:pp||'a subfolder'};
+    }
+  }
+
+  // 3 — genuinely not there. Say who we're signed in as, because the single
+  // most common cause is being signed into the wrong Microsoft account.
+  var who='';
+  try{
+    var me=await gfetch(GR+'/me?$select=userPrincipalName,mail');
+    if(me.ok){var jm=await me.json();who=jm.userPrincipalName||jm.mail||'';}
+  }catch(_){}
+  throw new Error(
+    'Could not find "'+FN+'" in OneDrive'+(who?' for '+who:'')+'.\n\n'
+    +'Check, in order:\n'
+    +'1. The filename is exactly "'+FN+'" — no "(1)", no " - Copy", no double extension.\n'
+    +'2. It is in OneDrive itself, not a SharePoint or Teams library, and not a shortcut to a shared folder.\n'
+    +(who?'3. You are signed in as the right account — currently '+who+'.\n':'3. You are signed in as the right Microsoft account.\n')
+    +'4. It has finished uploading — a file still syncing is not visible to this dashboard.');
 }
 
 // Write specific columns to a row. updates is an object {colIndex: value, ...}.
@@ -2045,6 +2172,40 @@ function inferStepFromLog(rowArr){
   return 0;
 }
 
+/* ─── Stall sweep ────────────────────────────────────────────────────────
+ * An engine can declare exits.onStall = {days:N, to:engineId}. Any partner
+ * sitting on that engine whose step_done_at is older than N days gets moved.
+ *
+ * This is what keeps the pipeline honest without you policing it: a warm
+ * partner who goes quiet for 90 days drops back to gentle nurture instead of
+ * sitting in "warm" forever, and an active partner who stops referring for
+ * 120 days surfaces in reactivation instead of quietly disappearing.
+ *
+ * Runs on every load. Idempotent — a partner already on the destination
+ * engine at step 0 produces no update.
+ * ─────────────────────────────────────────────────────────────────────── */
+async function runStallTransitions(){
+  var today=localToday(), moved=0;
+  for(var ri=DATA_START;ri<rows.length;ri++){
+    var r=rows[ri];
+    if(!r||!String(r[C.NM]||'').trim())continue;
+    var stx=lc(r[C.ST]);
+    if(EXCL_ST.some(function(a){return stx.indexOf(a)>-1;}))continue;
+    var ex=exitsFor(ri);
+    if(!ex.onStall||!ex.onStall.to||!ENGINES[ex.onStall.to])continue;
+    var days=Math.max(1,parseInt(ex.onStall.days,10)||90);
+    var since=getStepDoneAt(ri);
+    if(!since)continue;
+    var elapsed=daysBetween(today,new Date(since.getFullYear(),since.getMonth(),since.getDate()));
+    if(elapsed<days)continue;
+    try{
+      if(await transitionEngine(ri,ex.onStall.to,'stalled '+elapsed+'d'))moved++;
+    }catch(e){console.warn('Stall move failed row '+ri+':',e.message);}
+  }
+  if(moved)toast('\u21bb '+moved+' partner'+(moved!==1?'s':'')+' moved to a new sequence');
+  return moved;
+}
+
 async function maybeRunMigration(){
   var key='solura_migration_'+MIGRATION_VERSION;
   if(localStorage.getItem(key)==='done')return;
@@ -2245,8 +2406,13 @@ function whenToShow(ri){
   var r=rows[ri]||[];
   var st=String(r[C.ST]||'');
   if(isExcluded(st))return {bucket:'hidden'};
-  if(isOffSequence(ri)||isActive(st)){
-    // Active leads sort by NF
+  // NOTE (referral build): this used to also short-circuit on isActive(st),
+  // which meant any partner marked Engaged/Nurturing/Referring was bucketed
+  // purely off column N and never saw their engine's cadence again. With
+  // sequence chaining those partners are on a real engine, so only a genuine
+  // off-sequence partner (no engine, manual mode) takes the NF-only path.
+  if(isOffSequence(ri)){
+    // Off-sequence leads sort by NF
     var nf=pd(r[C.NF]);
     var today=localToday();
     if(nf){
@@ -2421,6 +2587,24 @@ function advanceLead(ri,methodUsed){
     return u;
   }
 
+  // End of a non-sticky engine: hand off to exits.onComplete if one exists.
+  // This is what turns "ran out of steps" into "moved to long-term nurture"
+  // instead of silently pinning on the last step forever.
+  if(step+1>=sq.length){
+    var exC=exitsFor(ri);
+    if(exC.onComplete&&ENGINES[exC.onComplete]){
+      var histC=String((rows[ri]||[])[C.SL]||'');
+      var uC=transitionUpdates(ri,exC.onComplete,'sequence complete');
+      if(uC){
+        uC[C.LC]=todayStr;
+        if(methodUsed)uC[C.MT]=methodUsed;
+        uC[C.SL]=appendLogStr(appendLogStr(histC,cur.text,methodUsed),
+          '\u2192 moved to "'+ENGINES[exC.onComplete].name+'" (sequence complete)','');
+        return uC;
+      }
+    }
+  }
+
   var nextStep=step+1;
   if(nextStep>=sq.length)nextStep=sq.length-1;
   u[C.STEP]=nextStep;
@@ -2439,7 +2623,12 @@ function advanceLead(ri,methodUsed){
   //  b) action step done, entering a daily phase          (legacy: P1 last)
   //  c) timed step done, entering an action phase         (legacy: wk6 → P4,
   //     kills the "overdue by 35 days" stale-NF bug)
-  if(prevAction.cadence==='daily'&&prevAction.lastSlot){
+  //  d) next step declares waitDays → due exactly that many days out. This
+  //     takes priority over every legacy rule, because an engine that states
+  //     its own spacing means it.
+  if(nextAction&&nextAction.waitDays!=null){
+    u[C.NF]=fd(addDays(localToday(),nextAction.waitDays));
+  }else if(prevAction.cadence==='daily'&&prevAction.lastSlot){
     u[C.NF]=tomorrowStr;
   }else if(prevAction.trigger==='action'&&nextAction&&nextAction.cadence==='daily'){
     u[C.NF]=tomorrowStr;
@@ -3038,12 +3227,23 @@ async function saveEp(ri,mode){
       if(budget)np.push('Budget: '+budget);
       if(urg)np.push('Urgency: '+urg);
       if(np.length)u[C.NT]=np.filter(Boolean).join(' | ');
-      u[C.ST]=(respSt&&respSt.trim())||'Active Conversation';
+      u[C.ST]=(respSt&&respSt.trim())||'Engaged';
       u[C.LC]=todayStr;
-      u[C.STEP]=STEP_OFF_SEQUENCE;
-      u[C.STEP_AT]=new Date().toISOString();
-      u[C.SQ]=stepLabel(STEP_OFF_SEQUENCE);
-      u[C.SL]=appendLogStr(String(r[C.SL]||''),'Lead responded — first contact',mt2);
+      // Chaining: a partner who responds moves onto the engine's onRespond
+      // target (normally Warm Development) at step 0 — NOT into the old
+      // off-sequence dead end, which left them with no cadence at all.
+      var exR=exitsFor(ri);
+      var uR=exR.onRespond?transitionUpdates(ri,exR.onRespond,'partner responded'):null;
+      if(uR){
+        Object.keys(uR).forEach(function(k){if(k!=String(C.SL))u[k]=uR[k];});
+        u[C.SL]=appendLogStr(String(r[C.SL]||''),
+          'Partner responded \u2014 \u2192 "'+ENGINES[exR.onRespond].name+'"',mt2);
+      }else{
+        u[C.STEP]=STEP_OFF_SEQUENCE;
+        u[C.STEP_AT]=new Date().toISOString();
+        u[C.SQ]=stepLabel(STEP_OFF_SEQUENCE);
+        u[C.SL]=appendLogStr(String(r[C.SL]||''),'Partner responded \u2014 manual mode',mt2);
+      }
     }else if(mode==='update'){
       var st=q('.ep-st'),fu2=q('.ep-fu'),mt3=q('.ep-mt'),nsm2=q('.ep-nsm'),notes2=q('.ep-notes');
       if(st)u[C.ST]=st;
@@ -3052,11 +3252,24 @@ async function saveEp(ri,mode){
       if(nsm2)u[C.NSM]=nsm2;
       if(notes2!=null)u[C.NT]=notes2;
       u[C.LC]=todayStr;
-      // If status moves to active and we're not already off-sequence, flip
-      if(st&&isActive(st)&&!isOffSequence(ri)){
-        u[C.STEP]=STEP_OFF_SEQUENCE;
-        u[C.STEP_AT]=new Date().toISOString();
-        u[C.SQ]=stepLabel(STEP_OFF_SEQUENCE);
+      // Chaining: a status change can move the partner onto a different
+      // engine (e.g. "Referring" -> Active Partner retention cadence).
+      // Falls back to the legacy off-sequence flip only when no rule matches.
+      if(st){
+        var mapS=exitsFor(ri).onStatus||{};
+        var stL=String(st).toLowerCase(), hitS='';
+        Object.keys(mapS).forEach(function(k){
+          if(!hitS&&k&&stL.indexOf(String(k).toLowerCase())>-1)hitS=mapS[k];
+        });
+        var uS=hitS?transitionUpdates(ri,hitS,'status \u2192 '+st):null;
+        if(uS){
+          Object.keys(uS).forEach(function(k){if(k!=String(C.SL))u[k]=uS[k];});
+          u[C.SL]=uS[C.SL];
+        }else if(isActive(st)&&!isOffSequence(ri)&&!exitsFor(ri).onRespond){
+          u[C.STEP]=STEP_OFF_SEQUENCE;
+          u[C.STEP_AT]=new Date().toISOString();
+          u[C.SQ]=stepLabel(STEP_OFF_SEQUENCE);
+        }
       }
     }
     if(!Object.keys(u).length){closeEp(ri);return;}
@@ -5169,8 +5382,9 @@ function openDrawer(ri){
   var action=currentAction(ri);
   var step=getStep(ri);
   var stepDesc='—';
-  if(step===STEP_OFF_SEQUENCE)stepDesc='Off-sequence (responded)';
+  if(step===STEP_OFF_SEQUENCE)stepDesc='Off-sequence (manual)';
   else if(action)stepDesc=(action.lbl||('Phase '+action.ph))+' — '+action.text;
+  var engNow=engineFor(ri);
 
   var fields=[
     ['In Pipeline',ageStr+' (added '+addedStr+')'],
@@ -5192,8 +5406,8 @@ function openDrawer(ri){
     ['Access Notes',String(r[C.SAFETY]||'')],
     ['Intro Source',String(r[C.REL]||'')],
     ['Notes',String(r[C.NT]||'')],
-    ['Sequence',stepDesc],
-    ['Step Index',String(step)]
+    ['Sequence',(engNow?engNow.name+' \u00b7 ':'')+stepDesc],
+    ['Step Index',String(step)+(engNow?' of '+engNow.seq.length:'')]
   ];
   var fieldsHtml=fields.filter(function(f){return String(f[1]).trim();}).map(function(f){
     return '<div class="drow"><div class="dlabel">'+escapeHtml(f[0])+'</div><div class="dval">'+escapeHtml(f[1])+'</div></div>';
