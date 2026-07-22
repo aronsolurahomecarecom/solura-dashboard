@@ -6950,7 +6950,13 @@ const TEMPLATES={
       candidate a heads-up that a SECOND email is coming for the background check — they don't
       need to do anything in this email except book. Without Yardstik, we still ask for consent
       + cert copies inline. */
-   const bgParagraph=yardstikEnabled
+   /* Direct second-check link when the check was already ordered (the streamlined sequence
+      orders Yardstik BEFORE this invite, so the candidate's applyUrl exists by now). Falls back
+      to the "separate email coming" copy, then to inline consent when Yardstik is off. */
+   const applyUrl=c&&c.st&&c.st.yardstik&&c.st.yardstik.applyUrl;
+   const bgParagraph=applyUrl
+     ? `Please also complete your part of the background check here (takes ~5 minutes):\n${applyUrl}\nIt runs while we schedule and interview — booking and the check can happen in either order.`
+     : yardstikEnabled
      ? `Shortly after this email, you'll also receive a separate, secure email from <b>Yardstik</b> (our background-check partner) with a link to complete a quick consent + identity form. That kicks off a standard caregiver background check, which runs while we schedule and interview — no extra steps from you here.`
      : `We'll also need to run a standard background check while we're scheduling. Please reply with your consent to run the check, along with copies of any caregiving certificates you have.`;
    return {
@@ -9689,6 +9695,12 @@ const REGISTRIES=[
  {k:'sexoffender',l:'National Sex Offender Public Website',u:'https://www.nsopw.gov/',req:'recommended'},
  {k:'ohnurselic',l:'OH Nursing License Verification',u:'https://elicense.ohio.gov/oh_verifylicense',req:'if RN/LPN claimed'}
 ];
+/* Registry list resolution: Settings-configured list wins; the hardcoded Ohio defaults serve
+   as the fallback AND the seed for "Load Ohio defaults" in the editor. */
+function _registryList(){
+  const cfg=(SETTINGS.config&&SETTINGS.config.registryLinks)||[];
+  return (Array.isArray(cfg)&&cfg.length)?cfg:REGISTRIES;
+}
 function chkStatusOpts(cur){const opts=[['','— not checked —'],['clean','Clean'],['flag','Found — flagged'],['na','N/A']];return opts.map(([v,l])=>'<option value="'+v+'" '+(cur===v?'selected':'')+'>'+esc(l)+'</option>').join('');}
 function checksBlock(){
   W.st.registryChecks=W.st.registryChecks||{};
@@ -9698,7 +9710,7 @@ function checksBlock(){
   const seqCard=seqV2Card();
   const aiCard=aiScreenCard();
   /* Render each registry as a row with: link + status select + notes input */
-  const rows=REGISTRIES.map(r=>{
+  const rows=_registryList().map(r=>{
     const rc=W.st.registryChecks[r.k]||{};
     const reqClass=r.req==='required'?'pa':r.req==='recommended'?'psoft':'pg';
     return `<div style="border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:8px;background:#FAFAF7">
@@ -9716,6 +9728,22 @@ function checksBlock(){
   return `<div class="wscard" id="ws-checks"><h3>Background &amp; certificates</h3>
     ${aiCard}${seqCard}${yardstikCard}
     <div style="font-size:12px;color:var(--soft);margin-bottom:12px">Run each registry, record what you found. The Offer button unlocks when the 3rd-party check returns clear.</div>
+    <h4>Certificates on file</h4>
+    ${(function(){
+      const creds=(W.st&&W.st.credentials)||[];
+      const certs=(W.st&&W.st.certs)||[];
+      if(!creds.length&&!certs.length)return '<div style="font-size:12px;color:var(--soft);font-style:italic;margin-bottom:10px">No certs claimed or uploaded yet.</div>';
+      const rows2=creds.map(cr=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px dashed var(--border-soft);font-size:12.5px">
+        <span>🎓</span><b>${esc(cr.name||'?')}</b>
+        <span class="pill ${cr.type==='verified'?'pg':'psoft'}" style="font-size:9px">${esc(cr.type||'claimed')}</span>
+        ${cr.expires?`<span style="font-size:10.5px;color:var(--soft)">exp ${esc(cr.expires)}</span>`:''}
+        <div style="flex:1"></div>
+        ${cr.fileUrl?`<a href="${esc(cr.fileUrl)}" target="_blank" class="btn-sm bg-cream" style="text-decoration:none;font-size:10.5px">📎 open</a>`:'<span style="font-size:10px;color:var(--soft)">no file</span>'}
+      </div>`).join('');
+      const extra=certs.filter(n=>!creds.some(cr=>String(cr.name||'').toLowerCase()===String(n).toLowerCase()));
+      const chips=extra.length?`<div style="margin-top:6px">${extra.map(n=>`<span style="background:var(--cream);border:1px solid var(--border);border-radius:999px;padding:2px 9px;font-size:11px;margin-right:4px">${esc(n)}</span>`).join('')}</div>`:'';
+      return `<div style="margin-bottom:14px">${rows2}${chips}<div style="font-size:10.5px;color:var(--soft);margin-top:5px">Verify STNA claims against the Nurse Aide Registry below; RN/LPN claims against license verification.</div></div>`;
+    })()}
     <h4>Registry checks</h4>
     ${rows}
     <h4 style="margin-top:18px">Overall status</h4>
@@ -14038,7 +14066,26 @@ async function ziCall(path,payload){
    before — this section just concatenates them, so nothing about their behavior changed.
    Old section keys ('yardstik','zoominfo') route here for compatibility. */
 function renderSettingsIntegrations(){
-  return _claudeIntegrationCard()+renderSettingsYardstik()+renderSettingsZoomInfo();
+  return _claudeIntegrationCard()+renderSettingsYardstik()+_registryLinksCard()+renderSettingsZoomInfo();
+}
+/* Editable registry list — feeds the 📋 Background & certificates hub. Empty list = built-in
+   Ohio defaults apply. */
+function _registryLinksCard(){
+  const list=(SETTINGS.config&&SETTINGS.config.registryLinks)||[];
+  const rows=list.map((r,i)=>`<div style="display:grid;grid-template-columns:1fr 2fr 120px auto;gap:6px;padding:5px 0;border-top:1px dashed var(--border-soft);align-items:center">
+    <input type="text" value="${esc(r.l||'')}" placeholder="Name" onchange="SETTINGS.config.registryLinks[${i}].l=this.value;markSettingsDirty()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
+    <input type="text" value="${esc(r.u||'')}" placeholder="https://…" onchange="SETTINGS.config.registryLinks[${i}].u=this.value.trim();markSettingsDirty()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;font-family:ui-monospace,monospace">
+    <input type="text" value="${esc(r.req||'required')}" placeholder="required" onchange="SETTINGS.config.registryLinks[${i}].req=this.value.trim()||'required';markSettingsDirty()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-size:11px">
+    <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer" onclick="SETTINGS.config.registryLinks.splice(${i},1);markSettingsDirty();renderSettings()">×</button>
+  </div>`).join('');
+  return `<div class="wscard"><h3>📋 Registry links</h3>
+    <p class="set-help">The registries shown in every candidate's Background &amp; certificates hub. Leave empty to use the built-in Ohio defaults; edit to match your license category / waiver programs. The "requirement" column is a free label shown on each row (required / recommended / if STNA…).</p>
+    ${rows||'<div style="font-size:12px;color:var(--soft);font-style:italic;padding:6px 0">Using built-in Ohio defaults (7 registries).</div>'}
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn-sm bg-cream" style="cursor:pointer" onclick="SETTINGS.config.registryLinks=SETTINGS.config.registryLinks||[];SETTINGS.config.registryLinks.push({k:'reg_'+Date.now().toString(36),l:'',u:'',req:'required'});markSettingsDirty();renderSettings()">+ Add registry</button>
+      <button class="btn-sm bg-cream" style="cursor:pointer" onclick="SETTINGS.config.registryLinks=JSON.parse(JSON.stringify(REGISTRIES));markSettingsDirty();renderSettings()">Load Ohio defaults (editable)</button>
+    </div>
+  </div>`;
 }
 function _claudeIntegrationCard(){
   return `<div class="wscard">
@@ -15228,7 +15275,8 @@ function seqV2Card(){
     const bColor={action:'#8B6500',awaiting:'#1E4E8C',scheduled:'#525555',done:'#3D7A34'}[ev.bucket]||'#525555';
     const bBg={action:'#FEF7E8',awaiting:'#EBF3FB',scheduled:'#F2EDE4',done:'#EBF5EA'}[ev.bucket]||'#F2EDE4';
     const stepLabel=ev.currentStep?(ev.currentStep.label||ev.currentStep.key||ev.currentStep.id):'—';
-    const btns=(ev.intents||[]).slice(0,4).map(it=>{
+    const hubBtn=(ev.currentStep&&/registry/i.test(ev.currentStep.id||ev.currentStep.key||''))?`<button class="btn-sm bg-sky-l" style="cursor:pointer;font-size:11px" onclick="setFocusedHub('checks')">📋 Open checks hub</button>`:'';
+    const btns=hubBtn+(ev.intents||[]).slice(0,4).map(it=>{
       const enc=encodeURIComponent(JSON.stringify(it));
       const lbl={'send-email':'✉ '+(it.templateKey||'send'),'nudge':'🔔 nudge','advance':'→ advance','set-stage':'⚑ '+(it.stage||'stage'),'park':'⏸ park','decline':'✕ decline','integration':'🔌 '+(it.provider||''),'manual':'✓ done'}[it.type]||it.type;
       return `<button class="btn-sm bg-cream" style="cursor:pointer;font-size:11px" onclick="_seqRunIntent(${cand.excelRow},'${enc}')">${esc(lbl)}</button>`;
