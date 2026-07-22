@@ -15691,6 +15691,93 @@ function _mountSeqEditorV2(){
 
 
 /* ═══ FORM CUSTOMIZATION + DOC TEMPLATES — ported verbatim from Claude Code's feature/form-config branch ═══ */
+/* ported consts — dependencies of the form-config/doc-template functions */
+const DOC_TEMPLATE_DEFAULTS={
+application_pdf:{b:`<h1>Application — {name}</h1>
+<p class="meta">Submitted {appliedDate} · Source: {source} · Ref code: {refCode}</p>
+<h2>Candidate</h2>
+<table class="kv"><tr><td>Name</td><td>{name}</td></tr><tr><td>Phone</td><td>{phone}</td></tr><tr><td>Email</td><td>{email}</td></tr><tr><td>Address</td><td>{address}</td></tr></table>
+<h2>Eligibility gates</h2>
+{gates_table}
+<h2>Application answers</h2>
+{application_table}
+{custom_answers}
+<h2>Past employers</h2>
+{employers_table}`},
+
+phone_screen_sheet:{b:`<h1>Phone Screen — {name}</h1>
+<p class="meta">{date} · Stage: {stage} · {phone}</p>
+<div class="callout"><b>Call structure:</b> ① Confirm it’s a good time → ② Confirm interest, availability &amp; pay → ③ Run the questions below → ④ Explain that references will be needed → ⑤ Send the booking link.</div>
+<h2>Eligibility gates</h2>
+{gates_table}
+<h2>Screen questions</h2>
+{qa_phone_screen}
+{custom_answers}
+<h2>Notes</h2>
+<div class="lines"></div><div class="lines"></div><div class="lines"></div><div class="lines"></div>
+<h2>Outcome</h2>
+<p>☐ Advance to references &nbsp;&nbsp; ☐ Hold &nbsp;&nbsp; ☐ Decline — reason: ______________________</p>`},
+
+interview_sheet:{b:`<h1>Caregiver Interview — {name}</h1>
+<p class="meta">{date} · Stage: {stage} · Applied {appliedDate}</p>
+<div class="callout"><b>Before scoring:</b> run the realistic job preview (RJP) below, honestly. A candidate who self-selects out here saves a ghosted shift later. <b>★ = critical competency — any score below 3 means do not advance.</b></div>
+
+<h2>Realistic job preview — checklist</h2>
+<p>☐ Hours &amp; pay discussed plainly &nbsp; ☐ Personal care expectations (bathing, toileting) &nbsp; ☐ Lifting / transfers up to 50 lbs<br>
+☐ Schedule variability &amp; weekend coverage &nbsp; ☐ Working alone in a client’s home &nbsp; ☐ Smoking / pets in client homes<br>
+☐ Background check, references &amp; employer verification process &nbsp; ☐ Earliest realistic start date: ____________</p>
+
+<h2>Competency scoring — 1–5 anchors</h2>
+<table class="comp">
+<tr><th>Competency</th><th>Ask</th><th>1 — red flag</th><th>3 — acceptable</th><th>5 — exemplary</th><th class="sc">Score</th></tr>
+<tr><td><b>Reliability ★</b></td><td>“Tell me about the last time you missed a shift. What happened?”</td><td>Blames others, pattern of no-shows, walked off a job</td><td>Rare misses, called ahead, has backup transport plan</td><td>Concrete system: backup transport, early arrival habit, verifiable record</td><td class="sc">__</td></tr>
+<tr><td><b>Compassion</b></td><td>“Describe a client you found difficult. How did you care for them anyway?”</td><td>Talks about clients with contempt or indifference</td><td>Patient, kind under strain, sees the person</td><td>Specific stories of going beyond; warmth is instinctive</td><td class="sc">__</td></tr>
+<tr><td><b>Integrity ★</b></td><td>“A client offers you cash to skip logging a fall. What do you do?”</td><td>Hedges, ‘depends’, history of shortcuts</td><td>Reports honestly, understands why it matters</td><td>Volunteers past examples of doing the hard right thing</td><td class="sc">__</td></tr>
+<tr><td><b>Safety ★</b></td><td>“Walk me through a transfer for a client with left-side weakness.”</td><td>Improvises, skips gait belt, no fall protocol</td><td>Correct mechanics, asks for help at limits</td><td>Teaches it back fluently; anticipates hazards before they happen</td><td class="sc">__</td></tr>
+<tr><td><b>Communication</b></td><td>“How do you hand off to family / the next caregiver?”</td><td>Doesn’t document, ‘they can figure it out’</td><td>Notes changes, texts back timely, flags concerns</td><td>Structured handoffs; families specifically praise their updates</td><td class="sc">__</td></tr>
+<tr><td><b>Boundaries</b></td><td>“A client asks you to run personal errands off the clock. What do you say?”</td><td>Overshares, takes clients’ requests personally, no limits</td><td>Friendly but professional; declines gracefully</td><td>Articulates the line clearly and keeps the relationship warm</td><td class="sc">__</td></tr>
+</table>
+
+<h2>Situational judgment (SJT)</h2>
+<table class="comp">
+<tr><th>Scenario</th><th>Strong answer</th><th>Red flag</th><th class="sc">Score</th></tr>
+<tr><td>Client refuses their medication reminder and gets agitated.</td><td>Stays calm, doesn’t force, re-approaches later, documents &amp; notifies the office/family</td><td>Argues, forces the issue, or shrugs it off without telling anyone</td><td class="sc">__</td></tr>
+<tr><td>You arrive and find the client on the floor.</td><td>Checks responsiveness, doesn’t lift alone, calls per protocol (911 if needed), stays with client, documents</td><td>Lifts them solo immediately; doesn’t report the fall</td><td class="sc">__</td></tr>
+<tr><td>A family member asks you to do something outside the care plan.</td><td>Kindly explains scope, offers to route the request to the office</td><td>Just does it, or is rude about declining</td><td class="sc">__</td></tr>
+</table>
+
+<h2>Interview question bank</h2>
+{qa_interview}
+{custom_answers}
+
+<h2>Recommendation</h2>
+<p>☐ HIRE TRACK &nbsp;&nbsp; ☐ CONDITIONAL &nbsp;&nbsp; ☐ HOLD / DEVELOP &nbsp;&nbsp; ☐ DECLINE</p>
+{scores_block}
+<div class="lines"></div><div class="lines"></div>`}
+};
+
+const DOC_TEMPLATE_LABELS={
+  application_pdf:'Application document',
+  phone_screen_sheet:'Phone screen sheet',
+  interview_sheet:'Interview sheet'
+};
+const DOC_TEMPLATE_PLACEHOLDERS={
+  '{name}':'Candidate full name','{first}':'First name','{email}':'Email','{phone}':'Phone',
+  '{address}':'Address on file','{stage}':'Current stage','{source}':'Source','{date}':'Today’s date',
+  '{appliedDate}':'Application date','{refCode}':'Candidate ref code',
+  '{gates_table}':'Eligibility gates table (H–L)','{application_table}':'Full application answers, section by section',
+  '{employers_table}':'Past employers + verification status','{refs_table}':'References on file',
+  '{qa_phone_screen}':'Phone-screen question bank with answers (blank score boxes when unanswered)',
+  '{qa_interview}':'Interview question bank with answers (blank score boxes when unanswered)',
+  '{custom_answers}':'Custom application-form question answers (from the form config)',
+  '{scores_block}':'Q/R scores + decision band (when computable)'
+};
+const FC_GATE_COLS={H:'Work authorization',I:'Credential',J:'Background check',K:'Transportation',L:'Availability'};
+const FC_Q_COLS={N:'rel',O:'com',P:'jud',Q:'doc',R:'ref',S:'cmp',T:'phn'};
+const FC_R_COLS={V:'ten',W:'prx',X:'ava',Y:'exp'};
+
+let _activeDocTpl='application_pdf';
+
 function _docApplicationTable(c){
   if(typeof APP_SECTIONS==='undefined')return '';
   return APP_SECTIONS.map(sec=>{
