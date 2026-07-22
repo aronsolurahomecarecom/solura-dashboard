@@ -1206,8 +1206,8 @@ select.app-edit-input{cursor:pointer;}
 .reg-row b{font-size:13px;color:var(--ink);}
 
 /* ===== Template editor — list + edit pane ===== */
-.tpl-editor{display:flex;gap:14px;height:calc(100vh - 230px);min-height:540px;}
-.tpl-list{flex:0 0 230px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:8px;overflow-y:auto;}
+.tpl-editor{display:flex;gap:14px;height:calc(100vh - 150px);min-height:680px;}
+.tpl-list{flex:0 0 200px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:8px;overflow-y:auto;}
 .tpl-list-head{font-size:10.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.08em;padding:8px 10px 6px;}
 .tpl-list-item{display:flex;align-items:center;gap:8px;width:100%;padding:9px 11px;background:transparent;border:none;border-radius:7px;font-family:inherit;font-size:12.5px;color:var(--mid);cursor:pointer;text-align:left;transition:background .12s ease-out,color .12s ease-out;margin-bottom:1px;}
 .tpl-list-item:hover{background:var(--cream);}
@@ -1217,9 +1217,9 @@ select.app-edit-input{cursor:pointer;}
 .tpl-edit-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border);}
 .tpl-edit-head h3{margin:0;font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--sky-deep);}
 .tpl-label{display:block;font-size:10.5px;font-weight:700;color:var(--soft);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px;margin-top:10px;}
-.tpl-subject-input{width:100%;padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;background:#fff;transition:border-color .12s ease-out;margin-bottom:4px;}
+.tpl-subject-input{width:100%;padding:11px 13px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13.5px;outline:none;background:#fff;transition:border-color .12s ease-out;margin-bottom:4px;}
 .tpl-subject-input:focus{border-color:var(--sky-deep);}
-.tpl-body-input{width:100%;flex:1;padding:11px 13px;border:1.5px solid var(--border);border-radius:8px;font-family:'JetBrains Mono','Consolas',monospace;font-size:12.5px;line-height:1.6;outline:none;background:#fff;color:var(--ink);resize:none;transition:border-color .12s ease-out;}
+.tpl-body-input{width:100%;flex:1;min-height:420px;padding:14px 16px;border:1.5px solid var(--border);border-radius:8px;font-family:'JetBrains Mono','Consolas',monospace;font-size:13.5px;line-height:1.75;outline:none;background:#fff;color:var(--ink);resize:vertical;transition:border-color .12s ease-out;}
 .tpl-body-input:focus{border-color:var(--sky-deep);}
 .tpl-placeholders{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0;}
 .tpl-placeholders-label{font-size:10.5px;font-weight:600;color:var(--soft);text-transform:uppercase;letter-spacing:.06em;margin-right:4px;}
@@ -6516,7 +6516,8 @@ async function _sendNudgeHeadless(c){
      contains tags, send rich; otherwise plaintext (Graph wraps it). Previously hardcoded false,
      so an HTML template arrived as raw visible tags. */
   const _bodyIsHtml=/<[a-z][\s\S]*?>/i.test(body);
-  await sendMailViaGraph(c.email,subj,body,_bodyIsHtml,[]);
+  const _finalBody=_bodyIsHtml?_soluraShell(body):_soluraEmailHtml(body);
+  await sendMailViaGraph(c.email,subj,_finalBody,true,[]);
   c.st=c.st||{};
   c.st.sent=c.st.sent||{};c.st.sent[tpl]=today();
   c.st.emails=c.st.emails||[];
@@ -7601,6 +7602,34 @@ const COMPOSER_PLACEHOLDERS=[
 
 /* Live placeholder substitution for the composer — applies to whatever's currently in the
    subject/body fields before sending. Same substitutions as getEffectiveTemplate. */
+/* ── Solura branded email shell ──
+   EVERY outgoing plaintext email is wrapped in this at SEND time (composer sends and headless
+   nudges), so candidates always receive branded HTML while templates stay clean, readable
+   plaintext in the editor. Marker div prevents double-wrapping; bodies that are already full
+   HTML documents (<html) are left alone. Palette: linen/cream + Solura gold; Georgia serif. */
+function _soluraShell(innerHtml){
+  if(!innerHtml||String(innerHtml).indexOf('solura-shell')>-1||/<html[\s>]/i.test(innerHtml))return innerHtml;
+  return '<div id="solura-shell" style="background:#F7F4EE;padding:28px 12px;font-family:Georgia,\'Times New Roman\',serif">'
+    +'<div style="max-width:600px;margin:0 auto;background:#FFFDF8;border-radius:10px;border:1px solid #E8E0D0;overflow:hidden">'
+    +'<div style="height:5px;background:#C59B4E"></div>'
+    +'<div style="padding:26px 30px 8px"><img src="https://apply.solurahomecare.com/logo.png" alt="Solura Home Care" width="140" style="display:block;max-width:140px;height:auto"></div>'
+    +'<div style="padding:14px 30px 24px;font-size:15px;line-height:1.65;color:#3A3A3A">'+innerHtml+'</div>'
+    +'<div style="padding:16px 30px 22px;border-top:1px solid #EFE8DA;font-size:13px;color:#6B6455;line-height:1.6">Meir Schwimer<br>Solura Home Care · Cleveland, OH<br><a href="tel:+12167704886" style="color:#8B6500;text-decoration:none">(216) 770-4886</a></div>'
+    +'</div></div>';
+}
+/* Plaintext → branded HTML: escape, linkify (a URL alone on a line becomes a gold button; inline
+   URLs become styled links), paragraph-ize, wrap in the shell. */
+function _soluraEmailHtml(text){
+  const paras=String(text||'').split(/\n\n+/).map(p=>{
+    const lines=p.split('\n').map(ln=>{
+      const t=ln.trim();
+      if(/^https?:\/\/\S+$/.test(t))return '<a href="'+esc(t)+'" style="display:inline-block;background:#C59B4E;color:#FFFFFF;text-decoration:none;padding:10px 22px;border-radius:6px;font-weight:bold;margin:4px 0">Open link</a><br><span style="font-size:11px;color:#9A9284">'+esc(t)+'</span>';
+      return esc(ln).replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" style="color:#64A3D1">$1</a>');
+    });
+    return '<p style="margin:0 0 14px">'+lines.join('<br>')+'</p>';
+  }).join('');
+  return _soluraShell(paras);
+}
 function substituteLive(text,candidate){
   const c=candidate||W;
   if(!c)return text;
@@ -7966,6 +7995,8 @@ async function reallySend(tpl,advanceTo){
   }
   const b=document.getElementById('sendbtn');b.disabled=true;b.innerHTML='<span class="spin"></span> Sending…';
   try{
+    /* Every composer email ships in the branded shell (unless already shelled / a full HTML doc). */
+    body=_soluraShell(body);
     await sendMailViaGraph(W.email,subj,body,isHtml,atts);
     W.st.sent=W.st.sent||{};W.st.sent[tpl]=today();
     /* Alias: a missed-stage rebook email IS functionally the rebook invite. If the user hits
@@ -15448,10 +15479,18 @@ function renderSettingsSeqV2(){
   </div>
   <div id="seqv2-editor-mount" style="min-height:200px"></div>`;
 }
+/* Same-id sequences collapse to the NEWEST copy (last in the array). Re-importing an updated
+   export used to STACK another copy — v3, v4, v5… all listed — because upload appends. Dedup on
+   mount and on every editor change, keeping the latest, so re-import behaves as replace. */
+function _dedupSequences(arr){
+  const out=[],seen={};
+  for(let i=(arr||[]).length-1;i>=0;i--){const q=arr[i];const id=q&&q.id;if(!id||!seen[id]){out.unshift(q);if(id)seen[id]=1;}}
+  return out;
+}
 function _mountSeqEditorV2(){
   const el=document.getElementById('seqv2-editor-mount');
   if(!el||!window.SeqEngineV2)return;
-  SETTINGS.sequences=Array.isArray(SETTINGS.sequences)?SETTINGS.sequences:[];
+  SETTINGS.sequences=_dedupSequences(Array.isArray(SETTINGS.sequences)?SETTINGS.sequences:[]);
   SETTINGS.sequenceAssignments=Array.isArray(SETTINGS.sequenceAssignments)?SETTINGS.sequenceAssignments:[];
   window.SeqEngineV2.renderSequenceEditor(el,{
     sequences:SETTINGS.sequences,
@@ -15461,7 +15500,7 @@ function _mountSeqEditorV2(){
     onChange:function(payload){
       /* Editor hands back fresh copies — persist through the normal settings pipeline
          (autosave + undo snapshots + diff preview all apply). */
-      if(payload&&Array.isArray(payload.sequences))SETTINGS.sequences=payload.sequences;
+      if(payload&&Array.isArray(payload.sequences))SETTINGS.sequences=_dedupSequences(payload.sequences);
       if(payload&&Array.isArray(payload.assignments))SETTINGS.sequenceAssignments=payload.assignments;
       markSettingsDirty();
     }
