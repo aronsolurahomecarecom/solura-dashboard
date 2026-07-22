@@ -7956,6 +7956,14 @@ async function reallySend(tpl,advanceTo){
       return '<img'+cleanPre+' src="cid:'+cid+'"'+cleanPost+'>';
     });
   }
+  /* HARD GATE: the offer cannot go out before the Yardstik result is CLEAR. This is the online
+     check that gates hiring; the state BCI check is separate and may clear even after hire, so
+     it is deliberately NOT gated here. No override in the composer — if a rare exception is
+     truly needed, the check status itself is the thing to correct first. */
+  if(tpl==='offer'&&!(W&&W.st&&W.st.tpCheck==='clear')){
+    toast('🔒 Offer locked — the Yardstik check must be CLEAR first (current: '+((W&&W.st&&W.st.tpCheck)||'not run')+')');
+    return;
+  }
   const b=document.getElementById('sendbtn');b.disabled=true;b.innerHTML='<span class="spin"></span> Sending…';
   try{
     await sendMailViaGraph(W.email,subj,body,isHtml,atts);
