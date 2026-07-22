@@ -7499,7 +7499,13 @@ function substituteLive(text,candidate){
   const refLink=buildReferencesLink(c);
   const referralCode=c.st&&c.st.refCode?c.st.refCode:'';
   const referralLink=buildReferralLink(referralCode);
+  /* Per-source wage: the candidate's source link (via st.sourceCode) can carry its own wage;
+     {wage} resolves to that, else the config default. Lets each platform's ads/templates quote
+     the pay you set for that channel. */
+  const _srcLink=(c.st&&c.st.sourceCode&&typeof _lookupSourceLink==='function')?_lookupSourceLink(c.st.sourceCode):null;
+  const wage=(_srcLink&&_srcLink.wage)||cfg.defaultWage||'';
   return String(text||'')
+    .replace(/\{wage\}/g,wage)
     .replace(/\{onboardingLink\}/g,cfg.calOnboardingUrl||'')
     .replace(/\{interviewLink\}/g,cfg.calInterviewUrl||BOOK_LINK)
     .replace(/\{screenLink\}/g,cfg.calScreenUrl||BOOK_LINK)
@@ -13842,7 +13848,7 @@ function renderSettingsSourceLinks(){
       return `<div style="display:grid;grid-template-columns:1fr 90px 90px 90px auto;gap:10px;padding:9px 12px;border-top:1px solid var(--border-soft);align-items:center;font-size:12.5px;${inactive?'opacity:.5':''}">
         <div>
           <div style="font-weight:600;color:var(--ink)">${esc(l.method||'—')}</div>
-          <div style="font-size:10.5px;color:var(--soft);margin-top:2px">code <span style="font-family:ui-monospace,SF Mono,Consolas,monospace;background:var(--cream);padding:1px 5px;border-radius:3px">${esc(l.code)}</span>${l.notes?' \u00b7 '+esc(l.notes):''}${inactive?' \u00b7 <b>inactive</b>':''}</div>
+          <div style="font-size:10.5px;color:var(--soft);margin-top:2px">code <span style="font-family:ui-monospace,SF Mono,Consolas,monospace;background:var(--cream);padding:1px 5px;border-radius:3px">${esc(l.code)}</span>${l.wage?' \u00b7 <b style="color:var(--grn-deep)">'+esc(l.wage)+'</b>':''}${l.notes?' \u00b7 '+esc(l.notes):''}${inactive?' \u00b7 <b>inactive</b>':''}</div>
         </div>
         <div style="text-align:center"><b>${s.applied}</b><div style="font-size:10px;color:var(--soft)">applied</div></div>
         <div style="text-align:center"><b>${s.screened}</b><div style="font-size:10px;color:var(--soft)">screened ${s.applied?'('+s.conversionScreenPct+'%)':''}</div></div>
@@ -13885,6 +13891,7 @@ function renderSettingsSourceLinks(){
       </label>
       <label class="set-field"><span>Method</span><input type="text" id="src-new-method" placeholder="Sponsored post" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px"></label>
       <label class="set-field"><span>Notes <span style="color:var(--soft);font-size:10px">(optional)</span></span><input type="text" id="src-new-notes" placeholder="Cleveland targeting" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px"></label>
+      <label class="set-field"><span>Wage <span style="color:var(--soft);font-size:10px">(optional — fills {wage} in emails for this source)</span></span><input type="text" id="src-new-wage" placeholder="$16–18/hr" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px"></label>
       <div style="align-self:end"><button class="btn-primary bg-grn" style="padding:8px 16px;height:38px" onclick="_srcCreate()">+ Create link</button></div>
     </div>
   </div>
@@ -13912,9 +13919,11 @@ async function _srcCreate(){
   SETTINGS.config=SETTINGS.config||{};
   SETTINGS.config.sourceLinks=SETTINGS.config.sourceLinks||[];
   const code=_sourceLinkCode(SETTINGS.config.sourceLinks);
+  const wage=((document.getElementById('src-new-wage')||{}).value||'').trim();
   SETTINGS.config.sourceLinks.push({
     id:_sourceLinkId(),code:code,
     platform:platform.trim(),method:method.trim(),notes:notes.trim(),
+    wage:wage,
     createdAt:new Date().toISOString(),active:true
   });
   markSettingsDirty();
@@ -13950,9 +13959,12 @@ function _srcEdit(id){
   if(newMethod===null)return;
   const newNotes=prompt('Notes:',l.notes||'');
   if(newNotes===null)return;
+  const newWage=prompt('Wage for this source (fills {wage} in emails; empty = default):',l.wage||'');
+  if(newWage===null)return;
   l.platform=(newPlatform||'').trim();
   l.method=(newMethod||'').trim();
   l.notes=(newNotes||'').trim();
+  l.wage=(newWage||'').trim();
   markSettingsDirty();renderSettings();
 }
 
@@ -14046,10 +14058,17 @@ async function _claudeIntStatus(){
   if(el)el.textContent='checking…';
   try{
     const r=await fetch(ZI_WORKER_URL+'/ai/status',{headers:{'X-Solura-Token':tok}});
-    const j=await r.json();
+    if(r.status===401){if(el){el.textContent='✕ token mismatch — the token here doesn\u2019t match the worker\u2019s SOLURA_INTERNAL_TOKEN';el.className='pill pbad';}return;}
+    let j=null;
+    try{j=await r.json();}catch(parseErr){
+      /* Non-JSON = an old worker without /ai/* is deployed (its fallback is a text page). */
+      if(el){el.textContent='✕ deployed worker predates the AI layer — deploy solura_hiring_webhook_v7.js';el.className='pill pbad';}
+      return;
+    }
     if(el){
-      if(j.keyConfigured){el.textContent='✓ connected — '+(j.model||'ready');el.className='pill pok';}
-      else{el.textContent='worker reachable, ANTHROPIC_API_KEY not set';el.className='pill pwarn';}
+      if(j&&j.keyConfigured){el.textContent='✓ connected — '+(j.model||'ready');el.className='pill pok';}
+      else if(j&&j.ok){el.textContent='worker v7 live, but ANTHROPIC_API_KEY secret not set — add it in Cloudflare → worker → Settings → Variables';el.className='pill pwarn';}
+      else{el.textContent='✕ unexpected reply — deploy v7 and retest';el.className='pill pbad';}
     }
   }catch(e){if(el){el.textContent='✕ worker unreachable: '+e.message;el.className='pill pbad';}}
 }
