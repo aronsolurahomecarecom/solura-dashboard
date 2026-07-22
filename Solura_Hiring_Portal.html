@@ -4759,6 +4759,9 @@ const TRIGGERS={
   hasRefs:          c => !!(c.st&&Array.isArray(c.st.refs)&&c.st.refs.length>=2),
   noRefs:           c => !(c.st&&Array.isArray(c.st.refs)&&c.st.refs.length>=2),
   hasBooking:       c => !!(c.st&&c.st.booking),
+  /* certsIn: every cert claimed on the APPLICATION has an uploaded file (or nothing claimed). */
+  certsIn:          c => _missingAppCerts(c).length===0,
+  yardstikFormDone: c => _yardstikFormFilled(c),
   noBooking:        c => !(c.st&&c.st.booking),
   bookingImminent:  c => {const m=c.st&&c.st.booking?minsUntil(c.st.booking):null;return m!=null&&m<=5&&m>-150;},
   bookingOverdue:   c => {const m=c.st&&c.st.booking?minsUntil(c.st.booking):null;return m!=null&&m<=-150;},
@@ -4811,6 +4814,22 @@ function _initEmailTriggers(){
 }
 
 /* Helper to evaluate a trigger by name, with safe fallback for unknown triggers. */
+/* Certs claimed on the application that have NO uploaded file yet. */
+function _missingAppCerts(c){
+  const st=(c&&c.st)||{};
+  const claimed=Array.isArray(st.certs)?st.certs:[];
+  const creds=Array.isArray(st.credentials)?st.credentials:[];
+  return claimed.filter(n=>{
+    const nm=String(n||'').trim().toLowerCase();
+    return nm&&!creds.some(cr=>cr&&cr.fileUrl&&String(cr.name||'').trim().toLowerCase()===nm);
+  });
+}
+/* Yardstik form done: their part complete → Yardstik creates the report. */
+function _yardstikFormFilled(c){
+  const ys=(c&&c.st&&c.st.yardstik)||null;
+  if(!ys)return false;
+  return !!(ys.reportId||/report|complete|clear|consider/i.test(ys.status||''));
+}
 function evalTrigger(name,c){
   if(!name)return false;
   /* Negation prefix: "!triggerName" */
@@ -5043,7 +5062,23 @@ function _dn(txt,pill,date){return{txt:txt,pill:pill||'pnew',date:date||''};}
    recomputed 2-4x per candidate per render. _memGen is bumped at the top of every render/
    interaction entry point, so results are cached within one pass and recomputed on the next. */
 let _memGen=0;const _actMemo=new WeakMap(),_srMemo=new WeakMap();
-function action(c){let e=_actMemo.get(c);if(e&&e.g===_memGen)return e.v;const v=_actionC(c);_actMemo.set(c,{g:_memGen,v});return v;}
+function action(c){
+  /* Cert-gated interview: inside the final hour with certs missing or the BG form undone,
+     cancellation is the urgent action (the invite warned them). One click → Cal.com via the
+     worker; the BOOKING_CANCELLED webhook updates state normally. Nothing cancels silently. */
+  if(c&&c.st&&c.st.booking&&c.stage==='Interview booked'){
+    const _mins=minsUntil(c.st.booking);
+    const _miss=_missingAppCerts(c);
+    const _form=_yardstikFormFilled(c);
+    if(_mins!=null&&_mins<=60&&_mins>-30&&(_miss.length||!_form)){
+      const why=(_miss.length?_miss.length+' cert'+(_miss.length===1?'':'s')+' missing':'')+(_miss.length&&!_form?' + ':'')+(!_form?'BG form not completed':'');
+      return{bucket:'action',timing:_dn('\u26a0 Interview in '+Math.max(0,_mins)+'m \u2014 '+why,'pbad'),info:baseInfo(c),primary:{kind:'cancelInterview',label:'\u2715 Cancel interview (Cal.com)',cls:'red'}};
+    }
+  }
+  /* All certs in → cross-check hub is the action, until opened. */
+  if(c&&c.st&&c.st.certsReadyReview&&c.stage!=='Hired'&&c.stage!=='Declined'){
+    return{bucket:'action',timing:_dn('Certs in \u2014 cross-check them','pnew'),info:baseInfo(c),primary:{kind:'checks',label:'\ud83d\udccb Cross-check certs',cls:'gold'}};
+  }let e=_actMemo.get(c);if(e&&e.g===_memGen)return e.v;const v=_actionC(c);_actMemo.set(c,{g:_memGen,v});return v;}
 function scoreRow(c){let e=_srMemo.get(c);if(e&&e.g===_memGen)return e.v;const v=_scoreRowC(c);_srMemo.set(c,{g:_memGen,v});return v;}
 function _actionC(c){
   const s=c.stage,st=c.st,info=STAGEINFO[s]||STAGEINFO['Applied'];
@@ -5110,6 +5145,11 @@ function _actionC(c){
     }
     if(!_autoReleased&&assignmentFresh){
       const remaining=awaitingItems.length;
+      const remainingCerts=(st.awaitingItems||[]).filter(a=>a.kind==='cert');
+      if(remainingCerts.length===remaining&&remaining>0){
+        /* All that's left is certs → the useful action is chasing the REST by email. */
+        return{bucket:'action',timing:{txt:'Certs partially received',pill:'pnew',date:remaining+' still missing'},info,primary:{kind:'email-tpl',tpl:'request_updated_credential',label:'✉ Request remaining certs ('+remaining+')',cls:'gold'},manuallyAwaiting:true,awaitingReSurfaceReason:'attachment'};
+      }
       return{bucket:'action',timing:{txt:'New document assigned',pill:'pnew',date:remaining+' more awaited'},info,primary:{kind:'open',label:'📎 Review — '+remaining+' awaited remaining',cls:'gold'},manuallyAwaiting:true,awaitingReSurfaceReason:'attachment'};
     }
     if(!_autoReleased){
@@ -6690,6 +6730,7 @@ function doPrimary(r){_memGen++;const c=pipeline.find(x=>x.excelRow===r);if(!c)r
   if(p.kind==='verify'){openWorkspace(r);W.focusedHub='verify';renderWorkspace();return;}
   if(p.kind==='refs'){openWorkspace(r);W.focusedHub='refs';renderWorkspace();return;}
   if(p.kind==='checks'){openWorkspace(r);W.focusedHub='checks';renderWorkspace();return;}
+  if(p.kind==='cancelInterview'){openWorkspace(r);cancelInterviewBooking();return;}
   if(p.kind==='checkin')return openCheckin();
   if(p.kind==='decline')return doEmail('reject','Declined');
   if(p.kind==='open-email'){openWorkspace(r);return setTimeout(()=>openEmailDetail(p.emailId),300);}
@@ -6737,6 +6778,59 @@ function setFocusedHub(kind){
   }
   W.focusedHub=kind;
   renderWorkspace();
+}
+/* Cancel the current Cal.com booking from the portal (worker → Cal.com API → webhook). */
+async function cancelInterviewBooking(){
+  if(!W||!W.st.calBookingId){toast('No Cal.com booking id on file for this candidate');return;}
+  const missing=_missingAppCerts(W);
+  const reason=prompt('Cancellation reason (Cal.com sends it to the candidate):',
+    missing.length?('Required certificates not received before the interview: '+missing.join(', ')):'Background-check form not completed before the interview');
+  if(reason===null)return;
+  if(!confirm('Cancel this booking through Cal.com? The candidate is notified by Cal.com.'))return;
+  const tok=(SETTINGS.config||{}).ziToken||'';
+  if(!tok){toast('Set the internal worker token first (Settings → 🔌 Integrations)');return;}
+  try{
+    const r=await fetch(ZI_WORKER_URL+'/cal/cancel-booking',{method:'POST',headers:{'Content-Type':'application/json','X-Solura-Token':tok},body:JSON.stringify({bookingUid:W.st.calBookingId,reason:reason})});
+    const j=await r.json();
+    if(j.ok){logW('\u2715 Interview cancelled via Cal.com \u2014 '+reason);await saveW(true);toast('\u2715 Cancelled \u2014 Cal.com is notifying the candidate');}
+    else toast('\u26a0 Cancel failed: '+(j.error||('Cal.com '+(j.status||'')))+(j.calcom&&j.calcom.message?(' \u2014 '+j.calcom.message):''));
+  }catch(e){toast('\u26a0 Cancel failed: '+e.message);}
+}
+/* ── Eligible functions (Hired) ──
+   What this caregiver may do, derived from certs on file. Mapping is editable:
+   SETTINGS.config.certFunctions = [{match:'stna', functions:'Personal care, Transfers, ...'}] —
+   match is a case-insensitive substring against cert names; baseline functions apply to everyone.
+   Defaults reflect Ohio NON-MEDICAL scope: reminders never administration. */
+function _certFunctionsMap(){
+  const cfg=(SETTINGS.config&&SETTINGS.config.certFunctions)||[];
+  if(Array.isArray(cfg)&&cfg.length)return cfg;
+  return [
+    {match:'',functions:'Companionship · Homemaking & light housekeeping · Meal preparation · Errands & shopping · Medication REMINDERS (never administration)'},
+    {match:'stna',functions:'Personal care (bathing, toileting, incontinence) · Transfers & mobility assistance · Range-of-motion support'},
+    {match:'cna',functions:'Personal care (bathing, toileting, incontinence) · Transfers & mobility assistance'},
+    {match:'hha',functions:'Personal care (bathing, toileting, incontinence) · Transfers & mobility assistance'},
+    {match:'cpr',functions:'Emergency response readiness (CPR)'},
+    {match:'first aid',functions:'First-aid response'},
+    {match:'driver',functions:'Client transportation (with agency insurance verification)'},
+    {match:'hoyer',functions:'Mechanical-lift transfers'}
+  ];
+}
+function functionsBlock(){
+  const creds=((W.st&&W.st.credentials)||[]).filter(cr=>cr&&cr.name);
+  const certNames=creds.map(cr=>String(cr.name)); 
+  const map=_certFunctionsMap();
+  const base=map.filter(m=>!m.match);
+  const matched=map.filter(m=>m.match&&certNames.some(n=>n.toLowerCase().includes(m.match.toLowerCase())));
+  const unmatchedCerts=certNames.filter(n=>!map.some(m=>m.match&&n.toLowerCase().includes(m.match.toLowerCase())));
+  const row=(label,fns,pill)=>`<div style="border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:8px;background:#FAFAF7">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b style="font-size:13px">${esc(label)}</b>${pill||''}</div>
+    <div style="font-size:12.5px;color:var(--mid)">${esc(fns)}</div></div>`;
+  return `<div class="wscard"><h3>Eligible functions</h3>
+    <div style="font-size:12px;color:var(--soft);margin-bottom:12px">Derived from certs on file. Verify certs in the Background &amp; certificates hub; edit the mapping in Settings → Pipeline config.</div>
+    ${base.map(m=>row('Baseline (all caregivers)',m.functions)).join('')}
+    ${matched.map(m=>{const via=certNames.filter(n=>n.toLowerCase().includes(m.match.toLowerCase()));const verified=creds.some(cr=>via.includes(String(cr.name))&&cr.type==='verified');return row('Via '+via.join(', '),m.functions,verified?'<span class="pill pg" style="font-size:9px">VERIFIED</span>':'<span class="pill psoft" style="font-size:9px">CLAIMED — verify before assigning</span>');}).join('')||'<div style="font-size:12px;color:var(--soft);font-style:italic;margin-bottom:8px">No cert-based functions yet — only the baseline applies.</div>'}
+    ${unmatchedCerts.length?`<div style="font-size:11px;color:var(--soft);margin-top:6px">Certs with no mapping: ${esc(unmatchedCerts.join(', '))} — add rows in Settings → Pipeline config → Eligible functions.</div>`:''}
+  </div>`;
 }
 function clearFocusedHub(){if(!W)return;W.focusedHub=null;renderWorkspace();}
 
@@ -6959,13 +7053,23 @@ const TEMPLATES={
      : yardstikEnabled
      ? `Shortly after this email, you'll also receive a separate, secure email from <b>Yardstik</b> (our background-check partner) with a link to complete a quick consent + identity form. That kicks off a standard caregiver background check, which runs while we schedule and interview — no extra steps from you here.`
      : `We'll also need to run a standard background check while we're scheduling. Please reply with your consent to run the check, along with copies of any caregiving certificates you have.`;
+   /* Personalized cert ask: the certs THEY claimed on their application, by name. */
+   const missingCerts=_missingAppCerts(c);
+   const certAsk=missingCerts.length
+     ? `\n\n3) Reply to this email with copies of the certificates you listed on your application: ${missingCerts.join(', ')}. Photos or PDFs are both fine.\n\nIMPORTANT: your certificates and the background-check form must both be completed at least ONE HOUR before your interview time — otherwise the interview is automatically cancelled and you'll need to rebook once everything is in.`
+     : `\n\nIMPORTANT: the background-check form must be completed at least ONE HOUR before your interview time — otherwise the interview is cancelled and you'll need to rebook.`;
    return {
-     s:'Interview with Solura Home Care + background check',
-     b:`Hi ${first(c)},\n\nGreat news — you're moving to the interview stage. Two things:\n\n1) Book a 60-minute interview here:\n${url}\n\n2) ${bgParagraph.replace(/<\/?b>/g,'')}\n\nThe interview can happen while the check is processing.\n\nSolura Home Care`
+     s:'Interview with Solura Home Care — booking, background check'+(missingCerts.length?', and your certificates':''),
+     b:`Hi ${first(c)},\n\nGreat news — you're moving to the interview stage. A few things:\n\n1) Book a 60-minute interview here:\n${url}\n\n2) ${bgParagraph.replace(/<\/?b>/g,'')}${certAsk}\n\nSolura Home Care`
    };
  },
  bg_request:c=>({s:'Background check + certifications — Solura Home Care',b:`Hi ${first(c)},\n\nFollowing up on the background check. There are two pieces:\n\n1) Send us copies of any caregiving certifications you have (STNA, CNA, HHA, CPR, etc.) — just reply with photos or PDFs.\n\n2) You'll need to complete an Ohio BCI Webcheck fingerprint background check. We can't do this for you — it has to be the candidate. Go to a Webcheck-authorized location (search "BCI Webcheck near me") and request:\n  • BCI background check\n  • FBI background check (out-of-state agencies)\n  • Results sent directly to: Solura Home Care, Cleveland Heights, OH\n\nThe cost is around $25 each. Bring photo ID. Most pharmacies and UPS stores offer this.\n\nWe'll send the secure 3rd-party check link separately once we receive your certifications.\n\nSolura Home Care`}),
- offer:c=>({s:'Your offer — Solura Home Care',b:`Hi ${first(c)},\n\nWe're delighted to offer you a caregiver position at ${payRange()}. Your formal offer follows via DocuSign.\n\nWelcome aboard,\nSolura Home Care`}),
+ offer:c=>{
+   /* One email: the offer AND the state-required check (separate from Yardstik — the candidate
+      goes in person). Customize via Settings → config.stateCheckInstructions. */
+   const stateCheck=(SETTINGS.config&&SETTINGS.config.stateCheckInstructions)||`One required step before your first shift: Ohio's state background check (BCI Webcheck, fingerprint-based — separate from the online check you already completed). Go to any Webcheck-authorized location (search "BCI Webcheck near me" — most UPS Stores and many pharmacies), request the BCI check (plus FBI if you've lived in Ohio under 5 years), have results sent directly to Solura Home Care, and reply here with the receipt. Cost is ~$25 each; bring photo ID.`;
+   return {s:'Your offer — Solura Home Care (+ one required state check)',b:`Hi ${first(c)},\n\nWe're delighted to offer you a caregiver position at ${payRange()}. Your formal offer follows via DocuSign.\n\n${stateCheck}\n\nWelcome aboard,\nSolura Home Care`};
+ },
  onboarding:c=>{const url=(SETTINGS.config&&SETTINGS.config.calOnboardingUrl)||'https://cal.com/meir-schwimer-juktct/caregiver-onboarding';
    return {s:'Welcome to Solura — book your orientation',b:`Hi ${first(c)},\n\nWelcome to the Solura Home Care team! 🎉\n\nThe last step before your first shift is a 30-minute orientation call where we'll go over policies, paperwork, and your schedule. Please pick a time that works for you:\n\n${url}\n\nYou'll get a confirmation with the meeting link as soon as you book. Looking forward to it!\n\nSolura Home Care`};},
  reject:c=>({s:'Update on your application',b:`Hi ${first(c)},\n\nThank you for your interest in Solura Home Care. After careful review we won't be moving forward at this time. We appreciate the time you invested and wish you the very best.\n\nSolura Home Care`}),
@@ -7122,6 +7226,7 @@ async function _markReceivedCore(cand,idx,note){
     delete cand.st.awaitingItemsReceived;
     delete cand.st.lastAwaitingReview;
     cand.st.log.push({t:stamp(),x:'\u2705 Auto-released from awaiting \u2014 all requested items received'});
+    if(item.kind==='cert')cand.st.certsReadyReview=true; /* next action: cross-check in the hub */
   }
   /* NOTE: deliberately NOT stamping lastAssignmentAt here — receiving an item is the OPPOSITE of
      a new assignment arriving; stamping it made the candidate re-surface as "New document
@@ -7512,6 +7617,7 @@ function substituteLive(text,candidate){
   const wage=(_srcLink&&_srcLink.wage)||cfg.defaultWage||'';
   return String(text||'')
     .replace(/\{wage\}/g,wage)
+    .replace(/\{missingCerts\}/g,_missingAppCerts(c).join(', ')||'your certificates')
     .replace(/\{onboardingLink\}/g,cfg.calOnboardingUrl||'')
     .replace(/\{interviewLink\}/g,cfg.calInterviewUrl||BOOK_LINK)
     .replace(/\{screenLink\}/g,cfg.calScreenUrl||BOOK_LINK)
@@ -7860,6 +7966,25 @@ async function reallySend(tpl,advanceTo){
        Backfill the corresponding *_invite sent flag so downstream triggers see a sent invite. */
     if(tpl==='missed_screen')W.st.sent.screen_invite=W.st.sent.screen_invite||today();
     if(tpl==='missed_interview')W.st.sent.interview_invite=W.st.sent.interview_invite||today();
+    /* Cert-gated interview: sending the invite parks the candidate AWAITING their application-
+       claimed certs (only those without files). Existing machinery handles the rest: wake on
+       reply, attachment→cert matching, auto-release when all are in. */
+    if(tpl==='interview_invite'){
+      const missing=_missingAppCerts(W);
+      if(missing.length){
+        W.st.awaitingItems=W.st.awaitingItems||[];
+        missing.forEach(nm=>{
+          if(!W.st.awaitingItems.some(a=>a.kind==='cert'&&String(a.name||'').toLowerCase()===String(nm).toLowerCase()))
+            W.st.awaitingItems.push({kind:'cert',name:nm,addedAt:new Date().toISOString(),source:'interview-invite'});
+        });
+        W.st.manualAwaiting=true;
+        W.st.awaitingReason='Awaiting certificates before the interview';
+        W.st.awaitingSince=W.st.awaitingSince||new Date().toISOString();
+        W.st.awaitingItemsInitialCount=(W.st.awaitingItems||[]).length;
+        W.st.awaitingItemsReceived=0;
+        logW('⏳ Parked awaiting '+missing.length+' cert'+(missing.length===1?'':'s')+' from the application: '+missing.join(', '));
+      }
+    }
     if(tpl==='missed_onboarding')W.st.sent.onboarding=W.st.sent.onboarding||today();
     /* Push a lightweight copy into the candidate's local emails array so the user sees their sent
        message immediately instead of waiting for the 60s Sent-folder polling cycle. Schema MUST
@@ -8088,9 +8213,10 @@ function renderFocusedHub(){_memGen++;
     layoutMode='split';
   }else if(kind==='verify'){block=verifyBlock();title='Verify past employers';}
   else if(kind==='refs'){block=refsBlock();title='References';}
-  else if(kind==='checks'){block=checksBlock();title='Background & certificates';}
+  else if(kind==='checks'){if(W.st&&W.st.certsReadyReview){delete W.st.certsReadyReview;saveW(true);}block=checksBlock();title='Background & certificates';}
   else if(kind==='application'){block=applicationBlock();title='Application data';}
   else if(kind==='rewards'){block=rewardsBlock(c);title='Referrals & rewards';}
+  else if(kind==='functions'){block=functionsBlock();title='Eligible functions';}
   document.getElementById('ws-name').innerHTML='<button onclick="clearFocusedHub()" style="background:none;border:none;cursor:pointer;font-size:24px;color:var(--sky-deep);margin-right:8px;padding:0 6px;font-weight:700;vertical-align:-2px" title="Back to candidate overview">‹</button>'+esc(title);
   const info=STAGEINFO[W.stage]||STAGEINFO['Applied'];
   document.getElementById('ws-sub').innerHTML='<span style="color:var(--soft);font-size:13px">for </span><b>'+esc(W.name)+'</b> <span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-left:8px">'+esc(stageLabel(W.stage))+'</span>';
@@ -8636,6 +8762,7 @@ function referralsPreviewCard(c){
       <button class="btn-sm bg-gold" style="padding:4px 9px;font-size:11px;white-space:nowrap" onclick="copyToClipboard('${esc(refLink)}');toast('✓ Link copied')">📋</button>
     </div>`:''}
     <button class="btn-sec bg-cream" style="padding:6px 12px;font-size:12px;width:100%" onclick="setFocusedHub('rewards')">🎁 Open referrals hub →</button>
+    ${W.stage==='Hired'?'<button class="btn-sec bg-cream" style="margin-top:6px;padding:6px 12px;font-size:12px;width:100%" onclick="setFocusedHub(\'functions\')">🧰 Eligible functions →</button>':''}
   </div>`;
 }
 
@@ -13373,7 +13500,21 @@ function renderSettingsPipeline(){
       <label class="set-field">Allowed users (comma emails)<input type="text" id="cfg_stageMoveUsers" placeholder="you@solurahomecare.com" value="${esc(((_sm.allowedUsers||[]).join(', ')))}" onchange="SETTINGS.config.stageMove=SETTINGS.config.stageMove||{};SETTINGS.config.stageMove.allowedUsers=this.value.split(',').map(x=>x.trim()).filter(Boolean);markSettingsDirty()"></label>
     </div>
   </div>`;
-  return stageMoveCard+`<div class="wscard"><h3>Pay range</h3>
+  const cf=(SETTINGS.config&&SETTINGS.config.certFunctions)||[];
+  const cfRows=cf.map((m,i)=>`<div style="display:grid;grid-template-columns:140px 1fr auto;gap:6px;padding:4px 0;border-top:1px dashed var(--border-soft)">
+    <input type="text" value="${esc(m.match||'')}" placeholder="cert match (empty=all)" onchange="SETTINGS.config.certFunctions[${i}].match=this.value.trim().toLowerCase();markSettingsDirty()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
+    <input type="text" value="${esc(m.functions||'')}" placeholder="Functions (· separated)" onchange="SETTINGS.config.certFunctions[${i}].functions=this.value;markSettingsDirty()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
+    <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer" onclick="SETTINGS.config.certFunctions.splice(${i},1);markSettingsDirty();renderSettings()">×</button>
+  </div>`).join('');
+  const certFnCard=`<div class="wscard"><h3>🧰 Eligible functions mapping</h3>
+    <p class="set-help">Drives the Eligible-functions tab on Hired caregivers: cert name contains "match" → those functions apply. Empty match = baseline for everyone. Empty list = built-in Ohio non-medical defaults.</p>
+    ${cfRows||'<div style="font-size:12px;color:var(--soft);font-style:italic;padding:4px 0">Using built-in defaults.</div>'}
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn-sm bg-cream" style="cursor:pointer" onclick="SETTINGS.config.certFunctions=SETTINGS.config.certFunctions||[];SETTINGS.config.certFunctions.push({match:'',functions:''});markSettingsDirty();renderSettings()">+ Add row</button>
+      <button class="btn-sm bg-cream" style="cursor:pointer" onclick="SETTINGS.config.certFunctions=JSON.parse(JSON.stringify(_certFunctionsMap()));markSettingsDirty();renderSettings()">Load defaults (editable)</button>
+    </div>
+  </div>`;
+  return stageMoveCard+certFnCard+`<div class="wscard"><h3>Pay range</h3>
     <p class="set-help">Pay floor/ceiling drive the {pay} placeholder in email templates and the pay band shown to candidates.</p>
     <div class="set-grid-2">
       <label class="set-field">Floor ($/hr)<input type="number" step="0.25" id="cfg_payFloor" value="${SETTINGS.config.payFloor}"></label>
