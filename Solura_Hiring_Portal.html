@@ -16807,6 +16807,15 @@ function openAdd(){AD={name:'',phone:'',email:'',address:'',city:'',state:'OH',z
   renderAdd();document.getElementById('aoverlay').classList.add('open');document.getElementById('adrawer').classList.add('open');}
 function closeAdd(){document.getElementById('aoverlay').classList.remove('open');document.getElementById('adrawer').classList.remove('open');AD=null;}
 function renderAdd(){
+  const _rz=window._adResumeFile;
+  const resumeCard=`<div style="background:#FDF9F0;border:1.5px dashed var(--gold-mid);border-radius:10px;padding:12px 14px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <b style="font-size:12.5px">📄 Résumé</b>
+      <input type="file" id="ad-resume" accept=".pdf,.doc,.docx" onchange="adResumePick(this)" style="font-size:11.5px">
+      ${_rz?`<button class="btn-sm bg-grn" style="cursor:pointer" onclick="adAutofill()" ${/pdf$/i.test(_rz.name)?'':'disabled title="Autofill needs a PDF"'}>⚡ Autofill from résumé</button><span id="ad-rz-status" style="font-size:11px;color:var(--soft)"></span>`:''}
+    </div>
+    <div style="font-size:10.5px;color:var(--soft);margin-top:5px">Uploads to their folder on save${_rz?' · '+esc(_rz.name):''}. Autofill reads the PDF with Claude and fills the form — review every field before saving.</div>
+  </div>`;
   const sourceOpts=SOURCES.map(s=>`<option ${AD.source===s?'selected':''}>${s}</option>`).join('');
   const stateOpts=US_STATES.map(s=>`<option ${AD.state===s?'selected':''}>${s}</option>`).join('');
   const lsOpts=US_STATES.map(s=>`<option ${AD.licenseState===s?'selected':''}>${s}</option>`).join('');
@@ -16818,7 +16827,7 @@ function renderAdd(){
   const customCerts=AD.certs.filter(c=>!CERT_COMMON.includes(c)&&!CERT_MORE.includes(c)).map(c=>`<span class="added-chip gold">${esc(c)}<button onclick="adToggleCert(${JSON.stringify(c).replace(/"/g,'&quot;')})">✕</button></span>`).join('');
   const dayRows=DAYS.map(d=>{const shifts=AD.dayShifts[d]||[];const on=shifts.length>0;
     return `<div class="day-row ${on?'':'off'}"><div class="day-lbl">${d}</div><div class="shifts">${SHIFTS.map(sh=>`<button class="${shifts.includes(sh)?'on':''}" onclick="adDayShift('${d}','${sh}')">${sh}</button>`).join('')}</div></div>`;}).join('');
-  document.getElementById('a-body').innerHTML=`
+  document.getElementById('a-body').innerHTML=resumeCard+`
     <div class="ef">
     <div class="acsection">Contact</div>
     <div class="ac-row-2">
@@ -16905,6 +16914,34 @@ function rProx(z){if(!/^\d{5}$/.test(z||''))return'';return SERVICE_ZIPS[z]??1;}
 function rTen(l,sh){let b={u6:1,u12:2,y12:3,y23:4,y3p:5}[l];if(b==null)return'';sh=+sh||0;if(sh>=2)b=Math.max(1,b-2);else if(sh===1)b=Math.max(1,b-1);return b;}
 function rComp(y,set,certs){let b={'0':1,u1:2,'12':3,'35':4,'5p':4}[y];if(b==null)return'';const rel=(set||[]).filter(s=>['home','memory','hospice'].includes(s)).length;if(rel>=2)b=Math.min(5,b+1);if(y==='5p'&&rel>=1)b=5;const hasCred=(certs||[]).length>0;if(!hasCred&&b>3)b=3;return b;}
 function rAva(dayShifts){const dd=Object.keys(dayShifts||{}).length;if(!dd)return'';const allShifts=new Set();Object.values(dayShifts).forEach(arr=>arr.forEach(s=>allShifts.add(s)));const ss=allShifts.size;let r=dd>=6?5:dd>=4?4:dd>=2?3:2;if(ss<=1&&r>3)r=3;return r;}
+function adResumePick(inp){
+  window._adResumeFile=(inp.files&&inp.files[0])||null;
+  if(window._adResumeFile&&window._adResumeFile.size>8*1024*1024){toast('Max 8MB');window._adResumeFile=null;inp.value='';}
+  renderAdd();
+}
+async function adAutofill(){
+  const f=window._adResumeFile;if(!f)return;
+  const tokI=(SETTINGS.config||{}).ziToken||'';
+  if(!tokI){toast('Set the internal worker token first (Settings → 🔌 Integrations)');return;}
+  const st=document.getElementById('ad-rz-status');if(st)st.textContent='reading…';
+  try{
+    const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(f);});
+    const r=await fetch(ZI_WORKER_URL+'/ai/resume-extract',{method:'POST',headers:{'Content-Type':'application/json','X-Solura-Token':tokI},body:JSON.stringify({pdfBase64:b64,filename:f.name})});
+    const j=await r.json();
+    if(!j.ok){toast('⚠ '+(j.error||'extract failed'));if(st)st.textContent='';return;}
+    const e=j.extract||{};
+    /* Fill only what's empty — never clobber operator-typed values. */
+    ['name','phone','email','address','city','zip'].forEach(k=>{if(e[k]&&!AD[k])AD[k]=String(e[k]);});
+    if(e.state&&/^[A-Z]{2}$/i.test(e.state))AD.state=e.state.toUpperCase();
+    if(e.yearsExperience&&!AD.years)AD.years=String(e.yearsExperience);
+    if(e.longestTenureYears&&!AD.longest)AD.longest=String(e.longestTenureYears);
+    (Array.isArray(e.certs)?e.certs:[]).forEach(c=>{const n=String(c).trim();if(n&&!AD.certs.some(x=>x.toLowerCase()===n.toLowerCase()))AD.certs.push(n);});
+    (Array.isArray(e.skills)?e.skills:[]).forEach(p=>{const n=String(p).trim();if(n&&!AD.pills.some(x=>x.toLowerCase()===n.toLowerCase()))AD.pills.push(n);});
+    window._adExtractEmployers=Array.isArray(e.employers)?e.employers.slice(0,8):[];
+    renderAdd();
+    toast('⚡ Filled from résumé — review before saving');
+  }catch(err){toast('⚠ '+err.message);if(st)st.textContent='';}
+}
 async function saveAdd(){if(!AD.name){toast('Name required');return;}
   const gv=k=>AD.gates[k]||'',zip=AD.zip;
   const prx=rProx(zip),ten=rTen(AD.longest,AD.shorts),cmp=rComp(AD.years,AD.settings,AD.certs),ava=rAva(AD.dayShifts);
@@ -16913,12 +16950,29 @@ async function saveAdd(){if(!AD.name){toast('Name required');return;}
   if(AD.source==='Other'&&AD.otherSource&&!SOURCES.includes(AD.otherSource)&&!(SETTINGS.customSources||[]).includes(AD.otherSource)){
     SETTINGS.customSources=SETTINGS.customSources||[];SETTINGS.customSources.push(AD.otherSource);saveSettings();}
   const fullAddr=[AD.address,AD.city,AD.state,zip].filter(Boolean).join(', ');
-  const st={due:null,booking:null,zip:zip,address:fullAddr,pills:AD.pills.slice(),certs:AD.certs.slice(),licenseState:AD.hasLicense?AD.licenseState:'',licenseNum:AD.hasLicense?AD.licenseNum:'',license:AD.hasLicense?'Y':'',reqCheck:'',tpCheck:'',employers:[],refs:[],sent:{},checkins:[],dayShifts:AD.dayShifts,log:[{t:stamp(),x:'Added manually'}]};
+  const _exEmp=(window._adExtractEmployers||[]).map(x=>({name:String(x.name||'').slice(0,120),role:String(x.role||'').slice(0,80),from:String(x.from||'').slice(0,12),to:String(x.to||'').slice(0,12)})).filter(x=>x.name);
+  const st={due:null,booking:null,zip:zip,address:fullAddr,pills:AD.pills.slice(),certs:AD.certs.slice(),licenseState:AD.hasLicense?AD.licenseState:'',licenseNum:AD.hasLicense?AD.licenseNum:'',license:AD.hasLicense?'Y':'',reqCheck:'',tpCheck:'',employers:_exEmp,refs:[],sent:{},checkins:[],dayShifts:AD.dayShifts,log:[{t:stamp(),x:'Added manually'+(window._adResumeFile?' with résumé':'')}]};
   const row=nextRow,bl=v=>(v===''||v==null?'':v);
   try{
     await patchRange('C'+row+':L'+row,[[AD.name,AD.phone,AD.email,source,'Applied',bl(gv('wa')),bl(gv('cr')),bl(gv('bg')),bl(gv('tr')),bl(gv('av'))]]);
     await patchRange('N'+row+':Y'+row,[['','','','','',bl(cmp),'','',bl(ten),bl(prx),bl(ava),'']]);
     await patchRange('AJ'+row,[[JSON.stringify(st)]]);
+    /* Résumé upload — same folder convention as the worker (safeName mirror), simple PUT (<8MB). */
+    const rf=window._adResumeFile;
+    if(rf){
+      try{
+        const safe=String(AD.name).replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,' ').trim();
+        const path=('caregivers/'+safe+'/onboarding/'+rf.name).split('/').map(encodeURIComponent).join('/');
+        const buf=await rf.arrayBuffer();
+        const up=await gfetch(GR+'/drives/'+driveId+'/root:/'+path+':/content',{method:'PUT',headers:{'Content-Type':rf.type||'application/octet-stream'},body:buf});
+        if(up.ok){
+          st.hasResume=true;st.resumeName=rf.name;
+          st.log.push({t:stamp(),x:'📄 Résumé uploaded at add: '+rf.name});
+          await patchRange('AJ'+row,[[JSON.stringify(st)]]);
+        }else{toast('⚠ Résumé upload failed ('+up.status+') — candidate saved without it');}
+      }catch(ue){toast('⚠ Résumé upload failed: '+ue.message);}
+    }
+    window._adResumeFile=null;window._adExtractEmployers=null;
     toast('Added');closeAdd();await loadData();
   }catch(e){toast('Add failed: '+e.message);}}
 
