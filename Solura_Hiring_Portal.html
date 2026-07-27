@@ -13381,6 +13381,44 @@ async function reallySend(tpl,advanceTo){
       W.st.awaitingReason=tpl==='missing'?'Awaiting reply with missing info':tpl==='request_resume'?'Awaiting résumé':('Awaiting reply to "'+(subj||'email').slice(0,60)+'"');
       logW('Parked in awaiting after send');
     }
+    /* Sequence bridge (§4): a composer send completes the current email step — advance the
+       pointer, and fold in an immediately-following set-stage step (the ported legacy
+       advanceTo) so one Send click still moves the stage exactly like the legacy engine did.
+       Fail-closed: any mismatch (different template, not on an email step, engine error)
+       advances nothing — the card just re-offers the send. */
+    let _seqStageFrom=null;
+    try{
+      if(W.st.sequenceId&&window.SeqBuilderV3&&typeof _seqTriggerEval==='function'){
+        const _sq=(SETTINGS.sequences||[]).find(q=>q.id===W.st.sequenceId);
+        if(_sq){
+          const _base=(typeof pipeline!=='undefined'?pipeline.find(x=>x.excelRow===W.row):null);
+          const _cd=()=>Object.assign({},_base||{},{stage:W.stage,st:W.st});
+          const _ctx=(typeof _seqHostCtx==='function')?_seqHostCtx():undefined;
+          let _ev=window.SeqBuilderV3.evaluate(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
+          let _it=(_ev.intents||[])[0];
+          if(_it&&_it.type==='send-email'&&_it.templateKey===tpl){
+            let _adv=window.SeqBuilderV3.advanceStep(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
+            if(!_adv.error){
+              Object.assign(W.st,_adv.partialState);
+              logW('🧬 Sequence advanced — '+String(tpl).replace(/_/g,' ')+' sent');
+              _ev=window.SeqBuilderV3.evaluate(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
+              _it=(_ev.intents||[])[0];
+              const _flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
+              if(_it&&_it.type==='set-stage'&&_it.stage&&_flow.includes(_it.stage)){
+                _adv=window.SeqBuilderV3.advanceStep(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
+                if(!_adv.error){
+                  _seqStageFrom=W.stage;
+                  W.stage=_it.stage;
+                  W.st.due=(_it.stage==='Screen invite'||_it.stage==='Interview invite')?plusDays(3):today(); /* legacy advanceTo due-date rule */
+                  Object.assign(W.st,_adv.partialState);
+                  logW('🧬 Sequence set stage → '+_it.stage);
+                }
+              }
+            }
+          }
+        }
+      }
+    }catch(_se){console.warn('seq post-send advance:',_se);}
     const _fromStageForPdf=W.stage;
     if(advanceTo){W.stage=advanceTo;if(advanceTo==='Screen invite'||advanceTo==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();logW('Advanced to '+advanceTo);if(advanceTo==='Declined'&&W.st.declineHint)delete W.st.declineHint;}
     await saveW(true);closeModal();toast('Email sent — watching for delivery');
@@ -13388,6 +13426,9 @@ async function reallySend(tpl,advanceTo){
        application snapshot save). Skip when no advance happened. */
     if(advanceTo&&advanceTo!==_fromStageForPdf){
       autoUploadStageReport(W,_fromStageForPdf).catch(e=>console.warn('Stage PDF auto-upload:',e.message));
+    }else if(_seqStageFrom&&_seqStageFrom!==W.stage){
+      /* Sequence-driven stage move (set-stage folded into the send) — same snapshot rule. */
+      autoUploadStageReport(W,_seqStageFrom).catch(e=>console.warn('Stage PDF auto-upload:',e.message));
     }
     /* If this send was a renewal request, stamp lastRenewalRequestedAt on the credential. */
     if(typeof window._credRenewalStampHook==='function')window._credRenewalStampHook(true);
@@ -21364,6 +21405,16 @@ async function _seqAssignTo(row,sequenceId){
   const seq=sequenceId?seqs.find(q=>q.id===sequenceId):window.SeqEngineV2.resolveSequenceFor(cand,SETTINGS.sequenceAssignments||[],seqs);
   if(!seq){toast('No sequence matches — create one in Settings → Sequences v2');return;}
   const patch=window.SeqEngineV2.assignSequence(cand,seq);
+  if(seq.id==='classic-flow'&&typeof _classicPointerFor==='function'){
+    /* Mid-pipeline adoption: place the pointer to match the candidate's current column-G
+       stage (same rule as the bulk switchover) — assignSequence's steps[0] would re-offer
+       "set stage Applied" to someone already sitting at Applied. */
+    const ptr=_classicPointerFor(cand,seq);
+    if(ptr&&ptr!==patch.sequenceStepId){
+      patch.sequenceStepId=ptr;
+      patch.sequenceHistory=[{stepId:ptr,at:new Date().toISOString()}];
+    }
+  }
   await _seqCommitState(cand,patch);
   toast('🧬 Assigned: '+seq.name);
   if(W&&W.row===row)renderWorkspace();
@@ -21424,7 +21475,12 @@ async function _seqRunIntent(row,intentJson){
     await patchRange('G'+cand.excelRow,[[stage]]);
     cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Sequence set stage → '+stage});
     await _seqCommitState(cand,{});
-    if(W&&W.row===row){W.stage=stage;renderWorkspace();}
+    if(W&&W.row===row)W.stage=stage;
+    /* §4 contract: a stage step carries an accompanying advance — the column-G write
+       completes the step, so the pointer must move on. Without this the next evaluation
+       re-offers the same set-stage forever (the "stuck at Applied" loop). */
+    await _seqAdvance(cand);
+    if(W&&W.row===row)renderWorkspace();
     if(typeof render==='function')render();
     return;
   }
@@ -21830,7 +21886,14 @@ function _seqV3Primary(ev,c){
     case 'send-email':return{kind:'email-tpl',tpl:it.templateKey,label:'✉ '+((_allTemplateLabels()[it.templateKey])||it.templateKey||'Send email'),cls:'gold'};
     case 'nudge':return{kind:'seq3',intent:it,label:'🔔 Send nudge',cls:'gold'};
     case 'advance':return{kind:'seq3',intent:it,label:'→ Advance',cls:'grn'};
-    case 'set-stage':return{kind:'seq3',intent:it,label:'⚑ '+(it.stage||'Set stage'),cls:'sky'};
+    case 'set-stage':{
+      /* Column G already shows this stage → the set-stage is pure bookkeeping; surface the
+         accompanying advance as the primary so the card offers real forward motion instead
+         of a no-op flag (the "stuck at Applied" card). */
+      const adv=(ev.intents||[]).find(x2=>x2.type==='advance');
+      if(adv&&it.stage&&c&&c.stage===it.stage)return{kind:'seq3',intent:adv,label:'→ Advance — '+it.stage+' already set',cls:'grn'};
+      return{kind:'seq3',intent:it,label:'⚑ '+(it.stage||'Set stage'),cls:'sky'};
+    }
     case 'open-hub':{
       const m=/^native:(\w+)$/.exec(it.hubId||'');
       if(m&&m[1]==='questions')return{kind:'questions',stage:it.questionsStage||((c.stage==='Screen booked')?'Phone Screen':'Interview'),nextStage:it.nextStage,label:ev.label||'Open hub',cls:'sky'};
