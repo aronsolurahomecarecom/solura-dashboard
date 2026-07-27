@@ -1180,7 +1180,7 @@ select.app-edit-input{cursor:pointer;}
    Without `height` (not min-height) on .set-shell, the page itself scrolls and the sidebar
    slides off-screen. Setting a fixed height (calc viewport - header) gives both columns their
    own internal scroll, so the nav stays visible while you're deep in a section. */
-.set-shell{display:flex;gap:0;height:calc(100vh - 130px);max-height:calc(100vh - 130px);max-width:1200px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 20px rgba(20,40,80,.05);}
+.set-shell{display:flex;gap:0;height:calc(100vh - 130px);max-height:calc(100vh - 130px);max-width:none;margin:0 18px;background:#fff;border-radius:14px;overflow:hidden;border:1px solid var(--border);box-shadow:0 4px 20px rgba(20,40,80,.05);}
 .set-sidebar{width:240px;flex:0 0 auto;background:linear-gradient(to bottom,#FAFAF7,#fff);border-right:1px solid var(--border);padding:22px 14px;overflow-y:auto;}
 .set-shell-title{font-family:'Cormorant Garamond',serif;font-size:24px;color:var(--sky-deep);font-weight:600;margin:0 0 4px;}
 .set-user{font-size:11px;color:var(--soft);margin-bottom:18px;font-weight:600;}
@@ -4729,14 +4729,19 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
   }
 
   /* ------------------------------------------------------------------ *
-   * Pay — sequence.payRange overrides source wage for {pay}/{wage}
+   * Pay — source-link wage wins; sequence.payRange is the fallback
    * ------------------------------------------------------------------ */
 
   // resolvePay(sequence, sourceWage) -> {text, from}
-  //   sequence.payRange = {min, max, note?} (numbers, dollars/hour).
-  //   When set it WINS over the source-link wage; otherwise the source wage
-  //   (string, already formatted by the host) passes through; otherwise null.
+  //   Precedence for {pay}/{wage}: the SOURCE-LINK wage wins — the candidate
+  //   applied through a link that promised that number, and the promise holds.
+  //   sequence.payRange ({min, max, note?}, dollars/hour) fills in only when
+  //   their link carries no wage. null lets the host fall through to its
+  //   config default.
   function resolvePay(sequence, sourceWage) {
+    if (sourceWage != null && sourceWage !== '') {
+      return { text: String(sourceWage), from: 'source' };
+    }
     var pr = sequence && sequence.payRange;
     if (pr && (pr.min != null || pr.max != null)) {
       var lo = pr.min != null ? Number(pr.min) : null;
@@ -4745,9 +4750,6 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
       if (lo != null && hi != null) text = '$' + lo + '–$' + hi + '/hr';
       else text = '$' + (lo != null ? lo : hi) + '/hr';
       return { text: text, from: 'sequence' };
-    }
-    if (sourceWage != null && sourceWage !== '') {
-      return { text: String(sourceWage), from: 'source' };
     }
     return { text: null, from: null };
   }
@@ -6231,7 +6233,7 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
       frag.appendChild(fieldRow('Name', el('input', { type: 'text', value: seq.name || '', onchange: function (e) { mutate(function () { seq.name = e.target.value; }); } })));
       frag.appendChild(fieldRow('Description', el('textarea', { value: seq.description || '', rows: 2, onchange: function (e) { mutate(function () { seq.description = e.target.value; }); } })));
       var pr = seq.payRange || {};
-      frag.appendChild(el('h4', { text: '💵 Pay range (overrides source wage for {pay}/{wage})' }));
+      frag.appendChild(el('h4', { text: '💵 Pay range (fallback for {pay}/{wage} when the source link has no wage)' }));
       frag.appendChild(el('div', { 'class': 'sqb3-row' }, [
         el('input', {
           type: 'number', value: pr.min != null ? pr.min : '', placeholder: 'min $/hr', style: 'width:80px',
@@ -6244,7 +6246,7 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
         })
       ]));
       var payNow = resolvePay(seq, null);
-      frag.appendChild(el('div', { 'class': 'sqb3-muted', text: payNow.text ? ('{pay} renders as: ' + payNow.text) : 'No pay range — {pay} falls back to the source-link wage.' }));
+      frag.appendChild(el('div', { 'class': 'sqb3-muted', text: payNow.text ? ('{pay} falls back to: ' + payNow.text + ' (a source-link wage still wins)') : 'No pay range — {pay} uses the source-link wage or the host default.' }));
 
       // Assignments: default + per-source rules.
       frag.appendChild(el('h4', { text: '🔗 Assignments' }));
@@ -10455,9 +10457,11 @@ function _actionC(c){
   /* === SEQUENCE ENGINE — data-driven workflow === */
   /* Verification & references — three-tier engine intercepts the Verify employers stage. */
   if(s==='Verify employers')return vrAction(c,info);
-  /* === V3 ENGINE — adopted candidates (st.sequenceId) are driven by their sequence.
-     _seqV3Action returns null on any problem so the legacy engine takes over. === */
-  let result=(st.sequenceId&&window.SeqBuilderV3&&typeof _seqV3Action==='function'&&_seqV3Action(c,info))||sequenceAction(c,info);
+  /* === V3 ENGINE — the single evaluation engine (legacy retired). Adopted candidates
+     (st.sequenceId) walk their sequence; unadopted ones are evaluated ephemerally through
+     their resolved sequence (_seqV3Action places an in-memory pointer, persists nothing).
+     sequenceAction remains ONLY as the fail-closed fallback when v3 can't produce a row. === */
+  let result=(window.SeqBuilderV3&&typeof _seqV3Action==='function'&&_seqV3Action(c,info))||sequenceAction(c,info);
 
   /* === Cross-cutting overrides — applied AFTER sequence === */
   /* DECLINE-band: scored DECLINE → swap primary to rejection email */
@@ -12895,11 +12899,20 @@ function substituteLive(text,candidate){
   const refLink=buildReferencesLink(c);
   const referralCode=c.st&&c.st.refCode?c.st.refCode:'';
   const referralLink=buildReferralLink(referralCode);
-  /* Per-source wage: the candidate's source link (via st.sourceCode) can carry its own wage;
-     {wage} resolves to that, else the config default. Lets each platform's ads/templates quote
-     the pay you set for that channel. */
+  /* {wage} precedence: source-link wage (the number their ad promised — the promise wins)
+     → the bound sequence's payRange → config default. */
   const _srcLink=(c.st&&c.st.sourceCode&&typeof _lookupSourceLink==='function')?_lookupSourceLink(c.st.sourceCode):null;
-  const wage=(_srcLink&&_srcLink.wage)||cfg.defaultWage||'';
+  let _seqWage=null;
+  try{
+    if(window.SeqBuilderV3&&!(_srcLink&&_srcLink.wage)){
+      const _sq=(c.st&&c.st.sequenceId)
+        ?(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId)
+        :window.SeqBuilderV3.resolveSequenceFor(c,SETTINGS.sequenceAssignments||[],SETTINGS.sequences||[]);
+      const _rp=window.SeqBuilderV3.resolvePay(_sq||null,null);
+      _seqWage=(_rp&&_rp.text)||null;
+    }
+  }catch(e){}
+  const wage=(_srcLink&&_srcLink.wage)||_seqWage||cfg.defaultWage||'';
   return String(text||'')
     .replace(/\{wage\}/g,wage)
     .replace(/\{missingCerts\}/g,_missingAppCerts(c).join(', ')||'your certificates')
@@ -17992,13 +18005,11 @@ function deleteCustomTemplate(key){
   toast('🗑 Deleted');
 }
 /* ===================== SETTINGS — sidebar-driven page ===================== */
-let settingsSection='workflow';
+let settingsSection='seqengine2'; /* legacy 'workflow'/'sequence' sections retired — the v3 builder is the sequence surface */
 function setSettingsSection(k){settingsSection=k;renderSettings();}
 
 const SETTINGS_SECTIONS=[
   {key:'preferences',label:'Settings preferences', icon:'🎛'},
-  {key:'workflow',  label:'Workflow & stages',    icon:'⚐'},
-  {key:'sequence',  label:'Sequence engine',      icon:'⚡'},
   {key:'seqengine2',label:'Sequences (builder v3)', icon:'🧬'},
   {key:'templates', label:'Email templates',      icon:'✉'},
   {key:'formconfig',label:'Application form',     icon:'📋'},
@@ -18025,7 +18036,7 @@ const SETTINGS_SECTIONS=[
    edited often and the blast radius is small.
    Storage: SETTINGS.seqPasswordHash (sha256 hex). Set/changed/cleared in Access section.
    Unlock state lives in sessionStorage, so each new tab session re-locks. */
-const SENSITIVE_SECTIONS=['workflow','sequence','pipeline','access'];
+const SENSITIVE_SECTIONS=['pipeline','access'];
 async function _sha256(text){
   const buf=new TextEncoder().encode(text);
   const hash=await crypto.subtle.digest('SHA-256',buf);
@@ -18104,6 +18115,8 @@ function renderSettings(){
   }).join('');
 
   let body='';
+  /* Retired legacy keys (stale deep links / restored state) land on the v3 builder. */
+  if(settingsSection==='workflow'||settingsSection==='sequence')settingsSection='seqengine2';
   /* Gate sensitive sections — show lockwall instead of the real content when locked. */
   if(SENSITIVE_SECTIONS.includes(settingsSection)&&!isSeqUnlocked()){
     const lbl=(SETTINGS_SECTIONS.find(s=>s.key===settingsSection)||{}).label||'';
@@ -18112,8 +18125,6 @@ function renderSettings(){
   else if(settingsSection==='preferences') body=renderSettingsPreferences();
   else if(settingsSection==='seqengine2') body=renderSettingsSeqV2();
   else if(settingsSection==='hubcenter') body=_hubCenterShell();
-  else if(settingsSection==='workflow') body=renderSettingsWorkflow();
-  else if(settingsSection==='sequence') body=renderSettingsSequence();
   else if(settingsSection==='templates') body=renderSettingsTemplates();
   else if(settingsSection==='formconfig') body=_fcV3Shell();
   else if(settingsSection==='doctemplates') body=_docV3Shell();
@@ -21363,6 +21374,20 @@ async function _seqAssignTo(row,sequenceId){
 async function _seqRunIntent(row,intentJson){
   const cand=pipeline.find(x=>x.excelRow===row);if(!cand)return;
   let intent;try{intent=JSON.parse(decodeURIComponent(intentJson));}catch(e){toast('Bad intent');return;}
+  /* Adopt-on-first-action: unadopted rows render from an ephemeral v3 evaluation
+     (_seqV3Action). The operator clicking a sequence action IS the explicit adoption
+     moment — persist the pointer with a log line (N-10), then run the intent. */
+  if(!(cand.st&&cand.st.sequenceId)&&window.SeqBuilderV3){
+    try{
+      const aseq=window.SeqBuilderV3.resolveSequenceFor(cand,SETTINGS.sequenceAssignments||[],SETTINGS.sequences||[]);
+      if(aseq&&Array.isArray(aseq.steps)&&aseq.steps.length){
+        const ptr=aseq.id==='classic-flow'?_classicPointerFor(cand,aseq):aseq.steps[0].id;
+        cand.st=cand.st||{};
+        cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Adopted '+aseq.name+' (first sequence action) — pointer '+ptr});
+        await _seqCommitState(cand,{sequenceId:aseq.id,sequenceStepId:ptr,sequenceHistory:((cand.st.sequenceHistory)||[]).concat({stepId:ptr,at:new Date().toISOString()}),sequenceCompletedAt:null,sequenceNudges:cand.st.sequenceNudges||{}});
+      }
+    }catch(e){console.warn('adopt-on-action:',e.message);}
+  }
   const seqs=SETTINGS.sequences||[];
   const seq=seqs.find(q=>q.id===(cand.st&&cand.st.sequenceId));
   const t=intent.type;
@@ -21779,9 +21804,20 @@ async function _seqV3AdoptConfirm(){
 function _seqV3Action(c,info){
   try{
     _seqV3Migrate();
-    const seq=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
-    if(!seq)return null;
-    const ev=window.SeqBuilderV3.evaluate(seq,c,_seqTriggerEval,undefined,_seqHostCtx());
+    let seq=(SETTINGS.sequences||[]).find(q=>q.id===(c.st&&c.st.sequenceId));
+    let cand=c;
+    if(!seq){
+      /* Legacy retirement: unadopted candidates are evaluated through v3 IN MEMORY —
+         resolve their sequence (source binding → default Classic flow) and place an
+         ephemeral pointer matching their current stage. Nothing persists here (no
+         silent mutations, N-5): the first sequence action they click adopts them with
+         a log line (_seqRunIntent), and the bulk switchover button remains the batch path. */
+      seq=window.SeqBuilderV3.resolveSequenceFor(c,SETTINGS.sequenceAssignments||[],SETTINGS.sequences||[]);
+      if(!seq||!Array.isArray(seq.steps)||!seq.steps.length)return null;
+      const ptr=seq.id==='classic-flow'?_classicPointerFor(c,seq):seq.steps[0].id;
+      cand=Object.assign({},c,{st:Object.assign({},c.st||{},{sequenceId:seq.id,sequenceStepId:ptr})});
+    }
+    const ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
     const pill=ev.bucket==='awaiting'?'psoft':ev.bucket==='scheduled'?'pg':'pnew';
     const bucket=ev.bucket==='done'?'action':ev.bucket;
     return{bucket:bucket,timing:{txt:ev.label||'Sequence',pill:pill,date:''},info:info,primary:_seqV3Primary(ev,c)};
@@ -22050,13 +22086,16 @@ function _seqCreateTemplateNamed(label){
   return {key:key,label:label.trim()};
 }
 
-/* Sequence payRange override for the {pay}/{wage} placeholders. */
+/* Effective pay for the OPEN candidate's {pay}: source-link wage first (the number
+   their ad promised — that promise wins), sequence.payRange as the fallback. Returns
+   null when neither exists so payRange() falls through to the computed default. */
 function _seqPayOverride(){
   try{
-    if(!window.SeqBuilderV3||!W||!W.st||!W.st.sequenceId)return null;
-    const seq=(SETTINGS.sequences||[]).find(q=>q.id===W.st.sequenceId);
-    const rp=seq?window.SeqBuilderV3.resolvePay(seq,null):null;
-    return rp&&rp.from==='sequence'?rp.text:null;
+    if(!window.SeqBuilderV3||!W||!W.st)return null;
+    const src=(W.st.sourceCode&&typeof _lookupSourceLink==='function')?_lookupSourceLink(W.st.sourceCode):null;
+    const seq=W.st.sequenceId?(SETTINGS.sequences||[]).find(q=>q.id===W.st.sequenceId):null;
+    const rp=window.SeqBuilderV3.resolvePay(seq||null,(src&&src.wage)||null);
+    return (rp&&rp.text)||null;
   }catch(e){return null;}
 }
 
