@@ -10345,13 +10345,19 @@ function action(c){
     const _form=_yardstikFormFilled(c);
     if(_mins!=null&&_mins<=60&&_mins>-30&&(_miss.length||!_form)){
       const why=(_miss.length?_miss.length+' cert'+(_miss.length===1?'':'s')+' missing':'')+(_miss.length&&!_form?' + ':'')+(!_form?'BG form not completed':'');
-      return{bucket:'action',timing:_dn('\u26a0 Interview in '+Math.max(0,_mins)+'m \u2014 '+why,'pbad'),info:baseInfo(c),primary:{kind:'cancelInterview',label:'\u2715 Cancel interview (Cal.com)',cls:'red'}};
+      return{bucket:'action',timing:_dn('\u26a0 Interview in '+Math.max(0,_mins)+'m \u2014 '+why,'pbad'),info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'cancelInterview',label:'\u2715 Cancel interview (Cal.com)',cls:'red'}};
     }
   }
   /* All certs in → cross-check hub is the action, until opened. */
   if(c&&c.st&&c.st.certsReadyReview&&c.stage!=='Hired'&&c.stage!=='Declined'){
-    return{bucket:'action',timing:_dn('Certs in \u2014 cross-check them','pnew'),info:baseInfo(c),primary:{kind:'checks',label:'\ud83d\udccb Cross-check certs',cls:'gold'}};
-  }let e=_actMemo.get(c);if(e&&e.g===_memGen)return e.v;const v=_actionC(c);_actMemo.set(c,{g:_memGen,v});return v;}
+    return{bucket:'action',timing:_dn('Certs in \u2014 cross-check them','pnew'),info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'checks',label:'\ud83d\udccb Cross-check certs',cls:'gold'}};
+  }let e=_actMemo.get(c);if(e&&e.g===_memGen)return e.v;
+  /* One candidate's evaluation error must never blank the whole board: fail to a visible
+     repair row for that candidate only (the baseInfo crash of 2026-07-28 took down render). */
+  let v;try{v=_actionC(c);}
+  catch(err){console.error('action() failed for',c&&c.name,err);
+    v={bucket:'action',timing:{txt:'⚠ Evaluation error — open candidate (see console)',pill:'pr2',date:''},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'open',label:'Open candidate',cls:'sky'}};}
+  _actMemo.set(c,{g:_memGen,v});return v;}
 function scoreRow(c){let e=_srMemo.get(c);if(e&&e.g===_memGen)return e.v;const v=_scoreRowC(c);_srMemo.set(c,{g:_memGen,v});return v;}
 function _actionC(c){
   const s=c.stage,st=c.st,info=STAGEINFO[s]||STAGEINFO['Applied'];
