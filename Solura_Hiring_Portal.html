@@ -21966,9 +21966,12 @@ async function _applyScoreWrites(cand,proposed,label){
 async function _execCatalogAction(cand,a){
   const p=(a&&a.params)||{};
   const id=(a&&a.action)||'';
-  const ig=/^integration:(\w+):(\w+)$/.exec(id);
+  /* Accept hyphen or underscore spellings (steps authored as claude:resume-screen must hit
+     the same branch as the registry's resume_screen — \w alone rejects hyphens, which made
+     these actions fall through to the "not executable" error). */
+  const ig=/^integration:([\w-]+):([\w-]+)$/.exec(id);
   if(ig){
-    const prov=ig[1],act=ig[2];
+    const prov=ig[1].replace(/-/g,'_'),act=ig[2].replace(/-/g,'_');
     if(prov==='yardstik'&&(act==='order_check'||act==='order_verification')){
       if(!W||W.row!==cand.excelRow)openWorkspace(cand.excelRow);
       setTimeout(()=>{act==='order_check'?orderYardstikCheck():orderYardstikVerification();},300);
