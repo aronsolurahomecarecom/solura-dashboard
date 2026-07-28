@@ -21503,9 +21503,18 @@ async function _seqRunIntent(row,intentJson){
     return;
   }
   if(t==='integration'){
-    try{await _execCatalogAction(cand,{action:'integration:'+intent.provider+':'+intent.action,params:intent.params||{}});}
+    try{
+      await _execCatalogAction(cand,{action:'integration:'+intent.provider+':'+intent.action,params:intent.params||{}});
+      /* §4: integration → on success → advance. Only for actions that COMPLETE inside the
+         await (the handler throws on failure). Handlers that merely open a workspace dialog
+         (yardstik, zoominfo, graph) signal nothing — the operator advances after those. */
+      if(intent.stepId&&/^claude:resume[-_]screen$/.test(intent.provider+':'+intent.action)){
+        await _seqAdvance(cand);
+        toast('🧬 Sequence advanced — screen complete');
+      }
+    }
     catch(e){toast('🔌 '+e.message);}
-    return; /* operator advances after the integration completes */
+    return; /* other integrations: operator advances after the integration completes */
   }
   if(t==='release'){
     if(W&&W.row===row)releaseAwaiting();
@@ -21556,10 +21565,12 @@ async function _seqRunIntent(row,intentJson){
    the Anthropic key as a secret — the key never touches the browser). Result is stored on
    st.aiScreen and rendered as an advisory card. It NEVER advances/declines anyone: the flags
    sit alongside the scoring engine and you decide. Costs one API call per run (~a cent). */
+/* Returns true only when a verdict was stored — callers (the sequence integration step,
+   locked packs) gate their advance on it. */
 async function _claudeResumeScreen(row){
-  const cand=pipeline.find(x=>x.excelRow===row);if(!cand){toast('Candidate not found');return;}
+  const cand=pipeline.find(x=>x.excelRow===row);if(!cand){toast('Candidate not found');return false;}
   const tok=(SETTINGS.config||{}).ziToken||'';
-  if(!tok){toast('Set the internal worker token first (Settings → 🔌 Integrations, ZoomInfo card — shared across integrations)');return;}
+  if(!tok){toast('Set the internal worker token first (Settings → 🔌 Integrations, ZoomInfo card — shared across integrations)');return false;}
   toast('🤖 Claude is screening '+(cand.name||'candidate')+'…');
   /* Compact snapshot: structured application data only. The résumé PDF binary is NOT read —
      most caregiver signal (tenure, availability, certs, care tolerance) is in the answers. */
@@ -21580,13 +21591,14 @@ async function _claudeResumeScreen(row){
       body:JSON.stringify({candidate:snap})
     });
     const j=await r.json();
-    if(!j.ok){toast('⚠ Screen failed: '+(j.error||r.status));return;}
+    if(!j.ok){toast('⚠ Screen failed: '+(j.error||r.status));return false;}
     cand.st.aiScreen=Object.assign({},j.screen,{at:new Date().toISOString(),resumeIncluded:!!j.resumeIncluded,resumeName:j.resumeName||null});
     cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🤖 Claude screened: '+(j.screen.verdict||'?')+' ('+(j.screen.score!=null?j.screen.score:'—')+') — '+String(j.screen.summary||'').slice(0,120)});
     await patchRange('AJ'+cand.excelRow,[[JSON.stringify(cand.st)]]);
     if(W&&W.row===row){if(W.st!==cand.st)W.st=cand.st;renderWorkspace();}
     toast('🤖 '+(j.screen.verdict==='advance'?'✓ Advance':j.screen.verdict==='concern'?'⚠ Concern':'👁 Review')+' — score '+(j.screen.score!=null?j.screen.score:'—'));
-  }catch(e){toast('⚠ Screen failed: '+e.message);}
+    return true;
+  }catch(e){toast('⚠ Screen failed: '+e.message);return false;}
 }
 /* Advisory result card for the workspace. Renders only when a screen exists. */
 function aiScreenCard(){
@@ -21999,7 +22011,7 @@ async function _execCatalogAction(cand,a){
       return;
     }
     if(prov==='claude'&&(act==='resume_screen'||act==='resume-screen')){
-      await _claudeResumeScreen(cand.excelRow);
+      if(await _claudeResumeScreen(cand.excelRow)!==true)throw new Error('Claude screen did not complete — nothing advanced');
       return;
     }
     if(prov==='graph'&&act==='generate_doc'){
