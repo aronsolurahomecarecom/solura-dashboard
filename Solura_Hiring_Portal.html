@@ -14058,6 +14058,30 @@ async function completeQuestions(nextStage){_memGen++;applyAnswers();const sc=sc
   await saveW(true);toast('→ '+nextStage);
   /* fire-and-forget PDF generation for the stage we just completed */
   autoUploadStageReport(W,completedStage).catch(e=>console.warn('PDF upload bg:',e.message));
+  /* Sequence bridge: running the questions hub completes a session step — advance the
+     pointer past it, or the card re-offers 'Run phone screen' after the screen was run.
+     Fail-closed: only when the current step really is a session (open-hub intent). */
+  try{
+    const cSeq=pipeline.find(x=>x.excelRow===W.row);
+    if(cSeq&&cSeq.st&&cSeq.st.sequenceId&&window.SeqBuilderV3){
+      const sq=(SETTINGS.sequences||[]).find(q=>q.id===cSeq.st.sequenceId);
+      if(sq){
+        const _cd=()=>Object.assign({},cSeq,{stage:W.stage,st:W.st});
+        const _ctx=(typeof _seqHostCtx==='function')?_seqHostCtx():undefined;
+        const ev=window.SeqBuilderV3.evaluate(sq,_cd(),_seqTriggerEval,undefined,_ctx);
+        const it=(ev.intents||[])[0];
+        if(it&&it.type==='open-hub'&&ev.currentStep&&ev.currentStep.kind==='session'){
+          const adv=window.SeqBuilderV3.advanceStep(sq,_cd(),_seqTriggerEval,undefined,_ctx);
+          if(!adv.error){
+            Object.assign(W.st,adv.partialState);
+            cSeq.st=W.st;
+            logW('🧬 Sequence advanced — session complete');
+            await patchRange('AJ'+W.row,[[JSON.stringify(W.st)]]);
+          }
+        }
+      }
+    }
+  }catch(e){console.warn('seq session advance:',e);}
   /* auto-progression handled by advanceWS pattern: clear focus + open next email if applicable */
   W.focusedHub=null;
   renderWorkspace();
@@ -21885,7 +21909,27 @@ function _seqV3Action(c,info){
       const ptr=seq.id==='classic-flow'?_classicPointerFor(c,seq):seq.steps[0].id;
       cand=Object.assign({},c,{st:Object.assign({},c.st||{},{sequenceId:seq.id,sequenceStepId:ptr})});
     }
-    const ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
+    let ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
+    /* Satisfied-wait walk-through: a met wait/gate evaluates to a single pure-bookkeeping
+       'advance' intent (no outward write). Walk the pointer through those — committed and
+       logged — so the card shows the step that actually needs a human: the booking arrives
+       and the row reads 'Run phone screen', not '→ Advance'. Outward steps (set-stage,
+       email, hub, …) are never auto-run here. Adopted candidates only — ephemeral rows
+       must not persist (N-5). */
+    if(c.st&&c.st.sequenceId&&cand===c){
+      let walked=0;
+      while(ev.bucket==='action'&&(ev.intents||[]).length===1&&ev.intents[0].type==='advance'&&walked<4){
+        const adv=window.SeqBuilderV3.advanceStep(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
+        if(adv.error)break;
+        Object.assign(cand.st,adv.partialState);
+        walked++;
+        ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
+      }
+      if(walked){
+        cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Sequence advanced '+(walked===1?'a step':walked+' steps')+' — condition met'});
+        _seqCommitState(cand,{}).catch(e2=>console.warn('sequence walk persist:',e2));
+      }
+    }
     /* Kill-switch honesty: a step marked automate buckets as 'scheduled', but with the master
        automation gate OFF nothing will ever run it — surface it as an operator action instead
        of letting the candidate sit in Scheduled forever. Genuinely time-gated rows (sessions
