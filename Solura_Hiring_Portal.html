@@ -21910,22 +21910,34 @@ function _seqV3Action(c,info){
       cand=Object.assign({},c,{st:Object.assign({},c.st||{},{sequenceId:seq.id,sequenceStepId:ptr})});
     }
     let ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
-    /* Satisfied-wait walk-through: a met wait/gate evaluates to a single pure-bookkeeping
-       'advance' intent (no outward write). Walk the pointer through those — committed and
-       logged — so the card shows the step that actually needs a human: the booking arrives
-       and the row reads 'Run phone screen', not '→ Advance'. Outward steps (set-stage,
-       email, hub, …) are never auto-run here. Adopted candidates only — ephemeral rows
-       must not persist (N-5). */
-    if(c.st&&c.st.sequenceId&&cand===c){
+    /* Bookkeeping walk-through: an advance button must never be the card — the card shows
+       the step that actually needs a human. Two intent shapes are pure bookkeeping (no
+       outward write) and get walked through automatically:
+         · a met wait/gate — single 'advance' intent;
+         · a set-stage whose stage ALREADY matches column G (e.g. the Cal.com webhook set
+           'Screen booked' when the booking arrived) — the write is a no-op, only the
+           pointer moves.
+       So a booking arriving turns the row into 'Run phone screen' directly. Real actions
+       (emails, differing set-stage, hubs, sessions) still wait for a click. Adopted
+       candidates commit + log the walk; ephemeral (unadopted) rows walk in memory only,
+       never persisting (N-5). */
+    {
+      const _isBookkeeping=(e3)=>{
+        if(e3.bucket!=='action')return false;
+        const its=e3.intents||[];
+        if(its.length===1&&its[0].type==='advance')return true;
+        if(its.length===2&&its[0].type==='set-stage'&&its[1].type==='advance'&&its[0].stage===cand.stage)return true;
+        return false;
+      };
       let walked=0;
-      while(ev.bucket==='action'&&(ev.intents||[]).length===1&&ev.intents[0].type==='advance'&&walked<4){
+      while(_isBookkeeping(ev)&&walked<6){
         const adv=window.SeqBuilderV3.advanceStep(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
         if(adv.error)break;
         Object.assign(cand.st,adv.partialState);
         walked++;
         ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
       }
-      if(walked){
+      if(walked&&cand===c&&c.st&&c.st.sequenceId){
         cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Sequence advanced '+(walked===1?'a step':walked+' steps')+' — condition met'});
         _seqCommitState(cand,{}).catch(e2=>console.warn('sequence walk persist:',e2));
       }
@@ -21949,15 +21961,15 @@ function _seqV3Primary(ev,c){
   switch(it.type){
     case 'send-email':return{kind:'email-tpl',tpl:it.templateKey,label:'✉ '+((_allTemplateLabels()[it.templateKey])||it.templateKey||'Send email'),cls:'gold'};
     case 'nudge':return{kind:'seq3',intent:it,label:'🔔 Send nudge',cls:'gold'};
-    case 'advance':return{kind:'seq3',intent:it,label:'→ Advance',cls:'grn'};
-    case 'set-stage':{
-      /* Column G already shows this stage → the set-stage is pure bookkeeping; surface the
-         accompanying advance as the primary so the card offers real forward motion instead
-         of a no-op flag (the "stuck at Applied" card). */
-      const adv=(ev.intents||[]).find(x2=>x2.type==='advance');
-      if(adv&&it.stage&&c&&c.stage===it.stage)return{kind:'seq3',intent:adv,label:'→ Advance — '+it.stage+' already set',cls:'grn'};
+    case 'advance':
+      /* Normally consumed by the bookkeeping walk — surfaces only if the walk hit its hop
+         cap or advanceStep errored (a broken sequence). A repair affordance, not a routine
+         button: advancing is otherwise always the RESULT of completing an action. */
+      return{kind:'seq3',intent:it,label:'→ Continue sequence',cls:'grn'};
+    case 'set-stage':
+      /* A set-stage matching column G is consumed by the bookkeeping walk in _seqV3Action
+         and never reaches here — this button only appears for a REAL stage move. */
       return{kind:'seq3',intent:it,label:'⚑ '+(it.stage||'Set stage'),cls:'sky'};
-    }
     case 'open-hub':{
       const m=/^native:(\w+)$/.exec(it.hubId||'');
       if(m&&m[1]==='questions')return{kind:'questions',stage:it.questionsStage||((c.stage==='Screen booked')?'Phone Screen':'Interview'),nextStage:it.nextStage,label:ev.label||'Open hub',cls:'sky'};
