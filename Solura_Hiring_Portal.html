@@ -21886,6 +21886,14 @@ function _seqV3Action(c,info){
       cand=Object.assign({},c,{st:Object.assign({},c.st||{},{sequenceId:seq.id,sequenceStepId:ptr})});
     }
     const ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
+    /* Kill-switch honesty: a step marked automate buckets as 'scheduled', but with the master
+       automation gate OFF nothing will ever run it — surface it as an operator action instead
+       of letting the candidate sit in Scheduled forever. Genuinely time-gated rows (sessions
+       waiting on a booking — no automatable intent) stay scheduled. */
+    if(ev.bucket==='scheduled'&&!(SETTINGS.config&&SETTINGS.config.seqAutomation)&&(ev.intents||[]).some(i2=>i2&&i2.automatable===true)){
+      ev.bucket='action';
+      ev.label=String(ev.label||'').replace(/^Automated: /,'');
+    }
     const pill=ev.bucket==='awaiting'?'psoft':ev.bucket==='scheduled'?'pg':'pnew';
     const bucket=ev.bucket==='done'?'action':ev.bucket;
     return{bucket:bucket,timing:{txt:ev.label||'Sequence',pill:pill,date:''},info:info,primary:_seqV3Primary(ev,c)};
