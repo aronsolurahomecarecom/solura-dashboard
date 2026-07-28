@@ -1959,12 +1959,24 @@ async function runDiagnostics(){
         rootNames.push(it.name);
         L.push('         '+(it.folder?'[dir] ':'      ')+it.name);
       });
-      var near=rootNames.filter(function(n){
-        return n!==FN&&/tracker|solura|referral/i.test(n);});
-      if(near.length){
-        note('');
-        note('Similar names present — check for an exact match:');
-        near.forEach(function(n){note('   -> "'+n+'"   vs expected   "'+FN+'"');});
+      if(rootNames.indexOf(FN)>-1)ok('Exact match "'+FN+'" IS present at root.');
+      else{
+        bad('No file named exactly "'+FN+'" at root.');
+        var base=FN.replace(/\.xlsx$/i,'');
+        var dbl=rootNames.filter(function(n){return n.toLowerCase()===(FN+'.xlsx').toLowerCase();});
+        var kin=rootNames.filter(function(n){
+          return n!==FN&&n.toLowerCase().indexOf(base.toLowerCase())===0;});
+        if(dbl.length){
+          note('');
+          note('>>> LIKELY CAUSE: "'+dbl[0]+'" has the extension twice.');
+          note('    Windows hides known extensions, so Explorer shows this as "'+FN+'".');
+          note('    FIX: rename it to exactly "'+FN+'"');
+          note('    THEN: File Explorer -> View -> Show -> File name extensions');
+        }else if(kin.length){
+          note('');
+          note('Close matches — rename the correct one to exactly "'+FN+'":');
+          kin.forEach(function(n){note('   -> "'+n+'"');});
+        }
       }
     }else bad('root listing HTTP '+rt.status);
   }catch(e){bad('root listing threw: '+e.message);}
@@ -2076,20 +2088,60 @@ async function findWorkbook(){
     }
   }
 
-  // 3 — genuinely not there. Say who we're signed in as, because the single
-  // most common cause is being signed into the wrong Microsoft account.
+  // 3 — near-miss detection. Windows hides known extensions by default, so a
+  // downloaded file very often lands as "name.xlsx.xlsx" while Explorer shows
+  // it as "name.xlsx". Copies, renames and " old" suffixes are equally common.
+  // Rather than a flat "not found", name the offending file and the exact fix.
+  var near=[];
+  try{
+    var rc=await gfetch(GR+'/me/drive/root/children?$select=name,lastModifiedDateTime&$top=200');
+    if(rc.ok){
+      var jc=await rc.json();
+      var base=FN.replace(/\.xlsx$/i,'');
+      (jc.value||[]).forEach(function(it){
+        var n=String(it.name||'');
+        if(n===FN)return;
+        // Anything that normalises to the target name is a near miss:
+        // doubled extension, " - Copy", " (1)", " old", " new", spacing drift.
+        var norm=n.replace(/\.xlsx(\.xlsx)+$/i,'.xlsx')
+                  .replace(/\s*[-–]?\s*(copy|old|new|final|backup)\s*/gi,'')
+                  .replace(/\s*\(\d+\)\s*/g,'')
+                  .replace(/[_\s]+/g,'_').trim();
+        if(norm.toLowerCase()===FN.toLowerCase()||
+           n.toLowerCase().indexOf(base.toLowerCase())===0)near.push(n);
+      });
+    }
+  }catch(_){}
+
   var who='';
   try{
     var me=await gfetch(GR+'/me?$select=userPrincipalName,mail');
     if(me.ok){var jm=await me.json();who=jm.userPrincipalName||jm.mail||'';}
   }catch(_){}
+
+  if(near.length){
+    var dbl=near.filter(function(n){return /\.xlsx\.xlsx$/i.test(n);});
+    var pick=dbl[0]||near[0];
+    throw new Error(
+      'Almost — the file is there, but the name is off by a little.\n\n'
+      +'Expected:  '+FN+'\n'
+      +'Found:     '+near.join('\n           ')+'\n\n'
+      +(dbl.length
+        ? 'That "'+pick+'" has the extension twice. Windows hides known extensions, '
+          +'so File Explorer shows it as "'+FN+'" and it looks correct.\n\n'
+          +'Fix: rename it to exactly "'+FN+'", then turn on\n'
+          +'File Explorer -> View -> Show -> File name extensions so it stops happening.'
+        : 'Fix: rename the right one to exactly "'+FN+'" (and move the others aside).'));
+  }
+
   throw new Error(
     'Could not find "'+FN+'" in OneDrive'+(who?' for '+who:'')+'.\n\n'
     +'Check, in order:\n'
     +'1. The filename is exactly "'+FN+'" — no "(1)", no " - Copy", no double extension.\n'
     +'2. It is in OneDrive itself, not a SharePoint or Teams library, and not a shortcut to a shared folder.\n'
     +(who?'3. You are signed in as the right account — currently '+who+'.\n':'3. You are signed in as the right Microsoft account.\n')
-    +'4. It has finished uploading — a file still syncing is not visible to this dashboard.');
+    +'4. It has finished uploading — a file still syncing is not visible to this dashboard.\n\n'
+    +'Click Diagnostics for a full report.');
 }
 
 // Write specific columns to a row. updates is an object {colIndex: value, ...}.
@@ -3477,20 +3529,44 @@ function getWarmSMS(ri){
   var names=getNames(ri);
   return fillNames(getTpl(WARM.sms,ri),names);
 }
+/* Split a step template into {subject, body}.
+ * A leading "Subject: ..." line is lifted out; everything after the following
+ * blank line is the body. Templates without that line are body-only. */
+function splitStepTemplate(t){
+  var raw=normalizeNewlines(String(t||''));
+  var m=raw.match(/^[ \t]*Subject:[ \t]*(.*)$/im);
+  if(!m)return {subject:'',body:raw.trim()};
+  var subj=m[1].trim();
+  var body=raw.slice(raw.indexOf(m[0])+m[0].length).replace(/^\s*\n/,'').trim();
+  return {subject:subj,body:body};
+}
+
 function getSMSText(ri){
   var r=rows[ri]||[];
-  // Custom-engine steps can carry an inline template — it wins over the
-  // Templates-sheet lookup. Default-engine steps have template:'' so the
-  // legacy sheet templates keep working unchanged.
-  if(!(isActive(r[C.ST])||isOffSequence(ri))){
-    var act=currentAction(ri);
-    if(act&&act.template)return fillNames(act.template,getNames(ri));
+  // A step that carries its own copy is authoritative — this is what makes
+  // chained engines work. With eight engines every phase is internally
+  // "Phase 1", so the old phase->template mapping would hand the intro text
+  // to Cold Nurture, Warm Development and Active Partner alike.
+  var act=currentAction(ri);
+  if(act&&act.template){
+    var sp=splitStepTemplate(act.template);
+    return fillNames(sp.body||sp.subject,getNames(ri));
   }
   return (isActive(r[C.ST])||isOffSequence(ri))?getWarmSMS(ri):getColdSMS(ri);
 }
 function getEmailContent(ri){
   var r=rows[ri]||[];
   var names=getNames(ri);
+  // Step-level copy wins, same as SMS. Without this every engine in the chain
+  // sends the same rotating cold email regardless of the relationship stage.
+  var actE=currentAction(ri);
+  if(actE&&actE.template){
+    var spE=splitStepTemplate(actE.template);
+    if(spE.body){
+      return {subject:fillNames(spE.subject||('Solura Home Care — '+actE.text),names),
+              body:fillNames(spE.body,names)};
+    }
+  }
   if(isActive(r[C.ST])||isOffSequence(ri)){
     var subjArr=WARM.email.subj||[];
     var bodyArr=WARM.email.body||[];
@@ -3761,8 +3837,8 @@ async function ensureCommsLogSheet(){
         throw new Error('Create Comms Log sheet failed: '+(ce.error&&ce.error.message?ce.error.message:cr.status));
       }
       // Write headers to A1:J1
-      var headers=['Timestamp','Direction','Channel','Lead Row','Lead Name','Contact','Subject','Preview','Outcome','Message ID'];
-      var hr=await gfetch(sheetUrl+"/range(address='A1:J1')",{
+      var headers=['Timestamp','Direction','Channel','Engine','Lead Row','Lead Name','Contact','Subject','Preview','Outcome','Message ID'];
+      var hr=await gfetch(sheetUrl+"/range(address='A1:K1')",{
         method:'PATCH',
         body:JSON.stringify({values:[headers]})
       });
@@ -3806,10 +3882,15 @@ async function logComms(entry){
     if(!row)return;
     var leadRow=(entry.leadRi!=null&&entry.leadRi>=0)?(entry.leadRi+1):'';
     var preview=String(entry.preview||'').slice(0,500);
+    // Stamp the engine the partner is on, so you can compare reply rates
+    // between channel arms (email-led vs email-only vs phone-led) later.
+    var engName='';
+    try{if(entry.leadRi!=null&&entry.leadRi>=0){var _e=engineFor(entry.leadRi);engName=_e?_e.name:'';}}catch(_){}
     var values=[
       new Date().toISOString(),
       entry.direction||'',
       entry.channel||'',
+      engName,
       leadRow,
       String(entry.leadName||''),
       String(entry.contact||''),
@@ -3818,7 +3899,7 @@ async function logComms(entry){
       String(entry.outcome||''),
       String(entry.messageId||'')
     ];
-    var addr='A'+row+':J'+row;
+    var addr='A'+row+':K'+row;
     var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
     var r=await gfetch(base+"/range(address='"+addr+"')",{
       method:'PATCH',
