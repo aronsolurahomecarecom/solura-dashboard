@@ -9908,7 +9908,38 @@ async function loadData(){
      lives in the Inbox under the ⚡ Blasts filter. Diagnostics remain available in console via
      window._blastDiag. */
   document.getElementById('sync-time').textContent='Synced '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+  _reconcileBookingStages().catch(e=>console.warn('booking stage catch-up:',e.message));
   render();
+}
+
+/* Booking-stage catch-up (same auto-heal spirit as above): candidates whose booking arrived
+   while the pipeline was stalling kept a stale invite-stage — the webhook normally writes
+   'Screen booked' etc. the moment the booking lands, but these predate the 2026-07 fixes.
+   Apply the exact advanceMap the webhook/manual-link flows use, only for bookings that are
+   upcoming or recent (<48h past) — ancient stale bookings keep the explicit ⚑ button so a
+   human decides. Idempotent: an advanced stage leaves the map, so this no-ops after the
+   first pass. Each advance is logged on the candidate. */
+async function _reconcileBookingStages(){
+  const advanceMap={'Screen invite':'Screen booked','Interview invite':'Interview booked','Onboarding':'Onboarding booked'};
+  let n=0;
+  for(const c of pipeline){
+    if(!c||!c.st||!c.st.booking)continue;
+    if(c.stage==='Hired'||c.stage==='Declined')continue;
+    const next=advanceMap[c.stage];if(!next)continue;
+    const t=Date.parse(c.st.booking);
+    if(!isFinite(t)||t<Date.now()-48*3600*1000)continue;
+    try{
+      c.stage=next;c.row[6]=next;
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stage caught up to booking ('+new Date(t).toLocaleString()+') → '+next});
+      await patchRange('G'+c.excelRow,[[next]]);
+      await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+      n++;
+    }catch(e){console.warn('booking stage catch-up failed:',c.name,e.message);}
+  }
+  if(n){
+    toast('📅 '+n+' booked candidate'+(n===1?'':'s')+' caught up to their booking stage');
+    if(typeof render==='function')render();
+  }
 }
 async function refreshRow(excelRow){
   const sid=await getWorkbookSession();const h=sid?{'workbook-session-id':sid}:{};
