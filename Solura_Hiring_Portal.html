@@ -15419,19 +15419,40 @@ async function orderYardstikCheck(){
     toast('Can\'t order — no email on file for '+(W.name||'this candidate')+'. Edit the candidate to add one.');
     return;
   }
-  if(!confirm('Order a Yardstik background check for '+W.name+'?\n\nYardstik will email them at '+W.email+' with a secure intake form. You can monitor status here.'))return;
   const tok=(SETTINGS.config||{}).ziToken||'';
   if(!tok){toast('Set internal worker token first in Settings → 🔌 Integrations (ZoomInfo card — token is shared across all integrations)');return;}
-  const accountId=SETTINGS.config.yardstikAccountId, packageId=SETTINGS.config.yardstikPackageId;
-  const verifyPackageId=SETTINGS.config.yardstikVerifyPackageId||'';
-  if(!accountId||!packageId){toast('Yardstik not fully configured — see Settings');return;}
-  /* When a separate employment-verification package is configured, bundle the candidate's past
-     employers into the order so the worker can place both screens at once. The worker side reads
-     `verifyPackageId` + `employers` and is responsible for actually ordering the second package. */
-  const employers=(W.st.employers||[]).filter(e=>e&&(e.name||'').trim()).map(e=>({
-    name:(e.name||'').trim(), startYear:e.startYear||'', endYear:e.endYear||'', current:!!e.current, title:e.title||''
-  }));
-  toast(verifyPackageId&&employers.length?'🛡 Ordering BG check + employment verification…':'🛡 Ordering Yardstik check…');
+  const accountId=SETTINGS.config.yardstikAccountId, defPkg=SETTINGS.config.yardstikPackageId;
+  if(!accountId||!defPkg){toast('Yardstik not fully configured — see Settings');return;}
+  /* Package picker — the worker lists the account's packages (GET /yardstik/packages).
+     BG CHECK ONLY: employment verification is deliberately NOT bundled here — it is
+     ordered from the Verify hub (orderYardstikVerification), and only by sequences
+     that include that step. */
+  let pkgs=[];
+  try{
+    const r=await fetch(ZI_WORKER_URL+'/yardstik/packages',{headers:{'X-Solura-Token':tok}});
+    const j=await r.json();pkgs=(j&&j.packages)||[];
+  }catch(e){console.warn('yardstik packages:',e.message);}
+  if(!pkgs.some(p=>p.id===defPkg))pkgs.unshift({id:defPkg,name:'Configured default package'});
+  document.getElementById('m-title').textContent='🛡 Order Yardstik background check';
+  document.getElementById('m-body').innerHTML=`
+    <p style="font-size:13px">Yardstik will email <b>${esc(W.email)}</b> a secure intake form for <b>${esc(W.name||'this candidate')}</b>. Status is monitored here.</p>
+    <label style="font-size:12px;color:var(--mid)">Package</label>
+    <select id="yk-pkg" style="width:100%;padding:8px;margin:6px 0 4px;border:1.5px solid var(--border);border-radius:7px;background:#fff">
+      ${pkgs.map(p=>`<option value="${esc(p.id)}"${p.id===defPkg?' selected':''}>${esc(p.name||p.id)}${p.id===defPkg?' (default)':''}</option>`).join('')}
+    </select>
+    <p style="font-size:11px;color:var(--soft)">Background check only — employment verification is ordered separately from the Verify hub.</p>
+    <div class="brow" style="margin-top:12px;gap:8px">
+      <button class="btn-primary bg-gold" onclick="_orderYardstikGo(document.getElementById('yk-pkg').value)" style="padding:9px 18px">🛡 Order check</button>
+      <button class="btn-sec bg-cream" onclick="closeModal()" style="padding:9px 14px">Cancel</button>
+    </div>`;
+  document.getElementById('modal').classList.add('open');
+}
+async function _orderYardstikGo(packageId){
+  closeModal();
+  const tok=(SETTINGS.config||{}).ziToken||'';
+  const accountId=SETTINGS.config.yardstikAccountId;
+  if(!packageId){toast('No package selected');return;}
+  toast('🛡 Ordering Yardstik check…');
   try{
     const r=await fetch(ZI_WORKER_URL+'/yardstik/order',{
       method:'POST',
@@ -15442,25 +15463,19 @@ async function orderYardstikCheck(){
         candidatePhone:W.phone||'',
         excelRow:W.row,
         accountId:accountId,
-        packageId:packageId,
-        verifyPackageId:verifyPackageId||undefined,
-        employers:verifyPackageId&&employers.length?employers:undefined
+        packageId:packageId
       })
     });
     const data=await r.json();
     if(!r.ok){toast('✗ Order failed: '+(data.error||r.status));return;}
-    /* Worker already wrote st.yardstik to AJ — refresh our in-memory state by reloading the workspace */
-    W.st.yardstik={candidateId:data.candidateId,invitationId:data.invitationId,reportId:data.reportId,status:'created',applyUrl:data.applyUrl,orderedAt:new Date().toISOString(),verifyReportId:data.verifyReportId||null,verifyPackageId:verifyPackageId||null};
+    /* Worker already wrote st.yardstik to AJ — mirror it locally. */
+    W.st.yardstik={candidateId:data.candidateId,invitationId:data.invitationId,reportId:data.reportId,status:'created',applyUrl:data.applyUrl,orderedAt:new Date().toISOString(),packageId:packageId};
     W.st.tpCheck='pending';
-    /* If the worker placed an employment-verification order alongside the BG check, mark each
-       listed employer as "Yardstik in-flight" so the manual buttons hide until results come back
-       and t1n attempts on those rows are paused (Yardstik is doing the work). */
-    if(verifyPackageId&&employers.length){
-      (W.st.employers||[]).forEach(e=>{if(e&&!e.v&&(e.name||'').trim()){e.ySrc='yardstik';e.yStatus='ordered';}});
-    }
-    logW(verifyPackageId&&employers.length?'🛡 BG check + employment verification ordered':'🛡 Yardstik check ordered · candidate '+data.candidateId.slice(0,8)+'…');
+    logW('🛡 Yardstik check ordered ('+packageId+') · candidate '+String(data.candidateId||'').slice(0,8)+'…');
     await saveW(true);
     toast('✓ Yardstik check ordered — '+esc(W.email)+' will get the intake email shortly');
+    /* Completing the order IS what advances a yardstik sequence step. */
+    await _seqAdvanceIfIntent(W.row,it=>it.type==='integration'&&it.provider==='yardstik'&&/order_check|order-check/.test(it.action||''),'background check ordered');
     renderWorkspace();
   }catch(e){toast('✗ Order failed: '+e.message);}
 }
@@ -15515,6 +15530,8 @@ async function orderYardstikVerification(){
     logW('🔍 Employment verification ordered · '+targets.length+' employer'+(targets.length===1?'':'s'));
     await saveW(true);
     toast('✓ Verification ordered for '+targets.length+' employer'+(targets.length===1?'':'s'));
+    /* Sequences that include a verification step advance when the order completes. */
+    await _seqAdvanceIfIntent(W.row,it=>it.type==='integration'&&it.provider==='yardstik'&&/verification/.test(it.action||''),'employment verification ordered');
     renderWorkspace();
   }catch(e){toast('✗ Order failed: '+e.message);}
 }
@@ -21947,6 +21964,27 @@ function _seqV3Action(c,info){
       cand=Object.assign({},c,{st:Object.assign({},c.st||{},{sequenceId:seq.id,sequenceStepId:ptr})});
     }
     let ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
+    /* STAGE IS TRUTH (legacy parity): webhooks and workspace actions write column G. If the
+       sheet says the candidate is FURTHER along than the pointer (booking webhook advanced
+       the stage while the pointer sat on an earlier email/wait), snap the pointer forward
+       to match the stage — the card must act like the stage tag reads. Never backward. */
+    if(c.stage){
+      const skey='stage_'+String(c.stage).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+      const sIdx=seq.steps.findIndex(s2=>s2.id===skey);
+      const pIdx=seq.steps.findIndex(s2=>s2.id===(cand.st&&cand.st.sequenceStepId));
+      if(sIdx>=0&&pIdx>=0&&sIdx>pIdx){
+        const ptr=_classicPointerFor(cand,seq);
+        if(ptr&&ptr!==cand.st.sequenceStepId){
+          cand.st.sequenceStepId=ptr;
+          cand.st.sequenceHistory=(cand.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
+          if(cand===c&&c.st.sequenceId){
+            cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Pointer snapped to stage '+c.stage+' → '+ptr});
+            _seqCommitState(cand,{}).catch(e2=>console.warn('stage snap persist:',e2));
+          }
+          ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
+        }
+      }
+    }
     /* Bookkeeping walk-through: an advance button must never be the card — the card shows
        the step that actually needs a human. Two intent shapes are pure bookkeeping (no
        outward write) and get walked through automatically:
@@ -21964,6 +22002,9 @@ function _seqV3Action(c,info){
         const its=e3.intents||[];
         if(its.length===1&&its[0].type==='advance')return true;
         if(its.length===2&&its[0].type==='set-stage'&&its[1].type==='advance'&&its[0].stage===cand.stage)return true;
+        /* A yardstik-order step whose check ALREADY EXISTS (bgStarted) is done in reality —
+           re-offering "Start Yardstik check" would order a duplicate. Walk through it. */
+        if(its[0]&&its[0].type==='integration'&&its[0].provider==='yardstik'&&/order/.test(its[0].action||'')&&_seqTriggerEval('bgStarted',cand))return true;
         return false;
       };
       let walked=0;
@@ -22035,6 +22076,31 @@ async function _seqAdvance(cand){
   await _seqCommitState(cand,adv.partialState);
   if(typeof render==='function')render();
   if(W&&W.row===cand.excelRow)renderWorkspace();
+}
+
+/* Completion bridge: advance the pointer only when the CURRENT evaluated intent matches
+   pred — used by outward actions (yardstik order, etc.) after they succeed, so completing
+   an action IS what advances the sequence. Fail-closed: any mismatch advances nothing. */
+async function _seqAdvanceIfIntent(row,pred,logMsg){
+  try{
+    const cand=pipeline.find(x=>x.excelRow===row);
+    if(!cand||!cand.st||!cand.st.sequenceId||!window.SeqBuilderV3)return;
+    const sq=(SETTINGS.sequences||[]).find(q=>q.id===cand.st.sequenceId);
+    if(!sq)return;
+    const st=(W&&W.row===row)?W.st:cand.st;
+    const _cd=()=>Object.assign({},cand,{stage:(W&&W.row===row)?W.stage:cand.stage,st:st});
+    const ctx=(typeof _seqHostCtx==='function')?_seqHostCtx():undefined;
+    const ev=window.SeqBuilderV3.evaluate(sq,_cd(),_seqTriggerEval,undefined,ctx);
+    const it=(ev.intents||[])[0];
+    if(!it||!pred(it))return;
+    const adv=window.SeqBuilderV3.advanceStep(sq,_cd(),_seqTriggerEval,undefined,ctx);
+    if(adv.error)return;
+    Object.assign(st,adv.partialState);
+    if(st!==cand.st)cand.st=st;
+    st.log=(st.log||[]).concat({t:stamp(),x:'🧬 Sequence advanced — '+(logMsg||'step complete')});
+    await patchRange('AJ'+row,[[JSON.stringify(sanitizeState(st))]]);
+    if(typeof render==='function')render();
+  }catch(e){console.warn('seq advance bridge:',e);}
 }
 
 /* Direct template send (pack/hub actions) — the operator confirmed the send
