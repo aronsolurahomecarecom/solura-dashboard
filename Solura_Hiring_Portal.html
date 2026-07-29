@@ -15347,14 +15347,31 @@ function checksBlock(){
   const yardstikCard=yardstikBlock();
   const seqCard=seqV2Card();
   const aiCard=aiScreenCard();
+  /* Cert-gated registries are recommended only once the MATCHING cert was actually sent
+     (a credential with a file on record, or verified) — not merely claimed. Claimed-but-
+     not-sent dims to "awaiting cert"; no matching claim dims to "no matching cert".
+     Person-level registries (OIG, SAM, abuser, sex offender, LTC) are always relevant. */
+  const _certRx={ohnar:/stna|cna|nurse.?aide/i,ohnurselic:/\brn\b|\blpn\b|registered nurse|licensed practical/i};
+  const _credsAll=(W.st&&W.st.credentials)||[];
+  const _claimedNames=((W.st&&W.st.certs)||[]).concat(_credsAll.map(cr=>cr.name||'')).filter(Boolean);
+  const _receivedNames=_credsAll.filter(cr=>cr.fileUrl||cr.type==='verified').map(cr=>cr.name||'').filter(Boolean);
   /* Render each registry as a row with: link + status select + notes input */
   const rows=_registryList().map(r=>{
     const rc=W.st.registryChecks[r.k]||{};
     const reqClass=r.req==='required'?'pa':r.req==='recommended'?'psoft':'pg';
-    return `<div style="border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:8px;background:#FAFAF7">
+    const rx=_certRx[r.k];
+    const recvHit=rx?_receivedNames.find(n=>rx.test(n)):null;
+    const claimHit=rx?_claimedNames.find(n=>rx.test(n)):null;
+    const rank=!rx?1:recvHit?0:claimHit?2:3;
+    const dim=rank>=2?'opacity:.55;':'';
+    const certPill=!rx?''
+      :recvHit?`<span class="pill pg" style="font-size:9px;font-weight:700">🎓 ${esc(recvHit.toUpperCase())} ON FILE — CHECK NOW</span>`
+      :claimHit?`<span class="pill psoft" style="font-size:9px">⏳ AWAITING ${esc(claimHit.toUpperCase())} FROM CANDIDATE</span>`
+      :`<span class="pill psoft" style="font-size:9px">NO MATCHING CERT</span>`;
+    const html=`<div style="border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:8px;background:#FAFAF7;${dim}">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px">
         <span style="font-size:13px;font-weight:600;color:var(--mid)">${esc(r.l)}</span>
-        <span class="pill ${reqClass}" style="font-size:9px;font-weight:700">${esc(r.req.toUpperCase())}</span>
+        <span style="display:flex;gap:5px;align-items:center">${certPill}<span class="pill ${reqClass}" style="font-size:9px;font-weight:700">${esc(r.req.toUpperCase())}</span></span>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <button class="btn-sm bg-sky-l" style="flex:0 0 auto;cursor:pointer" onclick="openLinkPopup('${esc(r.u)}','reg_${r.k}',1000,750)">Open registry ↗</button>
@@ -15362,7 +15379,8 @@ function checksBlock(){
         <input type="text" value="${esc(rc.notes||'')}" placeholder="notes (optional)" oninput="setRegistryResult('${r.k}','notes',this.value)" onblur="saveW(true)" style="flex:1;min-width:140px;padding:6px 9px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12px">
       </div>
     </div>`;
-  }).join('');
+    return {html,rank};
+  }).sort((a,b)=>a.rank-b.rank).map(x=>x.html).join('');
   return `<div class="wscard" id="ws-checks"><h3>Background &amp; certificates</h3>
     ${aiCard}${seqCard}${yardstikCard}
     <div style="font-size:12px;color:var(--soft);margin-bottom:12px">Run each registry, record what you found. The Offer button unlocks when the 3rd-party check returns clear.</div>
@@ -16394,6 +16412,10 @@ const ASSIGNMENT_KINDS=[
   {key:'other',label:'Other document',icon:'📎',filename:(c,name)=>(name?safeFileName(name):'document')+'-'+today()+'.pdf'}
 ];
 
+/* Standard cert types for the expanded picker — the candidate's own claimed certs always
+   list first; this is the "see all types" tail. */
+const COMMON_CERT_TYPES=['STNA','CNA','HHA','CPR','First Aid','BLS','TB Test','Hepatitis B Vaccine','Flu Vaccine','COVID-19 Vaccine','RN License','LPN License','Med Aide (Certified)','DSP'];
+
 function _currentAwaitingItems(c){
   if(!c||!c.st)return [];
   return (c.st.awaitingItems||[]).slice();
@@ -16431,12 +16453,25 @@ function _renderAttachmentRow(a,i,messageId,cand,awaiting){
       ${primaryBtn}
       <select id="${dropdownId}" style="padding:5px 9px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px;background:#fff" onchange="_onAssignKindChange(${i},this.value)">
         <option value="">— or assign as… —</option>
-        ${ASSIGNMENT_KINDS.filter(k=>k.key!=='cert_clarification').map(k=>`<option value="${k.key}">${k.icon} ${esc(k.label)}</option>`).join('')}
+        ${(function(){
+          /* The candidate's claimed certs are first-class one-click options; the generic
+             cert entry below opens the full type list. */
+          const claimed=(cand&&cand.st&&Array.isArray(cand.st.certs)?cand.st.certs:[]).filter(x=>x&&String(x).trim());
+          return claimed.map(n=>`<option value="cert::${esc(n)}">🎓 Cert: ${esc(n)} (from application)</option>`).join('');
+        })()}
+        ${ASSIGNMENT_KINDS.filter(k=>k.key!=='cert_clarification').map(k=>`<option value="${k.key}">${k.icon} ${esc(k.key==='cert'?'Certificate — all types…':k.label)}</option>`).join('')}
       </select>
       <select id="${certNameId}" style="display:none;padding:5px 9px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px;background:#fff;min-width:180px" onchange="_onCertNameChange(${i},this.value)">
-        <option value="">— Pick cert from application —</option>
-        ${(cand&&cand.st&&Array.isArray(cand.st.certs)?cand.st.certs.filter(x=>x&&x.trim()):[]).map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
-        ${(cand&&cand.st&&Array.isArray(cand.st.certs)&&cand.st.certs.length)?'<option value="" disabled>──────────</option>':''}
+        <option value="">— Pick the cert type —</option>
+        ${(function(){
+          const claimed=(cand&&cand.st&&Array.isArray(cand.st.certs)?cand.st.certs.filter(x=>x&&x.trim()):[]);
+          const claimedOpts=claimed.map(c=>`<option value="${esc(c)}">🎓 ${esc(c)} (from application)</option>`).join('');
+          const rest=COMMON_CERT_TYPES.filter(t=>!claimed.some(c2=>String(c2).toLowerCase()===t.toLowerCase()));
+          return claimedOpts
+            +(claimed.length?'<option value="" disabled>── all cert types ──</option>':'')
+            +rest.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+        })()}
+        <option value="" disabled>──────────</option>
         <option value="__OTHER__">+ Other (type in)…</option>
       </select>
       <input id="att-certname-other-${i}" type="text" placeholder="Cert name (e.g. CPR, STNA)" style="display:none;padding:5px 9px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px;width:160px">
@@ -16453,7 +16488,9 @@ function _onAssignKindChange(i,kind){
   const certHint=document.getElementById('att-cert-hint-'+i);
   const customIn=document.getElementById('att-custom-'+i);
   const go=document.getElementById('att-go-'+i);
-  /* Cert: show the dropdown, reset its value, hide the "other" free-text until user picks it. */
+  /* Preset cert (value 'cert::NAME' — one of the candidate's claimed certs picked directly):
+     nothing more to choose, just show the hint + go. Generic 'cert' opens the type list. */
+  const certPreset=!!(kind&&kind.indexOf('cert::')===0);
   if(kind==='cert'){
     certIn.style.display='inline-block';
     certIn.value='';
@@ -16462,7 +16499,7 @@ function _onAssignKindChange(i,kind){
   }else{
     certIn.style.display='none';
     if(certOther)certOther.style.display='none';
-    if(certHint)certHint.style.display='none';
+    if(certHint)certHint.style.display=certPreset?'inline':'none';
   }
   customIn.style.display=(kind==='other')?'inline-block':'none';
   go.style.display=kind?'inline-block':'none';
@@ -16492,10 +16529,14 @@ async function _assignAttachmentToAwaiting(messageId,attIdx,row){
 async function _assignAttachmentCustom(messageId,attIdx,row){
   const cand=pipeline.find(c=>c.excelRow===row);
   if(!cand){toast('Candidate not found');return;}
-  const kind=document.getElementById('att-kind-'+attIdx).value;
+  let kind=document.getElementById('att-kind-'+attIdx).value;
   if(!kind){toast('Pick what to assign it as');return;}
   let name='';
-  if(kind==='cert'){
+  if(kind.indexOf('cert::')===0){
+    /* Claimed cert picked directly from the main dropdown. */
+    name=kind.slice(6);
+    kind='cert';
+  }else if(kind==='cert'){
     /* Read from the cert dropdown. If user picked "Other...", read from the free-text input. */
     const certSel=document.getElementById('att-certname-'+attIdx);
     const certOther=document.getElementById('att-certname-other-'+attIdx);
