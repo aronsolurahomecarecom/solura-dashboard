@@ -9908,8 +9908,71 @@ async function loadData(){
      lives in the Inbox under the ⚡ Blasts filter. Diagnostics remain available in console via
      window._blastDiag. */
   document.getElementById('sync-time').textContent='Synced '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
-  _reconcileBookingStages().catch(e=>console.warn('booking stage catch-up:',e.message));
+  _reconcileBookingStages().then(()=>_seqV3RepairPass()).catch(e=>console.warn('load heals:',e.message));
   render();
+}
+
+/* One engine, fully adopted (spec §1.3): ensure the default sequence is the Classic flow
+   with the Claude screen, then repair every active candidate onto a valid pointer:
+     - unadopted                → adopt (auto-assign, so the legacy path retires)
+     - sequence gone            → move to the default
+     - known-bad sequence       → (manual phone-screen step) move to the default
+     - pointer step missing     → re-place stage-matched
+   Healthy candidates — including anyone on a different healthy sequence (tag-for-life) —
+   are untouched, so re-running is a no-op. Candidates whose stage has no stage step in
+   the target (legacy References lane) are left alone. Every move is logged. */
+async function _seqV3RepairPass(){
+  try{
+    if(!window.SeqBuilderV3)return;
+    _seqV3Migrate();
+    let target=(SETTINGS.sequences||[]).find(s=>s.name==='Classic flow + Claude screen');
+    if(!target){
+      const base=(SETTINGS.sequences||[]).find(s=>s.id==='classic-flow');
+      if(base&&!(SETTINGS.sequences||[]).some(s=>s.id==='classic-flow-claude')){
+        const cl=JSON.parse(JSON.stringify(base));
+        cl.id='classic-flow-claude';cl.name='Classic flow + Claude screen';
+        const ap=cl.steps.find(s=>s.id==='stage_applied');
+        if(ap){
+          cl.steps.splice(cl.steps.indexOf(ap)+1,0,{id:'int_claude_screen',key:'claude_screen',kind:'integration',label:'Claude resume screen',icon:'🤖',integration:{provider:'claude',action:'resume_screen',params:{}},locked:false,automate:false,next:ap.next,ui:ap.ui?{x:(ap.ui.x||0)+90,y:(ap.ui.y||0)+90}:undefined});
+          ap.next='int_claude_screen';
+        }
+        if(window.SeqBuilderV3.validateSequence(cl).ok){
+          SETTINGS.sequences.push(cl);target=cl;markSettingsDirty();
+          console.log('🧬 Created "Classic flow + Claude screen" (classic-flow-claude)');
+        }
+      }
+      if(!target)target=base; /* fail-safe: plain Classic flow still has proper session steps */
+    }
+    if(!target)return;
+    if(window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[])!==target.id){
+      SETTINGS.sequenceAssignments=window.SeqBuilderV3.setDefaultSequence(SETTINGS.sequenceAssignments||[],target.id);
+      markSettingsDirty();
+    }
+    const badSeq=(sq)=>!sq||!(sq.steps||[]).length||(sq.steps||[]).some(s=>s.kind==='manual'&&/phone.?screen/i.test(s.label||''));
+    let n=0;
+    for(const c of pipeline){
+      if(!c||!c.st)continue;
+      if(c.stage==='Hired'||c.stage==='Declined')continue;
+      const cur=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
+      const ptrOk=!!(cur&&(cur.steps||[]).some(s=>s.id===c.st.sequenceStepId));
+      if(c.st.sequenceId===target.id&&ptrOk)continue;
+      if(c.st.sequenceId&&!badSeq(cur)&&ptrOk)continue; /* healthy on another sequence — tag-for-life stands */
+      const skey='stage_'+String(c.stage||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+      if(!target.steps.some(s=>s.id===skey))continue; /* no stage step for this stage — leave alone */
+      const wasAdopted=!!c.st.sequenceId;
+      const ptr=_classicPointerFor(c,target);
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧬 '+(wasAdopted?'Repaired onto':'Adopted')+' "'+target.name+'" — pointer '+ptr});
+      c.st.sequenceId=target.id;c.st.sequenceStepId=ptr;
+      c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
+      c.st.sequenceCompletedAt=null;c.st.sequenceNudges=c.st.sequenceNudges||{};
+      try{await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);n++;}
+      catch(e){console.warn('repair persist failed:',c.name,e.message);}
+    }
+    if(n){
+      toast('🧬 '+n+' candidate'+(n===1?'':'s')+' repaired onto "'+target.name+'"');
+      if(typeof render==='function')render();
+    }
+  }catch(e){console.warn('seq repair pass:',e);}
 }
 
 /* Booking-stage catch-up (same auto-heal spirit as above): candidates whose booking arrived
