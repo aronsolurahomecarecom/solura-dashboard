@@ -10000,8 +10000,15 @@ function _bookingKind(c){
 async function _reconcileBookingStages(){
   /* [stage] → [required booking kind, stage to advance to]. A SCREEN booking must never
      advance interview stages (that was the screening-vs-interview confusion). Kind unknown
-     → only the screen advance is safe (mirrors the worker's own fallback rule). */
-  const advanceMap={'Screen invite':['screen','Screen booked'],'Interview invite':['interview','Interview booked'],'Onboarding':['onboarding','Onboarding booked']};
+     → only the screen advance is safe (mirrors the worker's own fallback rule). Entry-stage
+     sets mirror the worker's PRE_* lists exactly — an interview booking legitimately arrives
+     while the candidate sits anywhere between Screen booked and Interview invite. */
+  const advanceMap={
+    'Applied':['screen','Screen booked'],'Screen invite':['screen','Screen booked'],
+    'Screen booked':['interview','Interview booked'],'Ask references':['interview','Interview booked'],
+    'Verify employers':['interview','Interview booked'],'References':['interview','Interview booked'],
+    'Interview invite':['interview','Interview booked'],
+    'Offer':['onboarding','Onboarding booked'],'Onboarding':['onboarding','Onboarding booked']};
   const bookedStages=['Screen booked','Interview booked','Onboarding booked'];
   let n=0,swept=0;
   for(const c of pipeline){
@@ -10023,7 +10030,7 @@ async function _reconcileBookingStages(){
     const rule=advanceMap[c.stage];if(!rule)continue;
     if(!isFinite(t)||t<Date.now()-48*3600*1000)continue;
     const kind=_bookingKind(c);
-    if(!(kind===rule[0]||(kind==null&&c.stage==='Screen invite')))continue;
+    if(!(kind===rule[0]||(kind==null&&(c.stage==='Screen invite'||c.stage==='Applied'))))continue;
     const next=rule[1];
     try{
       c.stage=next;c.row[6]=next;
