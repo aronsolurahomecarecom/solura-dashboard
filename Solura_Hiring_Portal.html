@@ -10027,9 +10027,35 @@ async function _reconcileBookingStages(){
       }catch(e){console.warn('stale booking sweep failed:',c.name,e.message);}
       continue;
     }
+    const kind=_bookingKind(c);
+    /* Mis-advance correction: a booked stage whose CURRENT booking kind contradicts it was
+       advanced by the old kind-blind catch-up (a screen booking pushed someone to
+       'Interview booked'). Move them to the booked stage the booking really belongs to and
+       re-place the pointer. Evidence-gated: only when the kind is known AND the booking is
+       current (upcoming or <48h past) — a stale slot on a manually-advanced candidate is
+       left alone. */
+    const _down={'Interview booked':{screen:'Screen booked'},'Onboarding booked':{screen:'Screen booked',interview:'Interview booked'}}[c.stage];
+    if(_down&&kind&&_down[kind]&&isFinite(t)&&t>=Date.now()-48*3600*1000){
+      const to=_down[kind];
+      try{
+        c.stage=to;c.row[6]=to;
+        c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stage corrected — current booking is a '+kind+' → '+to+' (was mis-advanced by the kind-blind catch-up)'});
+        const sq=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
+        if(sq&&(sq.steps||[]).some(s=>s.id==='stage_applied')){
+          const ptr=_classicPointerFor(c,sq);
+          if(ptr&&ptr!==c.st.sequenceStepId){
+            c.st.sequenceStepId=ptr;
+            c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
+          }
+        }
+        await patchRange('G'+c.excelRow,[[to]]);
+        await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+        n++;
+      }catch(e){console.warn('kind-mismatch correction failed:',c.name,e.message);}
+      continue;
+    }
     const rule=advanceMap[c.stage];if(!rule)continue;
     if(!isFinite(t)||t<Date.now()-48*3600*1000)continue;
-    const kind=_bookingKind(c);
     if(!(kind===rule[0]||(kind==null&&(c.stage==='Screen invite'||c.stage==='Applied'))))continue;
     const next=rule[1];
     try{
