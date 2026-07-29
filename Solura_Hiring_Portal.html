@@ -9982,25 +9982,60 @@ async function _seqV3RepairPass(){
    upcoming or recent (<48h past) — ancient stale bookings keep the explicit ⚑ button so a
    human decides. Idempotent: an advanced stage leaves the map, so this no-ops after the
    first pass. Each advance is logged on the candidate. */
+/* Which meeting is st.booking for? Prefer st.bookingKind (worker v9+ writes it); fall back
+   to the classification line the worker has always logged on booking receipt. Returns
+   'screen' | 'interview' | 'onboarding' | null (unclassifiable). */
+function _bookingKind(c){
+  const st=(c&&c.st)||{};
+  if(st.bookingKind)return st.bookingKind;
+  const log=st.log||[];
+  for(let i=log.length-1;i>=0;i--){
+    const x=(log[i]&&log[i].x)||'';
+    const m=/classified as "(screen|interview|onboarding)"/.exec(x);
+    if(m)return m[1];
+    if(/Cal\.com booking received/.test(x))return null; /* newest booking was unclassified */
+  }
+  return null;
+}
 async function _reconcileBookingStages(){
-  const advanceMap={'Screen invite':'Screen booked','Interview invite':'Interview booked','Onboarding':'Onboarding booked'};
-  let n=0;
+  /* [stage] → [required booking kind, stage to advance to]. A SCREEN booking must never
+     advance interview stages (that was the screening-vs-interview confusion). Kind unknown
+     → only the screen advance is safe (mirrors the worker's own fallback rule). */
+  const advanceMap={'Screen invite':['screen','Screen booked'],'Interview invite':['interview','Interview booked'],'Onboarding':['onboarding','Onboarding booked']};
+  const bookedStages=['Screen booked','Interview booked','Onboarding booked'];
+  let n=0,swept=0;
   for(const c of pipeline){
     if(!c||!c.st||!c.st.booking)continue;
     if(c.stage==='Hired'||c.stage==='Declined')continue;
-    const next=advanceMap[c.stage];if(!next)continue;
     const t=Date.parse(c.st.booking);
+    /* Consumed-booking sweep: a booking >48h in the past at a NON-booked stage was already
+       run (or died) — clear it so it can never satisfy a later hasBooking wait or pose as
+       the next meeting's time. Booked stages keep theirs for the overdue "log result" row. */
+    if(isFinite(t)&&t<Date.now()-48*3600*1000&&bookedStages.indexOf(c.stage)<0){
+      try{
+        c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stale booking cleared ('+new Date(t).toLocaleString()+') — already consumed'});
+        delete c.st.booking;delete c.st.meetingUrl;delete c.st.calBooking;delete c.st.calBookingId;delete c.st.bookingKind;
+        await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+        swept++;
+      }catch(e){console.warn('stale booking sweep failed:',c.name,e.message);}
+      continue;
+    }
+    const rule=advanceMap[c.stage];if(!rule)continue;
     if(!isFinite(t)||t<Date.now()-48*3600*1000)continue;
+    const kind=_bookingKind(c);
+    if(!(kind===rule[0]||(kind==null&&c.stage==='Screen invite')))continue;
+    const next=rule[1];
     try{
       c.stage=next;c.row[6]=next;
-      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stage caught up to booking ('+new Date(t).toLocaleString()+') → '+next});
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stage caught up to '+(kind||'screen')+' booking ('+new Date(t).toLocaleString()+') → '+next});
       await patchRange('G'+c.excelRow,[[next]]);
       await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
       n++;
     }catch(e){console.warn('booking stage catch-up failed:',c.name,e.message);}
   }
-  if(n){
-    toast('📅 '+n+' booked candidate'+(n===1?'':'s')+' caught up to their booking stage');
+  if(n||swept){
+    if(n)toast('📅 '+n+' booked candidate'+(n===1?'':'s')+' caught up to their booking stage');
+    if(swept)console.info('📅 Swept '+swept+' stale consumed booking'+(swept===1?'':'s'));
     if(typeof render==='function')render();
   }
 }
@@ -14155,6 +14190,12 @@ async function completeQuestions(nextStage){_memGen++;applyAnswers();const sc=sc
   if(sc.dec.cls==='red'){return doEmail('reject','Declined');}
   const completedStage=W.stage; /* capture before changing */
   W.stage=nextStage;W.st.due=today();logW('Completed step → '+nextStage+' (Q'+sc.Q+'/R'+sc.R+')');
+  /* The session's booking is consumed — clear it so a finished screen's time can never
+     satisfy the interview's hasBooking wait or pose as the interview slot downstream. */
+  if(W.st.booking){
+    logW('📅 Booking consumed ('+W.st.booking+') — session completed');
+    delete W.st.booking;delete W.st.meetingUrl;delete W.st.calBooking;delete W.st.calBookingId;delete W.st.bookingKind;
+  }
   await saveW(true);toast('→ '+nextStage);
   /* fire-and-forget PDF generation for the stage we just completed */
   autoUploadStageReport(W,completedStage).catch(e=>console.warn('PDF upload bg:',e.message));
