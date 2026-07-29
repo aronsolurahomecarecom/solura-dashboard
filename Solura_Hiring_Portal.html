@@ -10433,22 +10433,50 @@ function _dn(txt,pill,date){return{txt:txt,pill:pill||'pnew',date:date||''};}
    recomputed 2-4x per candidate per render. _memGen is bumped at the top of every render/
    interaction entry point, so results are cached within one pass and recomputed on the next. */
 let _memGen=0;const _actMemo=new WeakMap(),_srMemo=new WeakMap();
+/* Short booking-time label for worklist rows — 'Thu Jul 30, 2:30 PM'. */
+function _fmtBooking(b){
+  if(!b)return '';
+  const d2=new Date(b);
+  return isNaN(d2)?'':d2.toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+}
 function action(c){
-  /* Cert-gated interview: inside the final hour with certs missing or the BG form undone,
-     cancellation is the urgent action (the invite warned them). One click → Cal.com via the
-     worker; the BOOKING_CANCELLED webhook updates state normally. Nothing cancels silently. */
+  /* Cert-gated interview choreography (Interview booked + upcoming booking):
+       T-60, certs/BG form missing → send the cancellation WARNING (once, then Scheduled);
+       T-30, still missing         → cancel is the action (tick auto-cancels when automation on);
+       certs in                    → cross-check hub action until ✓ Done with checks;
+       checks done                 → Scheduled until T-15;
+       T-15                        → 🎥 Run interview (opens interview hub + meeting link).
+     Nothing cancels silently — cancel is one click → Cal.com via the worker; the
+     BOOKING_CANCELLED webhook updates state normally. */
   if(c&&c.st&&c.st.booking&&c.stage==='Interview booked'){
     const _mins=minsUntil(c.st.booking);
-    const _miss=_missingAppCerts(c);
-    const _form=_yardstikFormFilled(c);
-    if(_mins!=null&&_mins<=60&&_mins>-30&&(_miss.length||!_form)){
+    const _info=STAGEINFO[c.stage]||STAGEINFO['Applied'];
+    const _when=_fmtBooking(c.st.booking);
+    if(_mins!=null&&_mins>-30){
+      const _miss=_missingAppCerts(c);
+      const _form=_yardstikFormFilled(c);
+      const _missing=!!(_miss.length||!_form);
       const why=(_miss.length?_miss.length+' cert'+(_miss.length===1?'':'s')+' missing':'')+(_miss.length&&!_form?' + ':'')+(!_form?'BG form not completed':'');
-      return{bucket:'action',timing:_dn('\u26a0 Interview in '+Math.max(0,_mins)+'m \u2014 '+why,'pbad'),info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'cancelInterview',label:'\u2715 Cancel interview (Cal.com)',cls:'red'}};
+      if(_missing&&_mins<=30){
+        return{bucket:'action',timing:{txt:'\u26a0 Interview in '+Math.max(0,Math.round(_mins))+'m \u2014 '+why,pill:'pbad',date:_when},info:_info,primary:{kind:'cancelInterview',label:'\u2715 Cancel interview (Cal.com)',cls:'red'}};
+      }
+      if(_missing&&_mins<=60){
+        if(!(c.st.sent&&c.st.sent.interview_cert_warning)){
+          return{bucket:'action',timing:{txt:'\u26a0 Interview in '+Math.round(_mins)+'m \u2014 '+why,pill:'pbad',date:_when},info:_info,primary:{kind:'email-tpl',tpl:'interview_cert_warning',label:'\u26a0 Send cancellation warning',cls:'red'}};
+        }
+        return{bucket:'scheduled',timing:{txt:'\u26a0 Warned \u2014 certs due 30 min before the interview',pill:'pa',date:_when},info:_info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
+      }
+      if(!_missing&&c.st.certChecksDoneAt&&!c.st.certsReadyReview){
+        if(_mins<=15){
+          return{bucket:'action',timing:{txt:'\ud83c\udfa5 Interview in '+Math.max(0,Math.round(_mins))+'m \u2014 run it',pill:'pnew',date:_when},info:_info,primary:{kind:'questions',stage:'Interview',nextStage:'Offer',label:'\ud83c\udfa5 Run interview',cls:'grn'}};
+        }
+        return{bucket:'scheduled',timing:{txt:'\u2713 Checks done \u2014 interview upcoming',pill:'pg',date:_when},info:_info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
+      }
     }
   }
-  /* All certs in → cross-check hub is the action, until opened. */
+  /* All certs in → cross-check hub is the action, until ✓ Done with checks is pressed there. */
   if(c&&c.st&&c.st.certsReadyReview&&c.stage!=='Hired'&&c.stage!=='Declined'){
-    return{bucket:'action',timing:_dn('Certs in \u2014 cross-check them','pnew'),info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'checks',label:'\ud83d\udccb Cross-check certs',cls:'gold'}};
+    return{bucket:'action',timing:{txt:'Certs in \u2014 cross-check them',pill:'pnew',date:_fmtBooking(c.st.booking)},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'checks',label:'\ud83d\udccb Cross-check certs',cls:'gold'}};
   }let e=_actMemo.get(c);if(e&&e.g===_memGen)return e.v;
   /* One candidate's evaluation error must never blank the whole board: fail to a visible
      repair row for that candidate only (the baseInfo crash of 2026-07-28 took down render). */
@@ -12444,6 +12472,13 @@ const TEMPLATES={
     forgiving; the interview version notes the higher seriousness. Both editable in Settings. */
  missed_screen:c=>{const url=(SETTINGS.config&&SETTINGS.config.calScreenUrl)||BOOK_LINK;return {s:'Missed you for our call — Solura Home Care',b:`Hi ${first(c)},\n\nWe were expecting your call today and didn't connect. No worries — life happens. Could you grab another quick 15-min slot here:\n${url}\n\nLooking forward,\nSolura Home Care`};},
  missed_interview:c=>{const url=(SETTINGS.config&&SETTINGS.config.calInterviewUrl)||BOOK_LINK;return {s:'Rescheduling your Solura Home Care interview',b:`Hi ${first(c)},\n\nWe were expecting you for the interview today. Since you're further along in our process, we'd like to give you one more chance to reschedule — please grab a slot here:\n${url}\n\nIf this isn't the right time for you, just reply and let us know.\n\nSolura Home Care`};},
+ interview_cert_warning:c=>{
+   const miss=(typeof _missingAppCerts==='function')?_missingAppCerts(c):[];
+   const formOk=(typeof _yardstikFormFilled==='function')?_yardstikFormFilled(c):true;
+   const items=miss.slice();if(!formOk)items.push('the background-check intake form');
+   const when=c.st&&c.st.booking?new Date(c.st.booking).toLocaleString('en-US',{weekday:'long',hour:'numeric',minute:'2-digit'}):'today';
+   return {s:'⚠ Action needed before your Solura interview — documents missing',
+     b:`Hi ${first(c)},\n\nYour interview is scheduled for ${when}, but we're still missing:\n\n${items.map(x=>'  • '+x).join('\n')||'  • the certificates we requested'}\n\nPlease reply to this email with the missing item${items.length===1?'':'s'} as soon as possible. If we haven't received everything 30 minutes before your interview time, we'll unfortunately have to cancel and reschedule once your documents are in.\n\nA photo of each certificate is fine — it takes 30 seconds from your phone.\n\nThank you!\nSolura Home Care`};},
  missed_onboarding:c=>{const url=(SETTINGS.config&&SETTINGS.config.calOnboardingUrl)||BOOK_LINK;return {s:'Rescheduling onboarding — Solura Home Care',b:`Hi ${first(c)},\n\nYou missed the orientation session today. Please rebook here:\n${url}\n\nThis is the final step before starting. If you're no longer interested, reply and let us know.\n\nSolura Home Care`};},
  screen_invite:c=>{const url=(SETTINGS.config&&SETTINGS.config.calScreenUrl)||BOOK_LINK;return {s:'Next step with Solura Home Care',b:`Hi ${first(c)},\n\nThanks for applying. Let's set up a quick 15-minute call — pick a time here:\n${url}\n\nSolura Home Care Hiring`};},
  screen_nudge:c=>({s:'Still interested? — Solura Home Care',b:`Hi ${first(c)},\n\nJust following up — pick a 15-minute slot whenever it's convenient:\n${BOOK_LINK}\n\nSolura Home Care`}),
@@ -13712,7 +13747,7 @@ function renderFocusedHub(){_memGen++;
     layoutMode='split';
   }else if(kind==='verify'){block=verifyBlock();title='Verify past employers';}
   else if(kind==='refs'){block=refsBlock();title='References';}
-  else if(kind==='checks'){if(W.st&&W.st.certsReadyReview){delete W.st.certsReadyReview;saveW(true);}block=checksBlock();title='Background & certificates';}
+  else if(kind==='checks'){block=checksBlock();title='Background & certificates';} /* certsReadyReview clears via ✓ Done with checks, not on open */
   else if(kind==='application'){block=applicationBlock();title='Application data';}
   else if(kind==='rewards'){block=rewardsBlock(c);title='Referrals & rewards';}
   else if(kind==='functions'){block=functionsBlock();title='Eligible functions';}
@@ -14190,7 +14225,37 @@ async function completeQuestions(nextStage){_memGen++;applyAnswers();const sc=sc
   if(sc.dec.cls==='red'){return doEmail('reject','Declined');}
   const completedStage=W.stage; /* capture before changing */
   W.stage=nextStage;W.st.due=today();logW('Completed step → '+nextStage+' (Q'+sc.Q+'/R'+sc.R+')');
-  /* The session's booking is consumed — clear it so a finished screen's time can never
+  /* Sequence bridge — MUST run while the booking still exists (the wait/stage steps just
+     before the session are only satisfied by it; clearing the booking first left the
+     pointer stuck and the card re-offered 'Run phone screen' forever). Walk bookkeeping
+     (met waits, stage already in column G) up to the session, advance past it, all
+     in-memory — the single saveW below persists pointer + booking + stage together. */
+  try{
+    const cSeq=pipeline.find(x=>x.excelRow===W.row);
+    if(cSeq&&cSeq.st&&cSeq.st.sequenceId&&window.SeqBuilderV3){
+      const sq=(SETTINGS.sequences||[]).find(q=>q.id===cSeq.st.sequenceId);
+      if(sq){
+        const _cd=()=>Object.assign({},cSeq,{stage:W.stage,st:W.st});
+        const _ctx=(typeof _seqHostCtx==='function')?_seqHostCtx():undefined;
+        let sessionDone=false;
+        for(let hop=0;hop<6&&!sessionDone;hop++){
+          const ev=window.SeqBuilderV3.evaluate(sq,_cd(),_seqTriggerEval,undefined,_ctx);
+          const it=(ev.intents||[])[0];
+          const isSession=!!(it&&it.type==='open-hub'&&ev.currentStep&&ev.currentStep.kind==='session');
+          const isBookkeeping=!!(it&&(
+            (it.type==='advance'&&(ev.intents||[]).length===1)||
+            (it.type==='set-stage'&&(it.stage===completedStage||it.stage===W.stage))));
+          if(!isSession&&!isBookkeeping)break;
+          const adv=window.SeqBuilderV3.advanceStep(sq,_cd(),_seqTriggerEval,undefined,_ctx);
+          if(adv.error){console.warn('seq session advance refused:',adv.error);break;}
+          Object.assign(W.st,adv.partialState);
+          cSeq.st=W.st;
+          if(isSession){sessionDone=true;logW('🧬 Sequence advanced — session complete');}
+        }
+      }
+    }
+  }catch(e){console.warn('seq session advance:',e);}
+  /* NOW the session's booking is consumed — clear it so a finished screen's time can never
      satisfy the interview's hasBooking wait or pose as the interview slot downstream. */
   if(W.st.booking){
     logW('📅 Booking consumed ('+W.st.booking+') — session completed');
@@ -14199,30 +14264,6 @@ async function completeQuestions(nextStage){_memGen++;applyAnswers();const sc=sc
   await saveW(true);toast('→ '+nextStage);
   /* fire-and-forget PDF generation for the stage we just completed */
   autoUploadStageReport(W,completedStage).catch(e=>console.warn('PDF upload bg:',e.message));
-  /* Sequence bridge: running the questions hub completes a session step — advance the
-     pointer past it, or the card re-offers 'Run phone screen' after the screen was run.
-     Fail-closed: only when the current step really is a session (open-hub intent). */
-  try{
-    const cSeq=pipeline.find(x=>x.excelRow===W.row);
-    if(cSeq&&cSeq.st&&cSeq.st.sequenceId&&window.SeqBuilderV3){
-      const sq=(SETTINGS.sequences||[]).find(q=>q.id===cSeq.st.sequenceId);
-      if(sq){
-        const _cd=()=>Object.assign({},cSeq,{stage:W.stage,st:W.st});
-        const _ctx=(typeof _seqHostCtx==='function')?_seqHostCtx():undefined;
-        const ev=window.SeqBuilderV3.evaluate(sq,_cd(),_seqTriggerEval,undefined,_ctx);
-        const it=(ev.intents||[])[0];
-        if(it&&it.type==='open-hub'&&ev.currentStep&&ev.currentStep.kind==='session'){
-          const adv=window.SeqBuilderV3.advanceStep(sq,_cd(),_seqTriggerEval,undefined,_ctx);
-          if(!adv.error){
-            Object.assign(W.st,adv.partialState);
-            cSeq.st=W.st;
-            logW('🧬 Sequence advanced — session complete');
-            await patchRange('AJ'+W.row,[[JSON.stringify(W.st)]]);
-          }
-        }
-      }
-    }
-  }catch(e){console.warn('seq session advance:',e);}
   /* auto-progression handled by advanceWS pattern: clear focus + open next email if applicable */
   W.focusedHub=null;
   renderWorkspace();
@@ -15447,7 +15488,24 @@ function checksBlock(){
     <div class="kvrow">Required state check ${flagPill(W.st.reqCheck)}<select onchange="W.st.reqCheck=this.value;saveW(true);renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('reqCheck')}</select></div>
     <div class="kvrow">3rd-party check ${flagPill(W.st.tpCheck)}<select onchange="W.st.tpCheck=this.value;saveW(true);renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('tpCheck')}</select></div>
     <div style="font-size:11px;color:var(--soft);margin-top:8px">Background-check API webhook flips 3rd-party status automatically. State check (BCII Webcheck) is done by the candidate — link is in the BG-consent email.</div>
+    <div class="brow" style="margin-top:16px;gap:10px;align-items:center">
+      <button class="btn-primary bg-grn" onclick="checksMarkDone()" style="padding:9px 18px">✓ Done with checks</button>
+      <span style="font-size:11px;color:var(--soft)">${W.st.certChecksDoneAt?'Last completed '+new Date(W.st.certChecksDoneAt).toLocaleString():'Marks cross-checking complete — the candidate returns to Scheduled until 15 minutes before the interview.'}</span>
+    </div>
   </div>`;
+}
+/* ✓ Done with checks — the operator confirms every registry/cert check is recorded. Clears
+   the cross-check action; an interview-booked candidate returns to Scheduled and resurfaces
+   at T-15 with the 🎥 Run interview button. */
+async function checksMarkDone(){
+  if(!W)return;
+  W.st.certChecksDoneAt=new Date().toISOString();
+  delete W.st.certsReadyReview;
+  logW('📋 Cert & registry checks marked done');
+  await saveW(true);
+  toast('✓ Checks done'+(W.stage==='Interview booked'&&W.st.booking?' — back to Scheduled until 15 min before the interview':''));
+  clearFocusedHub();
+  if(typeof render==='function')render();
 }
 
 /* Yardstik status card — shows current state of the API-driven background check. Three modes:
@@ -18195,6 +18253,7 @@ const TEMPLATE_LABELS={
  ask_references:'Ask for references',
  interview_invite:'Interview invite + BG',bg_request:'BG consent request',
  missed_interview:'Missed interview — rebook',
+ interview_cert_warning:'Interview cert warning (cancel at T-30)',
  offer:'Offer',onboarding:'Onboarding',
  missed_onboarding:'Missed onboarding — rebook',
  reject:'Rejection',missing:'Request missing info',
@@ -18214,6 +18273,7 @@ const TEMPLATE_META={
   interview_invite:        {badge:'STAGE',badgeCls:'pg',hint:'Manual send via composer or Sequence engine.'},
   bg_request:              {badge:'STAGE',badgeCls:'pg',hint:'BG-check + cert request. Manual send via composer.'},
   missed_interview:        {badge:'REBOOK',badgeCls:'psoft',hint:'Auto-opens after a no-show at the interview.'},
+  interview_cert_warning:  {badge:'WARN',badgeCls:'pa',hint:'Sent 1h before the interview when certs/BG form are missing — cancel happens at T-30.'},
   offer:                   {badge:'STAGE',badgeCls:'pg',hint:'Sent when BG check clears.'},
   onboarding:              {badge:'STAGE',badgeCls:'pg',hint:'Onboarding invite with Cal.com link.'},
   missed_onboarding:       {badge:'REBOOK',badgeCls:'psoft',hint:'Auto-opens after a no-show at onboarding.'},
@@ -21885,11 +21945,22 @@ async function _seqAutomationTick(){
     /* 1-hour auto-cancel: automation ON makes the warned rule real. Once per booking. */
     if(c.st.booking&&c.stage==='Interview booked'&&!c.st.autoCancelledAt&&c.st.calBookingId){
       const m=minsUntil(c.st.booking),miss=_missingAppCerts(c);
-      if(m!=null&&m<=60&&m>0&&(miss.length||!_yardstikFormFilled(c))){
+      const missingAny=miss.length||!_yardstikFormFilled(c);
+      /* T-60→T-30: auto-send the cancellation warning (once). T-30→0: auto-cancel. */
+      if(m!=null&&m<=60&&m>30&&missingAny&&!(c.st.sent&&c.st.sent.interview_cert_warning)){
+        try{
+          if(await _autoSendTpl(c,'interview_cert_warning')){
+            c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-sent interview cert warning (cancel at T-30)'});
+            await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+            budget--;continue; /* one action per candidate per tick */
+          }
+        }catch(e){console.warn('auto warning failed:',c.name,e.message);}
+      }
+      if(m!=null&&m<=30&&m>0&&missingAny){
         const reason=miss.length?('Required certificates not received before the interview: '+miss.join(', ')):'Background-check form not completed before the interview';
         if(await _cancelBookingHeadless(c,reason)){
           c.st.autoCancelledAt=new Date().toISOString();
-          c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-cancelled interview (1-hour rule) — '+reason});
+          c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-cancelled interview (30-minute rule; warned at T-60) — '+reason});
           await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
           budget--;continue; /* one action per candidate per tick */
         }
@@ -22175,7 +22246,8 @@ function _seqV3Action(c,info){
     }
     const pill=ev.bucket==='awaiting'?'psoft':ev.bucket==='scheduled'?'pg':'pnew';
     const bucket=ev.bucket==='done'?'action':ev.bucket;
-    return{bucket:bucket,timing:{txt:ev.label||'Sequence',pill:pill,date:''},info:info,primary:_seqV3Primary(ev,c)};
+    /* Booking time rides on every row so the card always says WHEN the meeting is. */
+    return{bucket:bucket,timing:{txt:ev.label||'Sequence',pill:pill,date:_fmtBooking(cand.st&&cand.st.booking)},info:info,primary:_seqV3Primary(ev,c)};
   }catch(e){console.warn('v3 action:',e);return null;}
 }
 function _seqV3Primary(ev,c){
