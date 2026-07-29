@@ -10509,6 +10509,18 @@ function action(c){
         }
         return{bucket:'scheduled',timing:{txt:'\u26a0 Warned \u2014 certs due 30 min before the interview',pill:'pa',date:_when},info:_info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
       }
+      if(_missing&&!c.st.certsReadyReview){
+        /* Certs not in yet and the warning window hasn't opened \u2014 WE are waiting on the
+           candidate. Awaiting, never an operator hub action: the cross-check only surfaces
+           once their documents actually arrive and are recorded (attachment assignment
+           sets certsReadyReview). */
+        return{bucket:'awaiting',timing:{txt:'\u23f3 Awaiting before the interview \u2014 '+why,pill:'psoft',date:_when},info:_info,primary:{kind:'checks',label:'\ud83d\udccb Open cert hub',cls:'sky'}};
+      }
+      if(!_missing&&_mins<=60){
+        /* Everything is in but not signed off and the interview is close \u2014 surface the
+           cross-check so \u2713 Done with checks (and then \ud83c\udfa5 Run interview) isn't skipped. */
+        return{bucket:'action',timing:{txt:'\ud83d\udccb Cross-check certs \u2014 interview in '+Math.round(_mins)+'m',pill:'pnew',date:_when},info:_info,primary:{kind:'checks',label:'\ud83d\udccb Cross-check certs',cls:'gold'}};
+      }
     }
   }
   /* All certs in → cross-check hub is the action, until ✓ Done with checks is pressed there. */
@@ -21914,6 +21926,9 @@ async function _claudeResumeScreen(row){
     if(!j.ok){toast('⚠ Screen failed: '+(j.error||r.status));return false;}
     cand.st.aiScreen=Object.assign({},j.screen,{at:new Date().toISOString(),resumeIncluded:!!j.resumeIncluded,resumeName:j.resumeName||null});
     cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🤖 Claude screened: '+(j.screen.verdict||'?')+' ('+(j.screen.score!=null?j.screen.score:'—')+') — '+String(j.screen.summary||'').slice(0,120)});
+    /* sanitizeState like every other save path — a heavily-logged candidate otherwise blows
+       the 32k AJ cell cap and the screen fails for that one candidate only. */
+    cand.st=sanitizeState(cand.st);
     await patchRange('AJ'+cand.excelRow,[[JSON.stringify(cand.st)]]);
     if(W&&W.row===row){if(W.st!==cand.st)W.st=cand.st;renderWorkspace();}
     toast('🤖 '+(j.screen.verdict==='advance'?'✓ Advance':j.screen.verdict==='concern'?'⚠ Concern':'👁 Review')+' — score '+(j.screen.score!=null?j.screen.score:'—'));
