@@ -10453,6 +10453,16 @@ function action(c){
     const _info=STAGEINFO[c.stage]||STAGEINFO['Applied'];
     const _when=_fmtBooking(c.st.booking);
     if(_mins!=null&&_mins>-30){
+      /* \u2713 Done with checks is the OPERATOR'S sign-off \u2014 it beats the automatic missing-
+         certs computation (a deliberately waived cert or an unticked BG-form flag must
+         not drag a signed-off candidate back into the warning/cancel path). A new cert
+         arriving after sign-off re-sets certsReadyReview and re-opens the review. */
+      if(c.st.certChecksDoneAt&&!c.st.certsReadyReview){
+        if(_mins<=15){
+          return{bucket:'action',timing:{txt:'\ud83c\udfa5 Interview in '+Math.max(0,Math.round(_mins))+'m \u2014 run it',pill:'pnew',date:_when},info:_info,primary:{kind:'questions',stage:'Interview',nextStage:'Offer',label:'\ud83c\udfa5 Run interview',cls:'grn'}};
+        }
+        return{bucket:'scheduled',timing:{txt:'\u2713 Checks done \u2014 interview upcoming',pill:'pg',date:_when},info:_info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
+      }
       const _miss=_missingAppCerts(c);
       const _form=_yardstikFormFilled(c);
       const _missing=!!(_miss.length||!_form);
@@ -10465,12 +10475,6 @@ function action(c){
           return{bucket:'action',timing:{txt:'\u26a0 Interview in '+Math.round(_mins)+'m \u2014 '+why,pill:'pbad',date:_when},info:_info,primary:{kind:'email-tpl',tpl:'interview_cert_warning',label:'\u26a0 Send cancellation warning',cls:'red'}};
         }
         return{bucket:'scheduled',timing:{txt:'\u26a0 Warned \u2014 certs due 30 min before the interview',pill:'pa',date:_when},info:_info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
-      }
-      if(!_missing&&c.st.certChecksDoneAt&&!c.st.certsReadyReview){
-        if(_mins<=15){
-          return{bucket:'action',timing:{txt:'\ud83c\udfa5 Interview in '+Math.max(0,Math.round(_mins))+'m \u2014 run it',pill:'pnew',date:_when},info:_info,primary:{kind:'questions',stage:'Interview',nextStage:'Offer',label:'\ud83c\udfa5 Run interview',cls:'grn'}};
-        }
-        return{bucket:'scheduled',timing:{txt:'\u2713 Checks done \u2014 interview upcoming',pill:'pg',date:_when},info:_info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
       }
     }
   }
@@ -21943,7 +21947,8 @@ async function _seqAutomationTick(){
     if(budget<=0)break;
     if(!c.st||!c.st.sequenceId||c.stage==='Hired'||c.stage==='Declined')continue;
     /* 1-hour auto-cancel: automation ON makes the warned rule real. Once per booking. */
-    if(c.st.booking&&c.stage==='Interview booked'&&!c.st.autoCancelledAt&&c.st.calBookingId){
+    if(c.st.booking&&c.stage==='Interview booked'&&!c.st.autoCancelledAt&&c.st.calBookingId&&!(c.st.certChecksDoneAt&&!c.st.certsReadyReview)){
+      /* ✓ Done with checks is the operator's sign-off — automation never warns or cancels past it. */
       const m=minsUntil(c.st.booking),miss=_missingAppCerts(c);
       const missingAny=miss.length||!_yardstikFormFilled(c);
       /* T-60→T-30: auto-send the cancellation warning (once). T-30→0: auto-cancel. */
