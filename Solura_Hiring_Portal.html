@@ -9088,8 +9088,53 @@ function watchForBounce(recipient,candidateRow){
 async function loadAvailability(){
   try{const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AK1')?$select=values");
     if(!r.ok)return;const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{AVAIL=Object.assign({pattern:{},slots:[],offs:[]},JSON.parse(v[0][0]));}catch(e){}}}catch(e){}
+  _autoLinkUnmatchedBookings().catch(e=>console.warn('auto-link:',e.message));
 }
 async function saveAvailability(){try{await patchRange('AK1',[[JSON.stringify(AVAIL)]]);}catch(e){toast('Could not save availability');}}
+
+/* Auto-link unmatched Cal.com bookings. The worker matches by the booking email only, so a
+   candidate who booked with a different address lands in AVAIL.unmatched and the portal
+   "doesn't detect" their booking. Here: an unmatched entry that matches exactly ONE active
+   candidate by email or by normalized full name gets linked exactly like the calendar's
+   manual link flow — logged, kind classified from the event title (same keywords as the
+   worker), stage caught up kind-matched by the reconcile. Ambiguous or no-hit entries stay
+   in the pool for the manual flow; a candidate who already has an upcoming booking is
+   never silently overwritten. */
+async function _autoLinkUnmatchedBookings(){
+  if(!AVAIL||!Array.isArray(AVAIL.unmatched)||!AVAIL.unmatched.length)return;
+  if(typeof pipeline==='undefined'||!pipeline.length)return;
+  const norm=s=>String(s||'').toLowerCase().replace(/[^a-z]/g,'');
+  let linked=0;const keep=[];
+  for(const u of AVAIL.unmatched){
+    let cand=null;
+    const byEmail=u.email?pipeline.filter(c=>c.email&&String(c.email).toLowerCase()===String(u.email).toLowerCase()):[];
+    const byName=norm(u.name)?pipeline.filter(c=>norm(c.name)===norm(u.name)):[];
+    if(byEmail.length===1)cand=byEmail[0];
+    else if(byName.length===1)cand=byName[0];
+    const hasUpcoming=cand&&cand.st&&cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
+    if(!cand||cand.stage==='Hired'||cand.stage==='Declined'||hasUpcoming){keep.push(u);continue;}
+    try{
+      cand.st=cand.st||{};
+      cand.st.booking=u.start;
+      cand.st.bookingSource='auto-link';
+      cand.st.bookingReceivedAt=new Date().toISOString();
+      if(u.bookingId)cand.st.calBookingId=u.bookingId;
+      if(u.email)cand.st.bookingAltEmail=u.email;
+      const hay=String(u.eventType||'').toLowerCase();
+      cand.st.bookingKind=/onboard|orientation|welcome|start/.test(hay)?'onboarding':/interview|final|in.person|meet|second|video/.test(hay)?'interview':/screen|phone|intro|initial|chat|call|first|consult/.test(hay)?'screen':null;
+      cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🔗 Booking auto-linked ('+(u.email||'?')+(u.eventType?' · '+u.eventType:'')+') — '+new Date(u.start).toLocaleString()});
+      await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
+      linked++;
+    }catch(e){console.warn('auto-link failed:',u.email,e.message);keep.push(u);}
+  }
+  if(linked){
+    AVAIL.unmatched=keep;
+    await saveAvailability();
+    toast('🔗 '+linked+' Cal.com booking'+(linked===1?'':'s')+' auto-linked to candidates');
+    await _reconcileBookingStages().catch(e=>console.warn('post-link catch-up:',e.message));
+    if(typeof render==='function')render();
+  }
+}
 
 /* Settings are persisted in THREE places, in priority order:
    1. PRIMARY: Solura_Settings.json in OneDrive (via worker /settings endpoint) — survives ALL
@@ -13613,27 +13658,40 @@ async function reallySend(tpl,advanceTo){
           const _base=(typeof pipeline!=='undefined'?pipeline.find(x=>x.excelRow===W.row):null);
           const _cd=()=>Object.assign({},_base||{},{stage:W.stage,st:W.st});
           const _ctx=(typeof _seqHostCtx==='function')?_seqHostCtx():undefined;
-          let _ev=window.SeqBuilderV3.evaluate(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
-          let _it=(_ev.intents||[])[0];
-          if(_it&&_it.type==='send-email'&&_it.templateKey===tpl){
-            let _adv=window.SeqBuilderV3.advanceStep(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
-            if(!_adv.error){
-              Object.assign(W.st,_adv.partialState);
-              logW('🧬 Sequence advanced — '+String(tpl).replace(/_/g,' ')+' sent');
-              _ev=window.SeqBuilderV3.evaluate(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
-              _it=(_ev.intents||[])[0];
-              const _flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
-              if(_it&&_it.type==='set-stage'&&_it.stage&&_flow.includes(_it.stage)){
-                _adv=window.SeqBuilderV3.advanceStep(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
-                if(!_adv.error){
-                  _seqStageFrom=W.stage;
-                  W.stage=_it.stage;
-                  W.st.due=(_it.stage==='Screen invite'||_it.stage==='Interview invite')?plusDays(3):today(); /* legacy advanceTo due-date rule */
-                  Object.assign(W.st,_adv.partialState);
-                  logW('🧬 Sequence set stage → '+_it.stage);
+          const _flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
+          /* Walk bookkeeping FIRST — when the legacy advanceTo path already wrote the stage,
+             a satisfied set-stage (or met wait) sits in front of the email step and used to
+             hide it from this bridge, so sends never advanced the pointer. */
+          for(let _hop=0;_hop<5;_hop++){
+            let _ev=window.SeqBuilderV3.evaluate(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
+            let _it=(_ev.intents||[])[0];
+            if(!_it)break;
+            if((_it.type==='advance'&&(_ev.intents||[]).length===1)||(_it.type==='set-stage'&&_it.stage===W.stage)){
+              const _advB=window.SeqBuilderV3.advanceStep(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
+              if(_advB.error)break;
+              Object.assign(W.st,_advB.partialState);
+              continue;
+            }
+            if(_it.type==='send-email'&&_it.templateKey===tpl){
+              let _adv=window.SeqBuilderV3.advanceStep(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
+              if(!_adv.error){
+                Object.assign(W.st,_adv.partialState);
+                logW('🧬 Sequence advanced — '+String(tpl).replace(/_/g,' ')+' sent');
+                _ev=window.SeqBuilderV3.evaluate(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
+                _it=(_ev.intents||[])[0];
+                if(_it&&_it.type==='set-stage'&&_it.stage&&_flow.includes(_it.stage)&&_it.stage!==W.stage){
+                  _adv=window.SeqBuilderV3.advanceStep(_sq,_cd(),_seqTriggerEval,undefined,_ctx);
+                  if(!_adv.error){
+                    _seqStageFrom=W.stage;
+                    W.stage=_it.stage;
+                    W.st.due=(_it.stage==='Screen invite'||_it.stage==='Interview invite')?plusDays(3):today(); /* legacy advanceTo due-date rule */
+                    Object.assign(W.st,_adv.partialState);
+                    logW('🧬 Sequence set stage → '+_it.stage);
+                  }
                 }
               }
             }
+            break;
           }
         }
       }
