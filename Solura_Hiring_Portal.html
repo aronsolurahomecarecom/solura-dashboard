@@ -14297,6 +14297,18 @@ function openLinkPopup(url,name,w,h){
   try{win.focus();}catch(e){}
   return win;
 }
+/* EVERY external link opens as a popup — delegated intercept so all current and future
+   <a target="_blank"> http(s) anchors (file links, cert 📎 open, email webLinks, report
+   links…) route through openLinkPopup instead of a new tab. tel:/mailto: untouched. */
+document.addEventListener('click',function(ev){
+  const a=ev.target&&ev.target.closest?ev.target.closest('a[target="_blank"]'):null;
+  if(!a)return;
+  const href=a.getAttribute('href')||'';
+  if(!/^https?:/i.test(href))return;
+  ev.preventDefault();
+  ev.stopPropagation(); /* card-level onclick (open candidate) must not also fire */
+  openLinkPopup(href,'lnk_'+href.replace(/\W+/g,'').slice(-24));
+},true);
 function meetButton(url,label){return '<button class="meet-btn" onclick="openMeetingPopup(\''+esc(url||'')+'\')"><svg viewBox=\"0 0 16 16\" fill=\"currentColor\"><path d=\"M3 4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H3zm10 1.5l2.5-1.5v8L13 10.5v-5z\"/></svg>'+esc(label||'Open meeting')+'</button>';}
 
 /* compact "empty section" bar — used when a workspace card would render essentially blank */
@@ -15937,7 +15949,7 @@ async function decideBgReport(decision){
        wired), so on proceed we open the report page in Yardstik for you to mirror the decision
        there. Popup blockers may eat this; the card's "↗ View in Yardstik" button is the fallback. */
     if(W.st.yardstik&&W.st.yardstik.reportId){
-      try{window.open('https://app.yardstik.com/report/'+encodeURIComponent(W.st.yardstik.reportId),'_blank');}catch(e){}
+      try{openLinkPopup('https://app.yardstik.com/report/'+encodeURIComponent(W.st.yardstik.reportId),'yardstik_report',1100,800);}catch(e){}
     }
     renderWorkspace();
   }
