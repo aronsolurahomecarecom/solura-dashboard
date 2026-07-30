@@ -10022,7 +10022,12 @@ async function _seqV3RepairPass(){
   try{
     if(!window.SeqBuilderV3)return;
     _seqV3Migrate();
-    let target=(SETTINGS.sequences||[]).find(s=>s.name==='Classic flow + Claude screen');
+    /* THE OPERATOR'S ★DEFAULT IS AUTHORITY: repair targets whatever sequence is starred in
+       the editor — any shape, any author. The Classic+Claude bootstrap below only runs when
+       no usable default exists at all; it never overrides a choice made in the editor. */
+    const _defId=window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[]);
+    let target=(SETTINGS.sequences||[]).find(s=>s.id===_defId&&Array.isArray(s.steps)&&s.steps.length&&!(s.steps||[]).some(s2=>s2.kind==='manual'&&/phone.?screen/i.test(s2.label||'')));
+    if(!target)target=(SETTINGS.sequences||[]).find(s=>s.name==='Classic flow + Claude screen');
     if(!target){
       const base=(SETTINGS.sequences||[]).find(s=>s.id==='classic-flow');
       if(base&&!(SETTINGS.sequences||[]).some(s=>s.id==='classic-flow-claude')){
@@ -10055,8 +10060,7 @@ async function _seqV3RepairPass(){
       const ptrOk=!!(cur&&(cur.steps||[]).some(s=>s.id===c.st.sequenceStepId));
       if(c.st.sequenceId===target.id&&ptrOk)continue;
       if(c.st.sequenceId&&!badSeq(cur)&&ptrOk)continue; /* healthy on another sequence — tag-for-life stands */
-      const skey='stage_'+String(c.stage||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
-      if(!target.steps.some(s=>s.id===skey))continue; /* no stage step for this stage — leave alone */
+      if(!target.steps.some(s=>s.kind==='stage'&&s.stage&&s.stage.setStage===c.stage))continue; /* target has no stage step for their stage — leave alone */
       const wasAdopted=!!c.st.sequenceId;
       const ptr=_classicPointerFor(c,target);
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧬 '+(wasAdopted?'Repaired onto':'Adopted')+' "'+target.name+'" — pointer '+ptr});
@@ -10140,7 +10144,7 @@ async function _reconcileBookingStages(){
         c.stage=to;c.row[6]=to;
         c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stage corrected — current booking is a '+kind+' → '+to+' (was mis-advanced by the kind-blind catch-up)'});
         const sq=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
-        if(sq&&(sq.steps||[]).some(s=>s.id==='stage_applied')){
+        if(sq&&(sq.steps||[]).some(s=>s.kind==='stage')){
           const ptr=_classicPointerFor(c,sq);
           if(ptr&&ptr!==c.st.sequenceStepId){
             c.st.sequenceStepId=ptr;
@@ -21944,7 +21948,7 @@ async function _seqRunIntent(row,intentJson){
     try{
       const aseq=window.SeqBuilderV3.resolveSequenceFor(cand,SETTINGS.sequenceAssignments||[],SETTINGS.sequences||[]);
       if(aseq&&Array.isArray(aseq.steps)&&aseq.steps.length){
-        const ptr=aseq.id==='classic-flow'?_classicPointerFor(cand,aseq):aseq.steps[0].id;
+        const ptr=_classicPointerFor(cand,aseq); /* stage-matched for ANY sequence; falls back to steps[0] */
         cand.st=cand.st||{};
         cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Adopted '+aseq.name+' (first sequence action) — pointer '+ptr});
         await _seqCommitState(cand,{sequenceId:aseq.id,sequenceStepId:ptr,sequenceHistory:((cand.st.sequenceHistory)||[]).concat({stepId:ptr,at:new Date().toISOString()}),sequenceCompletedAt:null,sequenceNudges:cand.st.sequenceNudges||{}});
@@ -22369,9 +22373,12 @@ function _seqV3Migrate(){
    start just after the stage step (their stage is already set) and skip
    email steps whose template was already sent (legacy sent-flags). */
 function _classicPointerFor(c,seq){
+  /* SEQUENCE-AGNOSTIC: the stage step is found by its DATA (stage.setStage === column G),
+     not by the migration's stage_* id convention — canvas-authored sequences with random
+     step ids get identical stage-matched placement. Id lookup kept as fallback. */
   const byId={};seq.steps.forEach(s2=>byId[s2.id]=s2);
   const key='stage_'+String(c.stage||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
-  const stageStep=byId[key];
+  const stageStep=seq.steps.find(s2=>s2.kind==='stage'&&s2.stage&&s2.stage.setStage===c.stage)||byId[key];
   if(!stageStep)return seq.steps[0].id;
   let ptr=stageStep.next?byId[stageStep.next]:null;
   if(!ptr)return stageStep.id;
@@ -22432,7 +22439,7 @@ function _seqV3Action(c,info){
          a log line (_seqRunIntent), and the bulk switchover button remains the batch path. */
       seq=window.SeqBuilderV3.resolveSequenceFor(c,SETTINGS.sequenceAssignments||[],SETTINGS.sequences||[]);
       if(!seq||!Array.isArray(seq.steps)||!seq.steps.length)return null;
-      const ptr=seq.id==='classic-flow'?_classicPointerFor(c,seq):seq.steps[0].id;
+      const ptr=_classicPointerFor(c,seq); /* stage-matched for ANY sequence; falls back to steps[0] */
       cand=Object.assign({},c,{st:Object.assign({},c.st||{},{sequenceId:seq.id,sequenceStepId:ptr})});
     }
     let ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
@@ -22441,8 +22448,9 @@ function _seqV3Action(c,info){
        the stage while the pointer sat on an earlier email/wait), snap the pointer forward
        to match the stage — the card must act like the stage tag reads. Never backward. */
     if(c.stage){
-      const skey='stage_'+String(c.stage).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
-      const sIdx=seq.steps.findIndex(s2=>s2.id===skey);
+      /* Stage step matched by DATA (setStage === column G), not the migration id convention —
+         works for any sequence authored in the editor. */
+      const sIdx=seq.steps.findIndex(s2=>s2.kind==='stage'&&s2.stage&&s2.stage.setStage===c.stage);
       const pIdx=seq.steps.findIndex(s2=>s2.id===(cand.st&&cand.st.sequenceStepId));
       if(sIdx>=0&&pIdx>=0&&sIdx>pIdx){
         const ptr=_classicPointerFor(cand,seq);
