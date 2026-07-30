@@ -9088,9 +9088,60 @@ function watchForBounce(recipient,candidateRow){
 async function loadAvailability(){
   try{const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AK1')?$select=values");
     if(!r.ok)return;const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{AVAIL=Object.assign({pattern:{},slots:[],offs:[]},JSON.parse(v[0][0]));}catch(e){}}}catch(e){}
-  _autoLinkUnmatchedBookings().catch(e=>console.warn('auto-link:',e.message));
+  _autoLinkUnmatchedBookings().then(()=>_backfillCalBookings()).catch(e=>console.warn('booking link/backfill:',e.message));
 }
 async function saveAvailability(){try{await patchRange('AK1',[[JSON.stringify(AVAIL)]]);}catch(e){toast('Could not save availability');}}
+
+/* Cal.com BACKFILL — the definitive net under the webhook. Pulls ALL upcoming bookings
+   straight from the Cal.com API (worker GET /cal/bookings; requires the v8.1 paste-deploy —
+   silently skips until the endpoint exists) and reconciles them against the pipeline. This
+   catches bookings the webhook never delivered (subscription scoped to one event type,
+   delivery failures, unmatched-pool overflow). Match: exactly ONE active candidate by email
+   (incl. bookingAltEmail) or normalized full name. Never overwrites a DIFFERENT existing
+   upcoming booking. Throttled to one Cal.com pull per 10 minutes. */
+async function _backfillCalBookings(){
+  try{
+    const tok=(SETTINGS.config||{}).ziToken||'';if(!tok)return;
+    if(window._lastCalBackfillAt&&Date.now()-window._lastCalBackfillAt<10*60*1000)return;
+    window._lastCalBackfillAt=Date.now();
+    const r=await fetch(ZI_WORKER_URL+'/cal/bookings',{headers:{'X-Solura-Token':tok}});
+    if(!r.ok)return; /* endpoint not deployed yet — silent until the worker paste-deploy */
+    const j=await r.json();
+    if(!j.ok||!Array.isArray(j.bookings))return;
+    const norm=s=>String(s||'').toLowerCase().replace(/[^a-z]/g,'');
+    let linked=0;
+    for(const b of j.bookings){
+      if(b.status&&/cancel|reject/i.test(b.status))continue;
+      const t=Date.parse(b.start);
+      if(!isFinite(t)||t<Date.now()-2*3600*1000)continue; /* upcoming (or just started) only */
+      let cand=null;
+      const byEmail=b.attendeeEmail?pipeline.filter(c=>String(c.email||'').toLowerCase()===b.attendeeEmail||String((c.st&&c.st.bookingAltEmail)||'').toLowerCase()===b.attendeeEmail):[];
+      const byName=norm(b.attendeeName)?pipeline.filter(c=>norm(c.name)===norm(b.attendeeName)):[];
+      if(byEmail.length===1)cand=byEmail[0];
+      else if(byName.length===1)cand=byName[0];
+      if(!cand||cand.stage==='Hired'||cand.stage==='Declined')continue;
+      cand.st=cand.st||{};
+      if(cand.st.calBookingId===b.uid)continue; /* already on file */
+      const hasOtherUpcoming=cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
+      if(hasOtherUpcoming)continue; /* a different live booking is already tracked — manual call */
+      const hay=String((b.title||'')+' '+(b.eventTypeSlug||'')).toLowerCase();
+      cand.st.booking=b.start;
+      cand.st.bookingKind=/onboard|orientation|welcome|start/.test(hay)?'onboarding':/interview|final|in.person|meet|second|video/.test(hay)?'interview':/screen|phone|intro|initial|chat|call|first|consult/.test(hay)?'screen':null;
+      cand.st.bookingSource='cal-backfill';
+      cand.st.bookingReceivedAt=new Date().toISOString();
+      cand.st.calBooking=true;cand.st.calBookingId=b.uid||'';
+      if(b.attendeeEmail&&String(cand.email||'').toLowerCase()!==b.attendeeEmail)cand.st.bookingAltEmail=b.attendeeEmail;
+      cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🔗 Booking backfilled from Cal.com ('+(b.title||b.eventTypeSlug||'?')+') — '+new Date(t).toLocaleString()+' · the webhook never delivered this one'});
+      await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
+      linked++;
+    }
+    if(linked){
+      toast('🔗 '+linked+' booking'+(linked===1?'':'s')+' backfilled from Cal.com');
+      await _reconcileBookingStages().catch(e=>console.warn('post-backfill catch-up:',e.message));
+      if(typeof render==='function')render();
+    }
+  }catch(e){console.warn('cal backfill:',e.message);}
+}
 
 /* Auto-link unmatched Cal.com bookings. The worker matches by the booking email only, so a
    candidate who booked with a different address lands in AVAIL.unmatched and the portal
