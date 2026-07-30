@@ -202,6 +202,13 @@ async function submitRefs(){
       btn.disabled=false;btn.textContent='Submit references';
       alert(msg);return;
     }
+    if(r.status===404){
+      /* Their link's code/email didn't match a candidate — retrying can never succeed.
+         Give a specific instruction instead of an endless generic-retry loop. */
+      btn.disabled=false;btn.textContent='Submit references';
+      alert("We couldn't match your link to your application. Please email your references directly to careers@solurahomecare.com (or reply to any email from us) and we'll take it from there — no need to retry this form.");
+      return;
+    }
     if(!r.ok){const t=await r.text().catch(()=>'');throw new Error('Server returned '+r.status+' '+t.slice(0,80));}
     document.getElementById('app').innerHTML=`<div class="done">
       <div class="ck">✓</div><h2>Thanks!</h2>

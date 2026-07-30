@@ -9120,6 +9120,7 @@ async function _backfillCalBookings(){
       if(byEmail.length===1)cand=byEmail[0];
       else if(byName.length===1)cand=byName[0];
       if(!cand||cand.stage==='Hired'||cand.stage==='Declined')continue;
+      if(W&&W.row===cand.excelRow)continue; /* workspace open — saveW would clobber; next pull */
       cand.st=cand.st||{};
       if(cand.st.calBookingId===b.uid)continue; /* already on file */
       const hasOtherUpcoming=cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
@@ -9163,7 +9164,7 @@ async function _autoLinkUnmatchedBookings(){
     if(byEmail.length===1)cand=byEmail[0];
     else if(byName.length===1)cand=byName[0];
     const hasUpcoming=cand&&cand.st&&cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
-    if(!cand||cand.stage==='Hired'||cand.stage==='Declined'||hasUpcoming){keep.push(u);continue;}
+    if(!cand||cand.stage==='Hired'||cand.stage==='Declined'||hasUpcoming||(W&&W.row===cand.excelRow)){keep.push(u);continue;}
     try{
       cand.st=cand.st||{};
       cand.st.booking=u.start;
@@ -9987,7 +9988,7 @@ async function loadData(){
     if(touched){
       /* Fire-and-forget persist — load shouldn't block. Single write per candidate covers both
          the awaiting heal and the email sweep, so the two can't race on the same AJ cell. */
-      patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(e=>console.warn('Heal/sweep write failed for row '+c.excelRow+':',e.message));
+      patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]).catch(e=>console.warn('Heal/sweep write failed for row '+c.excelRow+':',e.message));
     }
   }
   if(healed)console.info('Auto-healed '+healed+' stuck awaiting candidate'+(healed===1?'':'s'));
@@ -10049,6 +10050,7 @@ async function _seqV3RepairPass(){
     for(const c of pipeline){
       if(!c||!c.st)continue;
       if(c.stage==='Hired'||c.stage==='Declined')continue;
+      if(W&&W.row===c.excelRow)continue; /* workspace open — saveW would clobber; next load */
       const cur=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
       const ptrOk=!!(cur&&(cur.steps||[]).some(s=>s.id===c.st.sequenceStepId));
       if(c.st.sequenceId===target.id&&ptrOk)continue;
@@ -10110,6 +10112,7 @@ async function _reconcileBookingStages(){
   for(const c of pipeline){
     if(!c||!c.st||!c.st.booking)continue;
     if(c.stage==='Hired'||c.stage==='Declined')continue;
+    if(W&&W.row===c.excelRow)continue; /* workspace open on them — saveW would clobber the heal; next load catches it */
     const t=Date.parse(c.st.booking);
     /* Consumed-booking sweep: a booking >48h in the past at a NON-booked stage was already
        run (or died) — clear it so it can never satisfy a later hasBooking wait or pose as
@@ -10577,7 +10580,9 @@ function action(c){
        T-15                        → 🎥 Run interview (opens interview hub + meeting link).
      Nothing cancels silently — cancel is one click → Cal.com via the worker; the
      BOOKING_CANCELLED webhook updates state normally. */
-  if(c&&c.st&&c.st.booking&&c.stage==='Interview booked'){
+  if(c&&c.st&&c.st.booking&&c.stage==='Interview booked'&&!(c.st.emails||[]).some(e2=>!e2.seen)){
+    /* An unread reply from the candidate outranks the choreography (they may be
+       rescheduling) — fall through so _actionC's email override surfaces it. */
     const _mins=minsUntil(c.st.booking);
     const _info=STAGEINFO[c.stage]||STAGEINFO['Applied'];
     const _when=_fmtBooking(c.st.booking);
@@ -10596,10 +10601,12 @@ function action(c){
       const _form=_yardstikFormFilled(c);
       const _missing=!!(_miss.length||!_form);
       const why=(_miss.length?_miss.length+' cert'+(_miss.length===1?'':'s')+' missing':'')+(_miss.length&&!_form?' + ':'')+(!_form?'BG form not completed':'');
-      if(_missing&&_mins<=30){
+      /* Fresh certs arrived (certsReadyReview) → the cross-check action below outranks the
+         warning/cancel path: never cancel on a candidate whose documents are in, unreviewed. */
+      if(_missing&&_mins<=30&&!c.st.certsReadyReview){
         return{bucket:'action',timing:{txt:'\u26a0 Interview in '+Math.max(0,Math.round(_mins))+'m \u2014 '+why,pill:'pbad',date:_when},info:_info,primary:{kind:'cancelInterview',label:'\u2715 Cancel interview (Cal.com)',cls:'red'}};
       }
-      if(_missing&&_mins<=60){
+      if(_missing&&_mins<=60&&!c.st.certsReadyReview){
         if(!(c.st.sent&&c.st.sent.interview_cert_warning)){
           return{bucket:'action',timing:{txt:'\u26a0 Interview in '+Math.round(_mins)+'m \u2014 '+why,pill:'pbad',date:_when},info:_info,primary:{kind:'email-tpl',tpl:'interview_cert_warning',label:'\u26a0 Send cancellation warning',cls:'red'}};
         }
@@ -11272,7 +11279,7 @@ async function markAllRead(){
     let dirty=false;
     emails.forEach(e=>{if(!e.seen){e.seen=true;e.seenAt=stamp();dirty=true;count++;}});
     if(dirty){
-      try{await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);}catch(e){console.warn('mark-read save:',e.message);}
+      try{await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);}catch(e){console.warn('mark-read save:',e.message);}
     }
   }
   toast('✓ '+count+' email'+(count===1?'':'s')+' marked read');
@@ -12078,7 +12085,7 @@ async function _sendNudgeHeadless(c){
   c.st.emails.unshift({id:'local-'+Date.now()+'-'+c.excelRow,direction:'out',subject:(subj||'').slice(0,140),preview:(body||'').slice(0,200),from:'careers@solurahomecare.com',to:c.email,received:new Date().toISOString(),seen:true});
   if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
   c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'\ud83d\udd14 Nudge sent: '+tpl.replace(/_/g,' ')});
-  await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+  await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
 }
 /* Nudge ALL idle candidates — resilient batch (per-send timeout + guaranteed toast/re-render). */
 async function nudgeAll(){
@@ -12807,7 +12814,7 @@ async function _markReceivedCore(cand,idx,note){
   /* NOTE: deliberately NOT stamping lastAssignmentAt here — receiving an item is the OPPOSITE of
      a new assignment arriving; stamping it made the candidate re-surface as "New document
      assigned" right after you marked something received. */
-  await patchRange('AJ'+cand.excelRow,[[JSON.stringify(cand.st)]]);
+  await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
   /* If the workspace is showing this candidate as a separate object, keep it in sync. */
   if(W&&W.row===cand.excelRow&&W.st!==cand.st)W.st=cand.st;
   /* Refresh the UI so the profile change is visible immediately (#4: "doesn't update the profile"). */
@@ -13828,7 +13835,7 @@ function openWorkspace(r,jump){wsRow=r;loadW(r);renderWorkspace(jump);
     if(c.st&&c.st.manualAwaiting){
       c.st.lastAwaitingReview=new Date().toISOString();
       /* Persist this stamp so refreshes don't re-surface them */
-      patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(err=>console.warn('Awaiting review stamp:',err.message));
+      patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]).catch(err=>console.warn('Awaiting review stamp:',err.message));
     }
     detectResumeInFolder(c).catch(e=>console.warn(e.message));
     ensureApplicationPdf(c).catch(e=>console.warn(e.message));
@@ -13879,7 +13886,7 @@ async function detectResumeInFolder(c){
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-released — résumé received'});
         }
       }
-      await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+      await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
       if(W&&W.row===c.excelRow){W.st=c.st;W.gates=W.gates||{};}
       render();
       if(W&&W.row===c.excelRow)renderWorkspace();
@@ -14396,6 +14403,7 @@ async function completeQuestions(nextStage){_memGen++;applyAnswers();const sc=sc
         const _cd=()=>Object.assign({},cSeq,{stage:W.stage,st:W.st});
         const _ctx=(typeof _seqHostCtx==='function')?_seqHostCtx():undefined;
         let sessionDone=false;
+        window._cqBridgeErr=false;
         for(let hop=0;hop<6&&!sessionDone;hop++){
           const ev=window.SeqBuilderV3.evaluate(sq,_cd(),_seqTriggerEval,undefined,_ctx);
           const it=(ev.intents||[])[0];
@@ -14405,7 +14413,7 @@ async function completeQuestions(nextStage){_memGen++;applyAnswers();const sc=sc
             (it.type==='set-stage'&&(it.stage===completedStage||it.stage===W.stage))));
           if(!isSession&&!isBookkeeping)break;
           const adv=window.SeqBuilderV3.advanceStep(sq,_cd(),_seqTriggerEval,undefined,_ctx);
-          if(adv.error){console.warn('seq session advance refused:',adv.error);break;}
+          if(adv.error){console.warn('seq session advance refused:',adv.error);window._cqBridgeErr=true;break;}
           Object.assign(W.st,adv.partialState);
           cSeq.st=W.st;
           if(isSession){sessionDone=true;logW('🧬 Sequence advanced — session complete');}
@@ -14414,8 +14422,10 @@ async function completeQuestions(nextStage){_memGen++;applyAnswers();const sc=sc
     }
   }catch(e){console.warn('seq session advance:',e);}
   /* NOW the session's booking is consumed — clear it so a finished screen's time can never
-     satisfy the interview's hasBooking wait or pose as the interview slot downstream. */
-  if(W.st.booking){
+     satisfy the interview's hasBooking wait or pose as the interview slot downstream.
+     Skipped when the bridge errored mid-walk: the pointer may still sit before a
+     hasBooking wait that would then never be satisfiable. */
+  if(W.st.booking&&!window._cqBridgeErr){
     logW('📅 Booking consumed ('+W.st.booking+') — session completed');
     delete W.st.booking;delete W.st.meetingUrl;delete W.st.calBooking;delete W.st.calBookingId;delete W.st.bookingKind;
   }
@@ -16443,7 +16453,7 @@ async function markCurrentEmailUnread(){
       const e=(c.st.emails||[]).find(x=>x.id===id);
       if(e&&e.seen){
         delete e.seen;delete e.seenAt;
-        patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(err=>console.warn('unmark persist:',err.message));
+        patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]).catch(err=>console.warn('unmark persist:',err.message));
       }
     });
     toast('✓ Marked unread in Outlook');
@@ -16466,7 +16476,7 @@ async function openEmailDetail(messageId){
       e.seen=true;
       e.seenAt=stamp();
       anyMarked=true;
-      patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(err=>console.warn('seen persist:',err.message));
+      patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]).catch(err=>console.warn('seen persist:',err.message));
     }
   });
   if(anyMarked)setTimeout(()=>render(),200);
@@ -16909,7 +16919,7 @@ async function _doAssignment(messageId,attIdx,cand,item){
     cand.st.lastAssignmentAt=new Date().toISOString();
     cand.st.log=cand.st.log||[];
     cand.st.log.push({t:stamp(),x:'📎 Assigned attachment "'+att.name+'" as '+_awaitingItemLabel(item)+' — saved to '+finalName});
-    await patchRange('AJ'+cand.excelRow,[[JSON.stringify(cand.st)]]);
+    await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
     const releasedNow=wasParked&&queueEmpty;
     const remainingMsg=cand.st.awaitingItems.length?cand.st.awaitingItems.length+' awaiting item'+(cand.st.awaitingItems.length===1?'':'s')+' remaining':(releasedNow?'released from awaiting — next step ready':'all requests fulfilled');
     toast('✓ Assigned as '+_awaitingItemLabel(item)+' — '+remainingMsg);
@@ -17723,7 +17733,7 @@ async function ensureApplicationPdf(c){
       await uploadPdfToOnboarding(c.name,'application-'+((c.st&&c.st.appliedDate)||today())+'.pdf',blob);
     }
     c.st.hasApplicationPdf=true;
-    await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+    await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
   }catch(e){console.warn('Application PDF gen failed:',e.message);}
 }
 function generateActivityLogPdf(c){
@@ -18257,7 +18267,7 @@ async function sendMassEmail(){
            the log tail. */
         c.st.log=c.st.log||[];
         c.st.log.push({t:stamp(),x:'✉ Mass email sent: '+(subj||'').slice(0,60)});
-        patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]).catch(e=>{});
+        patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]).catch(e=>{});
       }catch(e){
         failed++;recipientRecord.error=e.message;if(!firstError)firstError=e.message;
         console.warn('Mass send failed for '+c.email+':',e.message);
@@ -20504,7 +20514,7 @@ async function backfillRefCodes(){
     usedCodes.add(code);
     c.st=c.st||{};c.st.refCode=code;
     try{
-      await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+      await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
       done++;
     }catch(e){
       console.warn('refCode backfill failed for row '+c.excelRow+':',e.message);
@@ -21099,7 +21109,7 @@ function scanRaceAffected(){
       <div style="font-size:11.5px;color:var(--mid);margin-bottom:7px">No booking on file even though they&apos;re past the invite stage. Send a rebook email so they pick a new time via Cal.com (the next webhook will restore state cleanly).</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn-sm bg-cream" onclick="sendRebookEmail(${c.excelRow},'${which}')" style="cursor:pointer">✉ Send rebook email</button>
-        <button class="btn-sm" style="background:#fff;border:1px solid var(--soft);color:var(--soft);cursor:pointer;font-size:11px" onclick="openWorkspace(${c.excelRow});closeSettings&&closeSettings();" title="Open workspace to handle manually">open workspace</button>
+        <button class="btn-sm" style="background:#fff;border:1px solid var(--soft);color:var(--soft);cursor:pointer;font-size:11px" onclick="openWorkspace(${c.excelRow});if(typeof closeSettings==='function')closeSettings();" title="Open workspace to handle manually">open workspace</button>
       </div>
     </div>`;
   }).join('');
@@ -21682,7 +21692,7 @@ async function _repairCorruptedStage(row,toStage){
   }
   c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🛠 Stage repaired: "'+fromStage+'" → '+target+(rebuilt.length?' · certs rebuilt: '+rebuilt.join(', '):'')});
   await patchRange('G'+row,[[target]]);
-  await patchRange('AJ'+row,[[JSON.stringify(c.st)]]);
+  await patchRange('AJ'+row,[[JSON.stringify(sanitizeState(c.st))]]);
   /* Sync the open workspace so its next saveW doesn't re-write the corrupted stage. */
   if(W&&W.row===row){W.stage=target;if(W.st!==c.st)W.st=c.st;}
   toast('🛠 '+(c.name||'Row '+row)+' → '+target);
@@ -21801,7 +21811,7 @@ async function _recoverAutoReleased(){
         c.st.awaitingReason=inf.reason||'Restored from erroneous auto-release \u2014 please review original context';
       }
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'\u2705 Restored to awaiting after erroneous auto-release'+(inf.certs?' (cert clarification reconstructed)':'')});
-      await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+      await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
       done++;
     }catch(e){
       failed++;
@@ -21836,7 +21846,7 @@ function _seqTriggerList(){
 async function _seqCommitState(cand,patch){
   if(!cand||!patch)return;
   cand.st=Object.assign({},cand.st||{},patch);
-  await patchRange('AJ'+cand.excelRow,[[JSON.stringify(cand.st)]]);
+  await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
   if(W&&W.row===cand.excelRow&&W.st!==cand.st)W.st=cand.st;
 }
 /* Resolve + assign a sequence for a candidate (tag-for-life; explicit action). */
@@ -22049,7 +22059,7 @@ async function _claudeResumeScreen(row){
       console.error('Claude screen FAILED for',cand.name,'—',err,resumeSkipped?('(also failed without résumé; first error: '+resumeSkipped+')'):'');
       cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'⚠ Claude screen failed: '+String(err).slice(0,200)});
       cand.st=sanitizeState(cand.st);
-      patchRange('AJ'+cand.excelRow,[[JSON.stringify(cand.st)]]).catch(()=>{});
+      patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]).catch(()=>{});
       toast('⚠ Screen failed for '+(cand.name||'candidate')+': '+err);
       return false;
     }
@@ -22061,7 +22071,7 @@ async function _claudeResumeScreen(row){
     /* sanitizeState like every other save path — a heavily-logged candidate otherwise blows
        the 32k AJ cell cap and the screen fails for that one candidate only. */
     cand.st=sanitizeState(cand.st);
-    await patchRange('AJ'+cand.excelRow,[[JSON.stringify(cand.st)]]);
+    await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
     if(W&&W.row===row){if(W.st!==cand.st)W.st=cand.st;renderWorkspace();}
     toast('🤖 '+(j.screen.verdict==='advance'?'✓ Advance':j.screen.verdict==='concern'?'⚠ Concern':'👁 Review')+' — score '+(j.screen.score!=null?j.screen.score:'—'));
     return true;
@@ -22130,13 +22140,13 @@ async function _seqAutomationTick(){
     if(c.st.booking&&c.stage==='Interview booked'&&!c.st.autoCancelledAt&&c.st.calBookingId&&!(c.st.certChecksDoneAt&&!c.st.certsReadyReview)){
       /* ✓ Done with checks is the operator's sign-off — automation never warns or cancels past it. */
       const m=minsUntil(c.st.booking),miss=_missingAppCerts(c);
-      const missingAny=miss.length||!_yardstikFormFilled(c);
+      const missingAny=(miss.length||!_yardstikFormFilled(c))&&!c.st.certsReadyReview; /* fresh certs awaiting review → never auto-warn/cancel */
       /* T-60→T-30: auto-send the cancellation warning (once). T-30→0: auto-cancel. */
       if(m!=null&&m<=60&&m>30&&missingAny&&!(c.st.sent&&c.st.sent.interview_cert_warning)){
         try{
           if(await _autoSendTpl(c,'interview_cert_warning')){
             c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-sent interview cert warning (cancel at T-30)'});
-            await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+            await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
             budget--;continue; /* one action per candidate per tick */
           }
         }catch(e){console.warn('auto warning failed:',c.name,e.message);}
@@ -22146,7 +22156,7 @@ async function _seqAutomationTick(){
         if(await _cancelBookingHeadless(c,reason)){
           c.st.autoCancelledAt=new Date().toISOString();
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-cancelled interview (30-minute rule; warned at T-60) — '+reason});
-          await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+          await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
           budget--;continue; /* one action per candidate per tick */
         }
       }
@@ -22161,7 +22171,7 @@ async function _seqAutomationTick(){
         if(await _autoSendTpl(c,it.templateKey)){
           const adv=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
           if(!adv.error)Object.assign(c.st,adv.partialState||{});
-          await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+          await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
           budget--;
         }
       }else if(it.type==='set-stage'){
@@ -22172,7 +22182,7 @@ async function _seqAutomationTick(){
           const adv=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
           if(!adv.error)Object.assign(c.st,adv.partialState||{});
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-advanced stage → '+it.stage});
-          await patchRange('AJ'+c.excelRow,[[JSON.stringify(c.st)]]);
+          await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
           budget--;
         }
       }
@@ -22378,9 +22388,17 @@ function _seqV3Action(c,info){
         if(ptr&&ptr!==cand.st.sequenceStepId){
           cand.st.sequenceStepId=ptr;
           cand.st.sequenceHistory=(cand.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
-          if(cand===c&&c.st.sequenceId){
-            cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Pointer snapped to stage '+c.stage+' → '+ptr});
-            _seqCommitState(cand,{}).catch(e2=>console.warn('stage snap persist:',e2));
+          if(cand===c&&c.st.sequenceId&&!(W&&W.row===c.excelRow)){
+            /* Once per row+pointer per page session — a canvas-authored sequence whose array
+               order diverges from link order could otherwise re-snap (and re-commit) on
+               every render, bloating st.log toward the 32k AJ cap. */
+            window._snapOnce=window._snapOnce||{};
+            const _sk=c.excelRow+':'+ptr;
+            if(!window._snapOnce[_sk]){
+              window._snapOnce[_sk]=1;
+              cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Pointer snapped to stage '+c.stage+' → '+ptr});
+              _seqCommitState(cand,{}).catch(e2=>console.warn('stage snap persist:',e2));
+            }
           }
           ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
         }
@@ -22416,7 +22434,7 @@ function _seqV3Action(c,info){
         walked++;
         ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
       }
-      if(walked&&cand===c&&c.st&&c.st.sequenceId){
+      if(walked&&cand===c&&c.st&&c.st.sequenceId&&!(W&&W.row===c.excelRow)){
         cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Sequence advanced '+(walked===1?'a step':walked+' steps')+' — condition met'});
         _seqCommitState(cand,{}).catch(e2=>console.warn('sequence walk persist:',e2));
       }

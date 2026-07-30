@@ -593,8 +593,10 @@ async function submitForm(e){
   /* Attach source-tracking code if the candidate came in through a tracked link */
   if(SOURCE_CODE)payload.sourceCode=SOURCE_CODE;
 
-  // attach resume if present
-  const resumeFile=document.getElementById('resume').files[0];
+  // attach resume if present (guarded: an operator form-config may omit the resume question,
+  // in which case #resume doesn't exist and an unguarded access would kill submit silently)
+  const _resumeEl=document.getElementById('resume');
+  const resumeFile=_resumeEl&&_resumeEl.files?_resumeEl.files[0]:null;
   if(resumeFile){
     if(resumeFile.size>10*1024*1024){alert('Résumé file is larger than 10MB. Please use a smaller file.');return;}
     if(!(resumeFile.type==='application/pdf'||/\.pdf$/i.test(resumeFile.name))){alert('Résumé must be a PDF. Word documents and other formats are not accepted.');return;}
