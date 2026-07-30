@@ -11370,6 +11370,30 @@ function _stageMoveAllowed(){
    saves. It does NOT fire the new stage's auto-email, does NOT upload a stage report, and does
    NOT credit referral milestones — those belong to genuine forward progression via advanceWS,
    not to manual repositioning. */
+/* Stage vocabulary OF THE CANDIDATE'S OWN SEQUENCE (its stage steps, in order), falling
+   back to the global flow when unadopted or their sequence defines no stage steps. Every
+   stage list shown for a candidate should come from here — the portal must speak the
+   language of whatever sequence they are actually on. */
+function _seqStagesFor(c){
+  const seq=c&&c.st&&(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
+  const stages=seq?(seq.steps||[]).filter(s=>s.kind==='stage'&&s.stage&&s.stage.setStage).map(s=>s.stage.setStage):[];
+  const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
+  return stages.length?stages:flow.slice();
+}
+/* Where a completed session lands, per the candidate's OWN sequence: the session step
+   with this questionsStage → its nextStageOnRun; else the stage after their current one
+   in their sequence; else the legacy default. */
+function _seqNextStageFor(c,questionsStage,legacyDefault){
+  const seq=c&&c.st&&(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
+  if(seq){
+    const sess=(seq.steps||[]).find(s=>s.kind==='session'&&s.session&&s.session.questionsStage===questionsStage);
+    if(sess&&sess.session.nextStageOnRun)return sess.session.nextStageOnRun;
+    const stages=_seqStagesFor(c);
+    const i=stages.indexOf(c.stage);
+    if(i>=0&&stages[i+1])return stages[i+1];
+  }
+  return legacyDefault;
+}
 function moveToStageWS(){
   if(!_stageMoveAllowed()){toast('Move to stage is restricted — see Settings → Pipeline config');return;}
   const _smCfg=(SETTINGS.config&&SETTINGS.config.stageMove)||{};
@@ -11378,17 +11402,30 @@ function moveToStageWS(){
     if(pw===null)return;
     if(pw!==_smCfg.password){toast('✕ Wrong password');return;}
   }
-  const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
+  const _mc=pipeline.find(x=>x.excelRow===W.row)||{st:W.st,stage:W.stage};
+  const flow=_seqStagesFor(_mc); /* the candidate's OWN sequence's stages — not the global flow */
+  const _curSeq=(SETTINGS.sequences||[]).find(q=>q.id===(W.st&&W.st.sequenceId));
   emailModal('move_stage','','',null);
   document.getElementById('m-title').textContent='Move to stage';
   document.getElementById('m-body').innerHTML=`
     <div style="font-size:13px;color:var(--mid);margin-bottom:14px;line-height:1.5">
-      Manually place <b>${esc(W.name)}</b> at any stage. Current: <b>${esc(W.stage)}</b>.<br>
+      Manually place <b>${esc(W.name)}</b> at any stage of <b>${esc(_curSeq?_curSeq.name:'the default flow')}</b>. Current: <b>${esc(W.stage)}</b>.<br>
       <span style="font-size:11.5px;color:var(--soft)">No emails fire and no reports upload — this only repositions them. Use the normal advance buttons for real progression.</span>
     </div>
     <select id="move-stage-sel" style="width:100%;padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13.5px">
       ${flow.map(s=>`<option value="${esc(s)}" ${s===W.stage?'selected':''}>${esc(s)}</option>`).join('')}
+      ${flow.indexOf(W.stage)<0?`<option value="${esc(W.stage)}" selected>${esc(W.stage)} (current — not in this sequence)</option>`:''}
     </select>
+    <details style="margin-top:14px">
+      <summary style="cursor:pointer;font-size:12px;color:var(--sky-deep);font-weight:600">⇄ Put on a different sequence…</summary>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+        <select id="move-seq-sel" style="flex:1;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px">
+          ${(SETTINGS.sequences||[]).map(s=>`<option value="${esc(s.id)}" ${s.id===(W.st&&W.st.sequenceId)?'selected':''}>${esc(s.name)}${s.id===(W.st&&W.st.sequenceId)?' (current)':''}</option>`).join('')}
+        </select>
+        <button class="btn-sm bg-gold" style="cursor:pointer" onclick="_seqAssignTo(W.row,document.getElementById('move-seq-sel').value);closeModal()">Assign</button>
+      </div>
+      <div style="font-size:10.5px;color:var(--soft);margin-top:6px">They keep their current stage; the pointer is placed to match it on the new sequence.</div>
+    </details>
     <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
       <button class="btn-sec" onclick="closeModal()">Cancel</button>
       <button class="btn-primary bg-grn" onclick="commitMoveToStage()">⇄ Move</button>
@@ -13919,7 +13956,7 @@ function renderFocusedHub(){_memGen++;
   let block='';let title='';let layoutMode='single';
   if(kind==='questions'){
     const stage=(W.stage==='Screen booked')?'Phone Screen':'Interview';
-    const next=(stage==='Phone Screen')?'Ask references':'Offer';
+    const next=_seqNextStageFor(c,stage,(stage==='Phone Screen')?'Ask references':'Offer'); /* the candidate's OWN sequence decides where the session lands */
     block=questionsBlock(stage,next);
     title=stage==='Interview'?'Interview':'Phone screen';
     /* The screening + interview hub has the most context-dependence — Meir wants every relevant
@@ -21921,7 +21958,7 @@ async function _seqAssignTo(row,sequenceId){
   const seq=sequenceId?seqs.find(q=>q.id===sequenceId):window.SeqEngineV2.resolveSequenceFor(cand,SETTINGS.sequenceAssignments||[],seqs);
   if(!seq){toast('No sequence matches — create one in Settings → Sequences v2');return;}
   const patch=window.SeqEngineV2.assignSequence(cand,seq);
-  if(seq.id==='classic-flow'&&typeof _classicPointerFor==='function'){
+  if((seq.steps||[]).some(s=>s.kind==='stage')&&typeof _classicPointerFor==='function'){ /* stage-matched adoption for ANY sequence with stage steps */
     /* Mid-pipeline adoption: place the pointer to match the candidate's current column-G
        stage (same rule as the bulk switchover) — assignSequence's steps[0] would re-offer
        "set stage Applied" to someone already sitting at Applied. */
