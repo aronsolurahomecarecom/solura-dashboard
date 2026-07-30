@@ -21976,12 +21976,35 @@ async function _claudeResumeScreen(row){
     hasResume:!!(cand.st&&cand.st.hasResume)
   };
   try{
-    const r=await fetch(ZI_WORKER_URL+'/ai/resume-screen',{
-      method:'POST',headers:{'Content-Type':'application/json','X-Solura-Token':tok},
-      body:JSON.stringify({candidate:snap})
-    });
-    const j=await r.json();
-    if(!j.ok){toast('⚠ Screen failed: '+(j.error||r.status));return false;}
+    const _post=async(s2)=>{
+      const r=await fetch(ZI_WORKER_URL+'/ai/resume-screen',{
+        method:'POST',headers:{'Content-Type':'application/json','X-Solura-Token':tok},
+        body:JSON.stringify({candidate:s2})
+      });
+      const j2=await r.json();j2._http=r.status;return j2;
+    };
+    let j=await _post(snap);
+    let resumeSkipped=null;
+    if(!j.ok&&snap.hasResume){
+      /* Per-candidate failure class: THEIR résumé PDF breaks the API call (corrupt, image-
+         only, oversized after encoding). Retry once on application data alone — an advisory
+         screen without the PDF beats no screen. The skip is noted on the result. */
+      resumeSkipped=j.error||('HTTP '+j._http);
+      console.warn('Claude screen retry without résumé for',cand.name,'— first attempt:',resumeSkipped);
+      j=await _post(Object.assign({},snap,{hasResume:false}));
+    }
+    if(!j.ok){
+      const err=(j.error||('HTTP '+j._http));
+      console.error('Claude screen FAILED for',cand.name,'—',err,resumeSkipped?('(also failed without résumé; first error: '+resumeSkipped+')'):'');
+      cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'⚠ Claude screen failed: '+String(err).slice(0,200)});
+      cand.st=sanitizeState(cand.st);
+      patchRange('AJ'+cand.excelRow,[[JSON.stringify(cand.st)]]).catch(()=>{});
+      toast('⚠ Screen failed for '+(cand.name||'candidate')+': '+err);
+      return false;
+    }
+    if(resumeSkipped){
+      cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🤖 Screened WITHOUT the résumé PDF — attaching it failed ('+String(resumeSkipped).slice(0,160)+'). Check the PDF in their folder.'});
+    }
     cand.st.aiScreen=Object.assign({},j.screen,{at:new Date().toISOString(),resumeIncluded:!!j.resumeIncluded,resumeName:j.resumeName||null});
     cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🤖 Claude screened: '+(j.screen.verdict||'?')+' ('+(j.screen.score!=null?j.screen.score:'—')+') — '+String(j.screen.summary||'').slice(0,120)});
     /* sanitizeState like every other save path — a heavily-logged candidate otherwise blows
