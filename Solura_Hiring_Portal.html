@@ -10797,7 +10797,17 @@ function _actionC(c){
 /* ===================== filter ===================== */
 function matchFilters(c){
   const t=(document.getElementById('search').value||'').toLowerCase();
-  if(t&&(c.name+' '+c.email+' '+(c.st.pills||[]).join(' ')+' '+(c.st.certs||[]).join(' ')+' '+c.stage).toLowerCase().indexOf(t)<0)return false;
+  if(t){
+    /* Search covers the FULL application: raw form answers, screening, facts, custom answers —
+       plus friendly words for coded values so "car" finds transport:'car', etc. */
+    const s0=c.st||{};
+    const trWords={car:'own car',transit:'public transit bus',rides:'rides',none:'no transport no car'}[(s0.formAnswers||{}).transport]||'';
+    const hay=(c.name+' '+c.email+' '+(s0.pills||[]).join(' ')+' '+(s0.certs||[]).join(' ')+' '+c.stage
+      +' '+trWords+(s0.liveIn?' live-in':'')
+      +' '+JSON.stringify(s0.formAnswers||{})+' '+JSON.stringify(s0.screening||{})
+      +' '+JSON.stringify(s0.facts||{})+' '+(c.row&&c.row[34]?String(c.row[34]):'')).toLowerCase();
+    if(hay.indexOf(t)<0)return false;
+  }
   const s=c.st||{},sc=s.screening||{},g=s.gates||{};
 
   /* Pipeline */
@@ -10853,7 +10863,9 @@ function matchFilters(c){
   /* Has own car — checks the application's transport question for "car" answer (their primary transport).
      Also accepts the older "Own car" / "yes" variants for backward compat with legacy candidates. */
   if(F.hasOwnCar){
-    const tr=(s.facts&&s.facts.transport)||sc.transport||'';
+    /* transport lives in st.formAnswers (the raw form answers) — the old facts/screening
+       paths never held it, which made this filter match nobody. */
+    const tr=(s.formAnswers&&s.formAnswers.transport)||(s.facts&&s.facts.transport)||sc.transport||'';
     const trStr=String(tr).toLowerCase();
     if(trStr!=='car'&&trStr!=='own car'&&trStr!=='yes')return false;
   }
@@ -14498,7 +14510,10 @@ const APP_SECTIONS=[
     {label:'Abuse finding on record',path:'st.screening.abuseFinding',type:'select',options:[['—',''],['No','no'],['Yes','yes']]},
     {label:'Will provide personal care',path:'st.screening.personalCare',type:'select',options:[['—',''],['Yes','yes'],['No','no']]},
     {label:'Can lift 25 lbs',path:'st.screening.lifting',type:'select',options:[['—',''],['Yes','yes'],['No','no']]},
-    {label:'Smoker',path:'st.screening.smoker',type:'select',options:[['—',''],['No','N'],['Yes','Y']]}
+    {label:'Smoker',path:'st.screening.smoker',type:'select',options:[['—',''],['No','N'],['Yes','Y']]},
+    {label:'Transportation',path:'st.formAnswers.transport',type:'select',options:[['—',''],['Own car','car'],['Public transit','transit'],['Rides','rides'],['Not yet','none']]},
+    {label:'Work authorization',path:'st.formAnswers.workauth',type:'select',options:[['—',''],['Yes','Y'],['No','N']]},
+    {label:'BG check consent',path:'st.formAnswers.bgcheck',type:'select',options:[['—',''],['Yes','Y'],['No','N']]}
   ]},
   {title:'Availability',fields:[
     {label:'Live-in only',path:'st.liveIn',type:'select',options:[['—',''],['No','false'],['Yes','true']]},
@@ -14784,10 +14799,18 @@ function applicationBlock(){
   /* draft = the editable copy. Created on entering edit mode, committed on Save. */
   if(editing&&!W._appDraft){W._appDraft=JSON.parse(JSON.stringify(c));}
   const src=editing?W._appDraft:c;
-  const sections=APP_SECTIONS.map(sec=>{
+  let sections=APP_SECTIONS.map(sec=>{
     const rows=sec.fields.map(f=>renderAppField(src,f,editing)).join('');
     return `<div class="wscard"><h3>${esc(sec.title)}</h3>${rows}</div>`;
   }).join('');
+  /* Everything else they submitted (uncovered form answers + operator custom questions) —
+     read-only card so no application data is ever invisible. */
+  {
+    const pc=pipeline.find(x=>x.excelRow===W.row)||c;
+    const extra=_extraAnswerRows(pc);
+    if(extra.length)sections+=`<div class="wscard"><h3>Other answers <span style="font-size:11px;color:var(--soft);font-weight:600">from the application</span></h3>
+      ${extra.map(r=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--border-soft);font-size:12.5px"><span style="color:var(--soft)">${esc(r[0])}</span><b>${esc(r[1])}</b></div>`).join('')}</div>`;
+  }
   /* audit-log preview */
   const audit=(c.st&&c.st.profileEdits)||[];
   const auditCard=audit.length?`<div class="wscard"><h3>Edit history <span style="font-size:11px;color:var(--soft);font-weight:600">${audit.length} change${audit.length===1?'':'s'}</span></h3>
@@ -20209,9 +20232,32 @@ function _docGatesTable(c){
   const rows=[['Work authorization',g.wa],['Credential',g.cr],['Background check',g.bg],['Transportation',g.tr],['Availability',g.av]];
   return '<table class="kv">'+rows.map(r=>'<tr><td>'+r[0]+'</td><td>'+sym(r[1])+'</td></tr>').join('')+'</table>';
 }
+/* Catch-all: every submitted answer NOT already covered by an APP_SECTIONS field — raw
+   form answers plus operator custom questions (column AI) — so nothing the candidate
+   entered is invisible in the workspace or the application PDF. */
+function _extraAnswerRows(c){
+  const covered=new Set();
+  (typeof APP_SECTIONS!=='undefined'?APP_SECTIONS:[]).forEach(sec=>sec.fields.forEach(f=>{
+    const m=/^st\.formAnswers\.(\w+)$/.exec(f.path||'');if(m)covered.add(m[1]);
+  }));
+  ['age18','dl','revoked','abuseFinding','personalCare','lifting','smoker','languages'].forEach(k=>covered.add(k));
+  const rows=[];
+  const fa=(c&&c.st&&c.st.formAnswers)||{};
+  Object.keys(fa).forEach(k=>{
+    if(covered.has(k))return;
+    const v=fa[k];if(v==null||v==='')return;
+    rows.push([k.replace(/([A-Z])/g,' $1').replace(/^./,ch=>ch.toUpperCase()),Array.isArray(v)?v.join(', '):String(v)]);
+  });
+  let custom={};try{custom=JSON.parse((c&&c.row&&c.row[34])||'{}')||{};}catch(e){}
+  Object.keys(custom).forEach(k=>{
+    const v=custom[k];if(v==null||v==='')return;
+    rows.push([String(k).replace(/^fq-/,'').replace(/[-_]/g,' '),Array.isArray(v)?v.join(', '):String(v)]);
+  });
+  return rows;
+}
 function _docApplicationTable(c){
   if(typeof APP_SECTIONS==='undefined')return '';
-  return APP_SECTIONS.map(sec=>{
+  const main=APP_SECTIONS.map(sec=>{
     if(sec.title==='Identity')return '';
     const rows=sec.fields.map(f=>{
       const v=_displayValue(_appField(c,f.path),f);
@@ -20219,6 +20265,9 @@ function _docApplicationTable(c){
     }).join('');
     return '<h3>'+esc(sec.title)+'</h3><table class="kv">'+rows+'</table>';
   }).join('');
+  const extra=_extraAnswerRows(c);
+  const extraHtml=extra.length?'<h3>Other answers</h3><table class="kv">'+extra.map(r=>'<tr><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td></tr>').join('')+'</table>':'';
+  return main+extraHtml;
 }
 function _docEmployersTable(c){
   const emp=(c&&c.st&&c.st.employers)||[];
