@@ -1142,6 +1142,10 @@ td{padding:13px 16px;vertical-align:top;}
           <input type="password" class="ee-inp" autocomplete="off" data-cfg="trackerToken" data-cfgtype="str">
         </div>
         <div class="st-field">
+          <button data-action="trk-test" class="st-btn-sky">🔌 Test connection</button>
+          <div id="trk-test-out" style="font-size:12px;margin-top:10px;line-height:1.7;color:var(--mid);white-space:pre-line"></div>
+        </div>
+        <div class="st-field">
           <label class="ee-lbl">Feedback stack</label>
           <div style="font-size:13px;color:var(--mid)"><span id="st-fb-count">0</span> items queued locally.
             <button data-action="st-wipe-feedback" class="st-btn-ghost" style="margin-left:8px;padding:5px 11px;font-size:11px">Wipe stack</button>
@@ -1683,6 +1687,8 @@ function applyConfig(){
   EMAIL_ONEDRIVE_FALLBACK_MIN=Math.max(0.2,parseFloat(cfg('emailFallbackMinMB'))||1)*1024*1024;
   // Restart polling on the new interval if it's currently running
   if(inboundEmailPollTimer){stopInboundPolling();startInboundPolling();}
+  // Open-tracking poller runs on its own timer (independent of the inbox)
+  try{startTrackerPolling();}catch(_){}
 }
 
 /* ─── Engine starting-point presets ────────────────────────────────────
@@ -1841,7 +1847,15 @@ function getNames(ri){
 }
 function fillNames(s,names){
   var dm=names.dm||'there';
-  s=String(s||'').replace(/\{dm\}/g,dm);
+  // Normalize placeholder dialects FIRST: {{name}}, {name}, {Name}, {{dm}},
+  // {{pt}} → the canonical {dm}/{pt} forms, then fill as before. HTML pasted
+  // from other tools tends to arrive with {{name}}-style tokens.
+  s=String(s||'')
+    .replace(/\{\{\s*(?:name|dm|first_?name)\s*\}\}/gi,'{dm}')
+    .replace(/\{\s*(?:name|first_?name)\s*\}/gi,'{dm}')
+    .replace(/\{\{\s*(?:pt|patient|client)\s*\}\}/gi,'{pt}')
+    .replace(/\{\s*(?:patient|client)\s*\}/gi,'{pt}');
+  s=s.replace(/\{dm\}/g,dm);
   if(names.pt){
     s=s.replace(/\{pt\}/g,names.pt);
   }else{
@@ -4510,8 +4524,6 @@ async function pollInboundMail(){
         addLoggedInboundIds(newIds);
       })();
     }
-    // Piggyback the open-tracking poll on the same cadence
-    try{pollTrackerEvents();}catch(_){}
     if(newlyArrived.length){
       // Show a single toast noting the count (unless muted in settings)
       var msg=newlyArrived.length===1
@@ -4829,7 +4841,9 @@ function trkB64(obj){
 function trackingPixelHtml(ri,toAddr,subj,sendId){
   var tc=trackerCfg();if(!tc)return '';
   var d=trkB64({r:(ri!=null&&ri>=0)?(ri+1):'',e:toAddr||'',s:String(subj||'').slice(0,120),i:sendId||''});
-  return '<img src="'+tc.url+'/px?d='+encodeURIComponent(d)+'" width="1" height="1" style="display:none;max-height:1px;max-width:1px" alt="">';
+  // NOT display:none — several rendering engines skip hidden images entirely,
+  // which would kill the pixel. 1×1 transparent at the very end is invisible.
+  return '<img src="'+tc.url+'/px?d='+encodeURIComponent(d)+'" width="1" height="1" style="width:1px;height:1px;border:0;opacity:0" alt="">';
 }
 var _trkMeta=null; // set by sendEmail for the share-block builder
 function trackDocUrl(target,meta){
@@ -4916,6 +4930,49 @@ function trackerEventToComms(ev){
     outcome:ev.type==='doc_open'?'doc-opened':'opened',
     messageId:String(ev.id||'')
   };
+}
+var trackerPollTimer=null;
+function startTrackerPolling(){
+  // Independent of mail polling — the tracker must run even if the inbox
+  // poll is disabled or failing.
+  if(trackerPollTimer)clearInterval(trackerPollTimer);
+  if(!trackerCfg())return;
+  trackerPollTimer=setInterval(function(){pollTrackerEvents().catch(function(){});},INBOUND_POLL_MS);
+  pollTrackerEvents().catch(function(){});
+}
+async function testTrackerConnection(){
+  var out=el('trk-test-out');
+  function line(t2){if(out)out.textContent+=t2+'\n';}
+  if(out)out.textContent='';
+  var tc=trackerCfg();
+  if(!tc){line('✗ No worker URL/token saved — fill both fields above and hit Save settings first.');return;}
+  line('1. Config: ✓ '+tc.url);
+  // 2. Auth check
+  try{
+    var r1=await fetch(tc.url+'/events?since=0&token='+encodeURIComponent(tc.token));
+    if(r1.status===401){line('2. Worker auth: ✗ 401 — the token here doesn\'t match TRACK_TOKEN on the worker. Fix one side, Save & Deploy.');return;}
+    if(!r1.ok){line('2. Worker auth: ✗ HTTP '+r1.status+' — worker reachable but erroring. Check the KV binding is named exactly TRACK_KV.');return;}
+    line('2. Worker auth: ✓');
+  }catch(e){line('2. Worker reach: ✗ '+e.message+' — URL typo, worker not deployed, or network. Open the URL in a tab: it should say "solura-track ok".');return;}
+  // 3. Fire a test pixel and confirm the round trip
+  var testId='selftest-'+Date.now();
+  try{
+    var d=trkB64({i:testId,e:'self@test',s:'Connection test',r:''});
+    await fetch(tc.url+'/px?d='+encodeURIComponent(d));
+    line('3. Test pixel fired ✓ — waiting for it to land…');
+  }catch(e){line('3. Test pixel: ✗ '+e.message);return;}
+  await new Promise(function(res){setTimeout(res,1800);});
+  try{
+    var r2=await fetch(tc.url+'/events?since=0&token='+encodeURIComponent(tc.token));
+    var j2=await r2.json();
+    var found=(j2.events||[]).some(function(ev){return ev.i===testId;});
+    if(found){
+      line('4. Round trip: ✓ the event came back. Tracking works end to end.');
+      line('\nIf a real email still shows no open: your mail client is blocking remote images (Outlook does by default — click "Download pictures" on the test email). Gmail and Apple Mail load them automatically.');
+    }else{
+      line('4. Round trip: ✗ pixel fired but the event never appeared — the KV binding is missing or misnamed. Worker → Settings → Bindings → KV namespace, variable name exactly TRACK_KV.');
+    }
+  }catch(e){line('4. Round trip: ✗ '+e.message);}
 }
 async function pollTrackerEvents(){
   var tc=trackerCfg();if(!tc||!tok)return;
@@ -7816,6 +7873,7 @@ function onClick(ev){
         }).catch(function(e){showErr(e.message);});
       })();
       break;
+    case 'trk-test': testTrackerConnection(); break;
     case 'es-reset-emailcap':
       try{sessionStorage.removeItem('emailMsgCap');}catch(_){}
       EMAIL_MSG_ATTACH_CAP=10*1024*1024;
