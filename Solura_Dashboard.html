@@ -598,6 +598,7 @@ td{padding:13px 16px;vertical-align:top;}
   <div class="hdr-r">
     <div class="sync-pill"><div class="sdot" id="sdot"></div><span id="slabel">Not connected</span></div>
     <button class="hbtn hbtn-ghost" id="btn-settings" style="display:none" data-action="open-settings" title="Settings">⚙</button>
+    <button class="hbtn hbtn-ghost" id="btn-weekly" style="display:none" data-action="open-weekly" title="This week's nurture email">📰 Weekly</button>
     <button class="hbtn hbtn-gold" id="btn-addlead" style="display:none" data-action="open-addlead">＋ Add Lead</button>
     <button class="hbtn hbtn-gold" id="btn-refresh" style="display:none" data-action="refresh">↺ Refresh</button>
     <button class="hbtn hbtn-ghost" id="btn-out" style="display:none" data-action="signout">Sign out</button>
@@ -677,6 +678,7 @@ td{padding:13px 16px;vertical-align:top;}
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Subject</div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <input id="email-subj" style="flex:1;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;outline:none">
+        <button type="button" data-action="use-weekly" title="Fill with this week's nurture draft" style="padding:8px 12px;background:#fff;color:var(--mid);border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap">📰</button>
         <button type="button" data-action="claude-write-email" title="Have Claude draft this email from everything known about the lead" style="padding:8px 14px;background:linear-gradient(135deg,#7C5CBF,#5B4BAA);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:0 2px 8px rgba(91,75,170,.3)">✨ Claude</button>
       </div>
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Message</div>
@@ -873,6 +875,35 @@ td{padding:13px 16px;vertical-align:top;}
         <button data-action="close-modal" data-mid="modal-addlead" style="padding:10px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">Cancel</button>
         <span id="al-spin" style="display:none;align-items:center;gap:6px;color:var(--soft);font-size:11px;margin-left:6px"><span class="mspin"></span>Saving…</span>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Weekly nurture draft modal -->
+<div class="modal" id="modal-weekly">
+  <div class="mbox" style="max-width:620px">
+    <div class="mhead"><div class="mtitle">📰 This week's nurture email</div><button class="mclose" data-action="close-modal" data-mid="modal-weekly">✕</button></div>
+    <div class="mbody" style="padding:20px 22px 22px">
+      <div id="weekly-status" style="font-size:12px;color:var(--mid);background:var(--warm);border:1px solid var(--border-soft);border-radius:10px;padding:10px 14px;margin-bottom:14px;line-height:1.5"></div>
+      <div style="margin-bottom:12px">
+        <label class="ee-lbl">Subject</label>
+        <input type="text" id="weekly-subj" class="ee-inp" placeholder="{dm} works — e.g. A thought for you this week, {dm}">
+      </div>
+      <div style="margin-bottom:12px">
+        <label class="ee-lbl">Body — {dm} and {pt} fill per lead</label>
+        <textarea id="weekly-body" rows="9" class="ee-inp" style="line-height:1.55" placeholder="Hi {dm},&#10;&#10;This week's note…"></textarea>
+      </div>
+      <div style="margin-bottom:14px">
+        <label class="ee-lbl">PDF that rides along (optional — attached to every send)</label>
+        <div id="weekly-pdf-chip"></div>
+        <label class="st-btn-ghost" style="cursor:pointer;font-size:11.5px;padding:7px 13px"><input type="file" id="weekly-pdf-input" accept=".pdf" style="display:none">📎 Attach PDF</label>
+      </div>
+      <div style="display:flex;gap:8px;padding-top:14px;border-top:1px solid var(--border-soft)">
+        <button data-action="weekly-save" class="st-btn-gold" style="padding:10px 22px">💾 Save this week's draft</button>
+        <button data-action="close-modal" data-mid="modal-weekly" class="st-btn-ghost">Cancel</button>
+        <span id="weekly-spin" style="display:none;align-items:center;gap:6px;color:var(--soft);font-size:11px"><span class="mspin"></span>Saving…</span>
+      </div>
+      <div style="font-size:11px;color:var(--soft);margin-top:12px;line-height:1.5">Auto-fills the composer for every <strong>long-term nurture</strong> contact. For anyone else, hit <strong>📰 Weekly</strong> inside the composer.</div>
     </div>
   </div>
 </div>
@@ -1473,11 +1504,11 @@ function applyEnginesDoc(){
   }
   SEQ=ENGINES[enginesDoc.defaultEngineId].seq;
 }
-function engineIdFor(ri){
+function resolveEngineIdWithRules(ri,rules){
   var r=rows[ri]||[];
   var src=String(r[C.SO]||'').trim().toLowerCase();
   var st=String(r[C.ST]||'').trim().toLowerCase();
-  var rules=enginesDoc.assignments||[];
+  rules=rules||[];
   for(var i=0;i<rules.length;i++){
     var m=String(rules[i].match||'').trim().toLowerCase();
     if(!m||!ENGINES[rules[i].engineId])continue;
@@ -1486,6 +1517,66 @@ function engineIdFor(ri){
     if(target&&(target===m||target.indexOf(m)>-1))return rules[i].engineId;
   }
   return enginesDoc.defaultEngineId;
+}
+function engineIdFor(ri){
+  return resolveEngineIdWithRules(ri,enginesDoc.assignments||[]);
+}
+// A STATUS rule you create deliberately (e.g. "Lost → Lost-Nurture engine")
+// overrides the exclusion list — those leads come BACK into the pipeline on
+// that engine. Source rules don't override exclusion.
+function statusRuleMatches(ri){
+  var st=String(((rows[ri]||[])[C.ST])||'').trim().toLowerCase();
+  if(!st)return false;
+  var rules=enginesDoc.assignments||[];
+  for(var i=0;i<rules.length;i++){
+    if(rules[i].field!=='status')continue;
+    var m=String(rules[i].match||'').trim().toLowerCase();
+    if(m&&ENGINES[rules[i].engineId]&&(st===m||st.indexOf(m)>-1))return true;
+  }
+  return false;
+}
+function isExcludedLead(ri){
+  return isExcluded((rows[ri]||[])[C.ST])&&!statusRuleMatches(ri);
+}
+// Which leads change engines under a new rule set? (skips excluded +
+// responded/off-sequence leads — never touch active conversations)
+function computeAssignmentChanges(oldRules,newRules){
+  var changed=[];
+  for(var i=DATA_START;i<rows.length;i++){
+    var r=rows[i];if(!r)continue;
+    if(!String(r[C.NM]||r[C.DM]||'').trim())continue;
+    if(isActive(r[C.ST])||isOffSequence(i))continue;
+    // Excluded leads count IF a status rule in the NEW set claims them —
+    // that's exactly the "put Lost on a nurture engine" backfill case.
+    if(isExcluded(r[C.ST])){
+      var claimed=(newRules||[]).some(function(nr){
+        if(nr.field!=='status')return false;
+        var m2=String(nr.match||'').trim().toLowerCase();
+        var st2=String(r[C.ST]||'').trim().toLowerCase();
+        return m2&&(st2===m2||st2.indexOf(m2)>-1);
+      });
+      if(!claimed)continue;
+    }
+    var a=resolveEngineIdWithRules(i,oldRules);
+    var b=resolveEngineIdWithRules(i,newRules);
+    if(a!==b)changed.push({ri:i,engineId:b});
+  }
+  return changed;
+}
+async function backfillAssignments(changed){
+  var t2=localToday();
+  var noon=new Date(t2.getFullYear(),t2.getMonth(),t2.getDate(),12,0,0).toISOString();
+  for(var i=0;i<changed.length;i++){
+    var ch=changed[i];
+    var sq=ENGINES[ch.engineId].seq;
+    var u={};
+    u[C.STEP]=0;
+    u[C.STEP_AT]=noon;
+    u[C.SQ]=stepLabel(0,sq);
+    u[C.NF]=fd(t2);
+    try{await writeRow(ch.ri,u);}catch(e){console.warn('Backfill row '+ch.ri+' failed:',e.message);}
+    if(i%5===4)toast('Backfilling… '+(i+1)+' / '+changed.length);
+  }
 }
 function engineFor(ri){return ENGINES[engineIdFor(ri)]||ENGINES[enginesDoc.defaultEngineId];}
 function seqFor(ri){return engineFor(ri).seq;}
@@ -1812,6 +1903,7 @@ function onSignedIn(){
   el('ls').style.display='none';
   el('btn-refresh').style.display='inline-block';
   var bal=el('btn-addlead');if(bal)bal.style.display='inline-block';
+  var bwk=el('btn-weekly');if(bwk)bwk.style.display='inline-block';
   var bst=el('btn-settings');if(bst)bst.style.display='inline-block';
   el('btn-out').style.display='inline-block';
   el('sdot').className='sdot live';
@@ -2646,7 +2738,7 @@ async function buildUI(){
     if(!r)continue;
     var nm=String(r[C.NM]||r[C.DM]||'').trim();
     if(!nm)continue;
-    if(isExcluded(r[C.ST]))continue;
+    if(isExcludedLead(i))continue;
 
     var when=whenToShow(i);
     if(when.bucket==='hidden')continue;
@@ -3656,7 +3748,7 @@ function leadsOnEngine(id){
   for(var i=DATA_START;i<rows.length;i++){
     var r=rows[i];if(!r)continue;
     if(!String(r[C.NM]||r[C.DM]||'').trim())continue;
-    if(isExcluded(r[C.ST]))continue;
+    if(isExcludedLead(i))continue;
     if(engineIdFor(i)===id)n++;
   }
   return n;
@@ -4211,6 +4303,23 @@ document.addEventListener('input',function(ev){
 });
 document.addEventListener('change',function(ev){
   var t=ev.target;
+  if(t&&t.id==='weekly-pdf-input'&&t.files&&t.files[0]){
+    (function(){
+      var wf=t.files[0];t.value='';
+      if(!/\.pdf$/i.test(wf.name)){toast('PDF only for the weekly attachment');return;}
+      if(wf.size>WEEKLY_PDF_CAP){toast('Weekly PDF caps at 10MB');return;}
+      var rd=new FileReader();
+      rd.onload=function(){
+        enginesDoc.config=enginesDoc.config||{};
+        enginesDoc.config.weeklyDraft=enginesDoc.config.weeklyDraft||{};
+        enginesDoc.config.weeklyDraft.pdf={name:wf.name,b64:String(rd.result).split(',')[1]};
+        renderWeeklyPdfChip();
+        toast('📕 '+wf.name+' attached — save to sync');
+      };
+      rd.readAsDataURL(wf);
+    })();
+    return;
+  }
   if(t&&t.id==='cts-file'&&t.files&&t.files[0]&&_ctsAttachIdx>=0){
     (function(){
       var f3=t.files[0];
@@ -4493,6 +4602,87 @@ function openAddLead(){
   el('modal-addlead').classList.add('open');
   setTimeout(function(){var n=el('al-name');if(n)n.focus();},60);
 }
+/* ─── 📰 Weekly nurture draft ──────────────────────────────────────────
+ * One fresh email per week — subject, body, and a PDF — stored in the
+ * synced config. Auto-fills the composer for every sticky long-term-
+ * nurture contact; one click (📰 in the composer) for anyone else.
+ * {dm}/{pt} placeholders fill per lead. Stale after 8 days → warning.
+ * ─────────────────────────────────────────────────────────────────────── */
+var WEEKLY_PDF_CAP=10*1024*1024;
+function getWeeklyDraft(){
+  var w=(enginesDoc.config||{}).weeklyDraft;
+  return (w&&(String(w.subject||'').trim()||String(w.body||'').trim()))?w:null;
+}
+function weeklyAgeDays(){
+  var w=getWeeklyDraft();
+  if(!w||!w.updatedAt)return null;
+  return Math.floor((Date.now()-w.updatedAt)/(24*3600*1000));
+}
+function isNurtureStep(ri){
+  var a=currentAction(ri);
+  return !!(a&&a.cadence==='weekly'&&a.sticky);
+}
+function openWeekly(){
+  var w=(enginesDoc.config||{}).weeklyDraft||{};
+  el('weekly-subj').value=w.subject||'';
+  el('weekly-body').value=w.body||'';
+  renderWeeklyPdfChip();
+  var age=weeklyAgeDays();
+  var st=el('weekly-status');
+  if(age==null)st.innerHTML='No draft stored yet — the composer falls back to the normal nurture template until you save one.';
+  else if(age>8)st.innerHTML='⚠ <strong>Last updated '+age+' days ago</strong> — nurture contacts are still getting last week\'s email. Time for a fresh one.';
+  else st.innerHTML='✓ Updated '+(age===0?'today':age+' day'+(age!==1?'s':'')+' ago')+'.';
+  el('modal-weekly').classList.add('open');
+}
+function renderWeeklyPdfChip(){
+  var w=(enginesDoc.config||{}).weeklyDraft||{};
+  var host=el('weekly-pdf-chip');if(!host)return;
+  host.innerHTML=w.pdf?'<span class="ee-chip call" style="margin-bottom:8px">📕 '+escapeHtml(w.pdf.name)
+    +' <span style="opacity:.6;font-weight:500">'+Math.round(w.pdf.b64.length*0.75/1024)+'KB</span>'
+    +' <b data-action="weekly-del-pdf">×</b></span>':'';
+}
+async function saveWeeklyDraft(){
+  enginesDoc.config=enginesDoc.config||{};
+  var w=enginesDoc.config.weeklyDraft||{};
+  w.subject=(el('weekly-subj')||{}).value||'';
+  w.body=(el('weekly-body')||{}).value||'';
+  w.updatedAt=Date.now();
+  enginesDoc.config.weeklyDraft=w;
+  var spin=el('weekly-spin');if(spin)spin.style.display='inline-flex';
+  try{
+    await saveEnginesDoc();
+    closeModal('modal-weekly');
+    toast('📰 This week\'s draft saved — nurture emails now use it');
+  }catch(e){showErr(e.message);}
+  finally{if(spin)spin.style.display='none';}
+}
+function applyWeeklyDraft(ri,opts){
+  opts=opts||{};
+  var w=getWeeklyDraft();
+  if(!w){if(!opts.silent)toast('No weekly draft stored — 📰 Weekly in the header to create one');return false;}
+  var names=getNames(ri);
+  var subjEl=el('email-subj');if(subjEl&&w.subject)subjEl.value=fillNames(w.subject,names);
+  var bodyEl=el('email-body');
+  if(bodyEl&&w.body){
+    var bodyText=fillNames(w.body,names);
+    var sig=String(cfg('emailSignature')||'').trim();
+    if(sig)bodyText+='\n\n'+sig;
+    bodyEl.innerHTML=emailPlainToHtml(bodyText);
+  }
+  if(w.pdf&&w.pdf.b64){
+    // Skip if already attached (re-clicks)
+    var already=emailAttachments.some(function(a){return a.name===w.pdf.name&&a._weekly;});
+    if(!already){
+      emailAttachments.push({name:w.pdf.name,size:Math.floor(w.pdf.b64.length*0.75),
+        type:'application/pdf',dataBase64:w.pdf.b64,large:false,_weekly:true});
+      try{emailRenderAttachList();}catch(_){}
+    }
+  }
+  var age=weeklyAgeDays();
+  if(!opts.silent)toast('📰 Weekly draft applied'+(age>8?' — ⚠ it\'s '+age+' days old':''));
+  return true;
+}
+
 /* ─── 👀 Open tracking (Cloudflare worker) ─────────────────────────────
  * trackingPixelHtml() → invisible 1×1 injected into outgoing email HTML.
  * trackDocUrl() → wraps OneDrive share links through the counting redirect.
@@ -5243,6 +5433,12 @@ function openEmail(ri){
   if(sig)bodyText=(bodyText?bodyText+'\n\n':'')+sig;
   bodyEl.innerHTML=emailPlainToHtml(bodyText);
   bodyEl.setAttribute('data-placeholder','Write your message…');
+  // Long-term nurture contacts get THIS WEEK'S draft automatically
+  if(isNurtureStep(ri)&&getWeeklyDraft()){
+    applyWeeklyDraft(ri,{silent:true});
+    var wAge=weeklyAgeDays();
+    toast('📰 Weekly nurture draft applied'+(wAge>8?' — ⚠ '+wAge+' days old, refresh it':''));
+  }
   // Reset attachments for fresh modal open
   emailAttachments=[];
   emailRenderAttachList();
@@ -7440,8 +7636,25 @@ function onClick(ev){
       renderAssignments();
       break;
     case 'es-save-assign':
-      enginesDoc.assignments=deepCopy(asgnState.filter(function(a){return String(a.match||'').trim();}));
-      saveEnginesDoc().then(function(){toast('✓ Assignments saved');buildUI();}).catch(function(e){showErr(e.message);});
+      (function(){
+        var oldRules=deepCopy(enginesDoc.assignments||[]);
+        var newRules=deepCopy(asgnState.filter(function(a){return String(a.match||'').trim();}));
+        var changed=computeAssignmentChanges(oldRules,newRules);
+        enginesDoc.assignments=newRules;
+        saveEnginesDoc().then(async function(){
+          toast('✓ Assignments saved');
+          if(changed.length){
+            // Backfill existing leads onto their new engine — DEFAULT YES,
+            // Cancel = rules apply but positions stay where they are.
+            var names2=changed.slice(0,4).map(function(c4){return String((rows[c4.ri]||[])[C.NM]||'').trim();}).filter(Boolean).join(', ');
+            if(confirm(changed.length+' existing lead'+(changed.length!==1?'s':'')+' ('+names2+(changed.length>4?'…':'')+') now fall under a different engine.\n\nRestart them at step 1 of their new engine? (Responded/active leads are never touched.)\n\nCancel = keep their current positions.')){
+              await backfillAssignments(changed);
+              toast('✓ Backfilled '+changed.length+' lead'+(changed.length!==1?'s':''));
+            }
+          }
+          buildUI();
+        }).catch(function(e){showErr(e.message);});
+      })();
       break;
     case 'es-reset-emailcap':
       try{sessionStorage.removeItem('emailMsgCap');}catch(_){}
@@ -7521,6 +7734,15 @@ function onClick(ev){
       openClaudeWriter(isNaN(_cri)?-1:_cri);
       break;
     case 'claude-generate': claudeGenerate(); break;
+    case 'open-weekly': openWeekly(); break;
+    case 'weekly-save': saveWeeklyDraft(); break;
+    case 'use-weekly':
+      var _wri=parseInt(el('modal-email').dataset.ri,10);
+      if(!isNaN(_wri))applyWeeklyDraft(_wri);
+      break;
+    case 'weekly-del-pdf':
+      if(enginesDoc.config&&enginesDoc.config.weeklyDraft){delete enginesDoc.config.weeklyDraft.pdf;renderWeeklyPdfChip();toast('PDF removed — save to sync');}
+      break;
     case 'cts-add-section':
       (function(){
         var preset=(el('cts-preset')||{}).value||'';
