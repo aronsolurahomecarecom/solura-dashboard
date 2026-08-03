@@ -1043,9 +1043,22 @@ td{padding:13px 16px;vertical-align:top;}
           </select>
         </div>
         <div class="st-field">
-          <label class="ee-lbl">Training — teach Claude your voice</label>
-          <textarea class="ee-inp" rows="10" data-cfg="claudeTraining" data-cfgtype="str" placeholder="Write like you're briefing a new assistant. Examples:&#10;&#10;- Warm but professional, never salesy. Short paragraphs.&#10;- Always acknowledge what stage the family is at emotionally.&#10;- Sign as Meir Schwimer, Solura Home Care, (216) 770-4886 — no title.&#10;- Mention we're licensed (Ohio HHA 4574HHN) when trust-building.&#10;- Never pressure. Offer one clear next step.&#10;- Paste a favorite past email here as a style example."></textarea>
-          <div style="font-size:11px;color:var(--soft);margin-top:5px">This is sent as Claude's instructions with every draft — voice, rules, sample emails, anything. Synced to OneDrive so it follows you across devices.</div>
+          <label class="ee-lbl">Training — teach Claude your voice, in sections</label>
+          <div style="font-size:11.5px;color:var(--soft);margin-bottom:10px;line-height:1.5">Organize instructions into sections and <strong>attach real template files</strong> (.txt / .md / .html) instead of describing them — Claude receives the actual content. Everything syncs to OneDrive.</div>
+          <div id="cts-list"></div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <select id="cts-preset" class="ee-inp" style="width:auto;padding:8px 10px;font-size:12px">
+              <option value="">Blank section…</option>
+              <option>Voice &amp; tone</option>
+              <option>Hard rules</option>
+              <option>Signature</option>
+              <option>Sample email</option>
+              <option>Never do</option>
+              <option>About Solura</option>
+            </select>
+            <button data-action="cts-add-section" class="st-btn-ghost" style="padding:8px 14px;font-size:12px">➕ Add section</button>
+            <input type="file" id="cts-file" accept=".txt,.md,.html,.htm" style="display:none">
+          </div>
         </div>
       </section>
 
@@ -3614,6 +3627,55 @@ function openSettings(){
   stDirty=false;var db=el('st-dirty-bar');if(db)db.style.display='none';
   el('modal-settings').classList.add('open');
 }
+/* ─── Claude training sections ─────────────────────────────────────────
+ * config.claudeSections = [{title, text, attachments:[{name,text}]}].
+ * Attachments are real file CONTENTS (txt/md/html, 50KB each) stored in
+ * the synced config — Claude gets the template itself, not a description.
+ * Legacy single-string claudeTraining migrates into a section once.
+ * ─────────────────────────────────────────────────────────────────────── */
+var CTS_MAX_FILE=50*1024;
+function ctsSections(){
+  enginesDoc.config=enginesDoc.config||{};
+  if(!Array.isArray(enginesDoc.config.claudeSections)){
+    var legacy=String(enginesDoc.config.claudeTraining||'').trim();
+    enginesDoc.config.claudeSections=legacy?[{title:'General instructions',text:legacy,attachments:[]}]:[];
+  }
+  return enginesDoc.config.claudeSections;
+}
+function renderClaudeSections(){
+  var host=el('cts-list');if(!host)return;
+  var secs=ctsSections();
+  host.innerHTML=secs.map(function(sec,i){
+    var chips=(sec.attachments||[]).map(function(a,ai){
+      return '<span class="ee-chip sms" title="'+escapeHtml((a.text||'').slice(0,120))+'">📎 '+escapeHtml(a.name)
+        +' <span style="opacity:.6;font-weight:500">'+Math.round((a.text||'').length/1024*10)/10+'KB</span>'
+        +' <b data-action="cts-del-attach" data-i="'+i+'" data-ai="'+ai+'">×</b></span>';
+    }).join('');
+    return '<div class="ee-slotbox" style="margin-bottom:10px">'
+      +'<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">'
+        +'<input type="text" class="ee-inp" style="flex:1;font-weight:700" placeholder="Section title" value="'+escapeHtml(sec.title||'')+'" data-cts="'+i+'.title">'
+        +'<button class="ee-mini" data-action="cts-move-section" data-i="'+i+'" data-dir="-1">↑</button>'
+        +'<button class="ee-mini" data-action="cts-move-section" data-i="'+i+'" data-dir="1">↓</button>'
+        +'<button class="ee-mini" data-action="cts-attach" data-i="'+i+'" title="Attach a template file — its content goes to Claude">📎</button>'
+        +'<button class="ee-mini" style="color:var(--red)" data-action="cts-del-section" data-i="'+i+'">🗑</button>'
+      +'</div>'
+      +'<textarea class="ee-inp" rows="4" placeholder="Instructions for this section…" data-cts="'+i+'.text">'+escapeHtml(sec.text||'')+'</textarea>'
+      +(chips?'<div style="margin-top:8px">'+chips+'</div>':'')
+      +'</div>';
+  }).join('')||'<div style="font-size:12px;color:var(--soft);font-style:italic;padding:10px 0">No sections yet — add one below, or attach a template file straight into it.</div>';
+}
+function buildClaudeSystemTraining(){
+  var secs=ctsSections();
+  if(!secs.length)return String(cfg('claudeTraining')||'').trim();
+  return secs.map(function(sec){
+    var out='## '+(sec.title||'Instructions')+'\n'+String(sec.text||'').trim();
+    (sec.attachments||[]).forEach(function(a){
+      out+='\n\n### Attached template: '+a.name+'\n'+String(a.text||'');
+    });
+    return out;
+  }).join('\n\n');
+}
+var _ctsAttachIdx=-1;
 function renderConfigInputs(){
   document.querySelectorAll('[data-cfg]').forEach(function(inp){
     var k=inp.dataset.cfg,ty=inp.dataset.cfgtype;
@@ -3624,6 +3686,7 @@ function renderConfigInputs(){
   // API key is device-local only — deliberately NOT in the synced config
   var ck=el('claude-key');
   if(ck){try{ck.value=localStorage.getItem('claudeApiKey')||'';}catch(_){}}
+  renderClaudeSections();
 }
 function stMarkDirty(){
   stDirty=true;
@@ -4008,6 +4071,12 @@ document.addEventListener('input',function(ev){
     var i=parseInt(parts[0],10);
     if(asgnState[i])asgnState[i][parts[1]]=t.value;
   }
+  // Claude training-section fields → straight into config, dirty-bar saves
+  if(t&&t.dataset&&t.dataset.cts){
+    var cparts=t.dataset.cts.split('.');
+    var csec=ctsSections()[parseInt(cparts[0],10)];
+    if(csec){csec[cparts[1]]=t.value;stMarkDirty();}
+  }
   // Claude API key → localStorage immediately (device-local, not synced)
   if(t&&t.id==='claude-key'){
     try{localStorage.setItem('claudeApiKey',t.value.trim());}catch(_){}
@@ -4022,6 +4091,22 @@ document.addEventListener('input',function(ev){
 });
 document.addEventListener('change',function(ev){
   var t=ev.target;
+  if(t&&t.id==='cts-file'&&t.files&&t.files[0]&&_ctsAttachIdx>=0){
+    (function(){
+      var f3=t.files[0];
+      t.value='';
+      if(f3.size>CTS_MAX_FILE){toast('Template too large — 50KB max (it goes to Claude with every draft)');return;}
+      f3.text().then(function(txt){
+        var sec3=ctsSections()[_ctsAttachIdx];
+        if(!sec3)return;
+        (sec3.attachments=sec3.attachments||[]).push({name:f3.name,text:txt});
+        _ctsAttachIdx=-1;
+        renderClaudeSections();stMarkDirty();
+        toast('📎 '+f3.name+' attached — save settings to sync');
+      });
+    })();
+    return;
+  }
   if(t&&(t.id==='eng-import-input'||t.id==='eng-import-input2')&&t.files&&t.files[0]){
     importEnginePackage(t.files[0]);
     t.value='';
@@ -4474,7 +4559,7 @@ function openClaudeWriter(ri){
   if(inb)histBits.push(inb+' inbound email'+(inb!==1?'s':''));
   el('claude-ctx-summary').innerHTML='Claude will draft for <strong>'+escapeHtml(name)+'</strong> using: lead details, position <strong>'+escapeHtml(posStr)+'</strong> on <strong>'+escapeHtml(engineFor(ri).name)+'</strong>'
     +(histBits.length?(', plus '+histBits.join(', ')):'')
-    +(String(cfg('claudeTraining')||'').trim()?'. Your training instructions apply.':'. <em>Tip: add training in Settings → Claude AI to teach it your voice.</em>');
+    +(buildClaudeSystemTraining()?'. Your training sections apply.':'. <em>Tip: add training sections in Settings → Claude AI to teach it your voice.</em>');
   var ins=el('claude-instructions');if(ins)ins.value='';
   var doc=el('claude-doc');if(doc)doc.value='';
   el('claude-err').textContent='';
@@ -4491,7 +4576,7 @@ async function claudeGenerate(){
   try{
     var context=buildClaudeEmailContext(ri);
     var instructions=String((el('claude-instructions')||{}).value||'').trim();
-    var training=String(cfg('claudeTraining')||'').trim();
+    var training=buildClaudeSystemTraining();
     var system='You write outreach emails for Meir Schwimer, founder of Solura Home Care, a licensed Ohio home care agency in Cleveland (license 4574HHN, phone (216) 770-4886).'
       +(training?('\n\nStanding instructions from Meir (follow these exactly):\n'+training):'')
       +'\n\nRespond ONLY with a JSON object: {"subject":"...","body":"..."} — no markdown fences, no commentary. The body is plain text with blank lines between paragraphs. Personalize genuinely from the lead context; never invent facts not present in it.';
@@ -7196,6 +7281,32 @@ function onClick(ev){
       openClaudeWriter(isNaN(_cri)?-1:_cri);
       break;
     case 'claude-generate': claudeGenerate(); break;
+    case 'cts-add-section':
+      (function(){
+        var preset=(el('cts-preset')||{}).value||'';
+        ctsSections().push({title:preset,text:'',attachments:[]});
+        renderClaudeSections();stMarkDirty();
+      })();
+      break;
+    case 'cts-del-section':
+      if(confirm('Delete this training section?')){ctsSections().splice(parseInt(t.dataset.i,10),1);renderClaudeSections();stMarkDirty();}
+      break;
+    case 'cts-move-section':
+      (function(){
+        var arr=ctsSections(),i2=parseInt(t.dataset.i,10),j2=i2+parseInt(t.dataset.dir,10);
+        if(j2>=0&&j2<arr.length){var tm3=arr[i2];arr[i2]=arr[j2];arr[j2]=tm3;renderClaudeSections();stMarkDirty();}
+      })();
+      break;
+    case 'cts-attach':
+      _ctsAttachIdx=parseInt(t.dataset.i,10);
+      var cf=el('cts-file');if(cf)cf.click();
+      break;
+    case 'cts-del-attach':
+      (function(){
+        var sec2=ctsSections()[parseInt(t.dataset.i,10)];
+        if(sec2&&sec2.attachments){sec2.attachments.splice(parseInt(t.dataset.ai,10),1);renderClaudeSections();stMarkDirty();}
+      })();
+      break;
     case 'email-fmt':
       var cmd=t.dataset.fmt;
       if(cmd)emailFormat(cmd);
