@@ -885,13 +885,14 @@ td{padding:13px 16px;vertical-align:top;}
     <div class="mhead"><div class="mtitle">📰 This week's nurture email</div><button class="mclose" data-action="close-modal" data-mid="modal-weekly">✕</button></div>
     <div class="mbody" style="padding:20px 22px 22px">
       <div id="weekly-status" style="font-size:12px;color:var(--mid);background:var(--warm);border:1px solid var(--border-soft);border-radius:10px;padding:10px 14px;margin-bottom:14px;line-height:1.5"></div>
+      <div id="weekly-tabs" style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap"></div>
       <div style="margin-bottom:12px">
         <label class="ee-lbl">Subject</label>
         <input type="text" id="weekly-subj" class="ee-inp" placeholder="{dm} works — e.g. A thought for you this week, {dm}">
       </div>
       <div style="margin-bottom:12px">
-        <label class="ee-lbl">Body — {dm} and {pt} fill per lead</label>
-        <textarea id="weekly-body" rows="9" class="ee-inp" style="line-height:1.55" placeholder="Hi {dm},&#10;&#10;This week's note…"></textarea>
+        <label class="ee-lbl">Body — plain text OR full HTML · {dm} and {pt} fill per lead</label>
+        <textarea id="weekly-body" rows="9" class="ee-inp" style="line-height:1.55;font-family:inherit" placeholder="Hi {dm},&#10;&#10;This week's note… (paste HTML and it renders as HTML — your design shell still wraps it)"></textarea>
       </div>
       <div style="margin-bottom:14px">
         <label class="ee-lbl">PDF that rides along (optional — attached to every send)</label>
@@ -903,7 +904,7 @@ td{padding:13px 16px;vertical-align:top;}
         <button data-action="close-modal" data-mid="modal-weekly" class="st-btn-ghost">Cancel</button>
         <span id="weekly-spin" style="display:none;align-items:center;gap:6px;color:var(--soft);font-size:11px"><span class="mspin"></span>Saving…</span>
       </div>
-      <div style="font-size:11px;color:var(--soft);margin-top:12px;line-height:1.5">Auto-fills the composer for every <strong>long-term nurture</strong> contact. For anyone else, hit <strong>📰 Weekly</strong> inside the composer.</div>
+      <div style="font-size:11px;color:var(--soft);margin-top:12px;line-height:1.5">Auto-fills the composer for every <strong>long-term nurture</strong> contact; <strong>📰 Weekly</strong> in the composer for anyone else. With multiple variants, sends <strong>rotate A → B → C → A…</strong> and each send's variant is stamped into the Comms Log — combine with open tracking and you have real A/B numbers.</div>
     </div>
   </div>
 </div>
@@ -1055,6 +1056,18 @@ td{padding:13px 16px;vertical-align:top;}
         <div class="st-field">
           <label class="ee-lbl">Route attachments through OneDrive share links when larger than (MB)</label>
           <input type="number" min="0.2" step="0.1" class="ee-inp" style="max-width:140px" data-cfg="emailFallbackMinMB" data-cfgtype="float">
+        </div>
+        <h4 class="st-h2">Email design shell</h4>
+        <p class="st-p">Paste your branded HTML wrapper here. <code style="font-size:11px">{content}</code> marks where the message goes — everything you type, Claude drafts, and the weekly nurture email all flow into it automatically at send. <code style="font-size:11px">{dm}</code> and <code style="font-size:11px">{pt}</code> also fill per lead. Leave empty for plain emails.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
+          <div>
+            <textarea class="ee-inp" rows="16" style="font-family:'SF Mono',Monaco,monospace;font-size:11px;line-height:1.45" data-cfg="emailShellHtml" data-cfgtype="str" placeholder='<div style="background:#F5F1E8;padding:30px">&#10;  <div style="max-width:600px;margin:0 auto;background:#fff;padding:30px;border-radius:8px">&#10;    {content}&#10;    <hr>&#10;    <p style="color:#8B6500">Solura Home Care · (216) 770-4886</p>&#10;  </div>&#10;</div>'></textarea>
+            <div id="shell-warn" style="font-size:11px;color:var(--red);margin-top:6px"></div>
+          </div>
+          <div>
+            <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Live sample</div>
+            <iframe id="shell-preview" style="width:100%;height:340px;border:1.5px solid var(--border);border-radius:10px;background:#fff" sandbox=""></iframe>
+          </div>
         </div>
       </section>
 
@@ -1644,6 +1657,7 @@ async function putEnginesContentChunked(body){
  * fallback threshold). Defaults preserve today's exact behavior.
  * ─────────────────────────────────────────────────────────────────────── */
 var CONFIG_DEFAULTS={
+  emailShellHtml:'',
   trackerUrl:'',
   trackerToken:'',
   claudeModel:'claude-sonnet-4-6',
@@ -3612,8 +3626,8 @@ async function ensureCommsLogSheet(){
         throw new Error('Create Comms Log sheet failed: '+(ce.error&&ce.error.message?ce.error.message:cr.status));
       }
       // Write headers to A1:J1
-      var headers=['Timestamp','Direction','Channel','Lead Row','Lead Name','Contact','Subject','Preview','Outcome','Message ID','Status','Phase','Source','Engine','Opened At','Opens','Doc Opens'];
-      var hr=await gfetch(sheetUrl+"/range(address='A1:Q1')",{
+      var headers=['Timestamp','Direction','Channel','Lead Row','Lead Name','Contact','Subject','Preview','Outcome','Message ID','Status','Phase','Source','Engine','Opened At','Opens','Doc Opens','Variant'];
+      var hr=await gfetch(sheetUrl+"/range(address='A1:R1')",{
         method:'PATCH',
         body:JSON.stringify({values:[headers]})
       });
@@ -3629,8 +3643,8 @@ async function ensureCommsLogSheet(){
     // Sheet exists — refresh the header row once per session so upgrades
     // (new analytics columns) appear on old installs. Idempotent overwrite.
     try{
-      await gfetch(sheetUrl+"/range(address='A1:Q1')",{method:'PATCH',
-        body:JSON.stringify({values:[['Timestamp','Direction','Channel','Lead Row','Lead Name','Contact','Subject','Preview','Outcome','Message ID','Status','Phase','Source','Engine','Opened At','Opens','Doc Opens']]})});
+      await gfetch(sheetUrl+"/range(address='A1:R1')",{method:'PATCH',
+        body:JSON.stringify({values:[['Timestamp','Direction','Channel','Lead Row','Lead Name','Contact','Subject','Preview','Outcome','Message ID','Status','Phase','Source','Engine','Opened At','Opens','Doc Opens','Variant']]})});
     }catch(_){/* non-fatal */}
     // find next empty row via usedRange
     var ur=await gfetch(sheetUrl+'/usedRange?$select=rowCount');
@@ -3685,9 +3699,10 @@ async function logComms(entry){
       String(entry.outcome||''),
       String(entry.messageId||''),
       ctxSt,ctxPh,ctxSo,ctxEng,
-      '','',''  // Opened At / Opens / Doc Opens — filled by open events
+      '','','',  // Opened At / Opens / Doc Opens — filled by open events
+      String(entry.variant||'')  // weekly A/B variant, when applicable
     ];
-    var addr='A'+row+':Q'+row;
+    var addr='A'+row+':R'+row;
     var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
     var r=await gfetch(base+"/range(address='"+addr+"')",{
       method:'PATCH',
@@ -3899,6 +3914,7 @@ function renderConfigInputs(){
   var ck=el('claude-key');
   if(ck){try{ck.value=localStorage.getItem('claudeApiKey')||'';}catch(_){}}
   renderClaudeSections();
+  renderShellPreview();
 }
 function stMarkDirty(){
   stDirty=true;
@@ -4299,6 +4315,7 @@ document.addEventListener('input',function(ev){
     var cv=ty==='bool'?t.checked:ty==='int'?(parseInt(t.value,10)||0):ty==='float'?(parseFloat(t.value)||0):t.value;
     setCfg(t.dataset.cfg,cv);
     stMarkDirty();
+    if(t.dataset.cfg==='emailShellHtml')renderShellPreview();
   }
 });
 document.addEventListener('change',function(ev){
@@ -4310,11 +4327,12 @@ document.addEventListener('change',function(ev){
       if(wf.size>WEEKLY_PDF_CAP){toast('Weekly PDF caps at 10MB');return;}
       var rd=new FileReader();
       rd.onload=function(){
-        enginesDoc.config=enginesDoc.config||{};
-        enginesDoc.config.weeklyDraft=enginesDoc.config.weeklyDraft||{};
-        enginesDoc.config.weeklyDraft.pdf={name:wf.name,b64:String(rd.result).split(',')[1]};
+        var vcur=weeklyVariants()[_wkIdx];
+        if(!vcur)return;
+        vcur.pdf={name:wf.name,b64:String(rd.result).split(',')[1]};
+        vcur.updatedAt=Date.now();
         renderWeeklyPdfChip();
-        toast('📕 '+wf.name+' attached — save to sync');
+        toast('📕 '+wf.name+' attached to variant '+(vcur.label||'')+' — save to sync');
       };
       rd.readAsDataURL(wf);
     })();
@@ -4602,6 +4620,40 @@ function openAddLead(){
   el('modal-addlead').classList.add('open');
   setTimeout(function(){var n=el('al-name');if(n)n.focus();},60);
 }
+/* ─── 🎨 Email design shell ────────────────────────────────────────────
+ * One branded HTML wrapper, stored in synced config. {content} marks the
+ * slot; typed emails, Claude drafts, and the weekly draft all flow into it
+ * at SEND time — the composer stays a clean writing surface. If a body is
+ * already a full HTML document (Claude adapting a full template), its inner
+ * content is extracted first so shells never double-wrap.
+ * ─────────────────────────────────────────────────────────────────────── */
+function extractInnerHtml(html){
+  var v=String(html||'');
+  var m=v.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  if(m)return m[1];
+  return v.replace(/<\/?html[^>]*>/gi,'').replace(/<head[\s\S]*?<\/head>/gi,'');
+}
+function applyEmailShell(bodyHtml,ri){
+  var shell=String(cfg('emailShellHtml')||'').trim();
+  if(!shell)return bodyHtml;
+  var content=extractInnerHtml(bodyHtml);
+  var out;
+  if(shell.indexOf('{content}')>-1)out=shell.replace('{content}',content);
+  else out=shell+content; // no slot → shell becomes a header
+  try{out=fillNames(out,getNames(ri));}catch(_){/* names best-effort */}
+  return out;
+}
+function renderShellPreview(){
+  var fr=el('shell-preview');if(!fr)return;
+  var shell=String(cfg('emailShellHtml')||'').trim();
+  var warn=el('shell-warn');
+  if(warn)warn.textContent=(shell&&shell.indexOf('{content}')===-1)?'⚠ No {content} slot — the message will be appended after your design instead of inside it.':'';
+  var sample='<p>Hi Susan,</p><p>Just a note to say we\u2019re thinking of you and Rose this week. Families often ask us about fall-proofing the bathroom \u2014 the attached one-pager covers the three changes that matter most.</p><p>Warmly,<br>Meir</p>';
+  var htmlOut=shell?(shell.indexOf('{content}')>-1?shell.replace('{content}',sample):shell+sample):('<div style="font-family:Georgia,serif;color:#999;padding:30px;text-align:center;font-style:italic">No shell yet \u2014 emails send as plain content.</div>');
+  htmlOut=htmlOut.replace(/\{dm\}/g,'Susan').replace(/\{pt\}/g,'Rose');
+  try{fr.srcdoc='<!doctype html><html><body style="margin:0">'+htmlOut+'</body></html>';}catch(_){}
+}
+
 /* ─── 📰 Weekly nurture draft ──────────────────────────────────────────
  * One fresh email per week — subject, body, and a PDF — stored in the
  * synced config. Auto-fills the composer for every sticky long-term-
@@ -4609,69 +4661,143 @@ function openAddLead(){
  * {dm}/{pt} placeholders fill per lead. Stale after 8 days → warning.
  * ─────────────────────────────────────────────────────────────────────── */
 var WEEKLY_PDF_CAP=10*1024*1024;
+var WK_LABELS='ABCDEFGH';
+function weeklyVariants(){
+  enginesDoc.config=enginesDoc.config||{};
+  var w=enginesDoc.config.weeklyDraft;
+  if(!w){enginesDoc.config.weeklyDraft={variants:[]};return enginesDoc.config.weeklyDraft.variants;}
+  if(!Array.isArray(w.variants)){
+    // migrate single-draft shape → variant A
+    var legacy=(String(w.subject||'').trim()||String(w.body||'').trim())?
+      [{label:'A',subject:w.subject||'',body:w.body||'',pdf:w.pdf||null,updatedAt:w.updatedAt||Date.now()}]:[];
+    enginesDoc.config.weeklyDraft={variants:legacy};
+  }
+  return enginesDoc.config.weeklyDraft.variants;
+}
+function weeklyLiveVariants(){
+  return weeklyVariants().filter(function(v){return String(v.subject||'').trim()||String(v.body||'').trim();});
+}
 function getWeeklyDraft(){
-  var w=(enginesDoc.config||{}).weeklyDraft;
-  return (w&&(String(w.subject||'').trim()||String(w.body||'').trim()))?w:null;
+  var live=weeklyLiveVariants();
+  return live.length?live[0]:null; // existence check only — rotation picks the real one
 }
 function weeklyAgeDays(){
-  var w=getWeeklyDraft();
-  if(!w||!w.updatedAt)return null;
-  return Math.floor((Date.now()-w.updatedAt)/(24*3600*1000));
+  var live=weeklyLiveVariants();
+  if(!live.length)return null;
+  var oldest=Math.min.apply(null,live.map(function(v){return v.updatedAt||0;}));
+  if(!oldest)return null;
+  return Math.floor((Date.now()-oldest)/(24*3600*1000));
+}
+// Round-robin rotation. Counter is device-local; the applied variant is
+// pinned per composer-open so re-clicking 📰 doesn't shuffle mid-compose.
+var _weeklyAppliedFor=null; // {ri,label}
+function pickWeeklyVariant(peek){
+  var live=weeklyLiveVariants();
+  if(!live.length)return null;
+  var idx=0;
+  try{idx=parseInt(localStorage.getItem('weeklyRotIdx'),10)||0;}catch(_){}
+  var v=live[idx%live.length];
+  if(!peek){try{localStorage.setItem('weeklyRotIdx',String((idx+1)%live.length));}catch(_){}}
+  return v;
 }
 function isNurtureStep(ri){
   var a=currentAction(ri);
   return !!(a&&a.cadence==='weekly'&&a.sticky);
 }
+var _wkIdx=0;
+function wkStash(){
+  var vs=weeklyVariants();
+  if(!vs[_wkIdx])return;
+  var v=vs[_wkIdx];
+  var ns=(el('weekly-subj')||{}).value||'';
+  var nb=(el('weekly-body')||{}).value||'';
+  if(ns!==(v.subject||'')||nb!==(v.body||'')){v.updatedAt=Date.now();}
+  v.subject=ns;v.body=nb;
+}
 function openWeekly(){
-  var w=(enginesDoc.config||{}).weeklyDraft||{};
-  el('weekly-subj').value=w.subject||'';
-  el('weekly-body').value=w.body||'';
-  renderWeeklyPdfChip();
-  var age=weeklyAgeDays();
-  var st=el('weekly-status');
-  if(age==null)st.innerHTML='No draft stored yet — the composer falls back to the normal nurture template until you save one.';
-  else if(age>8)st.innerHTML='⚠ <strong>Last updated '+age+' days ago</strong> — nurture contacts are still getting last week\'s email. Time for a fresh one.';
-  else st.innerHTML='✓ Updated '+(age===0?'today':age+' day'+(age!==1?'s':'')+' ago')+'.';
+  var vs=weeklyVariants();
+  if(!vs.length)vs.push({label:'A',subject:'',body:'',pdf:null,updatedAt:0});
+  _wkIdx=0;
+  renderWeeklyEditor();
   el('modal-weekly').classList.add('open');
 }
+function renderWeeklyEditor(){
+  var vs=weeklyVariants();
+  if(_wkIdx>=vs.length)_wkIdx=Math.max(0,vs.length-1);
+  var v=vs[_wkIdx]||{};
+  el('weekly-subj').value=v.subject||'';
+  el('weekly-body').value=v.body||'';
+  // tabs
+  var tabs=el('weekly-tabs');
+  if(tabs){
+    tabs.innerHTML=vs.map(function(vv,i){
+      var live=String(vv.subject||'').trim()||String(vv.body||'').trim();
+      return '<button class="ee-mini'+(i===_wkIdx?' fb-active':'')+'" style="padding:7px 14px;font-size:12px;font-weight:700'+(i===_wkIdx?';border-color:var(--gold);background:var(--gold-pale);color:#8B6500':'')+'" data-action="wk-tab" data-i="'+i+'">'
+        +escapeHtml(vv.label||WK_LABELS[i]||('V'+(i+1)))+(live?'':' <span style="opacity:.5;font-weight:500">(empty)</span>')+'</button>';
+    }).join('')
+    +(vs.length<8?'<button class="ee-mini" style="padding:7px 12px" data-action="wk-add-variant">＋ Variant</button>':'')
+    +(vs.length>1?'<button class="ee-mini" style="padding:7px 12px;color:var(--red)" data-action="wk-del-variant">🗑 This variant</button>':'');
+  }
+  renderWeeklyPdfChip();
+  // status
+  var age=weeklyAgeDays();
+  var live=weeklyLiveVariants();
+  var st=el('weekly-status');
+  var rot='';
+  if(live.length>1){
+    var nx=pickWeeklyVariant(true);
+    rot=' <strong>'+live.length+' variants rotating</strong> — next send uses <strong>'+escapeHtml(nx?nx.label:'A')+'</strong>.';
+  }
+  if(age==null)st.innerHTML='No draft stored yet — the composer falls back to the normal nurture template until you save one.'+rot;
+  else if(age>8)st.innerHTML='⚠ <strong>Oldest variant is '+age+' days old</strong> — time for fresh material.'+rot;
+  else st.innerHTML='✓ Updated '+(age===0?'today':age+' day'+(age!==1?'s':'')+' ago')+'.'+rot;
+}
 function renderWeeklyPdfChip(){
-  var w=(enginesDoc.config||{}).weeklyDraft||{};
+  var v=weeklyVariants()[_wkIdx]||{};
   var host=el('weekly-pdf-chip');if(!host)return;
-  host.innerHTML=w.pdf?'<span class="ee-chip call" style="margin-bottom:8px">📕 '+escapeHtml(w.pdf.name)
-    +' <span style="opacity:.6;font-weight:500">'+Math.round(w.pdf.b64.length*0.75/1024)+'KB</span>'
+  host.innerHTML=(v.pdf&&v.pdf.b64)?'<span class="ee-chip call" style="margin-bottom:8px">📕 '+escapeHtml(v.pdf.name)
+    +' <span style="opacity:.6;font-weight:500">'+Math.round(v.pdf.b64.length*0.75/1024)+'KB</span>'
     +' <b data-action="weekly-del-pdf">×</b></span>':'';
 }
 async function saveWeeklyDraft(){
-  enginesDoc.config=enginesDoc.config||{};
-  var w=enginesDoc.config.weeklyDraft||{};
-  w.subject=(el('weekly-subj')||{}).value||'';
-  w.body=(el('weekly-body')||{}).value||'';
-  w.updatedAt=Date.now();
-  enginesDoc.config.weeklyDraft=w;
+  wkStash();
   var spin=el('weekly-spin');if(spin)spin.style.display='inline-flex';
   try{
     await saveEnginesDoc();
     closeModal('modal-weekly');
-    toast('📰 This week\'s draft saved — nurture emails now use it');
+    var n=weeklyLiveVariants().length;
+    toast('📰 Saved — '+(n>1?n+' variants rotating on nurture sends':'nurture emails now use it'));
   }catch(e){showErr(e.message);}
   finally{if(spin)spin.style.display='none';}
 }
 function applyWeeklyDraft(ri,opts){
   opts=opts||{};
-  var w=getWeeklyDraft();
-  if(!w){if(!opts.silent)toast('No weekly draft stored — 📰 Weekly in the header to create one');return false;}
+  if(!weeklyLiveVariants().length){if(!opts.silent)toast('No weekly draft stored — 📰 Weekly in the header to create one');return false;}
+  // Pin the variant per composer-open — re-clicking 📰 mid-compose keeps it
+  var w;
+  if(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri){
+    w=weeklyLiveVariants().find(function(v){return v.label===_weeklyAppliedFor.label;})||pickWeeklyVariant(false);
+  }else{
+    w=pickWeeklyVariant(false);
+    _weeklyAppliedFor={ri:ri,label:w.label};
+  }
   var names=getNames(ri);
   var subjEl=el('email-subj');if(subjEl&&w.subject)subjEl.value=fillNames(w.subject,names);
   var bodyEl=el('email-body');
   if(bodyEl&&w.body){
-    var bodyText=fillNames(w.body,names);
-    var sig=String(cfg('emailSignature')||'').trim();
-    if(sig)bodyText+='\n\n'+sig;
-    bodyEl.innerHTML=emailPlainToHtml(bodyText);
+    var filled=fillNames(w.body,names);
+    if(looksLikeHtml(filled)){
+      // HTML newsletter → straight in, rendered. Design shell still wraps
+      // at send; no plain-text signature (HTML carries its own sign-off).
+      bodyEl.innerHTML=sanitizeDraftHtml(filled);
+    }else{
+      var sig=String(cfg('emailSignature')||'').trim();
+      if(sig)filled+='\n\n'+sig;
+      bodyEl.innerHTML=emailPlainToHtml(filled);
+    }
   }
   if(w.pdf&&w.pdf.b64){
-    // Skip if already attached (re-clicks)
-    var already=emailAttachments.some(function(a){return a.name===w.pdf.name&&a._weekly;});
+    var already=emailAttachments.some(function(a){return a._weekly;});
     if(!already){
       emailAttachments.push({name:w.pdf.name,size:Math.floor(w.pdf.b64.length*0.75),
         type:'application/pdf',dataBase64:w.pdf.b64,large:false,_weekly:true});
@@ -4679,7 +4805,8 @@ function applyWeeklyDraft(ri,opts){
     }
   }
   var age=weeklyAgeDays();
-  if(!opts.silent)toast('📰 Weekly draft applied'+(age>8?' — ⚠ it\'s '+age+' days old':''));
+  var multi=weeklyLiveVariants().length>1;
+  if(!opts.silent)toast('📰 Weekly draft'+(multi?' ('+w.label+')':'')+' applied'+(age>8?' — ⚠ oldest is '+age+' days old':''));
   return true;
 }
 
@@ -4727,10 +4854,11 @@ function sentStore(){
   }catch(_){return {};}
 }
 function saveSentStore(o){try{localStorage.setItem(SENT_STORE_KEY,JSON.stringify(o));}catch(_){}}
-function recordSentEmail(id,ri,email,subj,commsRow){
+function recordSentEmail(id,ri,email,subj,commsRow,variant){
   var o=sentStore();
   o[id]={id:id,ri:ri,email:normEmail(email),subj:String(subj||'').slice(0,140),
-    ts:Date.now(),commsRow:commsRow||null,openedAt:0,opens:0,docOpens:0};
+    ts:Date.now(),commsRow:commsRow||null,openedAt:0,opens:0,docOpens:0,
+    variant:String(variant||'')};
   // Cap per lead: keep newest 25
   var mine=Object.keys(o).filter(function(k){return o[k].ri===ri;})
     .sort(function(a,b){return o[b].ts-o[a].ts;});
@@ -4907,7 +5035,8 @@ function parseClaudeEmailJSON(text){
   // Attempt 1: strict
   try{
     var j=JSON.parse(clean);
-    if(j.subject&&j.body)return {subject:String(j.subject),body:String(j.body)};
+    if(j.subject&&j.body)return {subject:String(j.subject),body:String(j.body),
+      format:(j.format&&/html/i.test(String(j.format)))?'html':'text'};
   }catch(_){/* fall through to tolerant extraction */}
   // Attempt 2: tolerant field extraction — survives raw newlines inside
   // strings AND truncation mid-body (the two ways models break JSON).
@@ -4926,12 +5055,26 @@ function parseClaudeEmailJSON(text){
   }
   var subj=extractField(clean,'subject');
   var body=extractField(clean,'body');
+  var fmt=extractField(clean,'format');
   if(subj==null||body==null||!String(subj).trim()||!String(body).trim()){
     throw new Error('Draft came back malformed — hit ✨ Write the draft again');
   }
   var unesc=function(x){return String(x)
     .replace(/\\n/g,'\n').replace(/\\t/g,'\t').replace(/\\"/g,'"').replace(/\\\\/g,'\\');};
-  return {subject:unesc(subj).trim(),body:unesc(body).replace(/\s+$/,'')};
+  return {subject:unesc(subj).trim(),body:unesc(body).replace(/\s+$/,''),
+    format:(fmt&&/html/i.test(fmt))?'html':'text'};
+}
+function looksLikeHtml(sx){
+  var v=String(sx||'');
+  return /<[a-z][a-z0-9]*[\s>]/i.test(v)&&(/<\//.test(v)||/<br\s*\/?/i.test(v));
+}
+function sanitizeDraftHtml(html){
+  return String(html||'')
+    .replace(/<script[\s\S]*?<\/script>/gi,'')
+    .replace(/<style[\s\S]*?<\/style>/gi,function(m2){return m2;}) // inline styles are fine in email
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi,'')
+    .replace(/\son\w+\s*=\s*'[^']*'/gi,'')
+    .replace(/javascript:/gi,'');
 }
 var _claudeRi=-1;
 function openClaudeWriter(ri){
@@ -4979,7 +5122,7 @@ async function claudeGenerate(){
     var training=buildClaudeSystemTraining();
     var system='You write outreach emails for Meir Schwimer, founder of Solura Home Care, a licensed Ohio home care agency in Cleveland (license 4574HHN, phone (216) 770-4886).'
       +(training?('\n\nStanding instructions from Meir (follow these exactly):\n'+training):'')
-      +'\n\nRespond ONLY with a JSON object: {"subject":"...","body":"..."} — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). The body is plain text with blank lines between paragraphs. Personalize genuinely from the lead context; never invent facts not present in it.';
+      +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it.';
     var userContent=[];
     // Training attachments that are PDFs/images ride as native blocks
     collectTrainingBlocks().forEach(function(b3){userContent.push(b3);});
@@ -5032,7 +5175,15 @@ async function claudeGenerate(){
     var text=(data.content||[]).map(function(b2){return b2.type==='text'?b2.text:'';}).join('');
     var draft=parseClaudeEmailJSON(text);
     var subjEl=el('email-subj');if(subjEl)subjEl.value=draft.subject;
-    var bodyEl=el('email-body');if(bodyEl)bodyEl.innerHTML=emailPlainToHtml(draft.body);
+    var bodyEl=el('email-body');
+    if(bodyEl){
+      if(draft.format==='html'||looksLikeHtml(draft.body)){
+        // HTML draft → straight into the box, rendered (scripts/handlers stripped)
+        bodyEl.innerHTML=sanitizeDraftHtml(draft.body);
+      }else{
+        bodyEl.innerHTML=emailPlainToHtml(draft.body);
+      }
+    }
     closeModal('modal-claude');
     toast('✨ Draft ready — review before sending');
   }catch(e){
@@ -5434,10 +5585,12 @@ function openEmail(ri){
   bodyEl.innerHTML=emailPlainToHtml(bodyText);
   bodyEl.setAttribute('data-placeholder','Write your message…');
   // Long-term nurture contacts get THIS WEEK'S draft automatically
+  _weeklyAppliedFor=null; // fresh composer → rotation may advance
   if(isNurtureStep(ri)&&getWeeklyDraft()){
     applyWeeklyDraft(ri,{silent:true});
     var wAge=weeklyAgeDays();
-    toast('📰 Weekly nurture draft applied'+(wAge>8?' — ⚠ '+wAge+' days old, refresh it':''));
+    var wl=(_weeklyAppliedFor&&weeklyLiveVariants().length>1)?(' ('+_weeklyAppliedFor.label+')'):'';
+    toast('📰 Weekly nurture draft'+wl+' applied'+(wAge>8?' — ⚠ oldest is '+wAge+' days old':''));
   }
   // Reset attachments for fresh modal open
   emailAttachments=[];
@@ -5942,6 +6095,9 @@ async function sendEmail(){
     spin.innerHTML='<div class="mspin"></div>'+spinText;
   }
 
+  // Brand shell: everything (typed, Claude, weekly) flows into the design
+  bodyHtml=applyEmailShell(bodyHtml,ri);
+
   // Temporarily swap emailAttachments to effectiveAttachments so the existing
   // send code reads the right list. Restore in finally.
   var origAttachments=emailAttachments;
@@ -6039,9 +6195,12 @@ async function sendEmail(){
       subject:subj,
       preview:bodyEl?bodyEl.textContent.slice(0,500):'',
       outcome:oneDriveShared.length?'sent+onedrive':'sent',
-      messageId:_sendId
+      messageId:_sendId,
+      variant:(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri)?_weeklyAppliedFor.label:''
     })).then(function(commsRow){
-      recordSentEmail(_sendId,ri,toAddr,subj,commsRow);
+      recordSentEmail(_sendId,ri,toAddr,subj,commsRow,
+        (_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri)?_weeklyAppliedFor.label:'');
+      _weeklyAppliedFor=null;
     });
     var u=advanceLead(ri,'Email');
     if(u){try{await writeRow(ri,u);}catch(e){showErr('Email sent but log failed: '+e.message);}}
@@ -6173,8 +6332,9 @@ function renderSentEmailsFor(ri){
       ?'<span style="color:var(--grn);font-weight:700;font-size:10.5px">✓ Opened'+(rec.opens>1?' ×'+rec.opens:'')+'</span>'
       :'<span style="color:var(--soft);font-size:10.5px">not opened yet</span>';
     var docBadge=rec.docOpens?' <span style="color:var(--sky-deep);font-weight:700;font-size:10.5px">📄 doc ×'+rec.docOpens+'</span>':'';
+    var vBadge=rec.variant?' <span style="font-size:9px;font-weight:800;padding:1px 6px;border-radius:7px;background:var(--gold-pale);color:#8B6500">'+escapeHtml(rec.variant)+'</span>':'';
     return '<div class="activity-item" style="border-left-color:'+(rec.openedAt?'var(--grn)':'var(--border)')+'">'
-      +'<div class="subj">'+escapeHtml(rec.subj||'(no subject)')+'</div>'
+      +'<div class="subj">'+escapeHtml(rec.subj||'(no subject)')+vBadge+'</div>'
       +'<div class="meta">sent '+whenStr+' — '+openBadge+docBadge+'</div>'
       +'</div>';
   }).join('');
@@ -7741,7 +7901,28 @@ function onClick(ev){
       if(!isNaN(_wri))applyWeeklyDraft(_wri);
       break;
     case 'weekly-del-pdf':
-      if(enginesDoc.config&&enginesDoc.config.weeklyDraft){delete enginesDoc.config.weeklyDraft.pdf;renderWeeklyPdfChip();toast('PDF removed — save to sync');}
+      (function(){var vv=weeklyVariants()[_wkIdx];if(vv){vv.pdf=null;renderWeeklyPdfChip();toast('PDF removed — save to sync');}})();
+      break;
+    case 'wk-tab':
+      wkStash();_wkIdx=parseInt(t.dataset.i,10)||0;renderWeeklyEditor();
+      break;
+    case 'wk-add-variant':
+      (function(){
+        wkStash();
+        var vs2=weeklyVariants();
+        vs2.push({label:WK_LABELS[vs2.length]||('V'+(vs2.length+1)),subject:'',body:'',pdf:null,updatedAt:0});
+        _wkIdx=vs2.length-1;renderWeeklyEditor();
+      })();
+      break;
+    case 'wk-del-variant':
+      (function(){
+        var vs3=weeklyVariants();
+        if(vs3.length<=1)return;
+        if(!confirm('Delete variant '+(vs3[_wkIdx].label||'')+'?'))return;
+        vs3.splice(_wkIdx,1);
+        vs3.forEach(function(vv,i){vv.label=WK_LABELS[i]||('V'+(i+1));});
+        _wkIdx=0;renderWeeklyEditor();toast('Variant removed — save to sync');
+      })();
       break;
     case 'cts-add-section':
       (function(){
