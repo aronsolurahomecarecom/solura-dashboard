@@ -888,8 +888,8 @@ td{padding:13px 16px;vertical-align:top;}
         <textarea id="claude-instructions" rows="3" class="ee-inp" placeholder="e.g. Reference that her mom just left the hospital. Goal: get the in-home visit booked this week."></textarea>
       </div>
       <div style="margin-bottom:14px">
-        <label class="ee-lbl">Attach a document for Claude to reference (optional — PDF or text, e.g. a care plan)</label>
-        <input type="file" id="claude-doc" accept=".pdf,.txt,.md" style="font-size:12px">
+        <label class="ee-lbl">Attach a document for Claude to reference (optional — PDF, text, or image, e.g. a care plan)</label>
+        <input type="file" id="claude-doc" accept=".pdf,.txt,.md,.html,.htm,.png,.jpg,.jpeg,.webp,.gif" style="font-size:12px">
         <div style="font-size:10.5px;color:var(--soft);margin-top:4px">Claude reads it and works its contents into the email. It does NOT attach the file — add attachments in the composer as usual.</div>
       </div>
       <div style="display:flex;gap:8px;padding-top:14px;border-top:1px solid var(--border-soft)">
@@ -1044,7 +1044,7 @@ td{padding:13px 16px;vertical-align:top;}
         </div>
         <div class="st-field">
           <label class="ee-lbl">Training — teach Claude your voice, in sections</label>
-          <div style="font-size:11.5px;color:var(--soft);margin-bottom:10px;line-height:1.5">Organize instructions into sections and <strong>attach real template files</strong> (.txt / .md / .html) instead of describing them — Claude receives the actual content. Everything syncs to OneDrive.</div>
+          <div style="font-size:11.5px;color:var(--soft);margin-bottom:10px;line-height:1.5">Organize instructions into sections and <strong>attach real files</strong> instead of describing them — Claude receives the actual content. Text up to 500KB · PDFs to 20MB · images to 5MB · 25MB total. Everything syncs to OneDrive. Word/Excel: export as PDF first.</div>
           <div id="cts-list"></div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
             <select id="cts-preset" class="ee-inp" style="width:auto;padding:8px 10px;font-size:12px">
@@ -1057,7 +1057,7 @@ td{padding:13px 16px;vertical-align:top;}
               <option>About Solura</option>
             </select>
             <button data-action="cts-add-section" class="st-btn-ghost" style="padding:8px 14px;font-size:12px">➕ Add section</button>
-            <input type="file" id="cts-file" accept=".txt,.md,.html,.htm" style="display:none">
+            <input type="file" id="cts-file" style="display:none">
           </div>
         </div>
       </section>
@@ -1502,12 +1502,49 @@ async function loadEnginesDoc(){
   }catch(e){console.warn('Engines load failed — using embedded default:',e.message);applyEnginesDoc();}
 }
 async function saveEnginesDoc(){
-  var r=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/content',{
-    method:'PUT',body:JSON.stringify(enginesDoc,null,2)
-  });
-  if(!r.ok){var e=await r.json().catch(function(){return{};});
-    throw new Error('Engines save failed: '+(e.error&&e.error.message?e.error.message:r.status));}
+  var body=JSON.stringify(enginesDoc,null,2);
+  // Simple PUT is only reliable to ~4MB. Large configs (big training PDFs)
+  // go through a chunked upload session — same 320KB-aligned mechanics the
+  // email attachments use.
+  if(body.length<=3.5*1024*1024){
+    var r=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/content',{
+      method:'PUT',body:body
+    });
+    if(!r.ok){var e=await r.json().catch(function(){return{};});
+      throw new Error('Engines save failed: '+(e.error&&e.error.message?e.error.message:r.status));}
+  }else{
+    await putEnginesContentChunked(body);
+  }
   applyEnginesDoc();
+}
+async function putEnginesContentChunked(body){
+  var sess=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/createUploadSession',{
+    method:'POST',
+    body:JSON.stringify({item:{'@microsoft.graph.conflictBehavior':'replace'}})
+  });
+  if(!sess.ok){var se=await sess.json().catch(function(){return{};});
+    throw new Error('Upload session failed: '+(se.error&&se.error.message?se.error.message:sess.status));}
+  var sj=await sess.json();
+  var uploadUrl=sj.uploadUrl;
+  var bytes=new TextEncoder().encode(body);
+  var total=bytes.length;
+  var CH=3276800; // 10 × 320KB — Graph requires 320KB multiples
+  var sent=0;
+  while(sent<total){
+    var end=Math.min(sent+CH,total);
+    var chunk=bytes.slice(sent,end);
+    // NOTE: pre-signed URL — no auth headers (Graph rejects them here)
+    var cr=await fetch(uploadUrl,{
+      method:'PUT',
+      headers:{'Content-Range':'bytes '+sent+'-'+(end-1)+'/'+total},
+      body:chunk
+    });
+    if(!(cr.ok||cr.status===202)){
+      var ce=await cr.json().catch(function(){return{};});
+      throw new Error('Config chunk failed at byte '+sent+': '+(ce.error&&ce.error.message?ce.error.message:cr.status));
+    }
+    sent=end;
+  }
 }
 
 /* ─── Dashboard config — lives in the same OneDrive doc ────────────────
@@ -3483,8 +3520,8 @@ async function ensureCommsLogSheet(){
         throw new Error('Create Comms Log sheet failed: '+(ce.error&&ce.error.message?ce.error.message:cr.status));
       }
       // Write headers to A1:J1
-      var headers=['Timestamp','Direction','Channel','Lead Row','Lead Name','Contact','Subject','Preview','Outcome','Message ID','Status','Phase','Source','Engine'];
-      var hr=await gfetch(sheetUrl+"/range(address='A1:N1')",{
+      var headers=['Timestamp','Direction','Channel','Lead Row','Lead Name','Contact','Subject','Preview','Outcome','Message ID','Status','Phase','Source','Engine','Opened At','Opens','Doc Opens'];
+      var hr=await gfetch(sheetUrl+"/range(address='A1:Q1')",{
         method:'PATCH',
         body:JSON.stringify({values:[headers]})
       });
@@ -3497,7 +3534,13 @@ async function ensureCommsLogSheet(){
     }else if(!r.ok){
       throw new Error('Comms Log check failed: '+r.status);
     }
-    // Sheet exists — find next empty row via usedRange
+    // Sheet exists — refresh the header row once per session so upgrades
+    // (new analytics columns) appear on old installs. Idempotent overwrite.
+    try{
+      await gfetch(sheetUrl+"/range(address='A1:Q1')",{method:'PATCH',
+        body:JSON.stringify({values:[['Timestamp','Direction','Channel','Lead Row','Lead Name','Contact','Subject','Preview','Outcome','Message ID','Status','Phase','Source','Engine','Opened At','Opens','Doc Opens']]})});
+    }catch(_){/* non-fatal */}
+    // find next empty row via usedRange
     var ur=await gfetch(sheetUrl+'/usedRange?$select=rowCount');
     if(!ur.ok){
       _commsLogNextRow=2;
@@ -3549,9 +3592,10 @@ async function logComms(entry){
       preview,
       String(entry.outcome||''),
       String(entry.messageId||''),
-      ctxSt,ctxPh,ctxSo,ctxEng
+      ctxSt,ctxPh,ctxSo,ctxEng,
+      '','',''  // Opened At / Opens / Doc Opens — filled by open events
     ];
-    var addr='A'+row+':N'+row;
+    var addr='A'+row+':Q'+row;
     var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
     var r=await gfetch(base+"/range(address='"+addr+"')",{
       method:'PATCH',
@@ -3559,6 +3603,7 @@ async function logComms(entry){
     });
     if(r.ok){
       _commsLogNextRow=row+1;
+      return row;
     }else{
       // Something's off — reset the counter so next call re-syncs
       _commsLogNextRow=null;
@@ -3567,6 +3612,7 @@ async function logComms(entry){
     console.warn('Comms log skipped (non-fatal):',e.message);
     _commsLogNextRow=null; // re-sync next time
   }
+  return null;
 }
 
 // Helper: build a comms-log entry from a lead row + additional fields
@@ -3633,7 +3679,74 @@ function openSettings(){
  * the synced config — Claude gets the template itself, not a description.
  * Legacy single-string claudeTraining migrates into a section once.
  * ─────────────────────────────────────────────────────────────────────── */
-var CTS_MAX_FILE=50*1024;
+var CTS_MAX_TEXT=500*1024;       // text-likes: inlined into the system prompt
+var CTS_MAX_PDF=20*1024*1024;    // PDFs: API reads up to ~32MB/100 pages — 20MB is a sane ceiling
+var CTS_MAX_IMAGE=5*1024*1024;   // images: the API's own per-image limit
+var CTS_MAX_TOTAL=25*1024*1024;  // total training payload guard
+var CTS_MAX_FILE=CTS_MAX_TEXT;   // legacy alias
+function detectAttachKind(name,mime){
+  var n=String(name||'').toLowerCase();
+  var m=String(mime||'').toLowerCase();
+  if(/\.pdf$/.test(n)||m==='application/pdf')return {kind:'pdf',media:'application/pdf'};
+  if(/\.(png)$/.test(n)||m==='image/png')return {kind:'image',media:'image/png'};
+  if(/\.(jpe?g)$/.test(n)||m==='image/jpeg')return {kind:'image',media:'image/jpeg'};
+  if(/\.(gif)$/.test(n)||m==='image/gif')return {kind:'image',media:'image/gif'};
+  if(/\.(webp)$/.test(n)||m==='image/webp')return {kind:'image',media:'image/webp'};
+  if(/\.(txt|md|html?|csv|json|rtf)$/.test(n)||m.indexOf('text/')===0||m==='application/json')return {kind:'text'};
+  if(/\.(docx?|xlsx?|pptx?)$/.test(n))return {kind:'office'};
+  return {kind:'unknown'};
+}
+function ctsTotalBytes(){
+  var total=0;
+  ctsSections().forEach(function(sec){
+    (sec.attachments||[]).forEach(function(a){
+      total+=a.b64?Math.floor(a.b64.length*0.75):(a.text||'').length;
+    });
+  });
+  return total;
+}
+async function processTrainingFile(f){
+  var det=detectAttachKind(f.name,f.type);
+  if(det.kind==='office')throw new Error(f.name+': Word/Excel/PowerPoint can\'t be read by the API directly — export it as PDF and attach that.');
+  if(det.kind==='unknown')throw new Error(f.name+': unsupported type — use text, PDF, or an image (or export to PDF).');
+  if(det.kind==='text'){
+    if(f.size>CTS_MAX_TEXT)throw new Error(f.name+': text templates cap at 500KB (they travel with every draft).');
+    if(f.size>150*1024)toast('Big text template — a lot of tokens on every draft; consider trimming');
+    var txt=await f.text();
+    return {name:f.name,kind:'text',text:txt};
+  }
+  // pdf / image → base64 content block
+  var binCap=det.kind==='pdf'?CTS_MAX_PDF:CTS_MAX_IMAGE;
+  if(f.size>binCap)throw new Error(f.name+': '+(det.kind==='pdf'?'PDFs cap at 20MB':'images cap at 5MB (the API limit)')+'.');
+  if(ctsTotalBytes()+f.size>CTS_MAX_TOTAL)throw new Error('Training attachments would exceed the 25MB total — remove something first.');
+  if(ctsTotalBytes()+f.size>6*1024*1024){
+    toast('Heads up: large training attachments ride with EVERY draft — expect slower, pricier generations');
+  }
+  var b64=await new Promise(function(res,rej){
+    var rd=new FileReader();
+    rd.onload=function(){res(String(rd.result).split(',')[1]);};
+    rd.onerror=function(){rej(new Error('Could not read '+f.name));};
+    rd.readAsDataURL(f);
+  });
+  return {name:f.name,kind:det.kind,media:det.media,b64:b64};
+}
+function collectTrainingBlocks(){
+  // Binary training attachments → native API content blocks (system strings
+  // can't carry PDFs/images). Each gets a label so Claude knows its role.
+  var blocks=[];
+  ctsSections().forEach(function(sec){
+    (sec.attachments||[]).forEach(function(a){
+      if(a.kind==='pdf'&&a.b64){
+        blocks.push({type:'text',text:'Attached training template ("'+a.name+'", section "'+(sec.title||'Instructions')+'") — use as a base to adapt:'});
+        blocks.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:a.b64}});
+      }else if(a.kind==='image'&&a.b64){
+        blocks.push({type:'text',text:'Attached training reference image ("'+a.name+'", section "'+(sec.title||'Instructions')+'"):'});
+        blocks.push({type:'image',source:{type:'base64',media_type:a.media||'image/png',data:a.b64}});
+      }
+    });
+  });
+  return blocks;
+}
 function ctsSections(){
   enginesDoc.config=enginesDoc.config||{};
   if(!Array.isArray(enginesDoc.config.claudeSections)){
@@ -3647,8 +3760,11 @@ function renderClaudeSections(){
   var secs=ctsSections();
   host.innerHTML=secs.map(function(sec,i){
     var chips=(sec.attachments||[]).map(function(a,ai){
-      return '<span class="ee-chip sms" title="'+escapeHtml((a.text||'').slice(0,120))+'">📎 '+escapeHtml(a.name)
-        +' <span style="opacity:.6;font-weight:500">'+Math.round((a.text||'').length/1024*10)/10+'KB</span>'
+      var kb=a.b64?Math.round(a.b64.length*0.75/1024):Math.round((a.text||'').length/1024*10)/10;
+      var ic=a.kind==='pdf'?'📕':a.kind==='image'?'🖼':'📎';
+      var cls=a.kind==='pdf'?'call':a.kind==='image'?'email':'sms';
+      return '<span class="ee-chip '+cls+'" title="'+escapeHtml(a.kind==='text'?(a.text||'').slice(0,120):(a.kind+' — sent as a native block'))+'">'+ic+' '+escapeHtml(a.name)
+        +' <span style="opacity:.6;font-weight:500">'+kb+'KB</span>'
         +' <b data-action="cts-del-attach" data-i="'+i+'" data-ai="'+ai+'">×</b></span>';
     }).join('');
     return '<div class="ee-slotbox" style="margin-bottom:10px">'
@@ -3670,7 +3786,11 @@ function buildClaudeSystemTraining(){
   return secs.map(function(sec){
     var out='## '+(sec.title||'Instructions')+'\n'+String(sec.text||'').trim();
     (sec.attachments||[]).forEach(function(a){
-      out+='\n\n### Attached template: '+a.name+'\n'+String(a.text||'');
+      if(a.kind&&a.kind!=='text'){
+        out+='\n\n### Attached template (binary): '+a.name+' — provided as a document/image alongside this message.';
+      }else{
+        out+='\n\n### Attached template: '+a.name+'\n'+String(a.text||'');
+      }
     });
     return out;
   }).join('\n\n');
@@ -4095,14 +4215,16 @@ document.addEventListener('change',function(ev){
     (function(){
       var f3=t.files[0];
       t.value='';
-      if(f3.size>CTS_MAX_FILE){toast('Template too large — 50KB max (it goes to Claude with every draft)');return;}
-      f3.text().then(function(txt){
+      processTrainingFile(f3).then(function(att){
         var sec3=ctsSections()[_ctsAttachIdx];
         if(!sec3)return;
-        (sec3.attachments=sec3.attachments||[]).push({name:f3.name,text:txt});
+        (sec3.attachments=sec3.attachments||[]).push(att);
         _ctsAttachIdx=-1;
         renderClaudeSections();stMarkDirty();
         toast('📎 '+f3.name+' attached — save settings to sync');
+      }).catch(function(e6){
+        _ctsAttachIdx=-1;
+        showErr(e6.message);
       });
     })();
     return;
@@ -4387,9 +4509,9 @@ function trkB64(obj){
   // unicode-safe base64 (subjects can carry em-dashes etc.)
   try{return btoa(unescape(encodeURIComponent(JSON.stringify(obj))));}catch(_){return '';}
 }
-function trackingPixelHtml(ri,toAddr,subj){
+function trackingPixelHtml(ri,toAddr,subj,sendId){
   var tc=trackerCfg();if(!tc)return '';
-  var d=trkB64({r:(ri!=null&&ri>=0)?(ri+1):'',e:toAddr||'',s:String(subj||'').slice(0,120)});
+  var d=trkB64({r:(ri!=null&&ri>=0)?(ri+1):'',e:toAddr||'',s:String(subj||'').slice(0,120),i:sendId||''});
   return '<img src="'+tc.url+'/px?d='+encodeURIComponent(d)+'" width="1" height="1" style="display:none;max-height:1px;max-width:1px" alt="">';
 }
 var _trkMeta=null; // set by sendEmail for the share-block builder
@@ -4397,6 +4519,59 @@ function trackDocUrl(target,meta){
   var tc=trackerCfg();if(!tc)return target;
   var d=trkB64(meta||{});
   return tc.url+'/doc?u='+encodeURIComponent(target)+'&d='+encodeURIComponent(d);
+}
+/* ─── Sent-email record ────────────────────────────────────────────────
+ * Every outgoing email gets a send-id. The pixel and tracked doc links
+ * carry it; open events resolve back to the ORIGINAL sent record — the
+ * Comms Log row gets Opened At / Opens / Doc Opens stamped on it (no new
+ * rows), and the drawer shows each email with its open status.
+ * Store lives in localStorage (device-local; 90-day prune, 25/lead).
+ * ─────────────────────────────────────────────────────────────────────── */
+var SENT_STORE_KEY='sent_email_record_v1';
+function sentStore(){
+  try{
+    var o=JSON.parse(localStorage.getItem(SENT_STORE_KEY)||'{}');
+    var cut=Date.now()-90*24*3600*1000,kept={};
+    Object.keys(o).forEach(function(k){if(o[k].ts>cut)kept[k]=o[k];});
+    return kept;
+  }catch(_){return {};}
+}
+function saveSentStore(o){try{localStorage.setItem(SENT_STORE_KEY,JSON.stringify(o));}catch(_){}}
+function recordSentEmail(id,ri,email,subj,commsRow){
+  var o=sentStore();
+  o[id]={id:id,ri:ri,email:normEmail(email),subj:String(subj||'').slice(0,140),
+    ts:Date.now(),commsRow:commsRow||null,openedAt:0,opens:0,docOpens:0};
+  // Cap per lead: keep newest 25
+  var mine=Object.keys(o).filter(function(k){return o[k].ri===ri;})
+    .sort(function(a,b){return o[b].ts-o[a].ts;});
+  mine.slice(25).forEach(function(k){delete o[k];});
+  saveSentStore(o);
+}
+function markEmailOpened(id,isDoc){
+  var o=sentStore();
+  var rec=o[id];
+  if(!rec)return null;
+  if(isDoc)rec.docOpens=(rec.docOpens||0)+1;
+  else{rec.opens=(rec.opens||0)+1;if(!rec.openedAt)rec.openedAt=Date.now();}
+  saveSentStore(o);
+  return rec;
+}
+function sentEmailsFor(ri){
+  var o=sentStore();
+  return Object.keys(o).map(function(k){return o[k];})
+    .filter(function(r2){return r2.ri===ri;})
+    .sort(function(a,b){return b.ts-a.ts;});
+}
+async function stampCommsOpen(rec){
+  // Write Opened At / Opens / Doc Opens onto the ORIGINAL comms row
+  if(!rec||!rec.commsRow||!tok||!fid)return;
+  try{
+    var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
+    await gfetch(base+"/range(address='O"+rec.commsRow+':Q'+rec.commsRow+"')",{
+      method:'PATCH',
+      body:JSON.stringify({values:[[rec.openedAt?new Date(rec.openedAt).toISOString():'',rec.opens||0,rec.docOpens||0]]})
+    });
+  }catch(_){/* best-effort */}
 }
 var TRK_SEEN_KEY='trk_seen_events_v1';
 function trkSeen(){
@@ -4441,8 +4616,17 @@ async function pollTrackerEvents(){
       fresh.push(ev);
     }
     for(var k2=0;k2<fresh.length;k2++){
-      await logComms(trackerEventToComms(fresh[k2]));
-      seen[fresh[k2].id]=Date.now();
+      var ev2=fresh[k2];
+      var rec2=ev2.i?markEmailOpened(ev2.i,ev2.type==='doc_open'):null;
+      if(rec2){
+        // Known send → stamp the ORIGINAL comms row; no new row
+        await stampCommsOpen(rec2);
+        if(drawerRi>=0&&drawerRi===rec2.ri){var kd=drawerRi;drawerRi=-1;openDrawer(kd);}
+      }else{
+        // Unknown send (other device / pre-upgrade email) → standalone row
+        await logComms(trackerEventToComms(ev2));
+      }
+      seen[ev2.id]=Date.now();
     }
     try{localStorage.setItem(TRK_SEEN_KEY,JSON.stringify(seen));localStorage.setItem('trkLastTs',String(maxTs));}catch(_){}
     if(fresh.length&&cfg('toastOnReply')!==false){
@@ -4529,9 +4713,35 @@ function parseClaudeEmailJSON(text){
   // Grab the outermost JSON object if there's prose around it
   var a=clean.indexOf('{'),b=clean.lastIndexOf('}');
   if(a>-1&&b>a)clean=clean.slice(a,b+1);
-  var j=JSON.parse(clean);
-  if(!j.subject||!j.body)throw new Error('Draft came back incomplete');
-  return {subject:String(j.subject),body:String(j.body)};
+  else if(a>-1)clean=clean.slice(a); // truncated — no closing brace
+  // Attempt 1: strict
+  try{
+    var j=JSON.parse(clean);
+    if(j.subject&&j.body)return {subject:String(j.subject),body:String(j.body)};
+  }catch(_){/* fall through to tolerant extraction */}
+  // Attempt 2: tolerant field extraction — survives raw newlines inside
+  // strings AND truncation mid-body (the two ways models break JSON).
+  function extractField(src,key){
+    var m=src.match(new RegExp('"'+key+'"\\s*:\\s*"'));
+    if(!m)return null;
+    var start=m.index+m[0].length;
+    var out='',i=start;
+    while(i<src.length){
+      var ch=src[i];
+      if(ch==='\\'&&i+1<src.length){out+=ch+src[i+1];i+=2;continue;}
+      if(ch==='"')break; // proper close
+      out+=ch;i++;
+    }
+    return out; // if truncated, we simply take everything we got
+  }
+  var subj=extractField(clean,'subject');
+  var body=extractField(clean,'body');
+  if(subj==null||body==null||!String(subj).trim()||!String(body).trim()){
+    throw new Error('Draft came back malformed — hit ✨ Write the draft again');
+  }
+  var unesc=function(x){return String(x)
+    .replace(/\\n/g,'\n').replace(/\\t/g,'\t').replace(/\\"/g,'"').replace(/\\\\/g,'\\');};
+  return {subject:unesc(subj).trim(),body:unesc(body).replace(/\s+$/,'')};
 }
 var _claudeRi=-1;
 function openClaudeWriter(ri){
@@ -4579,24 +4789,29 @@ async function claudeGenerate(){
     var training=buildClaudeSystemTraining();
     var system='You write outreach emails for Meir Schwimer, founder of Solura Home Care, a licensed Ohio home care agency in Cleveland (license 4574HHN, phone (216) 770-4886).'
       +(training?('\n\nStanding instructions from Meir (follow these exactly):\n'+training):'')
-      +'\n\nRespond ONLY with a JSON object: {"subject":"...","body":"..."} — no markdown fences, no commentary. The body is plain text with blank lines between paragraphs. Personalize genuinely from the lead context; never invent facts not present in it.';
+      +'\n\nRespond ONLY with a JSON object: {"subject":"...","body":"..."} — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). The body is plain text with blank lines between paragraphs. Personalize genuinely from the lead context; never invent facts not present in it.';
     var userContent=[];
+    // Training attachments that are PDFs/images ride as native blocks
+    collectTrainingBlocks().forEach(function(b3){userContent.push(b3);});
     // Optional document (PDF as document block; txt/md inlined)
     var docInput=el('claude-doc');
     var f=docInput&&docInput.files&&docInput.files[0];
     if(f){
       if(f.size>4*1024*1024)throw new Error('Document too large (4MB max)');
-      if(/pdf$/i.test(f.name)){
+      var det2=detectAttachKind(f.name,f.type);
+      if(det2.kind==='office')throw new Error('Word/Excel can\'t be read directly — export as PDF first');
+      if(det2.kind==='pdf'||det2.kind==='image'){
         var b64=await new Promise(function(res,rej){
           var rd=new FileReader();
           rd.onload=function(){res(String(rd.result).split(',')[1]);};
           rd.onerror=function(){rej(new Error('Could not read file'));};
           rd.readAsDataURL(f);
         });
-        userContent.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}});
+        if(det2.kind==='pdf')userContent.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}});
+        else userContent.push({type:'image',source:{type:'base64',media_type:det2.media||'image/png',data:b64}});
       }else{
         var txt=await f.text();
-        userContent.push({type:'text',text:'Reference document "'+f.name+'":\n'+txt.slice(0,20000)});
+        userContent.push({type:'text',text:'Reference document "'+f.name+'":\n'+txt.slice(0,200000)});
       }
     }
     userContent.push({type:'text',text:'Lead context:\n'+context
@@ -4612,7 +4827,7 @@ async function claudeGenerate(){
       },
       body:JSON.stringify({
         model:cfg('claudeModel')||'claude-sonnet-4-6',
-        max_tokens:1400,
+        max_tokens:4000,
         system:system,
         messages:[{role:'user',content:userContent}]
       })
@@ -5442,9 +5657,11 @@ async function sendEmail(){
   var bodyEl=el('email-body');
   var bodyHtml=bodyEl?bodyEl.innerHTML:'';
   if(!bodyEl.textContent.trim()){toast('Message body is empty');return;}
-  // Open tracking: meta for pixel + tracked doc links (inert if unconfigured)
-  _trkMeta={r:ri+1,e:toAddr,s:String(subj||'').slice(0,120)};
-  var _trkPx=trackingPixelHtml(ri,toAddr,subj);
+  // Open tracking: per-send id rides in the pixel + tracked doc links, so
+  // opens resolve back to THIS email's record (inert if unconfigured)
+  var _sendId='m'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+  _trkMeta={r:ri+1,e:toAddr,s:String(subj||'').slice(0,120),i:_sendId};
+  var _trkPx=trackingPixelHtml(ri,toAddr,subj,_sendId);
   if(_trkPx)bodyHtml+=_trkPx;
 
   // Before sending, swap blob: preview URLs back to cid: references. The
@@ -5618,15 +5835,18 @@ async function sendEmail(){
     emailAttachments=[];
     origAttachments=[];
     toast(oneDriveShared.length?'\u2713 Email sent \u2014 large files shared via OneDrive':'\u2713 Email sent');
-    // Fire-and-forget log to Comms Log tab for later analytics
+    // Log to Comms Log; capture the row so opens can stamp it later
     logComms(commsEntryForLead(ri,{
       direction:'out',
       channel:'email',
       contact:toAddr,
       subject:subj,
       preview:bodyEl?bodyEl.textContent.slice(0,500):'',
-      outcome:oneDriveShared.length?'sent+onedrive':'sent'
-    }));
+      outcome:oneDriveShared.length?'sent+onedrive':'sent',
+      messageId:_sendId
+    })).then(function(commsRow){
+      recordSentEmail(_sendId,ri,toAddr,subj,commsRow);
+    });
     var u=advanceLead(ri,'Email');
     if(u){try{await writeRow(ri,u);}catch(e){showErr('Email sent but log failed: '+e.message);}}
     await buildUI();
@@ -5733,18 +5953,38 @@ function openDrawer(ri){
   }).join('');
   var email=String(r[C.EM]||'').trim();
   var activityHtml=email?renderActivityForEmail(email):'';
+  var sentHtml=renderSentEmailsFor(ri);
   // Action row at the TOP (call-log moved out of the bottom per feedback)
   var actionsRow='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'
     +'<button class="ee-mini" data-action="open-calllog" data-ri="'+ri+'">📞 Log call</button>'
     +'<button class="ee-mini" data-action="open-intake" data-ri="'+ri+'">📋 Intake Q&amp;A</button>'
     +'<button class="ee-mini" data-action="open-restart" data-ri="'+ri+'">⟳ Restart sequence</button>'
     +'</div>';
-  el('d-body').innerHTML=actionsRow+activityHtml+fieldsHtml;
+  el('d-body').innerHTML=actionsRow+sentHtml+activityHtml+fieldsHtml;
   el('drawer').classList.add('open');
   el('doverlay').classList.add('open');
   // Item 3 fix: values typed straight into the sheet (e.g. Notes edited in
   // Excel) were invisible until a full Refresh. Pull this one row fresh.
   refreshRowFromSheet(ri);
+}
+function renderSentEmailsFor(ri){
+  var sent=sentEmailsFor(ri);
+  if(!sent.length)return '';
+  var items=sent.slice(0,8).map(function(rec){
+    var when=new Date(rec.ts);
+    var whenStr=when.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+when.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    var openBadge=rec.openedAt
+      ?'<span style="color:var(--grn);font-weight:700;font-size:10.5px">✓ Opened'+(rec.opens>1?' ×'+rec.opens:'')+'</span>'
+      :'<span style="color:var(--soft);font-size:10.5px">not opened yet</span>';
+    var docBadge=rec.docOpens?' <span style="color:var(--sky-deep);font-weight:700;font-size:10.5px">📄 doc ×'+rec.docOpens+'</span>':'';
+    return '<div class="activity-item" style="border-left-color:'+(rec.openedAt?'var(--grn)':'var(--border)')+'">'
+      +'<div class="subj">'+escapeHtml(rec.subj||'(no subject)')+'</div>'
+      +'<div class="meta">sent '+whenStr+' — '+openBadge+docBadge+'</div>'
+      +'</div>';
+  }).join('');
+  return '<div class="activity-section" style="background:#F7FBF7;border-color:#D8EAD8">'
+    +'<div class="activity-hdr" style="color:var(--grn)">📧 Emails sent <span class="count" style="background:var(--grn)">'+sent.length+'</span></div>'
+    +items+'</div>';
 }
 async function refreshRowFromSheet(ri){
   if(!tok||!fid)return;
