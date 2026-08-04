@@ -1350,7 +1350,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-2';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-4';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5141,6 +5141,25 @@ function startTrackerPolling(){
   trackerPollTimer=setInterval(function(){pollTrackerEvents().catch(function(){});},INBOUND_POLL_MS);
   pollTrackerEvents().catch(function(){});
 }
+async function pingWorker(tc){
+  // Interrogate /ping via JSONP first (immune to fetch shields), fetch second.
+  try{
+    var j=await jsonpFetch(tc.url+'/ping',5000);
+    if(j&&j.ok)return {status:'ok',v:j.v,hasToken:!!j.hasToken,via:'compat'};
+    return {status:'weird'};
+  }catch(e){
+    if(String(e.message||'').indexOf('timeout')>-1){
+      // Script loaded but never called back → old worker without /ping
+      return {status:'old'};
+    }
+    // script network-blocked → try plain fetch as a second opinion
+    try{
+      var r=await fetch(tc.url+'/ping');
+      if(r.ok){var j2=await r.json();return {status:'ok',v:j2.v,hasToken:!!j2.hasToken,via:'direct'};}
+      return {status:'blocked'};
+    }catch(_){return {status:'blocked'};}
+  }
+}
 async function testTrackerConnection(){
   var out=el('trk-test-out');
   function line(t2){if(out)out.textContent+=t2+'\n';}
@@ -5158,40 +5177,63 @@ async function testTrackerConnection(){
   var tc=trackerCfg();
   if(!tc){line('✗ No worker URL/token saved — fill both fields above and hit Save settings first.');return;}
   line('1. Config: ✓ '+tc.url);
-  // 2. Auth check — direct fetch first, JSONP compatibility second
+  // 2. Deterministic worker interrogation via /ping (no auth, crash-proof)
+  var ping=await pingWorker(tc);
+  if(ping.status==='old'){
+    line('2. Worker version: ✗ the deployed worker is OLD (no /ping endpoint). Paste the NEWEST solura-track-worker.js into the editor and Deploy — the root page must say "solura-track ok v4". Then re-test.');
+    return;
+  }
+  if(ping.status==='blocked'){
+    line('2. Worker reach: ✗ even a plain script load was blocked — that\'s a machine-level block (AV web shield / strict extension / VPN filtering workers.dev).');
+    line('   Prove it in 60 seconds: run this test from your phone on cellular. If it passes there, pause McAfee Web Protection on this computer once and re-test here.');
+    return;
+  }
+  if(ping.status==='ok'){
+    line('2. Worker alive: ✓ v'+ping.v+' ('+(ping.via==='compat'?'compatibility transport':'direct')+') — token configured: '+(ping.hasToken?'YES':'NO'));
+    if(!ping.hasToken){
+      line('   ✗ THAT\'S THE PROBLEM: the worker has no TRACK_TOKEN. The online editor wipes plaintext variables on deploy. Add it in Worker → Settings → Variables & Secrets as type "Secret" (secrets survive), Deploy, re-test.');
+      return;
+    }
+  }
+  // 3. Auth check — direct fetch first, JSONP compatibility second
   var authed=false;
   try{
     var r1=await fetch(tc.url+'/events?since=0&token='+encodeURIComponent(tc.token));
+    if(r1.status===500){
+      var e500=await r1.json().catch(function(){return{};});
+      line('3. Worker error: ✗ the worker code CRASHED: '+(e500.message||'unknown')+' — re-paste the newest solura-track-worker.js and Deploy.');
+      return;
+    }
     if(r1.status===401){
       var e401=await r1.json().catch(function(){return{};});
       if(e401.error==='no-token-configured'){
-        line('2. Worker auth: ✗ the worker has NO token configured at all.');
+        line('3. Worker auth: ✗ the worker has NO token configured at all.');
         line('   This is the Cloudflare online-editor gotcha: deploying pasted code from the editor WIPES plaintext variables. Your TRACK_TOKEN was erased by the v2/v3 deploy.');
         line('   Fix: Worker → Settings → Variables & Secrets → Add → name TRACK_TOKEN, paste your token (choose type "Secret" — secrets survive editor deploys) → Deploy. Then re-test.');
       }else{
         var sentLen=String(tc.token||'').length;
-        line('2. Worker auth: ✗ 401 token mismatch — the portal sent a '+sentLen+'-character token'+(e401.hint?('; the worker expects '+String(e401.hint).replace('len:','')+' characters'):'')+'.');
+        line('3. Worker auth: ✗ 401 token mismatch — the portal sent a '+sentLen+'-character token'+(e401.hint?('; the worker expects '+String(e401.hint).replace('len:','')+' characters'):'')+'.');
         line('   Lengths differing = a stray space/newline on one side (both ends now auto-strip those — redeploy worker v3 + re-save settings here, then re-test). Same lengths = genuinely different strings: re-paste the SAME value into both places.');
       }
       return;
     }
-    if(!r1.ok){line('2. Worker auth: ✗ HTTP '+r1.status+' — worker reachable but erroring. Check the KV binding is named exactly TRACK_KV.');return;}
-    line('2. Worker auth: ✓ (direct)');authed=true;
+    if(!r1.ok){line('3. Worker auth: ✗ HTTP '+r1.status+' — worker reachable but erroring. Check the KV binding is named exactly TRACK_KV.');return;}
+    line('3. Worker auth: ✓ (direct)');authed=true;
   }catch(e){
     // fetch blocked → try compatibility mode
     try{
       var jj=await jsonpFetch(tc.url+'/events?since=0&token='+encodeURIComponent(tc.token),6000);
-      if(jj&&jj.error==='unauthorized'){line('2. Worker auth: ✗ token mismatch (via compatibility mode) — fix TRACK_TOKEN.');return;}
+      if(jj&&jj.error==='unauthorized'){line('3. Worker auth: ✗ token mismatch (via compatibility mode) — fix TRACK_TOKEN.');return;}
       if(jj&&jj.events!==undefined){
-        line('2. Worker auth: ✓ via COMPATIBILITY MODE — something on this machine blocks direct calls (your taskbar shows McAfee: its Web Protection is the usual suspect), but tracking now routes around it automatically. No action needed.');
+        line('3. Worker auth: ✓ via COMPATIBILITY MODE — something on this machine blocks direct calls (your taskbar shows McAfee: its Web Protection is the usual suspect), but tracking now routes around it automatically. No action needed.');
         authed=true;_trkCompatMode=true;
       }else{
-        line('2. Compatibility mode reached the worker but got an unexpected reply — REDEPLOY the latest solura-track-worker.js (the new file adds the compatibility endpoint), then re-test.');
+        line('3. Compatibility mode reached the worker but got an unexpected reply — REDEPLOY the latest solura-track-worker.js (the new file adds the compatibility endpoint), then re-test.');
         return;
       }
     }catch(e2){
       if(String(e2.message||'').indexOf('timeout')>-1){
-        line('2. Compatibility call TIMED OUT — this is the signature of the OLD worker still being deployed (it loads the request but can\'t answer it). Fix: Cloudflare → your worker → Edit code → select all → paste the NEWEST solura-track-worker.js → Deploy. The root page will then say "solura-track ok v3". Re-test after.');
+        line('3. Compatibility call TIMED OUT — this is the signature of the OLD worker still being deployed (it loads the request but can\'t answer it). Fix: Cloudflare → your worker → Edit code → select all → paste the NEWEST solura-track-worker.js → Deploy. The root page will then say "solura-track ok v4". Re-test after.');
         return;
       }
     // Distinguish browser-side blocking from a dead worker: a no-cors probe
@@ -5199,14 +5241,14 @@ async function testTrackerConnection(){
     var reachable=false;
     try{await fetch(tc.url+'/',{mode:'no-cors'});reachable=true;}catch(_){}
     if(reachable){
-      line('2. Worker reach: ⚠ reachable, but BOTH direct and compatibility calls were blocked — this is a strict shield. Most likely fix: redeploy the latest solura-track-worker.js (adds the compatibility endpoint), then pause McAfee Web Protection once to confirm. Details:');
+      line('3. Worker reach: ⚠ reachable, but BOTH direct and compatibility calls were blocked — this is a strict shield. Most likely fix: redeploy the latest solura-track-worker.js (adds the compatibility endpoint), then pause McAfee Web Protection once to confirm. Details:');
       line('   • Antivirus "web protection" (Avast, AVG, Kaspersky, McAfee, Bitdefender web shield) — these intercept HTTPS and kill CORS without being "ad blockers". Pause web protection and re-test.');
       line('   • A browser extension you don\'t think of as an ad-blocker (privacy/VPN/coupon extensions filter requests too). Test in a fresh incognito window with ALL extensions off.');
       line('   • Edge/Brave built-in tracking prevention — set to off/Basic for this site.');
       line('   • An old worker file without CORS headers — open '+tc.url+'/events?since=0&token=x in a tab: if you see {"error":"unauthorized"} the CURRENT worker code is live (good); if you see anything else, re-paste solura-track-worker.js and Deploy.');
       line('   Fastest isolation: run this same test from your phone on cellular — if it passes there, the blocker is on this computer.');
     }else{
-      line('2. Worker reach: ✗ '+e2.message+' — URL typo, worker not deployed, or network/VPN blocking workers.dev. Open the URL in a tab: it should say "solura-track ok".');
+      line('3. Worker reach: ✗ '+e2.message+' — URL typo, worker not deployed, or network/VPN blocking workers.dev. Open the URL in a tab: it should say "solura-track ok".');
     }
     return;
     }
@@ -5218,7 +5260,7 @@ async function testTrackerConnection(){
   await new Promise(function(res){
     var img=new Image();
     var done=false;
-    var fin=function(ok){if(done)return;done=true;line('3. Test pixel '+(ok?'fired ✓':'fired (opaque) —')+' waiting for it to land…');res();};
+    var fin=function(ok){if(done)return;done=true;line('4. Test pixel '+(ok?'fired ✓':'fired (opaque) —')+' waiting for it to land…');res();};
     img.onload=function(){fin(true);};
     img.onerror=function(){fin(false);}; // opaque/error still usually means the request went out
     img.src=tc.url+'/px?d='+encodeURIComponent(d)+'&t='+Date.now();
@@ -5229,12 +5271,12 @@ async function testTrackerConnection(){
     var j2=await fetchTrackerEvents(tc,0);
     var found=(j2.events||[]).some(function(ev){return ev.i===testId;});
     if(found){
-      line('4. Round trip: ✓ the event came back'+(_trkCompatMode?' (compatibility mode)':'')+'. Tracking works end to end.');
+      line('5. Round trip: ✓ the event came back'+(_trkCompatMode?' (compatibility mode)':'')+'. Tracking works end to end.');
       line('\nIf a real email still shows no open: your mail client is blocking remote images (Outlook does by default — click "Download pictures" on the test email). Gmail and Apple Mail load them automatically.');
     }else{
-      line('4. Round trip: ✗ pixel fired but the event never appeared — the KV binding is missing or misnamed. Worker → Settings → Bindings → KV namespace, variable name exactly TRACK_KV.');
+      line('5. Round trip: ✗ pixel fired but the event never appeared — the KV binding is missing or misnamed. Worker → Settings → Bindings → KV namespace, variable name exactly TRACK_KV.');
     }
-  }catch(e){line('4. Round trip: ✗ '+e.message);}
+  }catch(e){line('5. Round trip: ✗ '+e.message);}
 }
 async function pollTrackerEvents(){
   var tc=trackerCfg();if(!tc||!tok)return;
@@ -5926,15 +5968,17 @@ function openEmail(ri){
   if(sig)bodyText=(bodyText?bodyText+'\n\n':'')+sig;
   bodyEl.innerHTML=emailPlainToHtml(bodyText);
   bodyEl.setAttribute('data-placeholder','Write your message…');
-  // Long-term nurture contacts get THIS WEEK'S draft automatically
+  // Reset attachments for fresh modal open
+  emailAttachments=[];
+  emailRenderAttachList();
+  // Long-term nurture contacts get THIS WEEK'S draft automatically —
+  // AFTER the attachment reset above, so the set's PDF survives (it was
+  // being wiped when this ran earlier in the open flow).
   _weeklyAppliedFor=null; // fresh composer → rotation may advance
   _shellSuppressed=false;
   if(isNurtureStep(ri)&&getWeeklyDraftFor(ri)){
     applyWeeklyDraft(ri,{silent:false});
   }
-  // Reset attachments for fresh modal open
-  emailAttachments=[];
-  emailRenderAttachList();
   el('modal-email').dataset.ri=ri;
   el('modal-email').classList.add('open');
 }
