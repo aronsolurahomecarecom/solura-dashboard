@@ -1353,7 +1353,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-6';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-7';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2719,6 +2719,11 @@ function advanceLead(ri,methodUsed){
     u[C.STEP_AT]=noonToday;
     u[C.LC]=todayStr;
     u[C.SQ]=stepLabel(step,sq);
+    // Follow-Up advances to the NEXT touch date — leaving it stale made
+    // nurture leads look like they'd fallen off when they were simply
+    // scheduled ahead.
+    var iw=Math.max(1,parseInt(cur.intervalWeeks,10)||1);
+    u[C.NF]=fd(addDays(t,iw*7));
     if(methodUsed)u[C.MT]=methodUsed;
     var logHist=String((rows[ri]||[])[C.SL]||'');
     u[C.SL]=appendLogStr(logHist,cur.text,methodUsed);
