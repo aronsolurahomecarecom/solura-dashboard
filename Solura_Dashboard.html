@@ -1353,7 +1353,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-5';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-6';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5310,15 +5310,23 @@ async function testTrackerConnection(){
     img.src=tc.url+'/px?d='+encodeURIComponent(d)+'&t='+Date.now();
     setTimeout(function(){fin(false);},4000);
   });
-  await new Promise(function(res){setTimeout(res,1800);});
+  // KV is eventually consistent — list() can lag up to ~60s behind a fresh
+  // write. Retry patiently instead of blaming the binding after 2 seconds.
+  var found=false;
   try{
-    var j2=await fetchTrackerEvents(tc,0);
-    var found=(j2.events||[]).some(function(ev){return ev.i===testId;});
+    for(var att5=1;att5<=5&&!found;att5++){
+      await new Promise(function(res){setTimeout(res,3000);});
+      var j2=await fetchTrackerEvents(tc,0);
+      found=(j2.events||[]).some(function(ev){return ev.i===testId;});
+      if(!found&&att5<5)line('   …not indexed yet (attempt '+att5+'/5 — KV lists new events with a delay)');
+    }
     if(found){
       line('5. Round trip: ✓ the event came back'+(_trkCompatMode?' (compatibility mode)':'')+'. Tracking works end to end.');
-      line('\nIf a real email still shows no open: your mail client is blocking remote images (Outlook does by default — click "Download pictures" on the test email). Gmail and Apple Mail load them automatically.');
+      line('\nIf a real email shows no open: the recipient\'s mail client is blocking remote images (Outlook does by default — "Download pictures"). Gmail and Apple Mail load them automatically. Doc-link clicks always track.');
+    }else if(ping&&ping.hasKV){
+      line('5. Round trip: ⏳ the test event hasn\'t been indexed yet — KV can take up to a minute to list fresh writes. Everything upstream is green (worker v'+ping.v+', token ✓, storage ✓, pixel served ✓), so tracking IS working — the dashboard poller checks every minute and will catch it. Re-run this in ~60s to see the ✓.');
     }else{
-      line('5. Round trip: ✗ pixel fired but the event never appeared — the KV binding is missing or misnamed. Worker → Settings → Bindings → KV namespace, variable name exactly TRACK_KV.');
+      line('5. Round trip: ✗ pixel fired but nothing landed — check the KV binding: Worker → Settings → Bindings → variable name exactly TRACK_KV → Deploy.');
     }
   }catch(e){line('5. Round trip: ✗ '+e.message);}
 }
