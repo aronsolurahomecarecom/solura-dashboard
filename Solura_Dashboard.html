@@ -886,6 +886,17 @@ td{padding:13px 16px;vertical-align:top;}
     <div class="mhead"><div class="mtitle">📰 This week's nurture email</div><button class="mclose" data-action="close-modal" data-mid="modal-weekly">✕</button></div>
     <div class="mbody" style="padding:20px 22px 22px">
       <div id="weekly-status" style="font-size:12px;color:var(--mid);background:var(--warm);border:1px solid var(--border-soft);border-radius:10px;padding:10px 14px;margin-bottom:14px;line-height:1.5"></div>
+      <div id="weekly-set-tabs" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;padding-bottom:10px;border-bottom:1px solid var(--border-soft)"></div>
+      <div style="display:grid;grid-template-columns:1fr 130px;gap:10px;margin-bottom:12px">
+        <div><label class="ee-lbl">This set applies to</label>
+          <select id="wk-set-engine" class="ee-inp"></select></div>
+        <div><label class="ee-lbl">Refresh every (days)</label>
+          <input type="number" id="wk-set-refresh" min="1" max="90" class="ee-inp"></div>
+      </div>
+      <div style="margin-bottom:12px">
+        <label class="ee-lbl">SMS template for this sequence's nurture texts ({dm}/{pt} fill)</label>
+        <textarea id="wk-set-sms" rows="2" class="ee-inp" placeholder="Hi {dm}, Meir from Solura — just checking in on you and {pt} this week."></textarea>
+      </div>
       <div id="weekly-tabs" style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap"></div>
       <div style="margin-bottom:12px">
         <label class="ee-lbl">Subject</label>
@@ -1614,15 +1625,23 @@ function allRuleMatchedLeads(){
   }
   return out;
 }
+// STEP_AT for a fresh enrollment. Sticky nurture steps get a BACKDATED
+// anchor (one full interval ago) so the FIRST touch is due today — landing
+// weeks ahead on enrollment was the "they land a long time ahead" bug.
+function freshStepAt(step,t2){
+  var back=0;
+  if(step&&step.sticky)back=(parseInt(step.intervalWeeks,10)||1)*7;
+  var d=addDays(t2,-back);
+  return new Date(d.getFullYear(),d.getMonth(),d.getDate(),12,0,0).toISOString();
+}
 async function backfillAssignments(changed){
   var t2=localToday();
-  var noon=new Date(t2.getFullYear(),t2.getMonth(),t2.getDate(),12,0,0).toISOString();
   for(var i=0;i<changed.length;i++){
     var ch=changed[i];
     var sq=ENGINES[ch.engineId].seq;
     var u={};
     u[C.STEP]=0;
-    u[C.STEP_AT]=noon;
+    u[C.STEP_AT]=freshStepAt(sq[0],t2);
     u[C.SQ]=stepLabel(0,sq);
     u[C.NF]=fd(t2);
     try{await writeRow(ch.ri,u);}catch(e){console.warn('Backfill row '+ch.ri+' failed:',e.message);}
@@ -2498,6 +2517,12 @@ function nurtureWeekday(ri){
     var n=parseInt(ov,10);
     if(n>=0&&n<=6)return n;
   }
+  // Anchor the weekly cadence to when they ENTERED this step of the
+  // sequence (STEP_AT), not the original date-added. A lead enrolled into
+  // nurture today gets today's weekday as their touch day — cadence begins
+  // from enrollment, not from history.
+  var entered=getStepDoneAt(ri);
+  if(entered)return entered.getDay();
   var added=pd(r[C.DA]);
   return added?added.getDay():localToday().getDay();
 }
@@ -3400,6 +3425,13 @@ function getWarmSMS(ri){
   return fillNames(getTpl(WARM.sms,ri),names);
 }
 function getSMSText(ri){
+  // Sequence content set: nurture SMS template assigned to this engine
+  if(isNurtureStep(ri)){
+    var _set=setForLead(ri);
+    if(_set&&String(_set.smsText||'').trim()){
+      return fillNames(_set.smsText,getNames(ri));
+    }
+  }
   var r=rows[ri]||[];
   // Custom-engine steps can carry an inline template — it wins over the
   // Templates-sheet lookup. Default-engine steps have template:'' so the
@@ -4723,42 +4755,73 @@ function renderShellPreview(){
  * ─────────────────────────────────────────────────────────────────────── */
 var WEEKLY_PDF_CAP=10*1024*1024;
 var WK_LABELS='ABCDEFGH';
-function weeklyVariants(){
+/* Draft SETS: each set carries its own rotating email variants, an SMS
+ * template, a refresh cadence, and an engine assignment. The set whose
+ * engineId matches the lead's engine wins; engineId '' = default for all. */
+function draftSets(){
   enginesDoc.config=enginesDoc.config||{};
   var w=enginesDoc.config.weeklyDraft;
-  if(!w){enginesDoc.config.weeklyDraft={variants:[]};return enginesDoc.config.weeklyDraft.variants;}
-  if(!Array.isArray(w.variants)){
-    // migrate single-draft shape → variant A
-    var legacy=(String(w.subject||'').trim()||String(w.body||'').trim())?
-      [{label:'A',subject:w.subject||'',body:w.body||'',pdf:w.pdf||null,updatedAt:w.updatedAt||Date.now()}]:[];
-    enginesDoc.config.weeklyDraft={variants:legacy};
+  if(!w)w=enginesDoc.config.weeklyDraft={};
+  if(!Array.isArray(w.sets)){
+    // migrate: {variants} shape or legacy single-draft shape → default set
+    var vars=[];
+    if(Array.isArray(w.variants))vars=w.variants;
+    else if(String(w.subject||'').trim()||String(w.body||'').trim())
+      vars=[{label:'A',subject:w.subject||'',body:w.body||'',pdf:w.pdf||null,updatedAt:w.updatedAt||Date.now()}];
+    enginesDoc.config.weeklyDraft={sets:[{id:'default',name:'Default (all sequences)',engineId:'',refreshDays:8,smsText:'',variants:vars}]};
+    w=enginesDoc.config.weeklyDraft;
   }
-  return enginesDoc.config.weeklyDraft.variants;
+  if(!w.sets.length)w.sets.push({id:'default',name:'Default (all sequences)',engineId:'',refreshDays:8,smsText:'',variants:[]});
+  return w.sets;
+}
+var _wkSet=0;
+function currentDraftSet(){var ds=draftSets();if(_wkSet>=ds.length)_wkSet=0;return ds[_wkSet];}
+function setForLead(ri){
+  var ds=draftSets();
+  var eid=engineIdFor(ri);
+  var hit=ds.find(function(x){return x.engineId&&x.engineId===eid&&x.variants&&x.variants.some(function(v){return String(v.subject||'').trim()||String(v.body||'').trim();});});
+  if(hit)return hit;
+  return ds.find(function(x){return !x.engineId;})||ds[0]||null;
+}
+function weeklyVariants(){
+  return currentDraftSet().variants=currentDraftSet().variants||[];
+}
+function liveVariantsOf(set){
+  return ((set&&set.variants)||[]).filter(function(v){return String(v.subject||'').trim()||String(v.body||'').trim();});
 }
 function weeklyLiveVariants(){
-  return weeklyVariants().filter(function(v){return String(v.subject||'').trim()||String(v.body||'').trim();});
+  return liveVariantsOf(currentDraftSet());
 }
-function getWeeklyDraft(){
-  var live=weeklyLiveVariants();
-  return live.length?live[0]:null; // existence check only — rotation picks the real one
+function getWeeklyDraftFor(ri){
+  var set=setForLead(ri);
+  return (set&&liveVariantsOf(set).length)?set:null;
 }
-function weeklyAgeDays(){
+function getWeeklyDraft(){ // existence for the CURRENT editor set
   var live=weeklyLiveVariants();
+  return live.length?live[0]:null;
+}
+function setAgeDays(set){
+  var live=liveVariantsOf(set);
   if(!live.length)return null;
   var oldest=Math.min.apply(null,live.map(function(v){return v.updatedAt||0;}));
   if(!oldest)return null;
   return Math.floor((Date.now()-oldest)/(24*3600*1000));
 }
-// Round-robin rotation. Counter is device-local; the applied variant is
-// pinned per composer-open so re-clicking 📰 doesn't shuffle mid-compose.
-var _weeklyAppliedFor=null; // {ri,label}
-function pickWeeklyVariant(peek){
-  var live=weeklyLiveVariants();
+function weeklyAgeDays(){return setAgeDays(currentDraftSet());}
+// Round-robin rotation PER SET. Counter is device-local; the applied
+// variant pins per composer-open so re-clicking 📰 doesn't shuffle.
+var _weeklyAppliedFor=null; // {ri,label,setId}
+function pickWeeklyVariant(peekOrSet,maybePeek){
+  var set,peek;
+  if(peekOrSet===true||peekOrSet===false||peekOrSet===undefined){set=currentDraftSet();peek=!!peekOrSet;}
+  else{set=peekOrSet;peek=!!maybePeek;}
+  var live=liveVariantsOf(set);
   if(!live.length)return null;
+  var key='weeklyRotIdx:'+(set.id||'default');
   var idx=0;
-  try{idx=parseInt(localStorage.getItem('weeklyRotIdx'),10)||0;}catch(_){}
+  try{idx=parseInt(localStorage.getItem(key),10)||0;}catch(_){}
   var v=live[idx%live.length];
-  if(!peek){try{localStorage.setItem('weeklyRotIdx',String((idx+1)%live.length));}catch(_){}}
+  if(!peek){try{localStorage.setItem(key,String((idx+1)%live.length));}catch(_){}}
   return v;
 }
 function isNurtureStep(ri){
@@ -4767,6 +4830,13 @@ function isNurtureStep(ri){
 }
 var _wkIdx=0;
 function wkStash(){
+  var set=currentDraftSet();
+  // set-level fields
+  var se=el('wk-set-engine');if(se)set.engineId=se.value||'';
+  var sr=el('wk-set-refresh');if(sr)set.refreshDays=Math.max(1,parseInt(sr.value,10)||8);
+  var ss=el('wk-set-sms');if(ss)set.smsText=ss.value||'';
+  if(set.engineId){var e5=(enginesDoc.engines||[]).find(function(x){return x.id===set.engineId;});set.name=e5?e5.name:set.engineId;}
+  else set.name='Default (all sequences)';
   var vs=weeklyVariants();
   if(!vs[_wkIdx])return;
   var v=vs[_wkIdx];
@@ -4776,13 +4846,35 @@ function wkStash(){
   v.subject=ns;v.body=nb;
 }
 function openWeekly(){
-  var vs=weeklyVariants();
-  if(!vs.length)vs.push({label:'A',subject:'',body:'',pdf:null,updatedAt:0});
-  _wkIdx=0;
+  draftSets(); // ensure migrated
+  _wkSet=0;_wkIdx=0;
+  if(!weeklyVariants().length)weeklyVariants().push({label:'A',subject:'',body:'',pdf:null,updatedAt:0});
   renderWeeklyEditor();
   el('modal-weekly').classList.add('open');
 }
 function renderWeeklyEditor(){
+  var ds=draftSets();
+  if(_wkSet>=ds.length)_wkSet=0;
+  var set=ds[_wkSet];
+  // set tabs
+  var stabs=el('weekly-set-tabs');
+  if(stabs){
+    stabs.innerHTML=ds.map(function(sd,i){
+      return '<button class="ee-mini" style="padding:7px 14px;font-size:12px;font-weight:700'+(i===_wkSet?';border-color:var(--sky-mid);background:var(--sky-pale);color:var(--sky-deep)':'')+'" data-action="wk-set-tab" data-i="'+i+'">'
+        +escapeHtml(sd.name||sd.engineId||'Default')+'</button>';
+    }).join('')
+    +'<button class="ee-mini" style="padding:7px 12px" data-action="wk-add-set">＋ Sequence set</button>'
+    +(ds.length>1&&set.engineId?'<button class="ee-mini" style="padding:7px 12px;color:var(--red)" data-action="wk-del-set">🗑 This set</button>':'');
+  }
+  // set fields
+  var se=el('wk-set-engine');
+  if(se){
+    se.innerHTML='<option value="">Default — all sequences</option>'
+      +(enginesDoc.engines||[]).map(function(e6){return '<option value="'+escapeHtml(e6.id)+'"'+(set.engineId===e6.id?' selected':'')+'>'+escapeHtml(e6.name||e6.id)+'</option>';}).join('');
+    se.value=set.engineId||'';
+  }
+  var sr=el('wk-set-refresh');if(sr)sr.value=set.refreshDays||8;
+  var ss=el('wk-set-sms');if(ss)ss.value=set.smsText||'';
   var vs=weeklyVariants();
   if(_wkIdx>=vs.length)_wkIdx=Math.max(0,vs.length-1);
   var v=vs[_wkIdx]||{};
@@ -4801,17 +4893,19 @@ function renderWeeklyEditor(){
   }
   renderWeeklyPdfChip();
   // status
-  var age=weeklyAgeDays();
+  var age=setAgeDays(set);
+  var thr=parseInt(set.refreshDays,10)||8;
   var live=weeklyLiveVariants();
   var st=el('weekly-status');
   var rot='';
   if(live.length>1){
-    var nx=pickWeeklyVariant(true);
+    var nx=pickWeeklyVariant(set,true);
     rot=' <strong>'+live.length+' variants rotating</strong> — next send uses <strong>'+escapeHtml(nx?nx.label:'A')+'</strong>.';
   }
-  if(age==null)st.innerHTML='No draft stored yet — the composer falls back to the normal nurture template until you save one.'+rot;
-  else if(age>8)st.innerHTML='⚠ <strong>Oldest variant is '+age+' days old</strong> — time for fresh material.'+rot;
-  else st.innerHTML='✓ Updated '+(age===0?'today':age+' day'+(age!==1?'s':'')+' ago')+'.'+rot;
+  var scope=set.engineId?('Applies to <strong>'+escapeHtml(set.name||set.engineId)+'</strong> leads. '):'Applies to <strong>every sequence</strong> without its own set. ';
+  if(age==null)st.innerHTML=scope+'No draft stored yet.'+rot;
+  else if(age>thr)st.innerHTML=scope+'⚠ <strong>Oldest variant is '+age+' days old</strong> (refresh target: '+thr+'d).'+rot;
+  else st.innerHTML=scope+'✓ Updated '+(age===0?'today':age+' day'+(age!==1?'s':'')+' ago')+'.'+rot;
 }
 function renderWeeklyPdfChip(){
   var v=weeklyVariants()[_wkIdx]||{};
@@ -4826,21 +4920,22 @@ async function saveWeeklyDraft(){
   try{
     await saveEnginesDoc();
     closeModal('modal-weekly');
-    var n=weeklyLiveVariants().length;
-    toast('📰 Saved — '+(n>1?n+' variants rotating on nurture sends':'nurture emails now use it'));
+    var nsets=draftSets().filter(function(x){return liveVariantsOf(x).length;}).length;
+    toast('📰 Saved — '+nsets+' content set'+(nsets!==1?'s':'')+' live across your sequences');
   }catch(e){showErr(e.message);}
   finally{if(spin)spin.style.display='none';}
 }
 function applyWeeklyDraft(ri,opts){
   opts=opts||{};
-  if(!weeklyLiveVariants().length){if(!opts.silent)toast('No weekly draft stored — 📰 Weekly in the header to create one');return false;}
+  var set=getWeeklyDraftFor(ri);
+  if(!set){if(!opts.silent)toast('No weekly draft stored — 📰 Weekly in the header to create one');return false;}
   // Pin the variant per composer-open — re-clicking 📰 mid-compose keeps it
   var w;
-  if(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri){
-    w=weeklyLiveVariants().find(function(v){return v.label===_weeklyAppliedFor.label;})||pickWeeklyVariant(false);
+  if(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri&&_weeklyAppliedFor.setId===(set.id||'default')){
+    w=liveVariantsOf(set).find(function(v){return v.label===_weeklyAppliedFor.label;})||pickWeeklyVariant(set,false);
   }else{
-    w=pickWeeklyVariant(false);
-    _weeklyAppliedFor={ri:ri,label:w.label};
+    w=pickWeeklyVariant(set,false);
+    _weeklyAppliedFor={ri:ri,label:w.label,setId:set.id||'default'};
   }
   var names=getNames(ri);
   var subjEl=el('email-subj');if(subjEl&&w.subject)subjEl.value=fillNames(w.subject,names);
@@ -4865,9 +4960,11 @@ function applyWeeklyDraft(ri,opts){
       try{emailRenderAttachList();}catch(_){}
     }
   }
-  var age=weeklyAgeDays();
-  var multi=weeklyLiveVariants().length>1;
-  if(!opts.silent)toast('📰 Weekly draft'+(multi?' ('+w.label+')':'')+' applied'+(age>8?' — ⚠ oldest is '+age+' days old':''));
+  var age=setAgeDays(set);
+  var stale=age!=null&&age>(parseInt(set.refreshDays,10)||8);
+  var multi=liveVariantsOf(set).length>1;
+  var setName=set.engineId?(' · '+(set.name||set.engineId)):'';
+  if(!opts.silent)toast('📰 Draft'+(multi?' ('+w.label+')':'')+setName+' applied'+(stale?' — ⚠ '+age+' days old, refresh it':''));
   return true;
 }
 
@@ -4879,7 +4976,7 @@ function applyWeeklyDraft(ri,opts){
  * All of it is inert until Settings → Data has a worker URL + token.
  * ─────────────────────────────────────────────────────────────────────── */
 function trackerCfg(){
-  var u=String(cfg('trackerUrl')||'').trim().replace(/\/+$/,'');
+  var u=String(cfg('trackerUrl')||'').replace(/[^\x20-\x7E]/g,'').trim().replace(/\/+$/,'');
   var t2=String(cfg('trackerToken')||'').trim();
   return (u&&/^https:\/\//.test(u))?{url:u,token:t2}:null;
 }
@@ -4993,6 +5090,16 @@ async function testTrackerConnection(){
   var out=el('trk-test-out');
   function line(t2){if(out)out.textContent+=t2+'\n';}
   if(out)out.textContent='';
+  var rawUrl=String(cfg('trackerUrl')||'');
+  if(/[^\x20-\x7E]/.test(rawUrl)){
+    var cleaned=rawUrl.replace(/[^\x20-\x7E]/g,'').trim();
+    setCfg('trackerUrl',cleaned);
+    line('1. Config: ⚠ the saved URL contained INVISIBLE characters (a copy-paste artifact) — cleaned it to:');
+    line('   '+cleaned);
+    line('   Hit Save settings, then run this test again.');
+    renderConfigInputs();stMarkDirty();
+    return;
+  }
   var tc=trackerCfg();
   if(!tc){line('✗ No worker URL/token saved — fill both fields above and hit Save settings first.');return;}
   line('1. Config: ✓ '+tc.url);
@@ -5008,9 +5115,12 @@ async function testTrackerConnection(){
     var reachable=false;
     try{await fetch(tc.url+'/',{mode:'no-cors'});reachable=true;}catch(_){}
     if(reachable){
-      line('2. Worker reach: ⚠ the worker IS reachable, but this browser blocked the cross-origin call.');
-      line('   Almost always an ad-blocker or tracking prevention: disable uBlock/AdGuard/Brave Shields for this site, or Edge → site permissions → Tracking prevention → off for this site. Then re-test.');
-      line('   (If you re-pasted an old worker file without CORS headers, redeploy the latest solura-track-worker.js.)');
+      line('2. Worker reach: ⚠ the worker IS reachable, but something between this browser and the worker is stripping/blocking the cross-origin response. In order of likelihood:');
+      line('   • Antivirus "web protection" (Avast, AVG, Kaspersky, McAfee, Bitdefender web shield) — these intercept HTTPS and kill CORS without being "ad blockers". Pause web protection and re-test.');
+      line('   • A browser extension you don\'t think of as an ad-blocker (privacy/VPN/coupon extensions filter requests too). Test in a fresh incognito window with ALL extensions off.');
+      line('   • Edge/Brave built-in tracking prevention — set to off/Basic for this site.');
+      line('   • An old worker file without CORS headers — open '+tc.url+'/events?since=0&token=x in a tab: if you see {"error":"unauthorized"} the CURRENT worker code is live (good); if you see anything else, re-paste solura-track-worker.js and Deploy.');
+      line('   Fastest isolation: run this same test from your phone on cellular — if it passes there, the blocker is on this computer.');
     }else{
       line('2. Worker reach: ✗ '+e.message+' — URL typo, worker not deployed, or network/VPN blocking workers.dev. Open the URL in a tab: it should say "solura-track ok".');
     }
@@ -5360,7 +5470,7 @@ async function doRestartSeq(ri,stepIdx){
   var t2=localToday();
   var u={};
   u[C.STEP]=stepIdx;
-  u[C.STEP_AT]=new Date(t2.getFullYear(),t2.getMonth(),t2.getDate(),12,0,0).toISOString();
+  u[C.STEP_AT]=freshStepAt(sq[stepIdx],t2);
   u[C.SQ]=stepLabel(stepIdx,sq);
   u[C.NF]=fd(t2);
   // Status: excluded leads deliberately re-enrolled keep visibility EITHER
@@ -5730,11 +5840,8 @@ function openEmail(ri){
   bodyEl.setAttribute('data-placeholder','Write your message…');
   // Long-term nurture contacts get THIS WEEK'S draft automatically
   _weeklyAppliedFor=null; // fresh composer → rotation may advance
-  if(isNurtureStep(ri)&&getWeeklyDraft()){
-    applyWeeklyDraft(ri,{silent:true});
-    var wAge=weeklyAgeDays();
-    var wl=(_weeklyAppliedFor&&weeklyLiveVariants().length>1)?(' ('+_weeklyAppliedFor.label+')'):'';
-    toast('📰 Weekly nurture draft'+wl+' applied'+(wAge>8?' — ⚠ oldest is '+wAge+' days old':''));
+  if(isNurtureStep(ri)&&getWeeklyDraftFor(ri)){
+    applyWeeklyDraft(ri,{silent:false});
   }
   // Reset attachments for fresh modal open
   emailAttachments=[];
@@ -8058,6 +8165,25 @@ function onClick(ev){
       break;
     case 'wk-tab':
       wkStash();_wkIdx=parseInt(t.dataset.i,10)||0;renderWeeklyEditor();
+      break;
+    case 'wk-set-tab':
+      wkStash();_wkSet=parseInt(t.dataset.i,10)||0;_wkIdx=0;renderWeeklyEditor();
+      break;
+    case 'wk-add-set':
+      (function(){
+        wkStash();
+        var ds2=draftSets();
+        ds2.push({id:'set'+Date.now().toString(36),name:'New set',engineId:'',refreshDays:8,smsText:'',variants:[{label:'A',subject:'',body:'',pdf:null,updatedAt:0}]});
+        _wkSet=ds2.length-1;_wkIdx=0;renderWeeklyEditor();
+      })();
+      break;
+    case 'wk-del-set':
+      (function(){
+        var ds3=draftSets();
+        if(ds3.length<=1)return;
+        if(!confirm('Delete the "'+(ds3[_wkSet].name||'')+'" set and its drafts?'))return;
+        ds3.splice(_wkSet,1);_wkSet=0;_wkIdx=0;renderWeeklyEditor();toast('Set removed — save to sync');
+      })();
       break;
     case 'wk-add-variant':
       (function(){
