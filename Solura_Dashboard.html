@@ -1168,6 +1168,8 @@ td{padding:13px 16px;vertical-align:top;}
 
       <section class="st-sec" id="st-sec-about" hidden>
         <h3 class="st-h">About</h3>
+        <p class="st-p" style="font-size:14px;font-weight:700;color:var(--dark)">Build: <span id="about-build"></span></p>
+        <p class="st-p">If a fix "isn't working," check this build id FIRST — if it doesn't match the latest ship, the deploy or a cached page is the problem, not the fix. Hard-refresh with Ctrl+Shift+R.</p>
         <p class="st-p">Solura Dashboard · engines + settings live in <code style="font-size:11px">Solura_Engines.json</code> on OneDrive · step positions are index-based, so structural edits to an engine with active leads shift their meaning — the editor warns before saving those. Custom engines are never touched by auto-heal.</p>
       </section>
 
@@ -1348,6 +1350,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
+var BUILD='B-0804-1';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3860,6 +3863,7 @@ function leadsOnEngine(id){
 
 var stDirty=false;
 function openSettings(){
+  var ab=el('about-build');if(ab)ab.textContent=BUILD;
   renderSettingsEngines();
   asgnState=deepCopy(enginesDoc.assignments||[]);
   renderAssignments();
@@ -4037,17 +4041,29 @@ function renderSettingsEngines(){
       +'</div>';
   }).join('')||'<div style="font-size:12px;color:var(--soft);font-style:italic">No engines.</div>';
 }
+function ruleMatchCount(rule){
+  var n=0;
+  for(var i=DATA_START;i<rows.length;i++){
+    var r=rows[i];if(!r)continue;
+    if(!String(r[C.NM]||r[C.DM]||'').trim())continue;
+    var m=String(rule.match||'').trim().toLowerCase();if(!m)continue;
+    var target=(rule.field==='status')?String(r[C.ST]||'').trim().toLowerCase():String(r[C.SO]||'').trim().toLowerCase();
+    if(target&&(target===m||target.indexOf(m)>-1))n++;
+  }
+  return n;
+}
 function renderAssignments(){
   var list=el('es-assign-list');if(!list)return;
   var opts=(enginesDoc.engines||[]).map(function(e){return '<option value="'+escapeHtml(e.id)+'">'+escapeHtml(e.name||e.id)+'</option>';}).join('');
   list.innerHTML=asgnState.map(function(a,i){
-    return '<div class="es-assign-row" style="grid-template-columns:130px 1fr 1fr auto">'
+    return '<div class="es-assign-row" style="grid-template-columns:130px 1fr 1fr auto auto">'
       +'<select class="ee-inp" data-asg="'+i+'.field">'
         +'<option value="source"'+((a.field||'source')==='source'?' selected':'')+'>Source</option>'
         +'<option value="status"'+(a.field==='status'?' selected':'')+'>Status</option>'
       +'</select>'
       +'<input type="text" class="ee-inp" placeholder="contains… e.g. Caring / Lost" value="'+escapeHtml(a.match||'')+'" data-asg="'+i+'.match">'
       +'<select class="ee-inp" data-asg="'+i+'.engineId">'+opts+'</select>'
+      +'<span style="font-size:10.5px;font-weight:700;color:'+(ruleMatchCount(a)?'var(--grn)':'var(--red)')+';white-space:nowrap">'+ruleMatchCount(a)+' match</span>'
       +'<button class="ee-mini" style="color:var(--red)" data-action="es-del-assign" data-idx="'+i+'">✕</button>'
       +'</div>';
   }).join('')||'<div style="font-size:12px;color:var(--soft);font-style:italic;margin-bottom:6px">No rules — every lead uses the default engine.</div>';
@@ -5051,6 +5067,36 @@ async function stampCommsOpen(rec){
     });
   }catch(_){/* best-effort */}
 }
+// JSONP fallback: AV web-shields and blockers intercept fetch() but let
+// <script> loads through. The worker's /events supports ?cb= for this.
+var _trkCompatMode=false;
+function jsonpFetch(url,timeoutMs){
+  return new Promise(function(res,rej){
+    var cb='__trkCb'+Date.now().toString(36)+Math.floor(Math.random()*1e4);
+    var sc=document.createElement('script');
+    var done=false;
+    var to=setTimeout(function(){if(done)return;done=true;cleanup();rej(new Error('jsonp timeout'));},timeoutMs||8000);
+    function cleanup(){try{delete window[cb];}catch(_){window[cb]=undefined;}if(sc.parentNode)sc.parentNode.removeChild(sc);clearTimeout(to);}
+    window[cb]=function(data){if(done)return;done=true;cleanup();res(data);};
+    sc.onerror=function(){if(done)return;done=true;cleanup();rej(new Error('jsonp load failed'));};
+    sc.src=url+(url.indexOf('?')>-1?'&':'?')+'cb='+cb;
+    document.body.appendChild(sc);
+  });
+}
+async function fetchTrackerEvents(tc,since){
+  var base=tc.url+'/events?since='+since+'&token='+encodeURIComponent(tc.token);
+  try{
+    var r=await fetch(base);
+    if(!r.ok)throw new Error('http '+r.status);
+    _trkCompatMode=false;
+    return await r.json();
+  }catch(e){
+    // fetch blocked → compatibility mode via script tag
+    var j=await jsonpFetch(base);
+    _trkCompatMode=true;
+    return j;
+  }
+}
 var TRK_SEEN_KEY='trk_seen_events_v1';
 function trkSeen(){
   try{
@@ -5103,43 +5149,62 @@ async function testTrackerConnection(){
   var tc=trackerCfg();
   if(!tc){line('✗ No worker URL/token saved — fill both fields above and hit Save settings first.');return;}
   line('1. Config: ✓ '+tc.url);
-  // 2. Auth check
+  // 2. Auth check — direct fetch first, JSONP compatibility second
+  var authed=false;
   try{
     var r1=await fetch(tc.url+'/events?since=0&token='+encodeURIComponent(tc.token));
     if(r1.status===401){line('2. Worker auth: ✗ 401 — the token here doesn\'t match TRACK_TOKEN on the worker. Fix one side, Save & Deploy.');return;}
     if(!r1.ok){line('2. Worker auth: ✗ HTTP '+r1.status+' — worker reachable but erroring. Check the KV binding is named exactly TRACK_KV.');return;}
-    line('2. Worker auth: ✓');
+    line('2. Worker auth: ✓ (direct)');authed=true;
   }catch(e){
+    // fetch blocked → try compatibility mode
+    try{
+      var jj=await jsonpFetch(tc.url+'/events?since=0&token='+encodeURIComponent(tc.token),6000);
+      if(jj&&jj.error==='unauthorized'){line('2. Worker auth: ✗ token mismatch (via compatibility mode) — fix TRACK_TOKEN.');return;}
+      if(jj&&jj.events!==undefined){
+        line('2. Worker auth: ✓ via COMPATIBILITY MODE — something on this machine blocks direct calls (your taskbar shows McAfee: its Web Protection is the usual suspect), but tracking now routes around it automatically. No action needed.');
+        authed=true;_trkCompatMode=true;
+      }else{
+        line('2. Compatibility mode reached the worker but got an unexpected reply — REDEPLOY the latest solura-track-worker.js (the new file adds the compatibility endpoint), then re-test.');
+        return;
+      }
+    }catch(e2){
     // Distinguish browser-side blocking from a dead worker: a no-cors probe
     // succeeds (opaque) whenever the worker is actually reachable.
     var reachable=false;
     try{await fetch(tc.url+'/',{mode:'no-cors'});reachable=true;}catch(_){}
     if(reachable){
-      line('2. Worker reach: ⚠ the worker IS reachable, but something between this browser and the worker is stripping/blocking the cross-origin response. In order of likelihood:');
+      line('2. Worker reach: ⚠ reachable, but BOTH direct and compatibility calls were blocked — this is a strict shield. Most likely fix: redeploy the latest solura-track-worker.js (adds the compatibility endpoint), then pause McAfee Web Protection once to confirm. Details:');
       line('   • Antivirus "web protection" (Avast, AVG, Kaspersky, McAfee, Bitdefender web shield) — these intercept HTTPS and kill CORS without being "ad blockers". Pause web protection and re-test.');
       line('   • A browser extension you don\'t think of as an ad-blocker (privacy/VPN/coupon extensions filter requests too). Test in a fresh incognito window with ALL extensions off.');
       line('   • Edge/Brave built-in tracking prevention — set to off/Basic for this site.');
       line('   • An old worker file without CORS headers — open '+tc.url+'/events?since=0&token=x in a tab: if you see {"error":"unauthorized"} the CURRENT worker code is live (good); if you see anything else, re-paste solura-track-worker.js and Deploy.');
       line('   Fastest isolation: run this same test from your phone on cellular — if it passes there, the blocker is on this computer.');
     }else{
-      line('2. Worker reach: ✗ '+e.message+' — URL typo, worker not deployed, or network/VPN blocking workers.dev. Open the URL in a tab: it should say "solura-track ok".');
+      line('2. Worker reach: ✗ '+e2.message+' — URL typo, worker not deployed, or network/VPN blocking workers.dev. Open the URL in a tab: it should say "solura-track ok".');
     }
     return;
+    }
   }
+  if(!authed)return;
   // 3. Fire a test pixel and confirm the round trip
   var testId='selftest-'+Date.now();
-  try{
-    var d=trkB64({i:testId,e:'self@test',s:'Connection test',r:''});
-    await fetch(tc.url+'/px?d='+encodeURIComponent(d));
-    line('3. Test pixel fired ✓ — waiting for it to land…');
-  }catch(e){line('3. Test pixel: ✗ '+e.message);return;}
+  var d=trkB64({i:testId,e:'self@test',s:'Connection test',r:''});
+  await new Promise(function(res){
+    var img=new Image();
+    var done=false;
+    var fin=function(ok){if(done)return;done=true;line('3. Test pixel '+(ok?'fired ✓':'fired (opaque) —')+' waiting for it to land…');res();};
+    img.onload=function(){fin(true);};
+    img.onerror=function(){fin(false);}; // opaque/error still usually means the request went out
+    img.src=tc.url+'/px?d='+encodeURIComponent(d)+'&t='+Date.now();
+    setTimeout(function(){fin(false);},4000);
+  });
   await new Promise(function(res){setTimeout(res,1800);});
   try{
-    var r2=await fetch(tc.url+'/events?since=0&token='+encodeURIComponent(tc.token));
-    var j2=await r2.json();
+    var j2=await fetchTrackerEvents(tc,0);
     var found=(j2.events||[]).some(function(ev){return ev.i===testId;});
     if(found){
-      line('4. Round trip: ✓ the event came back. Tracking works end to end.');
+      line('4. Round trip: ✓ the event came back'+(_trkCompatMode?' (compatibility mode)':'')+'. Tracking works end to end.');
       line('\nIf a real email still shows no open: your mail client is blocking remote images (Outlook does by default — click "Download pictures" on the test email). Gmail and Apple Mail load them automatically.');
     }else{
       line('4. Round trip: ✗ pixel fired but the event never appeared — the KV binding is missing or misnamed. Worker → Settings → Bindings → KV namespace, variable name exactly TRACK_KV.');
@@ -5150,9 +5215,7 @@ async function pollTrackerEvents(){
   var tc=trackerCfg();if(!tc||!tok)return;
   try{
     var since=0;try{since=parseInt(localStorage.getItem('trkLastTs'),10)||0;}catch(_){}
-    var r=await fetch(tc.url+'/events?since='+since+'&token='+encodeURIComponent(tc.token));
-    if(!r.ok)return;
-    var j=await r.json();
+    var j=await fetchTrackerEvents(tc,since);
     var evs=(j&&j.events)||[];
     if(!evs.length)return;
     var seen=trkSeen();var maxTs=since;var fresh=[];
@@ -8353,6 +8416,7 @@ document.addEventListener('visibilitychange',function(){
 });
 
 window.addEventListener('load',async function(){
+  console.log('%cSolura Dashboard '+BUILD,'font-weight:bold;color:#C8870A');
   document.body.addEventListener('click',onClick);
 
   // Email attach input — change event, not click
