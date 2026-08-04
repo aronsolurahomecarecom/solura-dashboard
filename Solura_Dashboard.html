@@ -1576,7 +1576,8 @@ function computeAssignmentChanges(oldRules,newRules){
   for(var i=DATA_START;i<rows.length;i++){
     var r=rows[i];if(!r)continue;
     if(!String(r[C.NM]||r[C.DM]||'').trim())continue;
-    if(isActive(r[C.ST])||isOffSequence(i))continue;
+    if(isActive(r[C.ST]))continue;
+    if(isOffSequence(i)&&!isExcluded(r[C.ST]))continue; // Lost supersedes stale off-seq
     // Excluded leads count IF a status rule in the NEW set claims them —
     // that's exactly the "put Lost on a nurture engine" backfill case.
     if(isExcluded(r[C.ST])){
@@ -1601,7 +1602,11 @@ function allRuleMatchedLeads(){
   for(var i=DATA_START;i<rows.length;i++){
     var r=rows[i];if(!r)continue;
     if(!String(r[C.NM]||r[C.DM]||'').trim())continue;
-    if(isActive(r[C.ST])||isOffSequence(i))continue;
+    if(isActive(r[C.ST]))continue;
+    // Off-sequence normally means "responded — hands off". But an EXCLUDED
+    // status (Lost etc.) supersedes stale off-seq state: a Lost lead claimed
+    // by a rule belongs on its engine, not parked as an active conversation.
+    if(isOffSequence(i)&&!isExcluded(r[C.ST]))continue;
     var ov=engineOverrides()[String(i)];
     var claimed=(ov&&ENGINES[ov])||statusRuleMatches(i)||
       resolveEngineIdWithRules(i,enginesDoc.assignments||[])!==enginesDoc.defaultEngineId;
@@ -2510,6 +2515,9 @@ function whenToShow(ri){
   var r=rows[ri]||[];
   var st=String(r[C.ST]||'');
   if(isExcludedLead(ri))return {bucket:'hidden'}; // rule/override-claimed excluded statuses stay visible
+  // Claimed excluded lead still carrying stale off-sequence state: surface it
+  // in Due Now (it disappears onto its track after 🔄 Backfill or a restart)
+  if(isOffSequence(ri)&&isExcluded(st))return {bucket:'now',at:localToday()};
   if(isOffSequence(ri)||isActive(st)){
     // Active leads sort by NF
     var nf=pd(r[C.NF]);
@@ -2805,7 +2813,7 @@ async function buildUI(){
 
     // Active leads always go into the All Active list,
     // plus their NF-based bucket if applicable
-    if(isOffSequence(i)||isActive(r[C.ST])){
+    if((isOffSequence(i)&&!isExcluded(r[C.ST]))||isActive(r[C.ST])){
       buckets.active.push(lead);
       if(when.bucket==='overdue')buckets.overdue.push(lead);
       else if(when.bucket==='now')buckets.now.push(lead);
