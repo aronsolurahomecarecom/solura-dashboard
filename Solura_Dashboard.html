@@ -1350,7 +1350,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-1';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-2';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5002,7 +5002,7 @@ function applyWeeklyDraft(ri,opts){
  * ─────────────────────────────────────────────────────────────────────── */
 function trackerCfg(){
   var u=String(cfg('trackerUrl')||'').replace(/[^\x20-\x7E]/g,'').trim().replace(/\/+$/,'');
-  var t2=String(cfg('trackerToken')||'').trim();
+  var t2=String(cfg('trackerToken')||'').replace(/[^\x21-\x7E]/g,''); // strips spaces + invisibles
   return (u&&/^https:\/\//.test(u))?{url:u,token:t2}:null;
 }
 function trkB64(obj){
@@ -5162,7 +5162,19 @@ async function testTrackerConnection(){
   var authed=false;
   try{
     var r1=await fetch(tc.url+'/events?since=0&token='+encodeURIComponent(tc.token));
-    if(r1.status===401){line('2. Worker auth: ✗ 401 — the token here doesn\'t match TRACK_TOKEN on the worker. Fix one side, Save & Deploy.');return;}
+    if(r1.status===401){
+      var e401=await r1.json().catch(function(){return{};});
+      if(e401.error==='no-token-configured'){
+        line('2. Worker auth: ✗ the worker has NO token configured at all.');
+        line('   This is the Cloudflare online-editor gotcha: deploying pasted code from the editor WIPES plaintext variables. Your TRACK_TOKEN was erased by the v2/v3 deploy.');
+        line('   Fix: Worker → Settings → Variables & Secrets → Add → name TRACK_TOKEN, paste your token (choose type "Secret" — secrets survive editor deploys) → Deploy. Then re-test.');
+      }else{
+        var sentLen=String(tc.token||'').length;
+        line('2. Worker auth: ✗ 401 token mismatch — the portal sent a '+sentLen+'-character token'+(e401.hint?('; the worker expects '+String(e401.hint).replace('len:','')+' characters'):'')+'.');
+        line('   Lengths differing = a stray space/newline on one side (both ends now auto-strip those — redeploy worker v3 + re-save settings here, then re-test). Same lengths = genuinely different strings: re-paste the SAME value into both places.');
+      }
+      return;
+    }
     if(!r1.ok){line('2. Worker auth: ✗ HTTP '+r1.status+' — worker reachable but erroring. Check the KV binding is named exactly TRACK_KV.');return;}
     line('2. Worker auth: ✓ (direct)');authed=true;
   }catch(e){
@@ -5179,7 +5191,7 @@ async function testTrackerConnection(){
       }
     }catch(e2){
       if(String(e2.message||'').indexOf('timeout')>-1){
-        line('2. Compatibility call TIMED OUT — this is the signature of the OLD worker still being deployed (it loads the request but can\'t answer it). Fix: Cloudflare → your worker → Edit code → select all → paste the NEWEST solura-track-worker.js → Deploy. The root page will then say "solura-track ok v2". Re-test after.');
+        line('2. Compatibility call TIMED OUT — this is the signature of the OLD worker still being deployed (it loads the request but can\'t answer it). Fix: Cloudflare → your worker → Edit code → select all → paste the NEWEST solura-track-worker.js → Deploy. The root page will then say "solura-track ok v3". Re-test after.');
         return;
       }
     // Distinguish browser-side blocking from a dead worker: a no-cors probe
