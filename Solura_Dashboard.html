@@ -893,6 +893,9 @@ td{padding:13px 16px;vertical-align:top;}
         <div><label class="ee-lbl">Refresh every (days)</label>
           <input type="number" id="wk-set-refresh" min="1" max="90" class="ee-inp"></div>
       </div>
+      <div style="margin-bottom:10px">
+        <label class="st-check" style="font-size:12px"><input type="checkbox" id="wk-set-pdflink"> Deliver the PDF as a <strong>tracked link</strong> instead of an attachment — you'll see who opens it (attached PDFs can't be tracked)</label>
+      </div>
       <div style="margin-bottom:12px">
         <label class="ee-lbl">SMS template for this sequence's nurture texts ({dm}/{pt} fill)</label>
         <textarea id="wk-set-sms" rows="2" class="ee-inp" placeholder="Hi {dm}, Meir from Solura — just checking in on you and {pt} this week."></textarea>
@@ -1350,7 +1353,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-4';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-5';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4858,6 +4861,7 @@ function wkStash(){
   var se=el('wk-set-engine');if(se)set.engineId=se.value||'';
   var sr=el('wk-set-refresh');if(sr)set.refreshDays=Math.max(1,parseInt(sr.value,10)||8);
   var ss=el('wk-set-sms');if(ss)set.smsText=ss.value||'';
+  var pl=el('wk-set-pdflink');if(pl)set.pdfAsLink=!!pl.checked;
   if(set.engineId){var e5=(enginesDoc.engines||[]).find(function(x){return x.id===set.engineId;});set.name=e5?e5.name:set.engineId;}
   else set.name='Default (all sequences)';
   var vs=weeklyVariants();
@@ -4898,6 +4902,7 @@ function renderWeeklyEditor(){
   }
   var sr=el('wk-set-refresh');if(sr)sr.value=set.refreshDays||8;
   var ss=el('wk-set-sms');if(ss)ss.value=set.smsText||'';
+  var pl2=el('wk-set-pdflink');if(pl2)pl2.checked=!!set.pdfAsLink;
   var vs=weeklyVariants();
   if(_wkIdx>=vs.length)_wkIdx=Math.max(0,vs.length-1);
   var v=vs[_wkIdx]||{};
@@ -4941,6 +4946,27 @@ async function saveWeeklyDraft(){
   wkStash();
   var spin=el('weekly-spin');if(spin)spin.style.display='inline-flex';
   try{
+    // Link-mode PDFs get uploaded to OneDrive once (webUrl cached on the pdf)
+    var allSets=draftSets();
+    for(var si=0;si<allSets.length;si++){
+      var st6=allSets[si];
+      st6.variants=st6.variants||[];
+      for(var vi=0;vi<st6.variants.length;vi++){
+        var vv6=st6.variants[vi];
+        if(st6.pdfAsLink&&vv6.pdf&&vv6.pdf.b64&&!vv6.pdf.webUrl){
+          if(spin)spin.innerHTML='<div class="mspin"></div>Uploading '+escapeHtml(vv6.pdf.name)+' to OneDrive…';
+          var folderId=await emailEnsureOneDriveFolder('Weekly Newsletter '+new Date().toISOString().slice(0,10));
+          var bin=atob(vv6.pdf.b64);
+          var bytes=new Uint8Array(bin.length);
+          for(var bi=0;bi<bin.length;bi++)bytes[bi]=bin.charCodeAt(bi);
+          var up=await emailUploadFileToOneDrive(folderId,new File([new Blob([bytes],{type:'application/pdf'})],vv6.pdf.name,{type:'application/pdf'}));
+          if(up&&up.id){
+            vv6.pdf.webUrl=await emailCreateShareLink(up.id);
+          }
+        }
+      }
+    }
+    if(spin)spin.innerHTML='<div class="mspin"></div>Saving…';
     await saveEnginesDoc();
     closeModal('modal-weekly');
     var nsets=draftSets().filter(function(x){return liveVariantsOf(x).length;}).length;
@@ -4977,12 +5003,22 @@ function applyWeeklyDraft(ri,opts){
       bodyEl.innerHTML=emailPlainToHtml(filled);
     }
   }
-  if(w.pdf&&w.pdf.b64){
-    var already=emailAttachments.some(function(a){return a._weekly;});
-    if(!already){
-      emailAttachments.push({name:w.pdf.name,size:Math.floor(w.pdf.b64.length*0.75),
-        type:'application/pdf',dataBase64:w.pdf.b64,large:false,_weekly:true});
-      try{emailRenderAttachList();}catch(_){}
+  if(w.pdf&&(w.pdf.b64||w.pdf.webUrl)){
+    if(set.pdfAsLink&&w.pdf.webUrl){
+      // Tracked-link delivery: a gold button in the body instead of an
+      // attachment. The href is rewritten through /doc at send time, so
+      // every click lands as a doc-open you can see.
+      var beHost=el('email-body');
+      if(beHost&&beHost.innerHTML.indexOf('data-trkdoc')===-1){
+        beHost.innerHTML+='<p style="margin-top:16px"><a data-trkdoc="1" href="'+escapeHtml(w.pdf.webUrl)+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">\ud83d\udcc4 '+escapeHtml(w.pdf.name.replace(/\.pdf$/i,''))+'</a></p>';
+      }
+    }else if(w.pdf.b64){
+      var already=emailAttachments.some(function(a){return a._weekly;});
+      if(!already){
+        emailAttachments.push({name:w.pdf.name,size:Math.floor(w.pdf.b64.length*0.75),
+          type:'application/pdf',dataBase64:w.pdf.b64,large:false,_weekly:true});
+        try{emailRenderAttachList();}catch(_){}
+      }
     }
   }
   var age=setAgeDays(set);
@@ -5145,7 +5181,7 @@ async function pingWorker(tc){
   // Interrogate /ping via JSONP first (immune to fetch shields), fetch second.
   try{
     var j=await jsonpFetch(tc.url+'/ping',5000);
-    if(j&&j.ok)return {status:'ok',v:j.v,hasToken:!!j.hasToken,via:'compat'};
+    if(j&&j.ok)return {status:'ok',v:j.v,hasToken:!!j.hasToken,hasKV:j.hasKV,via:'compat'};
     return {status:'weird'};
   }catch(e){
     if(String(e.message||'').indexOf('timeout')>-1){
@@ -5155,7 +5191,7 @@ async function pingWorker(tc){
     // script network-blocked → try plain fetch as a second opinion
     try{
       var r=await fetch(tc.url+'/ping');
-      if(r.ok){var j2=await r.json();return {status:'ok',v:j2.v,hasToken:!!j2.hasToken,via:'direct'};}
+      if(r.ok){var j2=await r.json();return {status:'ok',v:j2.v,hasToken:!!j2.hasToken,hasKV:j2.hasKV,via:'direct'};}
       return {status:'blocked'};
     }catch(_){return {status:'blocked'};}
   }
@@ -5180,7 +5216,7 @@ async function testTrackerConnection(){
   // 2. Deterministic worker interrogation via /ping (no auth, crash-proof)
   var ping=await pingWorker(tc);
   if(ping.status==='old'){
-    line('2. Worker version: ✗ the deployed worker is OLD (no /ping endpoint). Paste the NEWEST solura-track-worker.js into the editor and Deploy — the root page must say "solura-track ok v4". Then re-test.');
+    line('2. Worker version: ✗ the deployed worker is OLD (no /ping endpoint). Paste the NEWEST solura-track-worker.js into the editor and Deploy — the root page must say "solura-track ok v5". Then re-test.');
     return;
   }
   if(ping.status==='blocked'){
@@ -5189,9 +5225,13 @@ async function testTrackerConnection(){
     return;
   }
   if(ping.status==='ok'){
-    line('2. Worker alive: ✓ v'+ping.v+' ('+(ping.via==='compat'?'compatibility transport':'direct')+') — token configured: '+(ping.hasToken?'YES':'NO'));
+    line('2. Worker alive: ✓ v'+ping.v+' ('+(ping.via==='compat'?'compatibility transport':'direct')+') — token: '+(ping.hasToken?'YES':'NO')+(ping.hasKV!==undefined?(' — KV storage: '+(ping.hasKV?'YES':'NO')):''));
     if(!ping.hasToken){
       line('   ✗ THAT\'S THE PROBLEM: the worker has no TRACK_TOKEN. The online editor wipes plaintext variables on deploy. Add it in Worker → Settings → Variables & Secrets as type "Secret" (secrets survive), Deploy, re-test.');
+      return;
+    }
+    if(ping.hasKV===false){
+      line('   ✗ THAT\'S THE PROBLEM: the KV storage binding is missing — the same editor deploy that ate your token wiped it. Fix: Worker → Settings → Bindings → Add → KV namespace → variable name exactly TRACK_KV → select solura-track-events → Deploy. Re-test after.');
       return;
     }
   }
@@ -5201,7 +5241,11 @@ async function testTrackerConnection(){
     var r1=await fetch(tc.url+'/events?since=0&token='+encodeURIComponent(tc.token));
     if(r1.status===500){
       var e500=await r1.json().catch(function(){return{};});
-      line('3. Worker error: ✗ the worker code CRASHED: '+(e500.message||'unknown')+' — re-paste the newest solura-track-worker.js and Deploy.');
+      if(e500.error==='no-kv-binding'){
+        line('3. Worker storage: ✗ KV binding missing — Worker → Settings → Bindings → Add KV namespace, variable name exactly TRACK_KV → solura-track-events → Deploy.');
+      }else{
+        line('3. Worker error: ✗ the worker code CRASHED: '+(e500.message||'unknown')+' — re-paste the newest solura-track-worker.js and Deploy.');
+      }
       return;
     }
     if(r1.status===401){
@@ -5233,7 +5277,7 @@ async function testTrackerConnection(){
       }
     }catch(e2){
       if(String(e2.message||'').indexOf('timeout')>-1){
-        line('3. Compatibility call TIMED OUT — this is the signature of the OLD worker still being deployed (it loads the request but can\'t answer it). Fix: Cloudflare → your worker → Edit code → select all → paste the NEWEST solura-track-worker.js → Deploy. The root page will then say "solura-track ok v4". Re-test after.');
+        line('3. Compatibility call TIMED OUT — this is the signature of the OLD worker still being deployed (it loads the request but can\'t answer it). Fix: Cloudflare → your worker → Edit code → select all → paste the NEWEST solura-track-worker.js → Deploy. The root page will then say "solura-track ok v5". Re-test after.');
         return;
       }
     // Distinguish browser-side blocking from a dead worker: a no-cors probe
@@ -5277,6 +5321,17 @@ async function testTrackerConnection(){
       line('5. Round trip: ✗ pixel fired but the event never appeared — the KV binding is missing or misnamed. Worker → Settings → Bindings → KV namespace, variable name exactly TRACK_KV.');
     }
   }catch(e){line('5. Round trip: ✗ '+e.message);}
+}
+// Rewrite authored tracked-doc anchors (data-trkdoc) through /doc so
+// clicks register as doc-opens tied to this send.
+function rewriteTrackedDocAnchors(html,meta){
+  if(!meta)return html;
+  return String(html||'').replace(/<a\b[^>]*data-trkdoc="1"[^>]*>/g,function(tag){
+    return tag.replace(/href="([^"]+)"/,function(_m,href){
+      var dec=href.replace(/&amp;/g,'&');
+      return 'href="'+escapeHtml(trackDocUrl(dec,meta))+'"';
+    });
+  });
 }
 async function pollTrackerEvents(){
   var tc=trackerCfg();if(!tc||!tok)return;
@@ -6394,6 +6449,8 @@ async function sendEmail(){
   // opens resolve back to THIS email's record (inert if unconfigured)
   var _sendId='m'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
   _trkMeta={r:ri+1,e:toAddr,s:String(subj||'').slice(0,120),i:_sendId};
+  // Authored tracked-doc buttons (weekly link-mode PDF) route through /doc
+  bodyHtml=rewriteTrackedDocAnchors(bodyHtml,_trkMeta);
   var _trkPx=trackingPixelHtml(ri,toAddr,subj,_sendId);
   if(_trkPx)bodyHtml+=_trkPx;
 
