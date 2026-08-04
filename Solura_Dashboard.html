@@ -1071,7 +1071,7 @@ td{padding:13px 16px;vertical-align:top;}
           <input type="number" min="0.2" step="0.1" class="ee-inp" style="max-width:140px" data-cfg="emailFallbackMinMB" data-cfgtype="float">
         </div>
         <h4 class="st-h2">Email design shell</h4>
-        <p class="st-p">Paste your branded HTML wrapper here. <code style="font-size:11px">{content}</code> marks where the message goes — everything you type, Claude drafts, and the weekly nurture email all flow into it automatically at send. <code style="font-size:11px">{dm}</code> and <code style="font-size:11px">{pt}</code> also fill per lead. Leave empty for plain emails.</p>
+        <p class="st-p">Paste your branded HTML wrapper here. <code style="font-size:11px">{content}</code> (or <code style="font-size:11px">{{body}}</code>) marks where the message goes — everything you type, Claude drafts, and the weekly nurture email all flow into it automatically at send. <code style="font-size:11px">{dm}</code> and <code style="font-size:11px">{pt}</code> also fill per lead. Leave empty for plain emails.</p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
           <div>
             <textarea class="ee-inp" rows="16" style="font-family:'SF Mono',Monaco,monospace;font-size:11px;line-height:1.45" data-cfg="emailShellHtml" data-cfgtype="str" placeholder='<div style="background:#F5F1E8;padding:30px">&#10;  <div style="max-width:600px;margin:0 auto;background:#fff;padding:30px;border-radius:8px">&#10;    {content}&#10;    <hr>&#10;    <p style="color:#8B6500">Solura Home Care · (216) 770-4886</p>&#10;  </div>&#10;</div>'></textarea>
@@ -4742,13 +4742,18 @@ function extractInnerHtml(html){
   if(m)return m[1];
   return v.replace(/<\/?html[^>]*>/gi,'').replace(/<head[\s\S]*?<\/head>/gi,'');
 }
+// Longest-first: double-brace forms checked before their single-brace substrings
+var SHELL_SLOTS=['{{content}}','{{body}}','{{message}}','{content}','{body}','{message}'];
+function findShellSlot(shell){
+  for(var i=0;i<SHELL_SLOTS.length;i++){if(shell.indexOf(SHELL_SLOTS[i])>-1)return SHELL_SLOTS[i];}
+  return null;
+}
 function applyEmailShell(bodyHtml,ri){
   var shell=String(cfg('emailShellHtml')||'').trim();
   if(!shell)return bodyHtml;
   var content=extractInnerHtml(bodyHtml);
-  var out;
-  if(shell.indexOf('{content}')>-1)out=shell.replace('{content}',content);
-  else out=shell+content; // no slot → shell becomes a header
+  var slot=findShellSlot(shell);
+  var out=slot?shell.replace(slot,content):(shell+content); // no slot → shell becomes a header
   try{out=fillNames(out,getNames(ri));}catch(_){/* names best-effort */}
   return out;
 }
@@ -4756,9 +4761,10 @@ function renderShellPreview(){
   var fr=el('shell-preview');if(!fr)return;
   var shell=String(cfg('emailShellHtml')||'').trim();
   var warn=el('shell-warn');
-  if(warn)warn.textContent=(shell&&shell.indexOf('{content}')===-1)?'⚠ No {content} slot — the message will be appended after your design instead of inside it.':'';
+  var slotPv=shell?findShellSlot(shell):null;
+  if(warn)warn.textContent=(shell&&!slotPv)?'⚠ No content slot found — add {content} or {{body}} where the message should go; until then it appends after your design.':'';
   var sample='<p>Hi Susan,</p><p>Just a note to say we\u2019re thinking of you and Rose this week. Families often ask us about fall-proofing the bathroom \u2014 the attached one-pager covers the three changes that matter most.</p><p>Warmly,<br>Meir</p>';
-  var htmlOut=shell?(shell.indexOf('{content}')>-1?shell.replace('{content}',sample):shell+sample):('<div style="font-family:Georgia,serif;color:#999;padding:30px;text-align:center;font-style:italic">No shell yet \u2014 emails send as plain content.</div>');
+  var htmlOut=shell?(slotPv?shell.replace(slotPv,sample):shell+sample):('<div style="font-family:Georgia,serif;color:#999;padding:30px;text-align:center;font-style:italic">No shell yet \u2014 emails send as plain content.</div>');
   htmlOut=htmlOut.replace(/\{dm\}/g,'Susan').replace(/\{pt\}/g,'Rose');
   try{fr.srcdoc='<!doctype html><html><body style="margin:0">'+htmlOut+'</body></html>';}catch(_){}
 }
@@ -4827,6 +4833,7 @@ function weeklyAgeDays(){return setAgeDays(currentDraftSet());}
 // Round-robin rotation PER SET. Counter is device-local; the applied
 // variant pins per composer-open so re-clicking 📰 doesn't shuffle.
 var _weeklyAppliedFor=null; // {ri,label,setId}
+var _shellSuppressed=false; // HTML weekly newsletter applied → don't double-wrap
 function pickWeeklyVariant(peekOrSet,maybePeek){
   var set,peek;
   if(peekOrSet===true||peekOrSet===false||peekOrSet===undefined){set=currentDraftSet();peek=!!peekOrSet;}
@@ -4959,10 +4966,12 @@ function applyWeeklyDraft(ri,opts){
   if(bodyEl&&w.body){
     var filled=fillNames(w.body,names);
     if(looksLikeHtml(filled)){
-      // HTML newsletter → straight in, rendered. Design shell still wraps
-      // at send; no plain-text signature (HTML carries its own sign-off).
+      // HTML newsletter → straight in, rendered — and the design shell is
+      // SUPPRESSED at send: a newsletter is already a complete design.
+      _shellSuppressed=true;
       bodyEl.innerHTML=sanitizeDraftHtml(filled);
     }else{
+      _shellSuppressed=false;
       var sig=String(cfg('emailSignature')||'').trim();
       if(sig)filled+='\n\n'+sig;
       bodyEl.innerHTML=emailPlainToHtml(filled);
@@ -5169,6 +5178,10 @@ async function testTrackerConnection(){
         return;
       }
     }catch(e2){
+      if(String(e2.message||'').indexOf('timeout')>-1){
+        line('2. Compatibility call TIMED OUT — this is the signature of the OLD worker still being deployed (it loads the request but can\'t answer it). Fix: Cloudflare → your worker → Edit code → select all → paste the NEWEST solura-track-worker.js → Deploy. The root page will then say "solura-track ok v2". Re-test after.');
+        return;
+      }
     // Distinguish browser-side blocking from a dead worker: a no-cors probe
     // succeeds (opaque) whenever the worker is actually reachable.
     var reachable=false;
@@ -5903,6 +5916,7 @@ function openEmail(ri){
   bodyEl.setAttribute('data-placeholder','Write your message…');
   // Long-term nurture contacts get THIS WEEK'S draft automatically
   _weeklyAppliedFor=null; // fresh composer → rotation may advance
+  _shellSuppressed=false;
   if(isNurtureStep(ri)&&getWeeklyDraftFor(ri)){
     applyWeeklyDraft(ri,{silent:false});
   }
@@ -6409,8 +6423,9 @@ async function sendEmail(){
     spin.innerHTML='<div class="mspin"></div>'+spinText;
   }
 
-  // Brand shell: everything (typed, Claude, weekly) flows into the design
-  bodyHtml=applyEmailShell(bodyHtml,ri);
+  // Brand shell: typed + Claude content flows into the design; HTML weekly
+  // newsletters skip it (they ARE the design)
+  if(!_shellSuppressed)bodyHtml=applyEmailShell(bodyHtml,ri);
 
   // Temporarily swap emailAttachments to effectiveAttachments so the existing
   // send code reads the right list. Restore in finally.
