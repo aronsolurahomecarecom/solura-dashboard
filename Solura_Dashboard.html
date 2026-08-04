@@ -640,6 +640,7 @@ td{padding:13px 16px;vertical-align:top;}
   <div class="sw" id="sw-1"><div class="shdr" data-action="toggle-bucket" data-bucket="1"><div class="sdot2 gold"></div><div class="stitle">Due Now</div><div class="scnt" id="c1">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t1"></tbody></table></div></div>
   <div class="sw" id="sw-2"><div class="shdr" data-action="toggle-bucket" data-bucket="2"><div class="sdot2 sky"></div><div class="stitle">Later Today</div><div class="scnt" id="c2">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t2"></tbody></table></div></div>
   <div class="sw" id="sw-3"><div class="shdr" data-action="toggle-bucket" data-bucket="3"><div class="sdot2 grn"></div><div class="stitle">This Week</div><div class="scnt" id="c3">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t3"></tbody></table></div></div>
+  <div class="sw" id="sw-5"><div class="shdr" data-action="toggle-bucket" data-bucket="5"><div class="sdot2" style="background:var(--sky-mid)"></div><div class="stitle">📅 Scheduled</div><div class="scnt" id="c5">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t5"></tbody></table></div></div>
   <div class="sw sw-all" id="sw-4" style="margin-top:8px"><div class="shdr" data-action="toggle-bucket" data-bucket="4"><div class="sdot2 soft"></div><div class="stitle">All Active Leads</div><div class="scnt" id="c4">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t4"></tbody></table></div></div>
 </div>
 
@@ -1030,9 +1031,10 @@ td{padding:13px 16px;vertical-align:top;}
         <h4 class="st-h2">Engine assignments by source</h4>
         <p class="st-p">Leads whose Source matches a rule use that engine; everyone else uses the default. Match is case-insensitive partial text.</p>
         <div id="es-assign-list" style="margin-bottom:8px"></div>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button data-action="es-add-assign" class="st-btn-ghost">＋ Add rule</button>
           <button data-action="es-save-assign" class="st-btn-sky">💾 Save assignments</button>
+          <button data-action="es-backfill-all" class="st-btn-ghost" title="Restart every rule-matched lead at the start of its assigned engine — catches leads set up before backfill existed">🔄 Backfill all matched now</button>
         </div>
       </section>
 
@@ -1535,7 +1537,15 @@ function resolveEngineIdWithRules(ri,rules){
   }
   return enginesDoc.defaultEngineId;
 }
+function engineOverrides(){
+  enginesDoc.config=enginesDoc.config||{};
+  enginesDoc.config.engineOverrides=enginesDoc.config.engineOverrides||{};
+  return enginesDoc.config.engineOverrides;
+}
 function engineIdFor(ri){
+  // Per-lead override (set when restarting onto a specific engine) beats rules.
+  var ov=engineOverrides()[String(ri)];
+  if(ov&&ENGINES[ov])return ov;
   return resolveEngineIdWithRules(ri,enginesDoc.assignments||[]);
 }
 // A STATUS rule you create deliberately (e.g. "Lost → Lost-Nurture engine")
@@ -1553,7 +1563,11 @@ function statusRuleMatches(ri){
   return false;
 }
 function isExcludedLead(ri){
-  return isExcluded((rows[ri]||[])[C.ST])&&!statusRuleMatches(ri);
+  if(!isExcluded((rows[ri]||[])[C.ST]))return false;
+  if(statusRuleMatches(ri))return false;
+  var ov=engineOverrides()[String(ri)];
+  if(ov&&ENGINES[ov])return false; // deliberately placed on an engine → visible
+  return true;
 }
 // Which leads change engines under a new rule set? (skips excluded +
 // responded/off-sequence leads — never touch active conversations)
@@ -1579,6 +1593,21 @@ function computeAssignmentChanges(oldRules,newRules){
     if(a!==b)changed.push({ri:i,engineId:b});
   }
   return changed;
+}
+// Everyone currently claimed by a rule or override, regardless of history —
+// the restore path for leads assigned before backfill existed / fallen out.
+function allRuleMatchedLeads(){
+  var out=[];
+  for(var i=DATA_START;i<rows.length;i++){
+    var r=rows[i];if(!r)continue;
+    if(!String(r[C.NM]||r[C.DM]||'').trim())continue;
+    if(isActive(r[C.ST])||isOffSequence(i))continue;
+    var ov=engineOverrides()[String(i)];
+    var claimed=(ov&&ENGINES[ov])||statusRuleMatches(i)||
+      resolveEngineIdWithRules(i,enginesDoc.assignments||[])!==enginesDoc.defaultEngineId;
+    if(claimed)out.push({ri:i,engineId:engineIdFor(i)});
+  }
+  return out;
 }
 async function backfillAssignments(changed){
   var t2=localToday();
@@ -2480,7 +2509,7 @@ function nurtureWeekday(ri){
 function whenToShow(ri){
   var r=rows[ri]||[];
   var st=String(r[C.ST]||'');
-  if(isExcluded(st))return {bucket:'hidden'};
+  if(isExcludedLead(ri))return {bucket:'hidden'}; // rule/override-claimed excluded statuses stay visible
   if(isOffSequence(ri)||isActive(st)){
     // Active leads sort by NF
     var nf=pd(r[C.NF]);
@@ -2759,7 +2788,7 @@ async function buildUI(){
   try{await autoExpirePhase2();}catch(e){console.warn('autoExpirePhase2:',e.message);}
 
   var today=localToday();
-  var buckets={overdue:[],now:[],later:[],week:[],active:[]};
+  var buckets={overdue:[],now:[],later:[],week:[],active:[],future:[]};
 
   for(var i=DATA_START;i<rows.length;i++){
     var r=rows[i];
@@ -2788,7 +2817,7 @@ async function buildUI(){
     else if(when.bucket==='now')buckets.now.push(lead);
     else if(when.bucket==='later')buckets.later.push(lead);
     else if(when.bucket==='week')buckets.week.push(lead);
-    // 'future' beyond a week not shown anywhere
+    else buckets.future.push(lead); // long-cadence nurture: visible, just not urgent
   }
 
   var sortByFu=function(a,b){
@@ -2800,6 +2829,7 @@ async function buildUI(){
   buckets.now.sort(sortByFu);
   buckets.later.sort(sortByFu);
   buckets.week.sort(sortByFu);
+  buckets.future.sort(sortByFu);
   buckets.active.sort(sortByFu);
 
   // Apply lead search filter — every lead view is checked against the query
@@ -2825,9 +2855,10 @@ async function buildUI(){
     buckets.now=buckets.now.filter(match);
     buckets.later=buckets.later.filter(match);
     buckets.week=buckets.week.filter(match);
+    buckets.future=buckets.future.filter(match);
     buckets.active=buckets.active.filter(match);
   }
-  var totalMatched=buckets.overdue.length+buckets.now.length+buckets.later.length+buckets.week.length+buckets.active.length;
+  var totalMatched=buckets.overdue.length+buckets.now.length+buckets.later.length+buckets.week.length+buckets.active.length+buckets.future.length;
   var countEl=el('lead-search-count');
   var clearEl=el('lead-search-clear');
   if(leadSearchQuery){
@@ -2850,16 +2881,20 @@ async function buildUI(){
   el('c2').textContent=pl(buckets.later.length);
   el('c3').textContent=pl(buckets.week.length);
   el('c4').textContent=pl(buckets.active.length);
+  var c5=el('c5');if(c5)c5.textContent=pl(buckets.future.length);
 
   el('t0').innerHTML=renderRows(buckets.overdue);
   el('t1').innerHTML=renderRows(buckets.now);
   el('t2').innerHTML=renderRows(buckets.later);
   el('t3').innerHTML=renderRows(buckets.week);
   el('t4').innerHTML=renderRows(buckets.active);
+  var t5=el('t5');if(t5)t5.innerHTML=renderRows(buckets.future);
 
   // Auto-collapse buckets that have no leads. Buckets that DO have leads
   // get explicitly un-collapsed so a returning lead pops the section open.
   var counts=[buckets.overdue.length,buckets.now.length,buckets.later.length,buckets.week.length,buckets.active.length];
+  var sw5=el('sw-5');
+  if(sw5){if(buckets.future.length===0)sw5.classList.add('collapsed');else sw5.classList.remove('collapsed');}
   counts.forEach(function(n,i){
     var sw=el('sw-'+i);
     if(!sw)return;
@@ -4389,6 +4424,12 @@ document.addEventListener('change',function(ev){
     if(ncad==='weekly')esState.phases[cpi].weekly={entries:[{week:1,type:'sms',text:'',template:''}]};
     renderEngineEditor();
   }
+  // Restart modal engine selector
+  if(t&&t.id==='restart-eng'&&_restartRi>=0){
+    _restartEngId=t.value;
+    renderRestartBody();
+    return;
+  }
   // Slot enable/disable checkboxes
   if(t&&t.dataset&&t.dataset.actionChk==='ee-slot-toggle'&&esState){
     var tpi=parseInt(t.dataset.pi,10),tsl=t.dataset.slot;
@@ -4953,7 +4994,20 @@ async function testTrackerConnection(){
     if(r1.status===401){line('2. Worker auth: ✗ 401 — the token here doesn\'t match TRACK_TOKEN on the worker. Fix one side, Save & Deploy.');return;}
     if(!r1.ok){line('2. Worker auth: ✗ HTTP '+r1.status+' — worker reachable but erroring. Check the KV binding is named exactly TRACK_KV.');return;}
     line('2. Worker auth: ✓');
-  }catch(e){line('2. Worker reach: ✗ '+e.message+' — URL typo, worker not deployed, or network. Open the URL in a tab: it should say "solura-track ok".');return;}
+  }catch(e){
+    // Distinguish browser-side blocking from a dead worker: a no-cors probe
+    // succeeds (opaque) whenever the worker is actually reachable.
+    var reachable=false;
+    try{await fetch(tc.url+'/',{mode:'no-cors'});reachable=true;}catch(_){}
+    if(reachable){
+      line('2. Worker reach: ⚠ the worker IS reachable, but this browser blocked the cross-origin call.');
+      line('   Almost always an ad-blocker or tracking prevention: disable uBlock/AdGuard/Brave Shields for this site, or Edge → site permissions → Tracking prevention → off for this site. Then re-test.');
+      line('   (If you re-pasted an old worker file without CORS headers, redeploy the latest solura-track-worker.js.)');
+    }else{
+      line('2. Worker reach: ✗ '+e.message+' — URL typo, worker not deployed, or network/VPN blocking workers.dev. Open the URL in a tab: it should say "solura-track ok".');
+    }
+    return;
+  }
   // 3. Fire a test pixel and confirm the round trip
   var testId='selftest-'+Date.now();
   try{
@@ -5256,29 +5310,44 @@ async function claudeGenerate(){
  * engine at a phase of your choosing. Sets step_idx to the phase's first
  * step, re-anchors step_done_at, resets NF to today, status back to Cold.
  * ─────────────────────────────────────────────────────────────────────── */
-var _restartRi=-1;
+var _restartRi=-1,_restartEngId=null;
 function openRestartSeq(ri){
   _restartRi=ri;
-  var sq=seqFor(ri);
-  var eng=engineFor(ri);
-  // First step index of each phase group
+  _restartEngId=engineIdFor(ri);
+  renderRestartBody();
+  el('modal-restart').classList.add('open');
+}
+function renderRestartBody(){
+  var ri=_restartRi;
+  var engId=_restartEngId;
+  var eng=ENGINES[engId]||ENGINES[enginesDoc.defaultEngineId];
+  var sq=eng.seq;
   var seen={},choices=[];
   sq.forEach(function(st,idx){
     var k=st.ph+'|'+st.phName;
     if(!seen[k]){seen[k]=true;choices.push({idx:idx,ph:st.ph,name:st.phName||('Phase '+st.ph)});}
   });
   var name=String((rows[ri]||[])[C.NM]||(rows[ri]||[])[C.DM]||'').trim();
-  var body='<div style="font-size:12.5px;color:var(--soft);margin-bottom:14px;line-height:1.5">Put <strong style="color:var(--dark)">'+escapeHtml(name)+'</strong> back on <strong style="color:var(--dark)">'+escapeHtml(eng.name)+'</strong>. Pick where to restart — follow-up resets to today.</div>'
+  var ruleId=resolveEngineIdWithRules(ri,enginesDoc.assignments||[]);
+  var engOpts=(enginesDoc.engines||[]).filter(function(e2){return ENGINES[e2.id];})
+    .map(function(e2){return '<option value="'+escapeHtml(e2.id)+'"'+(e2.id===engId?' selected':'')+'>'+escapeHtml(e2.name||e2.id)+(e2.id===ruleId?' (assigned)':'')+'</option>';}).join('');
+  var body='<div style="font-size:12.5px;color:var(--soft);margin-bottom:12px;line-height:1.5">Put <strong style="color:var(--dark)">'+escapeHtml(name)+'</strong> back on a sequence — follow-up resets to today.</div>'
+    +'<div style="margin-bottom:12px"><label class="ee-lbl">Sequence</label>'
+    +'<select id="restart-eng" class="ee-inp">'+engOpts+'</select>'
+    +(engId!==ruleId?'<div style="font-size:10.5px;color:var(--soft);margin-top:4px">Different from the rule-assigned engine — a per-lead override will be saved so it sticks.</div>':'')
+    +'</div>'
+    +'<label class="ee-lbl">Start at stage</label>'
     +choices.map(function(c3){
       return '<button class="ee-mini" style="display:block;width:100%;text-align:left;padding:11px 14px;margin-bottom:6px;font-size:12.5px" data-action="restart-at-phase" data-stepidx="'+c3.idx+'">'
         +'<strong>'+c3.ph+'. '+escapeHtml(c3.name)+'</strong>'
         +' <span style="color:var(--soft);font-size:11px">— starts at "'+escapeHtml(sq[c3.idx].text)+'"</span></button>';
     }).join('');
   el('restart-body').innerHTML=body;
-  el('modal-restart').classList.add('open');
 }
 async function doRestartSeq(ri,stepIdx){
-  var sq=seqFor(ri);
+  var engId=_restartEngId||engineIdFor(ri);
+  var eng=ENGINES[engId];if(!eng){toast('Engine missing');return;}
+  var sq=eng.seq;
   if(stepIdx==null||isNaN(stepIdx)||stepIdx<0||stepIdx>=sq.length){toast('Bad phase');return;}
   var t2=localToday();
   var u={};
@@ -5286,13 +5355,23 @@ async function doRestartSeq(ri,stepIdx){
   u[C.STEP_AT]=new Date(t2.getFullYear(),t2.getMonth(),t2.getDate(),12,0,0).toISOString();
   u[C.SQ]=stepLabel(stepIdx,sq);
   u[C.NF]=fd(t2);
-  u[C.ST]='Cold';
+  // Status: excluded leads deliberately re-enrolled keep visibility EITHER
+  // via a matching status rule (keep status, e.g. stay "Lost" on the Lost
+  // engine) or via the override; otherwise flip to Cold as before.
+  var ruleId=resolveEngineIdWithRules(ri,enginesDoc.assignments||[]);
+  var keepStatus=isExcluded((rows[ri]||[])[C.ST])&&(statusRuleMatches(ri)&&engId===ruleId);
+  if(!keepStatus)u[C.ST]='Cold';
   try{
+    // Persist/clear the per-lead engine override
+    var ovs=engineOverrides();
+    if(engId!==ruleId){ovs[String(ri)]=engId;}
+    else{delete ovs[String(ri)];}
+    await saveEnginesDoc();
     await writeRow(ri,u);
     closeModal('modal-restart');
     closeDrawer();
-    toast('⟳ Back on sequence — surfacing in Due Now');
-    _restartRi=-1;
+    toast('⟳ Back on '+eng.name);
+    _restartRi=-1;_restartEngId=null;
     await buildUI();
   }catch(e){showErr('Restart failed: '+e.message);}
 }
@@ -7843,6 +7922,14 @@ function onClick(ev){
       enginesDoc.engines=(enginesDoc.engines||[]).filter(function(x){return x.id!==did;});
       enginesDoc.assignments=(enginesDoc.assignments||[]).filter(function(a){return a.engineId!==did;});
       saveEnginesDoc().then(function(){renderSettingsEngines();asgnState=deepCopy(enginesDoc.assignments||[]);renderAssignments();toast('Engine deleted');buildUI();}).catch(function(e){showErr(e.message);});
+      break;
+    case 'es-backfill-all':
+      (function(){
+        var all=allRuleMatchedLeads();
+        if(!all.length){toast('No rule-matched leads to backfill');return;}
+        if(!confirm(all.length+' lead'+(all.length!==1?'s':'')+' are claimed by engine rules/overrides. Restart ALL of them at step 1 of their assigned engine? (Responded/active leads are never touched.)'))return;
+        backfillAssignments(all).then(function(){toast('✓ Backfilled '+all.length);buildUI();});
+      })();
       break;
     case 'es-add-assign':
       asgnState.push({match:'',engineId:enginesDoc.defaultEngineId});
