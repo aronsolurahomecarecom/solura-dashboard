@@ -1354,7 +1354,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-10';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-11';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5629,7 +5629,8 @@ async function claudeGenerate(){
     var docInput=el('claude-doc');
     var f=docInput&&docInput.files&&docInput.files[0];
     if(f){
-      if(f.size>4*1024*1024)throw new Error('Document too large (4MB max)');
+      // Kind-specific caps below are the real guards (30MB PDF / 5MB image /
+      // 800KB text) — the old blanket 4MB check lived here and blocked them.
       var det2=detectAttachKind(f.name,f.type);
       if(det2.kind==='office')throw new Error('Word/Excel can\'t be read directly — export as PDF first');
       if(det2.kind==='pdf'&&f.size>CTS_MAX_PDF)throw new Error(f.name+': PDFs cap at 30MB (the API rejects requests past 32MB). Compress or split it.');
