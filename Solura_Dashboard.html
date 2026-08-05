@@ -1105,7 +1105,7 @@ td{padding:13px 16px;vertical-align:top;}
         </div>
         <div class="st-field">
           <label class="ee-lbl">Training — teach Claude your voice, in sections</label>
-          <div style="font-size:11.5px;color:var(--soft);margin-bottom:10px;line-height:1.5">Organize instructions into sections and <strong>attach real files</strong> instead of describing them — Claude receives the actual content. Text up to 500KB · PDFs to 20MB · images to 5MB · 25MB total. Everything syncs to OneDrive. Word/Excel: export as PDF first.</div>
+          <div style="font-size:11.5px;color:var(--soft);margin-bottom:10px;line-height:1.5">Organize instructions into sections and <strong>attach real files</strong> instead of describing them — Claude receives the actual content. Text to 800KB · PDFs to 30MB / 100 pages (API limits) · images to 5MB (API hard cap) · 30MB total. Everything syncs to OneDrive. Word/Excel: export as PDF first.</div>
           <div id="cts-list"></div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
             <select id="cts-preset" class="ee-inp" style="width:auto;padding:8px 10px;font-size:12px">
@@ -1354,7 +1354,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-9';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-10';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3929,10 +3929,10 @@ function openSettings(){
  * the synced config — Claude gets the template itself, not a description.
  * Legacy single-string claudeTraining migrates into a section once.
  * ─────────────────────────────────────────────────────────────────────── */
-var CTS_MAX_TEXT=500*1024;       // text-likes: inlined into the system prompt
-var CTS_MAX_PDF=20*1024*1024;    // PDFs: API reads up to ~32MB/100 pages — 20MB is a sane ceiling
+var CTS_MAX_TEXT=800*1024;       // text-likes: ~200K tokens ≈ the model's whole context — the honest ceiling
+var CTS_MAX_PDF=30*1024*1024;    // PDFs: API hard-caps requests at 32MB and PDFs at 100 pages
 var CTS_MAX_IMAGE=5*1024*1024;   // images: the API's own per-image limit
-var CTS_MAX_TOTAL=25*1024*1024;  // total training payload guard
+var CTS_MAX_TOTAL=30*1024*1024;  // total payload guard — API rejects requests past 32MB
 var CTS_MAX_FILE=CTS_MAX_TEXT;   // legacy alias
 function detectAttachKind(name,mime){
   var n=String(name||'').toLowerCase();
@@ -3960,8 +3960,8 @@ async function processTrainingFile(f){
   if(det.kind==='office')throw new Error(f.name+': Word/Excel/PowerPoint can\'t be read by the API directly — export it as PDF and attach that.');
   if(det.kind==='unknown')throw new Error(f.name+': unsupported type — use text, PDF, or an image (or export to PDF).');
   if(det.kind==='text'){
-    if(f.size>CTS_MAX_TEXT)throw new Error(f.name+': text templates cap at 500KB (they travel with every draft).');
-    if(f.size>150*1024)toast('Big text template — a lot of tokens on every draft; consider trimming');
+    if(f.size>CTS_MAX_TEXT)throw new Error(f.name+': text caps at 800KB — that already fills the model\'s entire context. Bigger documents: save as PDF (up to 30MB / 100 pages).');
+    if(f.size>200*1024)toast('Big text template — a lot of tokens (and cost) on every draft; consider trimming or converting to PDF');
     var txt=await f.text();
     return {name:f.name,kind:'text',text:txt};
   }
@@ -5608,6 +5608,14 @@ async function claudeGenerate(){
   if(btn)btn.disabled=true;
   try{
     if(_emailReplyTo)await fetchInboundFullBody(_emailReplyTo);
+  // Pre-flight: the API rejects requests over 32MB — fail with a clear
+  // message BEFORE burning the call. base64 inflates binary ~4/3.
+  var projected=Math.floor(ctsTotalBytes()*4/3);
+  var pdoc=(el('claude-doc')||{}).files;
+  if(pdoc&&pdoc[0])projected+=Math.floor(pdoc[0].size*4/3);
+  if(projected>31*1024*1024){
+    throw new Error('Training + attached document total ~'+Math.round(projected/1024/1024)+'MB encoded — the API rejects past 32MB. Slim the training attachments (Settings → Claude AI) or attach a smaller document.');
+  }
   var context=buildClaudeEmailContext(ri,{replyTo:_emailReplyTo});
     var instructions=String((el('claude-instructions')||{}).value||'').trim();
     var training=buildClaudeSystemTraining();
@@ -5624,6 +5632,8 @@ async function claudeGenerate(){
       if(f.size>4*1024*1024)throw new Error('Document too large (4MB max)');
       var det2=detectAttachKind(f.name,f.type);
       if(det2.kind==='office')throw new Error('Word/Excel can\'t be read directly — export as PDF first');
+      if(det2.kind==='pdf'&&f.size>CTS_MAX_PDF)throw new Error(f.name+': PDFs cap at 30MB (the API rejects requests past 32MB). Compress or split it.');
+      if(det2.kind==='image'&&f.size>CTS_MAX_IMAGE)throw new Error(f.name+': images cap at 5MB — that\'s the API\'s own hard limit per image.');
       if(det2.kind==='pdf'||det2.kind==='image'){
         var b64=await new Promise(function(res,rej){
           var rd=new FileReader();
@@ -5635,7 +5645,7 @@ async function claudeGenerate(){
         else userContent.push({type:'image',source:{type:'base64',media_type:det2.media||'image/png',data:b64}});
       }else{
         var txt=await f.text();
-        userContent.push({type:'text',text:'Reference document "'+f.name+'":\n'+txt.slice(0,200000)});
+        userContent.push({type:'text',text:'Reference document "'+f.name+'":\n'+txt.slice(0,800000)});
       }
     }
     userContent.push({type:'text',text:'Lead context:\n'+context
