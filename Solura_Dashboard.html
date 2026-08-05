@@ -1353,7 +1353,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-7';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-8';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2826,10 +2826,51 @@ async function autoExpirePhase2(){
   }
 }
 
+/* ─── Nurture follow-up auto-heal ─────────────────────────────────────────
+ * Leads touched under older builds carry stale Follow-Up dates (the sticky
+ * advance didn't move NF), which made them look fallen-out. On every build:
+ * any sticky-step lead whose NF disagrees with the engine-truth due date is
+ * patched — in memory immediately (render shows the right date), sheet
+ * write queued in the background. Idempotent: once healed, zero writes.  */
+function healNurtureFollowUps(){
+  var fixes=[];
+  for(var i=DATA_START;i<rows.length;i++){
+    var r=rows[i];if(!r)continue;
+    if(!String(r[C.NM]||r[C.DM]||'').trim())continue;
+    if(isOffSequence(i)||isExcludedLead(i)||isActive(r[C.ST]))continue;
+    var a=currentAction(i);
+    if(!a||!a.sticky)continue;
+    var w=whenToShow(i);
+    if(!w||!w.at||w.bucket==='hidden')continue;
+    var want=fd(w.at);
+    if(String(r[C.NF]||'')!==want){
+      r[C.NF]=want; // memory now — the render below shows the true date
+      fixes.push({ri:i,nf:want});
+    }
+  }
+  return fixes;
+}
+var _healInFlight=false;
+function flushNurtureHeals(fixes){
+  if(!fixes.length||_healInFlight)return;
+  _healInFlight=true;
+  (async function(){
+    var okCount=0;
+    for(var i=0;i<fixes.length;i++){
+      var u={};u[C.NF]=fixes[i].nf;
+      try{await writeRow(fixes[i].ri,u);okCount++;}catch(e){console.warn('heal row '+fixes[i].ri+':',e.message);}
+    }
+    if(okCount)toast('🩹 Repaired follow-up dates on '+okCount+' nurture lead'+(okCount!==1?'s':''));
+    _healInFlight=false;
+  })();
+}
+
 /* ─── §9 Bucket + render ─────────────────────────────────────────────────  */
 async function buildUI(){
   // Run auto-expire before bucketing (writes to sheet; may take a moment)
   try{await autoExpirePhase2();}catch(e){console.warn('autoExpirePhase2:',e.message);}
+  // Heal stale nurture follow-ups (memory now, sheet async — see above)
+  try{flushNurtureHeals(healNurtureFollowUps());}catch(e){console.warn('nurture heal:',e.message);}
 
   var today=localToday();
   var buckets={overdue:[],now:[],later:[],week:[],active:[],future:[]};
