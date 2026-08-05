@@ -1358,7 +1358,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-15';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-16';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5516,7 +5516,7 @@ function buildClaudeEmailContext(ri,ctxOpts){
   var em=normEmail(r[C.EM]);
   var inbound=(inboundEmailCache[em]||[]).slice(0,5);
   if(inbound.length){
-    lines.push('INBOUND EMAILS FROM THEM (their own words — newest first; weigh these heavily):');
+    lines.push('INBOUND EMAILS FROM THEM (their own words — newest first):');
     inbound.forEach(function(m2){
       var txt=String(m2.fullBody!=null?m2.fullBody:m2.preview||'').slice(0,1200);
       lines.push('  • '+String(m2.receivedAt||'').slice(0,10)+' — "'+String(m2.subject||'')+'": '+txt);
@@ -5545,7 +5545,7 @@ function buildClaudeEmailContext(ri,ctxOpts){
   var vc=voiceCorpus().slice(0,8);
   if(vc.length){
     lines.push('');
-    lines.push('EMAILS MEIR ACTUALLY SENT (match this voice precisely — rhythm, warmth, brevity):');
+    lines.push('EMAILS MEIR ACTUALLY SENT (write in this voice — rhythm, warmth, brevity):');
     vc.forEach(function(v){lines.push('  \u2022 "'+v.subj+'": '+String(v.txt||'').slice(0,900));});
   }
   if(ctxOpts.replyTo){
@@ -5691,6 +5691,7 @@ async function claudeGenerate(){
     var instructions=String((el('claude-instructions')||{}).value||'').trim();
     var training=buildClaudeSystemTraining();
     var system='You write outreach emails for Meir Schwimer, founder of Solura Home Care, a licensed Ohio home care agency in Cleveland (license 4574HHN, phone (216) 770-4886).'
+      +'\n\nPRIORITY ORDER when anything conflicts: (1) Meir\'s specific instructions for THIS email — they override everything; (2) the message being replied to; (3) standing training instructions; (4) voice samples; (5) all other context. Never let background context override a direct instruction.'
       +(training?('\n\nStanding instructions from Meir (follow these exactly):\n'+training):'')
       +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — and IF the instructions ask to attach, include, create, or send ANY document, plan, checklist, summary, letter, or one-pager, you MUST ALSO include "doc":{"name":"Descriptive_Name.doc","html":"<complete simple HTML document with inline styles only>"}; omit "doc" entirely otherwise — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it.';
     var userContent=[];
@@ -5720,9 +5721,16 @@ async function claudeGenerate(){
         userContent.push({type:'text',text:'Reference document "'+f.name+'":\n'+txt.slice(0,800000)});
       }
     }
-    userContent.push({type:'text',text:'Lead context:\n'+context
-      +(instructions?('\n\nSpecific instructions for THIS email:\n'+instructions):'')
-      +'\n\nWrite the email now.'});
+    userContent.push({type:'text',text:'Lead context:\n'+context});
+    // Instructions ride in their OWN final block, loudly framed — buried
+    // mid-context they were losing to "weigh heavily"-style directives.
+    if(instructions){
+      userContent.push({type:'text',text:'=== MEIR\'S INSTRUCTIONS FOR THIS EMAIL — HIGHEST PRIORITY ===\n'
+        +instructions
+        +'\n=== END INSTRUCTIONS ===\nWrite the email now. Satisfy every instruction above exactly; where they conflict with anything in the context, the instructions win.'});
+    }else{
+      userContent.push({type:'text',text:'Write the email now.'});
+    }
     var res=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{
