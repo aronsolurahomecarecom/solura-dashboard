@@ -674,6 +674,7 @@ td{padding:13px 16px;vertical-align:top;}
   <div class="mbox" style="max-width:640px">
     <div class="mhead"><div class="mtitle">Send Email</div><button class="mclose" data-action="close-modal" data-mid="modal-email">✕</button></div>
     <div class="mbody">
+      <div id="email-reply-note" style="display:none;font-size:12px;background:var(--sky-pale);border:1px solid var(--sky-mid);color:var(--sky-deep);border-radius:8px;padding:8px 12px;margin-bottom:10px"></div>
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">To</div>
       <div id="email-to" style="font-size:12px;color:var(--mid);margin-bottom:12px;padding:8px 10px;background:var(--cream);border-radius:8px"></div>
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Subject</div>
@@ -1353,7 +1354,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-8';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-9';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4623,7 +4624,7 @@ async function pollInboundMail(){
         fromAddr:senderAddr,
         receivedAt:m.receivedDateTime,
         receivedTs:receivedTs,
-        preview:String(m.bodyPreview||'').slice(0,180),
+        preview:String(m.bodyPreview||'').slice(0,500),
         webLink:m.webLink||'',
         isRead:!!m.isRead
       };
@@ -5430,7 +5431,8 @@ async function pollTrackerEvents(){
  * text from Settings rides along as Claude's standing instructions, so
  * Meir can teach the writer his voice once and refine it over time.
  * ─────────────────────────────────────────────────────────────────────── */
-function buildClaudeEmailContext(ri){
+function buildClaudeEmailContext(ri,ctxOpts){
+  ctxOpts=ctxOpts||{};
   var r=rows[ri]||[];
   var sq=seqFor(ri);
   var eng=engineFor(ri);
@@ -5451,6 +5453,7 @@ function buildClaudeEmailContext(ri){
   add('Pay type',r[C.PT]);
   add('Area/ZIP',r[C.AR]);
   add('Safety concerns',r[C.SAFETY]);
+  add('Next steps planned',r[C.NSM]);
   add('Date added',r[C.DA]);
   add('Last contact',r[C.LC]+' via '+String(r[C.MT]||''));
   // Sequence position — exact
@@ -5474,14 +5477,25 @@ function buildClaudeEmailContext(ri){
     var ntail=notes.length>1200?(notes.slice(0,1200)+'…'):notes;
     lines.push('Notes & call history (most recent first): '+ntail);
   }
-  // Inbound emails we've seen from them
+  // Inbound emails from them — their actual words, newest first
   var em=normEmail(r[C.EM]);
-  var inbound=(inboundEmailCache[em]||[]).slice(0,4);
+  var inbound=(inboundEmailCache[em]||[]).slice(0,5);
   if(inbound.length){
-    lines.push('Recent inbound emails FROM them: '+inbound.map(function(m2){
-      return '['+m2.subject+'] '+m2.preview;
-    }).join(' | '));
+    lines.push('INBOUND EMAILS FROM THEM (their own words — newest first; weigh these heavily):');
+    inbound.forEach(function(m2){
+      var txt=String(m2.fullBody!=null?m2.fullBody:m2.preview||'').slice(0,1200);
+      lines.push('  • '+String(m2.receivedAt||'').slice(0,10)+' — "'+String(m2.subject||'')+'": '+txt);
+    });
   }
+  // Our recent sends + whether they opened them — engagement signal
+  try{
+    var sentRecs=sentEmailsFor(ri).slice(0,4);
+    if(sentRecs.length){
+      lines.push('OUR recent emails to them: '+sentRecs.map(function(sr){
+        return '"'+sr.subj+'"'+(sr.variant?' [variant '+sr.variant+']':'')+' — '+(sr.openedAt?('opened '+(sr.opens||1)+'×'+(sr.docOpens?(', doc '+sr.docOpens+'×'):'')):'never opened');
+      }).join(' | '));
+    }
+  }catch(_){/* sent store empty */}
   // House template for this exact stage — Claude adapts it rather than
   // inventing structure from scratch (Meir: "use specific templates")
   try{
@@ -5492,6 +5506,13 @@ function buildClaudeEmailContext(ri){
         +'\nTemplate body: '+String(tpl.body||'').slice(0,1400));
     }
   }catch(_){/* templates not loaded — fine */}
+  if(ctxOpts.replyTo){
+    var rt=ctxOpts.replyTo;
+    lines.push('');
+    lines.push('*** YOU ARE WRITING A DIRECT REPLY to this email they sent — respond to their actual points and questions, reference what they said, and do not restart the conversation from scratch: ***');
+    lines.push('Their email ('+String(rt.receivedAt||'').slice(0,10)+') — subject "'+String(rt.subject||'')+'":');
+    lines.push(String(rt.fullBody!=null&&rt.fullBody!==''?rt.fullBody:rt.preview||'').slice(0,3500));
+  }
   return lines.join('\n');
 }
 function parseClaudeEmailJSON(text){
@@ -5567,7 +5588,8 @@ function openClaudeWriter(ri){
   if(String(r[C.NT]||'').trim())histBits.push('notes');
   var em=normEmail(r[C.EM]);
   var inb=(inboundEmailCache[em]||[]).length;
-  if(inb)histBits.push(inb+' inbound email'+(inb!==1?'s':''));
+  if(inb)histBits.push(inb+' inbound email'+(inb!==1?'s':'')+' (their full text)');
+  if(_emailReplyTo)histBits.push('REPLY MODE — answering their message directly');
   el('claude-ctx-summary').innerHTML='Claude will draft for <strong>'+escapeHtml(name)+'</strong> using: lead details, position <strong>'+escapeHtml(posStr)+'</strong> on <strong>'+escapeHtml(engineFor(ri).name)+'</strong>'
     +(histBits.length?(', plus '+histBits.join(', ')):'')
     +(buildClaudeSystemTraining()?'. Your training sections apply.':'. <em>Tip: add training sections in Settings → Claude AI to teach it your voice.</em>');
@@ -5585,7 +5607,8 @@ async function claudeGenerate(){
   if(spin)spin.style.display='inline-flex';
   if(btn)btn.disabled=true;
   try{
-    var context=buildClaudeEmailContext(ri);
+    if(_emailReplyTo)await fetchInboundFullBody(_emailReplyTo);
+  var context=buildClaudeEmailContext(ri,{replyTo:_emailReplyTo});
     var instructions=String((el('claude-instructions')||{}).value||'').trim();
     var training=buildClaudeSystemTraining();
     var system='You write outreach emails for Meir Schwimer, founder of Solura Home Care, a licensed Ohio home care agency in Cleveland (license 4574HHN, phone (216) 770-4886).'
@@ -5966,6 +5989,28 @@ async function sendSMS(){
 // Attachments can be {name, size, type, dataBase64} OR {name, size, type, file} where file is the raw File
 // (For files larger than the single-PUT ceiling we keep the File around and stream it via upload session)
 var emailAttachments=[];
+var _emailReplyTo=null; // set when composing a threaded reply
+// Fetch the sender's actual text (uniqueBody = their words without the
+// quoted chain) for reply context + AI drafting. Cached on the entry.
+async function fetchInboundFullBody(entry){
+  if(!entry||entry.fullBody!=null||!entry.id)return entry;
+  try{
+    var r=await gfetch(GR+'/me/messages/'+encodeURIComponent(entry.id)+'?$select=uniqueBody,body');
+    if(r.ok){
+      var j=await r.json();
+      var html=(j.uniqueBody&&j.uniqueBody.content)||(j.body&&j.body.content)||'';
+      var txt=html.replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ')
+        .replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+        .replace(/\s+/g,' ').trim();
+      entry.fullBody=txt.slice(0,4000);
+    }else{entry.fullBody='';}
+  }catch(_){entry.fullBody='';}
+  return entry;
+}
+function inboundFor(ri){
+  var em=normEmail((rows[ri]||[])[C.EM]);
+  return (em&&inboundEmailCache[em])?inboundEmailCache[em]:[];
+}
 var EMAIL_INLINE_PUT_CEILING=3*1024*1024;   // 3MB — Graph sendMail single-PUT cap for total payload (incl. base64 inflation)
 // Exchange Online MaxSendSize varies by tenant: default is 25-35MB but many tenants
 // (including yours, per the ErrorMessageSizeExceeded at ~12.5MB) are capped lower.
@@ -6061,7 +6106,8 @@ function emailReadAsBase64(file){
   });
 }
 
-function openEmail(ri){
+function openEmail(ri,opts){
+  opts=opts||{};
   var email=String((rows[ri]||[])[C.EM]||'').trim();
   if(!email){toast('No email address');return;}
   var c=getEmailContent(ri);
@@ -6088,6 +6134,19 @@ function openEmail(ri){
   if(isNurtureStep(ri)&&getWeeklyDraftFor(ri)){
     applyWeeklyDraft(ri,{silent:false});
   }
+  // ↩ Reply mode: threaded reply to a specific inbound message
+  _emailReplyTo=null;
+  var rn=el('email-reply-note');
+  if(opts.reply&&opts.reply.id){
+    _emailReplyTo=opts.reply;
+    var sj=el('email-subj');
+    if(sj)sj.value='Re: '+String(opts.reply.subject||'').replace(/^(re:\s*)+/i,'');
+    if(rn){
+      rn.style.display='block';
+      rn.innerHTML='↩ Replying to <strong>'+escapeHtml(opts.reply.subject||'(no subject)')+'</strong> · '+escapeHtml(String(opts.reply.receivedAt||'').slice(0,10))+' <b data-action="cancel-reply" style="cursor:pointer;margin-left:8px">✕ cancel</b>';
+    }
+    fetchInboundFullBody(opts.reply); // warm the AI context in the background
+  }else if(rn){rn.style.display='none';rn.innerHTML='';}
   el('modal-email').dataset.ri=ri;
   el('modal-email').classList.add('open');
 }
@@ -6582,7 +6641,7 @@ async function sendEmail(){
   var hasLarge=effectiveAttachments.some(function(a){return a.large;});
   var smallTotal=effectiveAttachments.filter(function(a){return !a.large;}).reduce(function(s,a){return s+a.size;},0);
   var bodyApproxSize=bodyHtml.length+subj.length+toAddr.length+512;
-  var useUploadSession=hasLarge||(smallTotal+bodyApproxSize>EMAIL_INLINE_PUT_CEILING);
+  var useUploadSession=hasLarge||(smallTotal+bodyApproxSize>EMAIL_INLINE_PUT_CEILING)||!!_emailReplyTo;
 
   // Update spin label
   if(spin){
@@ -6640,6 +6699,28 @@ async function sendEmail(){
         if(a.isInline){att.isInline=true;att.contentId=a.contentId;}
         return att;
       });
+      var draft,messageId;
+      if(_emailReplyTo&&_emailReplyTo.id){
+        // Threaded reply: createReply carries In-Reply-To headers AND the
+        // quoted conversation; our message goes above the quote.
+        var crRes=await gfetch(GR+'/me/messages/'+encodeURIComponent(_emailReplyTo.id)+'/createReply',{method:'POST',body:'{}'});
+        if(!crRes.ok){
+          var ce=await crRes.json().catch(function(){return{};});
+          throw new Error('Reply draft failed: '+(ce.error&&ce.error.message?ce.error.message:crRes.status));
+        }
+        draft=await crRes.json();
+        messageId=draft.id;
+        if(!messageId)throw new Error('Reply draft has no id');
+        var quoted=(draft.body&&draft.body.content)||'';
+        var pr=await gfetch(GR+'/me/messages/'+messageId,{method:'PATCH',body:JSON.stringify({
+          subject:subj,
+          body:{contentType:'HTML',content:bodyHtml+'<br>'+quoted}
+        })});
+        if(!pr.ok)throw new Error('Reply body update failed: '+pr.status);
+        for(var sa=0;sa<smallAttsArr.length;sa++){
+          await gfetch(GR+'/me/messages/'+messageId+'/attachments',{method:'POST',body:JSON.stringify(smallAttsArr[sa])});
+        }
+      }else{
       var draftBody={
         subject:subj,
         body:{contentType:'HTML',content:bodyHtml},
@@ -6651,9 +6732,10 @@ async function sendEmail(){
         var de=await draftRes.json().catch(function(){return{};});
         throw new Error('Draft create failed: '+(de.error&&de.error.message?de.error.message:draftRes.status));
       }
-      var draft=await draftRes.json();
-      var messageId=draft.id;
+      draft=await draftRes.json();
+      messageId=draft.id;
       if(!messageId)throw new Error('Draft has no id');
+      }
 
       // 2. Upload each large attachment via session
       var largeAtts=emailAttachments.filter(function(a){return a.large;});
@@ -6690,13 +6772,14 @@ async function sendEmail(){
       contact:toAddr,
       subject:subj,
       preview:bodyEl?bodyEl.textContent.slice(0,500):'',
-      outcome:oneDriveShared.length?'sent+onedrive':'sent',
+      outcome:_emailReplyTo?'reply-sent':(oneDriveShared.length?'sent+onedrive':'sent'),
       messageId:_sendId,
       variant:(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri)?_weeklyAppliedFor.label:''
     })).then(function(commsRow){
       recordSentEmail(_sendId,ri,toAddr,subj,commsRow,
         (_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri)?_weeklyAppliedFor.label:'');
       _weeklyAppliedFor=null;
+      _emailReplyTo=null;
     });
     var u=advanceLead(ri,'Email');
     if(u){try{await writeRow(ri,u);}catch(e){showErr('Email sent but log failed: '+e.message);}}
@@ -6804,6 +6887,7 @@ function openDrawer(ri){
   }).join('');
   var email=String(r[C.EM]||'').trim();
   var activityHtml=email?renderActivityForEmail(email):'';
+  var inboundHtml=renderInboundFor(ri);
   var sentHtml=renderSentEmailsFor(ri);
   // Action row at the TOP (call-log moved out of the bottom per feedback)
   var actionsRow='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'
@@ -6811,12 +6895,25 @@ function openDrawer(ri){
     +'<button class="ee-mini" data-action="open-intake" data-ri="'+ri+'">📋 Intake Q&amp;A</button>'
     +'<button class="ee-mini" data-action="open-restart" data-ri="'+ri+'">⟳ Restart sequence</button>'
     +'</div>';
-  el('d-body').innerHTML=actionsRow+sentHtml+activityHtml+fieldsHtml;
+  el('d-body').innerHTML=actionsRow+inboundHtml+sentHtml+activityHtml+fieldsHtml;
   el('drawer').classList.add('open');
   el('doverlay').classList.add('open');
   // Item 3 fix: values typed straight into the sheet (e.g. Notes edited in
   // Excel) were invisible until a full Refresh. Pull this one row fresh.
   refreshRowFromSheet(ri);
+}
+function renderInboundFor(ri){
+  var list=inboundFor(ri);
+  if(!list.length)return '';
+  var items=list.slice(0,6).map(function(m2){
+    return '<div class="activity-item" style="border-left-color:var(--sky-mid)">'
+      +'<div class="subj">📥 '+escapeHtml(m2.subject||'(no subject)')+'</div>'
+      +'<div style="font-size:10.5px;color:var(--soft);margin:2px 0 4px">'+escapeHtml(String(m2.receivedAt||'').slice(0,10))+' · '+escapeHtml(m2.fromName||m2.fromAddr||'')+'</div>'
+      +'<div style="font-size:11px;color:var(--mid);line-height:1.4">'+escapeHtml(String(m2.preview||'').slice(0,160))+'</div>'
+      +'<button class="ee-mini" style="margin-top:6px;padding:5px 12px;font-size:11px" data-action="reply-inbound" data-ri="'+ri+'" data-mid="'+escapeHtml(m2.id)+'">↩ Reply</button>'
+      +'</div>';
+  }).join('');
+  return '<div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin:14px 0 6px">📥 From them</div>'+items;
 }
 function renderSentEmailsFor(ri){
   var sent=sentEmailsFor(ri);
@@ -8401,6 +8498,18 @@ function onClick(ev){
     case 'claude-generate': claudeGenerate(); break;
     case 'open-weekly': openWeekly(); break;
     case 'weekly-save': saveWeeklyDraft(); break;
+    case 'reply-inbound':
+      (function(){
+        var rri=parseInt(t.dataset.ri,10);
+        var mid=t.dataset.mid;
+        var entry=inboundFor(rri).find(function(m3){return m3.id===mid;});
+        if(entry){closeDrawer();openEmail(rri,{reply:entry});}
+      })();
+      break;
+    case 'cancel-reply':
+      _emailReplyTo=null;
+      var rn2=el('email-reply-note');if(rn2){rn2.style.display='none';rn2.innerHTML='';}
+      break;
     case 'use-weekly':
       var _wri=parseInt(el('modal-email').dataset.ri,10);
       if(!isNaN(_wri))applyWeeklyDraft(_wri);
