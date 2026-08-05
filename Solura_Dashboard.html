@@ -933,12 +933,12 @@ td{padding:13px 16px;vertical-align:top;}
       <div id="claude-ctx-summary" style="font-size:12px;color:var(--mid);background:var(--warm);border:1px solid var(--border-soft);border-radius:10px;padding:12px 14px;margin-bottom:14px;line-height:1.6"></div>
       <div style="margin-bottom:12px">
         <label class="ee-lbl">Extra instructions for this email (optional)</label>
-        <textarea id="claude-instructions" rows="3" class="ee-inp" placeholder="e.g. Reference that her mom just left the hospital. Goal: get the in-home visit booked this week."></textarea>
+        <textarea id="claude-instructions" rows="3" class="ee-inp" placeholder="e.g. Reference that her mom just left the hospital. Goal: get the in-home visit booked this week. Or ask for a document: include a one-page fall-prevention checklist as an attached doc."></textarea>
       </div>
       <div style="margin-bottom:14px">
         <label class="ee-lbl">Attach a document for Claude to reference (optional — PDF, text, or image, e.g. a care plan)</label>
         <input type="file" id="claude-doc" accept=".pdf,.txt,.md,.html,.htm,.png,.jpg,.jpeg,.webp,.gif" style="font-size:12px">
-        <div style="font-size:10.5px;color:var(--soft);margin-top:4px">Claude reads it and works its contents into the email. It does NOT attach the file — add attachments in the composer as usual.</div>
+        <div style="font-size:10.5px;color:var(--soft);margin-top:4px">Claude reads it, works its contents into the email, and the file is attached to the email automatically. Remove it from the attachment list if you don\u2019t want it sent.</div>
       </div>
       <div style="display:flex;gap:8px;padding-top:14px;border-top:1px solid var(--border-soft)">
         <button data-action="claude-generate" id="claude-gen-btn" style="padding:10px 22px;background:linear-gradient(135deg,#7C5CBF,#5B4BAA);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(91,75,170,.3)">✨ Write the draft</button>
@@ -1354,7 +1354,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-11';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-13';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5525,7 +5525,8 @@ function parseClaudeEmailJSON(text){
   try{
     var j=JSON.parse(clean);
     if(j.subject&&j.body)return {subject:String(j.subject),body:String(j.body),
-      format:(j.format&&/html/i.test(String(j.format)))?'html':'text'};
+      format:(j.format&&/html/i.test(String(j.format)))?'html':'text',
+      doc:(j.doc&&j.doc.html)?{name:String(j.doc.name||'Document.doc'),html:String(j.doc.html)}:null};
   }catch(_){/* fall through to tolerant extraction */}
   // Attempt 2: tolerant field extraction — survives raw newlines inside
   // strings AND truncation mid-body (the two ways models break JSON).
@@ -5550,8 +5551,36 @@ function parseClaudeEmailJSON(text){
   }
   var unesc=function(x){return String(x)
     .replace(/\\n/g,'\n').replace(/\\t/g,'\t').replace(/\\"/g,'"').replace(/\\\\/g,'\\');};
+  var doc=null;
+  var di=clean.indexOf('"doc"');
+  if(di>-1){
+    var dsub=clean.slice(di);
+    var dname=extractField(dsub,'name');
+    var dhtml=extractField(dsub,'html');
+    if(dhtml&&String(dhtml).trim())doc={name:(dname&&dname.trim())||'Document.doc',html:unesc(dhtml)};
+  }
   return {subject:unesc(subj).trim(),body:unesc(body).replace(/\s+$/,''),
-    format:(fmt&&/html/i.test(fmt))?'html':'text'};
+    format:(fmt&&/html/i.test(fmt))?'html':'text',doc:doc};
+}
+// Wrap Claude-generated document HTML in Solura letterhead and package it
+// as a Word-compatible .doc (Word opens styled HTML natively — zero deps).
+function buildGeneratedDoc(name,innerHtml){
+  var safe=sanitizeDraftHtml(innerHtml);
+  var inner=extractInnerHtml(safe);
+  var fname=String(name||'Document').replace(/[^\w\- .]/g,'').trim()||'Document';
+  if(!/\.docx?$/i.test(fname))fname+='.doc';
+  var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+escapeHtml(fname)+'</title></head>'
+    +'<body style="font-family:Georgia,serif;color:#222;margin:40px 50px">'
+    +'<div style="border-bottom:3px solid #C8870A;padding-bottom:14px;margin-bottom:24px">'
+    +'<span style="font-size:26px;font-weight:bold;color:#1B2A4A;letter-spacing:1px">SOLURA</span>'
+    +'<span style="font-size:11px;color:#C8870A;letter-spacing:3px;margin-left:10px">HOME CARE</span>'
+    +'<div style="font-size:9px;color:#888;margin-top:6px">815 Superior Ave E, Suite 1618, Cleveland, OH 44114 \u00b7 (216) 770-4886 \u00b7 www.solurahomecare.com</div>'
+    +'</div>'
+    +inner
+    +'<div style="border-top:1px solid #ddd;margin-top:30px;padding-top:10px;font-size:9px;color:#999">Prepared by Solura Home Care \u00b7 License 4574HHN</div>'
+    +'</body></html>';
+  var blob=new Blob(['\ufeff'+html],{type:'application/msword'});
+  return new File([blob],fname,{type:'application/msword'});
 }
 function looksLikeHtml(sx){
   var v=String(sx||'');
@@ -5621,7 +5650,7 @@ async function claudeGenerate(){
     var training=buildClaudeSystemTraining();
     var system='You write outreach emails for Meir Schwimer, founder of Solura Home Care, a licensed Ohio home care agency in Cleveland (license 4574HHN, phone (216) 770-4886).'
       +(training?('\n\nStanding instructions from Meir (follow these exactly):\n'+training):'')
-      +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it.';
+      +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — and IF the instructions ask for a document to accompany the email (care plan, letter, summary, one-pager, checklist), ALSO include "doc":{"name":"Descriptive_Name.doc","html":"<complete simple HTML document with inline styles only>"}; omit "doc" entirely otherwise — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it.';
     var userContent=[];
     // Training attachments that are PDFs/images ride as native blocks
     collectTrainingBlocks().forEach(function(b3){userContent.push(b3);});
@@ -5676,6 +5705,22 @@ async function claudeGenerate(){
     var data=await res.json();
     var text=(data.content||[]).map(function(b2){return b2.type==='text'?b2.text:'';}).join('');
     var draft=parseClaudeEmailJSON(text);
+    // The reference doc Claude just read rides the email automatically —
+    // no more attaching it twice. Remove it from the composer chip list
+    // if you don't want it sent.
+    if(f&&!emailAttachments.some(function(a){return a.name===f.name;})){
+      try{await emailAddFiles([f]);toast('📎 '+f.name+' attached to the email');}catch(eAtt){console.warn('auto-attach:',eAtt.message);}
+    }
+    // Claude generated a document → branded .doc, attached automatically
+    if(draft.doc&&draft.doc.html){
+      try{
+        var genFile=buildGeneratedDoc(draft.doc.name,draft.doc.html);
+        if(!emailAttachments.some(function(a){return a.name===genFile.name;})){
+          await emailAddFiles([genFile]);
+          toast('📄 Claude drafted '+genFile.name+' — attached');
+        }
+      }catch(eGen){console.warn('generated doc:',eGen.message);}
+    }
     var subjEl=el('email-subj');if(subjEl)subjEl.value=draft.subject;
     var bodyEl=el('email-body');
     if(bodyEl){
