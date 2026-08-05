@@ -1097,6 +1097,10 @@ td{padding:13px 16px;vertical-align:top;}
           <div style="font-size:11px;color:var(--soft);margin-top:5px">Stored only in this browser (never synced, never written to OneDrive). Get one at console.anthropic.com → API keys. Each draft costs a fraction of a cent.</div>
         </div>
         <div class="st-field">
+          <label class="st-check"><input type="checkbox" data-cfg="voiceLearn" data-cfgtype="bool"> Learn my voice from emails I send <span id="voice-count" style="color:var(--soft);font-weight:500"></span></label>
+          <div style="font-size:11px;color:var(--soft);margin-top:4px;line-height:1.5">Real sends (not weekly template blasts) become voice samples that ride with every ✨ draft, so Claude writes like you actually write. <b data-action="claude-clear-voice" style="color:var(--red);cursor:pointer">Clear samples</b></div>
+        </div>
+        <div class="st-field">
           <label class="ee-lbl">Model</label>
           <select class="ee-inp" style="max-width:280px" data-cfg="claudeModel" data-cfgtype="str">
             <option value="claude-sonnet-4-6">Claude Sonnet (best quality)</option>
@@ -1354,7 +1358,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-13';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-15';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1721,6 +1725,7 @@ async function putEnginesContentChunked(body){
  * fallback threshold). Defaults preserve today's exact behavior.
  * ─────────────────────────────────────────────────────────────────────── */
 var CONFIG_DEFAULTS={
+  voiceLearn:true,
   emailShellHtml:'',
   trackerUrl:'',
   trackerToken:'',
@@ -4058,6 +4063,8 @@ function renderConfigInputs(){
   if(ck){try{ck.value=localStorage.getItem('claudeApiKey')||'';}catch(_){}}
   renderClaudeSections();
   renderShellPreview();
+  var vcnt=el('voice-count');
+  if(vcnt){var n5=voiceCorpus().length;vcnt.textContent=n5?('\u00b7 '+n5+' sample'+(n5!==1?'s':'')+' captured'):'\u00b7 none yet';}
 }
 function stMarkDirty(){
   stDirty=true;
@@ -5431,6 +5438,34 @@ async function pollTrackerEvents(){
  * text from Settings rides along as Claude's standing instructions, so
  * Meir can teach the writer his voice once and refine it over time.
  * ─────────────────────────────────────────────────────────────────────── */
+/* ─── 🎙 Voice corpus — the writer trains on emails Meir ACTUALLY sends ──
+ * Every real send (not weekly-template blasts) is captured as a voice
+ * sample; the newest ride along with every ✨ draft so Claude imitates the
+ * live voice, not a description of it. Synced via config; capped tightly. */
+var _voiceSavedAt=0;
+function voiceCorpus(){
+  enginesDoc.config=enginesDoc.config||{};
+  return enginesDoc.config.voiceCorpus=enginesDoc.config.voiceCorpus||[];
+}
+function captureVoiceSample(subj,bodyHtml,variantLabel){
+  if(cfg('voiceLearn')===false)return false;
+  if(variantLabel)return false; // weekly template sends aren't voice
+  var plain=String(bodyHtml||'').replace(/<style[\s\S]*?<\/style>/gi,' ')
+    .replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&')
+    .replace(/\s+/g,' ').trim();
+  if(plain.length<180)return false; // too short to teach anything
+  var corpus=voiceCorpus();
+  var sig=plain.slice(0,120);
+  if(corpus.some(function(v){return String(v.txt||'').slice(0,120)===sig;}))return false;
+  corpus.unshift({ts:Date.now(),subj:String(subj||'').slice(0,120),txt:plain.slice(0,1500)});
+  if(corpus.length>20)corpus.length=20;
+  // Throttled background persist — at most one config write per 10 minutes
+  if(Date.now()-_voiceSavedAt>10*60*1000){
+    _voiceSavedAt=Date.now();
+    saveEnginesDoc().catch(function(){});
+  }
+  return true;
+}
 function buildClaudeEmailContext(ri,ctxOpts){
   ctxOpts=ctxOpts||{};
   var r=rows[ri]||[];
@@ -5506,6 +5541,13 @@ function buildClaudeEmailContext(ri,ctxOpts){
         +'\nTemplate body: '+String(tpl.body||'').slice(0,1400));
     }
   }catch(_){/* templates not loaded — fine */}
+  // Voice samples: real sent emails, newest first
+  var vc=voiceCorpus().slice(0,8);
+  if(vc.length){
+    lines.push('');
+    lines.push('EMAILS MEIR ACTUALLY SENT (match this voice precisely — rhythm, warmth, brevity):');
+    vc.forEach(function(v){lines.push('  \u2022 "'+v.subj+'": '+String(v.txt||'').slice(0,900));});
+  }
   if(ctxOpts.replyTo){
     var rt=ctxOpts.replyTo;
     lines.push('');
@@ -5650,7 +5692,7 @@ async function claudeGenerate(){
     var training=buildClaudeSystemTraining();
     var system='You write outreach emails for Meir Schwimer, founder of Solura Home Care, a licensed Ohio home care agency in Cleveland (license 4574HHN, phone (216) 770-4886).'
       +(training?('\n\nStanding instructions from Meir (follow these exactly):\n'+training):'')
-      +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — and IF the instructions ask for a document to accompany the email (care plan, letter, summary, one-pager, checklist), ALSO include "doc":{"name":"Descriptive_Name.doc","html":"<complete simple HTML document with inline styles only>"}; omit "doc" entirely otherwise — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it.';
+      +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — and IF the instructions ask to attach, include, create, or send ANY document, plan, checklist, summary, letter, or one-pager, you MUST ALSO include "doc":{"name":"Descriptive_Name.doc","html":"<complete simple HTML document with inline styles only>"}; omit "doc" entirely otherwise — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it.';
     var userContent=[];
     // Training attachments that are PDFs/images ride as native blocks
     collectTrainingBlocks().forEach(function(b3){userContent.push(b3);});
@@ -5709,7 +5751,13 @@ async function claudeGenerate(){
     // no more attaching it twice. Remove it from the composer chip list
     // if you don't want it sent.
     if(f&&!emailAttachments.some(function(a){return a.name===f.name;})){
-      try{await emailAddFiles([f]);toast('📎 '+f.name+' attached to the email');}catch(eAtt){console.warn('auto-attach:',eAtt.message);}
+      try{await emailAddFiles([f]);toast('📎 '+f.name+' attached to the email');}catch(eAtt){toast('⚠ Could not attach '+f.name+': '+eAtt.message);}
+    }
+    // If the instructions asked for a document but none came back, surface
+    // it — silence here read as "Claude doesn't attach files".
+    var wantedDoc=/\b(attach|include|add|create|make|send)\b[\s\S]{0,60}\b(doc|document|plan|checklist|summary|one[- ]?pager|letter|pdf)\b/i.test(String((el('claude-instructions')||{}).value||''));
+    if(wantedDoc&&!(draft.doc&&draft.doc.html)){
+      toast('⚠ Claude wrote the email but skipped the document — regenerate with wording like: include a one-page fall checklist as an attached doc');
     }
     // Claude generated a document → branded .doc, attached automatically
     if(draft.doc&&draft.doc.html){
@@ -5719,7 +5767,7 @@ async function claudeGenerate(){
           await emailAddFiles([genFile]);
           toast('📄 Claude drafted '+genFile.name+' — attached');
         }
-      }catch(eGen){console.warn('generated doc:',eGen.message);}
+      }catch(eGen){toast('⚠ Generated doc failed to attach: '+eGen.message);}
     }
     var subjEl=el('email-subj');if(subjEl)subjEl.value=draft.subject;
     var bodyEl=el('email-body');
@@ -6834,6 +6882,7 @@ async function sendEmail(){
     })).then(function(commsRow){
       recordSentEmail(_sendId,ri,toAddr,subj,commsRow,
         (_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri)?_weeklyAppliedFor.label:'');
+      try{captureVoiceSample(subj,bodyHtml,(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri)?_weeklyAppliedFor.label:'');}catch(_){}
       _weeklyAppliedFor=null;
       _emailReplyTo=null;
     });
@@ -8552,6 +8601,12 @@ function onClick(ev){
       openClaudeWriter(isNaN(_cri)?-1:_cri);
       break;
     case 'claude-generate': claudeGenerate(); break;
+    case 'claude-clear-voice':
+      if(confirm('Clear all captured voice samples?')){
+        enginesDoc.config.voiceCorpus=[];
+        saveEnginesDoc().then(function(){toast('Voice samples cleared');renderConfigInputs();}).catch(function(e){showErr(e.message);});
+      }
+      break;
     case 'open-weekly': openWeekly(); break;
     case 'weekly-save': saveWeeklyDraft(); break;
     case 'reply-inbound':
