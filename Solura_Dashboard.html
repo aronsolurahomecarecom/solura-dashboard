@@ -938,6 +938,11 @@ td{padding:13px 16px;vertical-align:top;}
       <div style="margin-bottom:14px">
         <label class="ee-lbl">Attach a document for Claude to reference (optional — PDF, text, or image, e.g. a care plan)</label>
         <input type="file" id="claude-doc" accept=".pdf,.txt,.md,.html,.htm,.png,.jpg,.jpeg,.webp,.gif" style="font-size:12px">
+        <div id="claude-doc-chip" style="display:none;margin-top:6px;align-items:center;gap:8px;font-size:12px;background:var(--cream);border:1px solid var(--border);border-radius:8px;padding:6px 10px">
+          <span id="claude-doc-name" data-action="claude-doc-open" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;font-weight:600"></span>
+          <span id="claude-doc-size" style="color:var(--soft)"></span>
+          <b data-action="claude-doc-clear" style="cursor:pointer;color:var(--red);margin-left:auto" title="Remove">\u00D7</b>
+        </div>
         <div style="font-size:10.5px;color:var(--soft);margin-top:4px">Claude reads it, works its contents into the email, and the file is attached to the email automatically. Remove it from the attachment list if you don\u2019t want it sent.</div>
       </div>
       <div style="display:flex;gap:8px;padding-top:14px;border-top:1px solid var(--border-soft)">
@@ -1358,7 +1363,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-16';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-18';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4035,6 +4040,15 @@ function renderClaudeSections(){
       +'</div>';
   }).join('')||'<div style="font-size:12px;color:var(--soft);font-style:italic;padding:10px 0">No sections yet — add one below, or attach a template file straight into it.</div>';
 }
+function renderClaudeDocChip(){
+  var di=el('claude-doc');var chip=el('claude-doc-chip');
+  if(!di||!chip)return;
+  var f=di.files&&di.files[0];
+  if(!f){chip.style.display='none';return;}
+  chip.style.display='flex';
+  var nm=el('claude-doc-name');if(nm)nm.textContent=f.name;
+  var sz=el('claude-doc-size');if(sz)sz.textContent=asmtFmtSize(f.size);
+}
 function buildClaudeSystemTraining(){
   var secs=ctsSections();
   if(!secs.length)return String(cfg('claudeTraining')||'').trim();
@@ -5624,6 +5638,129 @@ function buildGeneratedDoc(name,innerHtml){
   var blob=new Blob(['\ufeff'+html],{type:'application/msword'});
   return new File([blob],fname,{type:'application/msword'});
 }
+/* ─── Minimal PDF writer — Claude-generated docs as REAL PDFs ────────────
+ * Text-based (selectable, small), Helvetica core fonts, Solura letterhead,
+ * multi-page. No libraries: the file format is written directly.       */
+function pdfEsc(t){
+  return String(t).replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)')
+    .replace(/[\u2018\u2019]/g,"'").replace(/[\u201C\u201D]/g,'"')
+    .replace(/\u2013|\u2014/g,'-').replace(/\u2022/g,'\u00b7')
+    .replace(/[^\x20-\x7E\u00a0-\u00ff]/g,'');
+}
+function pdfWrap(text,maxChars){
+  var words=String(text).split(/\s+/),lines=[],cur='';
+  for(var i=0;i<words.length;i++){
+    var w2=words[i];
+    if((cur+' '+w2).trim().length>maxChars){if(cur)lines.push(cur);cur=w2;}
+    else cur=(cur?cur+' ':'')+w2;
+  }
+  if(cur)lines.push(cur);
+  return lines.length?lines:[''];
+}
+function htmlToPdfBlocks(inner){
+  var blocks=[];
+  var s2=String(inner)
+    .replace(/<br\s*\/?>/gi,'\n')
+    .replace(/<\/(p|div|h1|h2|h3|li|tr)>/gi,'</$1>\u0001');
+  var re=/<(h1|h2|h3|p|li|div|hr)([^>]*)>([\s\S]*?)(?=<\/\1>)|<hr[^>]*>/gi;
+  // simpler: linear parse on tags we care about
+  var parts=s2.split('\u0001');
+  parts.forEach(function(chunk){
+    var m=chunk.match(/<(h1|h2|h3|li|p|div)[^>]*>([\s\S]*)$/i);
+    var tag=m?m[1].toLowerCase():'p';
+    var raw=(m?m[2]:chunk);
+    if(/<hr/i.test(chunk))blocks.push({t:'hr'});
+    var txt=raw.replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&')
+      .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&#?\w+;/g,' ')
+      .replace(/\s+/g,' ').trim();
+    if(!txt)return;
+    txt.split('\n').forEach(function(ln){
+      if(tag==='h1'||tag==='h2')blocks.push({t:'h',txt:ln});
+      else if(tag==='h3')blocks.push({t:'h3',txt:ln});
+      else if(tag==='li')blocks.push({t:'li',txt:ln});
+      else blocks.push({t:'p',txt:ln});
+    });
+  });
+  return blocks;
+}
+function buildGeneratedPdfBytes(title,inner){
+  var blocks=htmlToPdfBlocks(inner);
+  var PW=612,PH=792,MG=54,TOP=PH-150,BOT=64;
+  var pages=[]; // each: array of content ops
+  function newPage(){
+    var ops=[];
+    // letterhead: navy wordmark + gold rule + address; footer line
+    ops.push('0.106 0.165 0.29 rg BT /F2 22 Tf '+MG+' '+(PH-64)+' Td (SOLURA) Tj ET');
+    ops.push('0.784 0.529 0.039 rg BT /F1 8 Tf '+(MG+96)+' '+(PH-64)+' Td (H O M E   C A R E) Tj ET');
+    ops.push('0.784 0.529 0.039 RG 2 w '+MG+' '+(PH-76)+' m '+(PW-MG)+' '+(PH-76)+' l S');
+    ops.push('0.45 0.45 0.45 rg BT /F1 7 Tf '+MG+' '+(PH-90)+' Td (815 Superior Ave E, Suite 1618, Cleveland, OH 44114  \u00b7  \\(216\\) 770-4886  \u00b7  www.solurahomecare.com) Tj ET');
+    ops.push('0.8 0.8 0.8 RG 0.5 w '+MG+' '+(BOT-14)+' m '+(PW-MG)+' '+(BOT-14)+' l S');
+    ops.push('0.55 0.55 0.55 rg BT /F1 6.5 Tf '+MG+' '+(BOT-26)+' Td (Prepared by Solura Home Care  \u00b7  License 4574HHN) Tj ET');
+    pages.push(ops);
+    return ops;
+  }
+  var ops=newPage(); var y=TOP;
+  // Title from filename
+  var tclean=pdfEsc(String(title).replace(/\.(pdf|docx?)$/i,'').replace(/[_-]+/g,' '));
+  ops.push('0.106 0.165 0.29 rg BT /F2 15 Tf '+MG+' '+y+' Td ('+tclean+') Tj ET'); y-=26;
+  blocks.forEach(function(b){
+    var need=(b.t==='h')?24:(b.t==='hr')?14:14;
+    if(y-need<BOT){ops=newPage();y=TOP;}
+    if(b.t==='hr'){
+      ops.push('0.85 0.85 0.85 RG 0.7 w '+MG+' '+(y-4)+' m '+(PW-MG)+' '+(y-4)+' l S'); y-=14; return;
+    }
+    var size=(b.t==='h')?12.5:(b.t==='h3')?10.5:9.5;
+    var font=(b.t==='h'||b.t==='h3')?'/F2':'/F1';
+    var color=(b.t==='h'||b.t==='h3')?'0.106 0.165 0.29 rg':'0.13 0.13 0.13 rg';
+    var maxc=(b.t==='h')?70:98;
+    var indent=(b.t==='li')?16:0;
+    var lines=pdfWrap(pdfEsc(b.txt),maxc-(indent?4:0));
+    if(b.t==='h'){y-=6;}
+    lines.forEach(function(ln,li2){
+      if(y-size-3<BOT){ops=newPage();y=TOP;}
+      var pre=(b.t==='li'&&li2===0)?'\u00b7  ':'';
+      ops.push(color+' BT '+font+' '+size+' Tf '+(MG+indent)+' '+y+' Td ('+pre+ln+') Tj ET');
+      y-=size+4.5;
+    });
+    y-=(b.t==='h')?5:3;
+  });
+  // Assemble PDF objects
+  var objs=[];
+  objs.push('<< /Type /Catalog /Pages 2 0 R >>'); // 1
+  var kids=[]; var firstPageObj=5;
+  for(var pi=0;pi<pages.length;pi++)kids.push((firstPageObj+pi*2)+' 0 R');
+  objs.push('<< /Type /Pages /Kids ['+kids.join(' ')+'] /Count '+pages.length+' >>'); // 2
+  objs.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'); // 3
+  objs.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'); // 4
+  pages.forEach(function(pops){
+    var stream=pops.join('\n');
+    objs.push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+PW+' '+PH+'] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents '+(objs.length+2)+' 0 R >>');
+    objs.push('<< /Length '+stream.length+' >>\nstream\n'+stream+'\nendstream');
+  });
+  var out='%PDF-1.4\n';
+  var offsets=[0];
+  for(var oi=0;oi<objs.length;oi++){
+    offsets.push(out.length);
+    out+=(oi+1)+' 0 obj\n'+objs[oi]+'\nendobj\n';
+  }
+  var xref=out.length;
+  out+='xref\n0 '+(objs.length+1)+'\n0000000000 65535 f \n';
+  for(var xi=1;xi<=objs.length;xi++){
+    out+=String(offsets[xi]).padStart(10,'0')+' 00000 n \n';
+  }
+  out+='trailer\n<< /Size '+(objs.length+1)+' /Root 1 0 R >>\nstartxref\n'+xref+'\n%%EOF';
+  return out;
+}
+function buildGeneratedPdf(name,innerHtml){
+  var safe=sanitizeDraftHtml(innerHtml);
+  var inner=extractInnerHtml(safe);
+  var fname=String(name||'Document').replace(/[^\w\- .]/g,'').trim()||'Document';
+  if(!/\.pdf$/i.test(fname))fname=fname.replace(/\.(docx?|html?)$/i,'')+'.pdf';
+  var bytes=buildGeneratedPdfBytes(fname,inner);
+  var arr=new Uint8Array(bytes.length);
+  for(var i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i)&0xff;
+  return new File([new Blob([arr],{type:'application/pdf'})],fname,{type:'application/pdf'});
+}
 function looksLikeHtml(sx){
   var v=String(sx||'');
   return /<[a-z][a-z0-9]*[\s>]/i.test(v)&&(/<\//.test(v)||/<br\s*\/?/i.test(v));
@@ -5665,6 +5802,7 @@ function openClaudeWriter(ri){
     +(histBits.length?(', plus '+histBits.join(', ')):'')
     +(buildClaudeSystemTraining()?'. Your training sections apply.':'. <em>Tip: add training sections in Settings → Claude AI to teach it your voice.</em>');
   var ins=el('claude-instructions');if(ins)ins.value='';
+  renderClaudeDocChip();
   var doc=el('claude-doc');if(doc)doc.value='';
   el('claude-err').textContent='';
   el('modal-claude').classList.add('open');
@@ -5693,7 +5831,7 @@ async function claudeGenerate(){
     var system='You write outreach emails for Meir Schwimer, founder of Solura Home Care, a licensed Ohio home care agency in Cleveland (license 4574HHN, phone (216) 770-4886).'
       +'\n\nPRIORITY ORDER when anything conflicts: (1) Meir\'s specific instructions for THIS email — they override everything; (2) the message being replied to; (3) standing training instructions; (4) voice samples; (5) all other context. Never let background context override a direct instruction.'
       +(training?('\n\nStanding instructions from Meir (follow these exactly):\n'+training):'')
-      +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — and IF the instructions ask to attach, include, create, or send ANY document, plan, checklist, summary, letter, or one-pager, you MUST ALSO include "doc":{"name":"Descriptive_Name.doc","html":"<complete simple HTML document with inline styles only>"}; omit "doc" entirely otherwise — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it.';
+      +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — and IF the instructions ask to attach, include, create, or send ANY document, plan, checklist, summary, letter, or one-pager, you MUST ALSO include "doc":{"name":"Descriptive_Name.pdf","html":"<complete simple HTML document, headings + paragraphs + lists, inline styles only>"} — name it .pdf (default) or .doc only when Word format is explicitly requested; omit "doc" entirely otherwise — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it. If a block of specific instructions is provided at the end of the user message, every point in it is BINDING — re-read it before finalizing and verify each point is satisfied.';
     var userContent=[];
     // Training attachments that are PDFs/images ride as native blocks
     collectTrainingBlocks().forEach(function(b3){userContent.push(b3);});
@@ -5742,6 +5880,7 @@ async function claudeGenerate(){
       body:JSON.stringify({
         model:cfg('claudeModel')||'claude-sonnet-4-6',
         max_tokens:4000,
+        temperature:0.3,
         system:system,
         messages:[{role:'user',content:userContent}]
       })
@@ -5770,7 +5909,8 @@ async function claudeGenerate(){
     // Claude generated a document → branded .doc, attached automatically
     if(draft.doc&&draft.doc.html){
       try{
-        var genFile=buildGeneratedDoc(draft.doc.name,draft.doc.html);
+        var wantWord=/\.docx?$/i.test(String(draft.doc.name||''));
+        var genFile=wantWord?buildGeneratedDoc(draft.doc.name,draft.doc.html):buildGeneratedPdf(draft.doc.name,draft.doc.html);
         if(!emailAttachments.some(function(a){return a.name===genFile.name;})){
           await emailAddFiles([genFile]);
           toast('📄 Claude drafted '+genFile.name+' — attached');
@@ -6171,6 +6311,26 @@ function emailHtmlToPlain(htmlStr){
   return txt.replace(/\n{3,}/g,'\n\n').trim();
 }
 
+// Open an attachment in a new tab before sending — File-backed entries
+// stream directly; base64-inlined ones are rebuilt into a Blob first.
+function emailOpenAttachment(i){
+  var a=emailAttachments[i];
+  if(!a)return;
+  try{
+    var blob=null;
+    if(a.file instanceof File||a.file instanceof Blob)blob=a.file;
+    else if(a.dataBase64){
+      var bc=atob(a.dataBase64);
+      var arr=new Uint8Array(bc.length);
+      for(var j=0;j<bc.length;j++)arr[j]=bc.charCodeAt(j);
+      blob=new Blob([arr],{type:a.type||'application/octet-stream'});
+    }
+    if(!blob){toast('\u26A0 Nothing to open for '+a.name);return;}
+    var url=URL.createObjectURL(blob);
+    window.open(url,'_blank');
+    setTimeout(function(){URL.revokeObjectURL(url);},60000);
+  }catch(e){toast('\u26A0 Could not open '+a.name+': '+e.message);}
+}
 function emailRenderAttachList(){
   var list=el('email-attach-list');
   var info=el('email-attach-info');
@@ -6195,7 +6355,7 @@ function emailRenderAttachList(){
     var routeTag=routedViaOD?'<span class="email-attach-route" title="Will be shared via OneDrive link (too large for direct attachment)">\u2601 OneDrive</span>':'';
     return '<div class="email-attach-item">'
       +'<span style="font-size:14px">'+(a.type&&a.type.indexOf('image')>-1?'\ud83d\uddbc':'\ud83d\udcc4')+'</span>'
-      +'<span class="email-attach-name" title="'+escapeHtml(a.name)+'">'+escapeHtml(a.name)+'</span>'
+      +'<span class="email-attach-name" data-email-attach-open="'+i+'" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted" title="Click to open \u00b7 '+escapeHtml(a.name)+'">'+escapeHtml(a.name)+'</span>'
       +'<span class="email-attach-size">'+asmtFmtSize(a.size)+'</span>'
       +routeTag
       +'<button type="button" class="email-attach-x" data-email-attach-remove="'+i+'" title="Remove">\u00D7</button>'
@@ -8609,6 +8769,20 @@ function onClick(ev){
       openClaudeWriter(isNaN(_cri)?-1:_cri);
       break;
     case 'claude-generate': claudeGenerate(); break;
+    case 'claude-doc-open':
+      (function(){
+        var di2=el('claude-doc');var f2=di2&&di2.files&&di2.files[0];
+        if(!f2)return;
+        var u2=URL.createObjectURL(f2);window.open(u2,'_blank');
+        setTimeout(function(){URL.revokeObjectURL(u2);},60000);
+      })();
+      break;
+    case 'claude-doc-clear':
+      (function(){
+        var di3=el('claude-doc');if(di3)di3.value='';
+        renderClaudeDocChip();
+      })();
+      break;
     case 'claude-clear-voice':
       if(confirm('Clear all captured voice samples?')){
         enginesDoc.config.voiceCorpus=[];
@@ -8881,9 +9055,17 @@ window.addEventListener('load',async function(){
     // If no HTML available, let the browser handle plain-text paste normally
   });
 
+  // Reference-doc chip refresh when a file is picked
+  var cdIn=el('claude-doc');
+  if(cdIn)cdIn.addEventListener('change',renderClaudeDocChip);
+
   // Attachment-remove (delegated since list is rendered dynamically)
   document.body.addEventListener('click',function(ev){
     var t=ev.target;
+    if(t&&t.dataset&&t.dataset.emailAttachOpen!=null){
+      emailOpenAttachment(parseInt(t.dataset.emailAttachOpen,10));
+      return;
+    }
     if(t&&t.dataset&&t.dataset.emailAttachRemove!=null){
       var i=parseInt(t.dataset.emailAttachRemove,10);
       if(!isNaN(i))emailRemoveAttachment(i);
