@@ -946,7 +946,7 @@ td{padding:13px 16px;vertical-align:top;}
         <div style="font-size:10.5px;color:var(--soft);margin-top:4px">Claude reads it, works its contents into the email, and the file is attached to the email automatically. Remove it from the attachment list if you don\u2019t want it sent.</div>
       </div>
       <div style="display:flex;gap:8px;padding-top:14px;border-top:1px solid var(--border-soft)">
-        <button data-action="claude-generate" id="claude-gen-btn" style="padding:10px 22px;background:linear-gradient(135deg,#7C5CBF,#5B4BAA);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(91,75,170,.3)">✨ Write the draft</button>
+        <span data-action="claude-preview-prompt" style="font-size:11px;color:var(--soft);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;margin-right:12px" title="See the exact system + user text that will be sent">view exact prompt</span><button data-action="claude-generate" id="claude-gen-btn" style="padding:10px 22px;background:linear-gradient(135deg,#7C5CBF,#5B4BAA);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(91,75,170,.3)">✨ Write the draft</button>
         <button data-action="close-modal" data-mid="modal-claude" style="padding:10px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">Cancel</button>
         <span id="claude-spin" style="display:none;align-items:center;gap:6px;color:var(--soft);font-size:11px"><span class="mspin"></span>Claude is writing…</span>
       </div>
@@ -1363,7 +1363,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-18';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-19';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4040,6 +4040,30 @@ function renderClaudeSections(){
       +'</div>';
   }).join('')||'<div style="font-size:12px;color:var(--soft);font-style:italic;padding:10px 0">No sections yet — add one below, or attach a template file straight into it.</div>';
 }
+function buildClaudeSystemPrompt(training){
+  return 'You write outreach emails for Meir Schwimer, founder of Solura Home Care, a licensed Ohio home care agency in Cleveland (license 4574HHN, phone (216) 770-4886).'
+    +'\n\nPRIORITY ORDER when anything conflicts: (1) Meir\'s specific instructions for THIS email — they override everything; (2) the message being replied to; (3) standing training instructions; (4) voice samples; (5) all other context. Never let background context override a direct instruction.'
+    +(training?('\n\nStanding instructions from Meir (follow these exactly):\n'+training):'')
+    +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — and IF the instructions ask to attach, include, create, or send ANY document, plan, checklist, summary, letter, or one-pager, you MUST ALSO include "doc":{"name":"Descriptive_Name.pdf","html":"<complete simple HTML document, headings + paragraphs + lists, inline styles only>"} — name it .pdf (default) or .doc only when Word format is explicitly requested; omit "doc" entirely otherwise — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it. If a block of specific instructions is provided at the end of the user message, every point in it is BINDING — re-read it before finalizing and verify each point is satisfied.';
+}
+function claudePromptPreview(){
+  var ri=_claudeRi;if(ri<0)return;
+  var context=buildClaudeEmailContext(ri,{replyTo:_emailReplyTo});
+  var instructions=String((el('claude-instructions')||{}).value||'').trim();
+  var di=el('claude-doc');var f4=di&&di.files&&di.files[0];
+  var txt='══════════ SYSTEM PROMPT ══════════\n'
+    +buildClaudeSystemPrompt(buildClaudeSystemTraining())
+    +'\n\n══════════ USER MESSAGE ══════════\n'
+    +(f4?('[attached document block: '+f4.name+']\n\n'):'')
+    +'Lead context:\n'+context
+    +'\n\n'+(instructions
+      ?('=== MEIR\'S INSTRUCTIONS FOR THIS EMAIL — HIGHEST PRIORITY ===\n'+instructions+'\n=== END INSTRUCTIONS ===\nWrite the email now. Satisfy every instruction above exactly; where they conflict with anything in the context, the instructions win.')
+      :'Write the email now.');
+  var blob=new Blob([txt],{type:'text/plain'});
+  var url=URL.createObjectURL(blob);
+  window.open(url,'_blank');
+  setTimeout(function(){URL.revokeObjectURL(url);},60000);
+}
 function renderClaudeDocChip(){
   var di=el('claude-doc');var chip=el('claude-doc-chip');
   if(!di||!chip)return;
@@ -5828,10 +5852,7 @@ async function claudeGenerate(){
   var context=buildClaudeEmailContext(ri,{replyTo:_emailReplyTo});
     var instructions=String((el('claude-instructions')||{}).value||'').trim();
     var training=buildClaudeSystemTraining();
-    var system='You write outreach emails for Meir Schwimer, founder of Solura Home Care, a licensed Ohio home care agency in Cleveland (license 4574HHN, phone (216) 770-4886).'
-      +'\n\nPRIORITY ORDER when anything conflicts: (1) Meir\'s specific instructions for THIS email — they override everything; (2) the message being replied to; (3) standing training instructions; (4) voice samples; (5) all other context. Never let background context override a direct instruction.'
-      +(training?('\n\nStanding instructions from Meir (follow these exactly):\n'+training):'')
-      +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — and IF the instructions ask to attach, include, create, or send ANY document, plan, checklist, summary, letter, or one-pager, you MUST ALSO include "doc":{"name":"Descriptive_Name.pdf","html":"<complete simple HTML document, headings + paragraphs + lists, inline styles only>"} — name it .pdf (default) or .doc only when Word format is explicitly requested; omit "doc" entirely otherwise — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it. If a block of specific instructions is provided at the end of the user message, every point in it is BINDING — re-read it before finalizing and verify each point is satisfied.';
+    var system=buildClaudeSystemPrompt(training);
     var userContent=[];
     // Training attachments that are PDFs/images ride as native blocks
     collectTrainingBlocks().forEach(function(b3){userContent.push(b3);});
@@ -8769,6 +8790,7 @@ function onClick(ev){
       openClaudeWriter(isNaN(_cri)?-1:_cri);
       break;
     case 'claude-generate': claudeGenerate(); break;
+    case 'claude-preview-prompt': claudePromptPreview(); break;
     case 'claude-doc-open':
       (function(){
         var di2=el('claude-doc');var f2=di2&&di2.files&&di2.files[0];
