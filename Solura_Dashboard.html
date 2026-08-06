@@ -1102,6 +1102,11 @@ td{padding:13px 16px;vertical-align:top;}
           <div style="font-size:11px;color:var(--soft);margin-top:5px">Stored only in this browser (never synced, never written to OneDrive). Get one at console.anthropic.com → API keys. Each draft costs a fraction of a cent.</div>
         </div>
         <div class="st-field">
+          <label class="ee-lbl">GoHighLevel API key (for SMS)</label>
+          <input type="password" class="ee-inp" id="ghl-key" placeholder="pit-…" autocomplete="off">
+          <div style="font-size:11px;color:var(--soft);margin-top:5px">Stored only in this browser — moved out of the page source so the file can be published safely. HighLevel \u2192 Settings \u2192 Private Integrations.</div>
+        </div>
+        <div class="st-field">
           <label class="st-check"><input type="checkbox" data-cfg="voiceLearn" data-cfgtype="bool"> Learn my voice from emails I send <span id="voice-count" style="color:var(--soft);font-weight:500"></span></label>
           <div style="font-size:11px;color:var(--soft);margin-top:4px;line-height:1.5">Real sends (not weekly template blasts) become voice samples that ride with every ✨ draft, so Claude writes like you actually write. <b data-action="claude-clear-voice" style="color:var(--red);cursor:pointer">Clear samples</b></div>
         </div>
@@ -1327,7 +1332,10 @@ var REDIRECT=location.href.split('?')[0].split('#')[0];
 var GR='https://graph.microsoft.com/v1.0';
 var GHL_BASE='https://services.leadconnectorhq.com';
 var GHL_LOC='kWlzzI2WZaes2GnQf7DV';
-var GHL_KEY='pit-5df912ec-7542-4dc8-af5b-272472ba84e9';
+// GHL private-integration token lives ONLY in this browser's localStorage —
+// never in this file (GitHub push protection rightly blocks committed keys,
+// and this page's source is public).
+function GHL_KEY(){try{return localStorage.getItem('ghlApiKey')||'';}catch(_){return '';}}
 var FN='Solura_Lead_Tracker.xlsx';
 var PHONE_DISPLAY='(216) 770-4886';
 
@@ -1363,7 +1371,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-19';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-20';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4099,6 +4107,8 @@ function renderConfigInputs(){
   // API key is device-local only — deliberately NOT in the synced config
   var ck=el('claude-key');
   if(ck){try{ck.value=localStorage.getItem('claudeApiKey')||'';}catch(_){}}
+  var gk=el('ghl-key');
+  if(gk){try{gk.value=localStorage.getItem('ghlApiKey')||'';}catch(_){}}
   renderClaudeSections();
   renderShellPreview();
   var vcnt=el('voice-count');
@@ -4508,6 +4518,9 @@ document.addEventListener('input',function(ev){
   // Claude API key → localStorage immediately (device-local, not synced)
   if(t&&t.id==='claude-key'){
     try{localStorage.setItem('claudeApiKey',t.value.trim());}catch(_){}
+  }
+  if(t&&t.id==='ghl-key'){
+    try{localStorage.setItem('ghlApiKey',t.value.trim());}catch(_){}
   }
   // Settings config fields → staged into enginesDoc.config, saved via Save bar
   if(t&&t.dataset&&t.dataset.cfg){
@@ -6206,7 +6219,8 @@ async function sendSMS(){
   try{
     var clean=phone.replace(/\D/g,'');if(clean.length===10)clean='1'+clean;
     var cid=null;
-    var ghlHeaders={Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Accept':'application/json'};
+    if(!GHL_KEY())throw new Error('No GoHighLevel API key — add it in Settings \u2192 SMS');
+    var ghlHeaders={Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Accept':'application/json'};
     function fetchTO(url,opts,ms){
       var ctrl=new AbortController();
       var tid=setTimeout(function(){ctrl.abort();},ms||6000);
@@ -6225,7 +6239,7 @@ async function sendSMS(){
     if(!cid){
       var r3=rows[ri]||[];
       try{
-        var cr=await fetchTO(GHL_BASE+'/contacts/',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({locationId:GHL_LOC,firstName:String(r3[C.NM]||'').split(' ')[0],phone:'+'+clean,email:String(r3[C.EM]||'')})});
+        var cr=await fetchTO(GHL_BASE+'/contacts/',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({locationId:GHL_LOC,firstName:String(r3[C.NM]||'').split(' ')[0],phone:'+'+clean,email:String(r3[C.EM]||'')})});
         if(cr.ok){var cj=await cr.json();cid=cj.contact?cj.contact.id:null;}
       }catch(e){}
     }
@@ -6235,7 +6249,7 @@ async function sendSMS(){
       el('modal-sms').classList.remove('open');
       return;
     }
-    var smsr=await fetch(GHL_BASE+'/conversations/messages',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({type:'SMS',contactId:cid,locationId:GHL_LOC,message:msg})});
+    var smsr=await fetch(GHL_BASE+'/conversations/messages',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({type:'SMS',contactId:cid,locationId:GHL_LOC,message:msg})});
     if(!smsr.ok){var se=await smsr.json().catch(function(){return{};});throw new Error('SMS failed: '+(se.message||smsr.status));}
     el('modal-sms').classList.remove('open');
     toast('✓ SMS sent');
