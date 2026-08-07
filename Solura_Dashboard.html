@@ -1371,7 +1371,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-23';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-24';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3998,12 +3998,15 @@ async function processTrainingFile(f){
   });
   return {name:f.name,kind:det.kind,media:det.media,b64:b64};
 }
+var _ctsSkippedNoData=[];
 function collectTrainingBlocks(){
   // Binary training attachments → native API content blocks (system strings
   // can't carry PDFs/images). Each gets a label so Claude knows its role.
   var blocks=[];
+  _ctsSkippedNoData=[];
   ctsSections().forEach(function(sec){
     (sec.attachments||[]).forEach(function(a){
+      if((a.kind==='pdf'||a.kind==='image')&&!a.b64){_ctsSkippedNoData.push(a.name||'(unnamed)');return;}
       if(a.kind==='pdf'&&a.b64){
         blocks.push({type:'text',text:'Attached training template ("'+a.name+'", section "'+(sec.title||'Instructions')+'") — use as a base to adapt:'});
         blocks.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:a.b64}});
@@ -5865,6 +5868,15 @@ function openClaudeWriter(ri){
   var inb=(inboundEmailCache[em]||[]).length;
   if(inb)histBits.push(inb+' inbound email'+(inb!==1?'s':'')+' (their full text)');
   if(_emailReplyTo)histBits.push('REPLY MODE — answering their message directly');
+  // Attachment manifest — say EXACTLY which binaries will ride the request
+  try{
+    var tb=collectTrainingBlocks();
+    var tCount=tb.filter(function(b){return b.type==='document'||b.type==='image';}).length;
+    if(tCount)histBits.push(tCount+' training attachment'+(tCount!==1?'s':'')+' (full contents)');
+    if(_ctsSkippedNoData.length)histBits.push('\u26A0 '+_ctsSkippedNoData.length+' training attachment'+(_ctsSkippedNoData.length!==1?'s':'')+' have NO stored data ('+_ctsSkippedNoData.slice(0,3).join(', ')+') — re-add them in Settings \u2192 Claude AI');
+    var pd2=el('claude-doc');
+    if(pd2&&pd2.files&&pd2.files[0])histBits.push('reference doc '+pd2.files[0].name+' (full contents)');
+  }catch(_){}
   el('claude-ctx-summary').innerHTML='Claude will draft for <strong>'+escapeHtml(name)+'</strong> using: lead details, position <strong>'+escapeHtml(posStr)+'</strong> on <strong>'+escapeHtml(engineFor(ri).name)+'</strong>'
     +(histBits.length?(', plus '+histBits.join(', ')):'')
     +(buildClaudeSystemTraining()?'. Your training sections apply.':'. <em>Tip: add training sections in Settings → Claude AI to teach it your voice.</em>');
@@ -5897,6 +5909,10 @@ async function claudeGenerate(){
     var training=buildClaudeSystemTraining();
     var system=buildClaudeSystemPrompt(training);
     var userContent=[];
+    // Training-section attachments (PDFs/images) ride as native content
+    // blocks — this call was severed in an earlier refactor, which silently
+    // dropped every binary attachment from every request. Never again:
+    // presence is test-locked.
     // Training attachments that are PDFs/images ride as native blocks
     collectTrainingBlocks().forEach(function(b3){userContent.push(b3);});
     // Optional document (PDF as document block; txt/md inlined)
