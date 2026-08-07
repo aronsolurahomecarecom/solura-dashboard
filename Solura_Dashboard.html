@@ -1371,7 +1371,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-22';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-23';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5984,11 +5984,20 @@ async function claudeGenerate(){
     var subjEl=el('email-subj');if(subjEl)subjEl.value=draft.subject;
     var bodyEl=el('email-body');
     if(bodyEl){
-      if(draft.format==='html'||looksLikeHtml(draft.body)){
-        // HTML draft → straight into the box, rendered (scripts/handlers stripped)
-        bodyEl.innerHTML=sanitizeDraftHtml(draft.body);
+      var newHtml=(draft.format==='html'||looksLikeHtml(draft.body))
+        ?sanitizeDraftHtml(draft.body)
+        :emailPlainToHtml(draft.body);
+      // If the composer already holds a template with a {{body}}-style slot
+      // (the preset-template workflow), the draft FILLS the slot instead of
+      // replacing the template — the template is the design wrapper.
+      var pre=String(bodyEl.innerHTML||'');
+      var preSlot=findShellSlot(pre);
+      if(preSlot){
+        bodyEl.innerHTML=pre.replace(preSlot,function(){return newHtml;});
+        _shellSuppressed=true; // template IS the shell — never double-wrap
+        toast('\u2728 Draft filled into the template\u2019s '+preSlot+' slot');
       }else{
-        bodyEl.innerHTML=emailPlainToHtml(draft.body);
+        bodyEl.innerHTML=newHtml;
       }
     }
     closeModal('modal-claude');
@@ -6991,6 +7000,12 @@ async function sendEmail(){
 
   // Brand shell: typed + Claude content flows into the design; HTML weekly
   // newsletters skip it (they ARE the design)
+  // Hard stop: a template slot that never got filled means the recipient
+  // would see literal {{body}} — refuse and say exactly how to fix it.
+  var _unfilled=findShellSlot(bodyHtml);
+  if(_unfilled){
+    throw new Error('The email still contains an unfilled '+_unfilled+' placeholder \u2014 use \u2728 to write the message into it, or delete the placeholder text before sending.');
+  }
   if(!_shellSuppressed)bodyHtml=applyEmailShell(bodyHtml,ri);
 
   // Temporarily swap emailAttachments to effectiveAttachments so the existing
