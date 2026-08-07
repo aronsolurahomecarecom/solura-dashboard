@@ -1371,7 +1371,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-20';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-21';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4853,15 +4853,35 @@ function extractInnerHtml(html){
 // Longest-first: double-brace forms checked before their single-brace substrings
 var SHELL_SLOTS=['{{content}}','{{body}}','{{message}}','{content}','{body}','{message}'];
 function findShellSlot(shell){
+  // Exact matches first (fast path)
   for(var i=0;i<SHELL_SLOTS.length;i++){if(shell.indexOf(SHELL_SLOTS[i])>-1)return SHELL_SLOTS[i];}
-  return null;
+  // Tolerant: spaces inside braces, any case — {{ Body }} etc.
+  var m=shell.match(/\{\{\s*(?:content|body|message)\s*\}\}/i)||shell.match(/\{\s*(?:content|body|message)\s*\}/i);
+  if(m)return m[0];
+  // Editors sometimes entity-encode braces when pasting
+  m=shell.match(/&#123;&#123;\s*(?:content|body|message)\s*&#125;&#125;/i);
+  return m?m[0]:null;
 }
 function applyEmailShell(bodyHtml,ri){
   var shell=String(cfg('emailShellHtml')||'').trim();
   if(!shell)return bodyHtml;
   var content=extractInnerHtml(bodyHtml);
   var slot=findShellSlot(shell);
-  var out=slot?shell.replace(slot,content):(shell+content); // no slot → shell becomes a header
+  var out;
+  if(slot){
+    // function replacer: content with $ signs (rates!) must never trigger
+    // String.replace's $-pattern substitutions
+    out=shell.replace(slot,function(){return content;});
+  }else{
+    // No slot. NEVER append after a full HTML document — email clients drop
+    // everything past </html>. Inject before </body> (or </html>) instead.
+    var lower=shell.toLowerCase();
+    var bi=lower.lastIndexOf('</body>');
+    if(bi===-1)bi=lower.lastIndexOf('</html>');
+    if(bi>-1)out=shell.slice(0,bi)+content+shell.slice(bi);
+    else out=shell+content;
+    try{toast('\u26A0 Design shell has no {{body}} slot \u2014 message was injected before the closing tag. Add {{body}} in Settings \u2192 Email where the message belongs.');}catch(_){}
+  }
   try{out=fillNames(out,getNames(ri));}catch(_){/* names best-effort */}
   return out;
 }
