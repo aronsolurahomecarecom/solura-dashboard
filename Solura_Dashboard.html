@@ -1336,7 +1336,10 @@ var GHL_LOC='kWlzzI2WZaes2GnQf7DV';
 // GHL private-integration token lives ONLY in this browser's localStorage —
 // never in this file (GitHub push protection rightly blocks committed keys,
 // and this page's source is public).
-function GHL_KEY(){try{return localStorage.getItem('ghlApiKey')||'';}catch(_){return '';}}
+function GHL_KEY(){
+  try{var v=localStorage.getItem('ghlApiKey');if(v)return v;}catch(_){}
+  try{return (enginesDoc&&enginesDoc.config&&enginesDoc.config.ghlApiKey)||'';}catch(_){return '';}
+}
 var FN='Solura_Lead_Tracker.xlsx';
 var PHONE_DISPLAY='(216) 770-4886';
 
@@ -1372,7 +1375,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-26';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-27';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4098,7 +4101,8 @@ function buildDiagnosticReport(){
     });
   }catch(eS){L.push('TRAINING SECTIONS: unavailable ('+eS.message+')');}
   L.push('VOICE SAMPLES: '+(function(){try{return voiceCorpus().length;}catch(_){return '?';}})());
-  L.push('KEYS: anthropic '+(localStorage.getItem('claudeApiKey')?'\u2713':'MISSING')+' \u00b7 ghl '+(localStorage.getItem('ghlApiKey')?'\u2713':'MISSING'));
+  var _ak='';try{_ak=localStorage.getItem('claudeApiKey')||(enginesDoc.config&&enginesDoc.config.claudeApiKey)||'';}catch(_){}
+  L.push('KEYS: anthropic '+(_ak?'\u2713':'MISSING')+' \u00b7 ghl '+(GHL_KEY()?'\u2713':'MISSING'));
   L.push('MODEL: '+(cfg('claudeModel')||'claude-sonnet-4-6')+' \u00b7 temperature 0.3 (fixed)');
   // Recent sends
   try{
@@ -4176,9 +4180,9 @@ function renderConfigInputs(){
   });
   // API key is device-local only — deliberately NOT in the synced config
   var ck=el('claude-key');
-  if(ck){try{ck.value=localStorage.getItem('claudeApiKey')||'';}catch(_){}}
+  if(ck){try{ck.value=localStorage.getItem('claudeApiKey')||(enginesDoc.config&&enginesDoc.config.claudeApiKey)||'';}catch(_){}}
   var gk=el('ghl-key');
-  if(gk){try{gk.value=localStorage.getItem('ghlApiKey')||'';}catch(_){}}
+  if(gk){try{gk.value=GHL_KEY();}catch(_){}}
   renderClaudeSections();
   renderShellPreview();
   var vcnt=el('voice-count');
@@ -4588,9 +4592,14 @@ document.addEventListener('input',function(ev){
   // Claude API key → localStorage immediately (device-local, not synced)
   if(t&&t.id==='claude-key'){
     try{localStorage.setItem('claudeApiKey',t.value.trim());}catch(_){}
+    try{enginesDoc.config=enginesDoc.config||{};enginesDoc.config.claudeApiKey=t.value.trim();stMarkDirty();}catch(_){}
   }
   if(t&&t.id==='ghl-key'){
     try{localStorage.setItem('ghlApiKey',t.value.trim());}catch(_){}
+    // Mirror into synced config so the key survives cleared browser data,
+    // storage eviction, and follows you across devices (private OneDrive
+    // file — never the public page source).
+    try{enginesDoc.config=enginesDoc.config||{};enginesDoc.config.ghlApiKey=t.value.trim();stMarkDirty();}catch(_){}
   }
   // Settings config fields → staged into enginesDoc.config, saved via Save bar
   if(t&&t.dataset&&t.dataset.cfg){
@@ -5918,6 +5927,7 @@ var _claudeRi=-1;
 function openClaudeWriter(ri){
   if(ri==null||ri<0){toast('Open an email for a lead first');return;}
   var key='';try{key=localStorage.getItem('claudeApiKey')||'';}catch(_){}
+  if(!key){try{key=(enginesDoc&&enginesDoc.config&&enginesDoc.config.claudeApiKey)||'';}catch(_){}}
   if(!key){
     toast('Add your Anthropic API key first — Settings → Claude AI');
     openSettings();
@@ -5960,6 +5970,7 @@ function openClaudeWriter(ri){
 async function claudeGenerate(){
   var ri=_claudeRi;if(ri<0)return;
   var key='';try{key=localStorage.getItem('claudeApiKey')||'';}catch(_){}
+  if(!key){try{key=(enginesDoc&&enginesDoc.config&&enginesDoc.config.claudeApiKey)||'';}catch(_){}}
   if(!key){el('claude-err').textContent='No API key — Settings → Claude AI';return;}
   var spin=el('claude-spin'),btn=el('claude-gen-btn'),errEl=el('claude-err');
   errEl.textContent='';
