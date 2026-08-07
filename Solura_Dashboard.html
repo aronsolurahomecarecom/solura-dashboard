@@ -1371,7 +1371,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-24';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-25';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4860,6 +4860,10 @@ function findShellSlot(shell){
   for(var i=0;i<SHELL_SLOTS.length;i++){if(shell.indexOf(SHELL_SLOTS[i])>-1)return SHELL_SLOTS[i];}
   // Tolerant: spaces inside braces, any case — {{ Body }} etc.
   var m=shell.match(/\{\{\s*(?:content|body|message)\s*\}\}/i)||shell.match(/\{\s*(?:content|body|message)\s*\}/i);
+  if(m)return m[0];
+  // Rich-paste mangling: editors can interleave tags INSIDE the braces
+  // ({{<span>body</span>}}) — match those too so they're filled, not sent.
+  m=shell.match(/\{\{(?:\s|<[^>]+>|&nbsp;)*(?:content|body|message)(?:\s|<[^>]+>|&nbsp;)*\}\}/i);
   if(m)return m[0];
   // Editors sometimes entity-encode braces when pasting
   m=shell.match(/&#123;&#123;\s*(?:content|body|message)\s*&#125;&#125;/i);
