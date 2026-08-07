@@ -1108,6 +1108,7 @@ td{padding:13px 16px;vertical-align:top;}
         </div>
         <div class="st-field">
           <label class="st-check"><input type="checkbox" data-cfg="voiceLearn" data-cfgtype="bool"> Learn my voice from emails I send <span id="voice-count" style="color:var(--soft);font-weight:500"></span></label>
+          <div style="margin-top:8px"><b data-action="claude-diagnostic" style="cursor:pointer;color:var(--sky-deep);text-decoration:underline;text-decoration-style:dotted">\ud83e\ude7a Copy diagnostic report</b> <span style="font-size:11px;color:var(--soft)">\u2014 one click, paste it to Claude when something misbehaves</span></div>
           <div style="font-size:11px;color:var(--soft);margin-top:4px;line-height:1.5">Real sends (not weekly template blasts) become voice samples that ride with every ✨ draft, so Claude writes like you actually write. <b data-action="claude-clear-voice" style="color:var(--red);cursor:pointer">Clear samples</b></div>
         </div>
         <div class="st-field">
@@ -1371,7 +1372,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-25';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-26';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4050,6 +4051,72 @@ function renderClaudeSections(){
       +(chips?'<div style="margin-top:8px">'+chips+'</div>':'')
       +'</div>';
   }).join('')||'<div style="font-size:12px;color:var(--soft);font-style:italic;padding:10px 0">No sections yet — add one below, or attach a template file straight into it.</div>';
+}
+/* ─── 🩺 Diagnostic report — one click, full ground truth ────────────────
+ * Everything needed to debug remotely: build, shell state + slot scan,
+ * every loaded email template with slot detection, training sections with
+ * real attachment byte counts, keys presence, recent sends. Paste it back
+ * to Claude and the guessing ends.                                       */
+function buildDiagnosticReport(){
+  var L=[];
+  L.push('SOLURA DIAGNOSTIC \u00b7 '+BUILD+' \u00b7 '+new Date().toISOString());
+  L.push('');
+  // Shell config
+  var shell=String(cfg('emailShellHtml')||'');
+  var shellSlot=shell?findShellSlot(shell):null;
+  L.push('SETTINGS SHELL: '+(shell?(shell.length+' chars \u00b7 slot '+(shellSlot?('FOUND ('+JSON.stringify(shellSlot)+')'):'NOT FOUND \u26A0')):'(empty \u2014 not in use)'));
+  if(shell)L.push('  shell head: '+JSON.stringify(shell.slice(0,160)));
+  // Composer right now
+  var be=el('email-body');
+  var comp=be?String(be.innerHTML||''):'';
+  L.push('COMPOSER NOW: '+(comp?(comp.length+' chars \u00b7 slot '+(findShellSlot(comp)?'PRESENT':'none')):'(empty)'));
+  // Email templates loaded from the sheet (WARM.email + COLD_EMAIL trees)
+  try{
+    var scanned=0;
+    var scanArr=function(label,arr){
+      (arr||[]).forEach(function(txt,vi){
+        scanned++;
+        var sl=findShellSlot(String(txt||''));
+        L.push('  ['+label+' v'+(vi+1)+'] '+String(txt||'').length+' chars \u00b7 slot '+(sl?('YES \u26A0 ('+JSON.stringify(sl)+')'):'no')+' \u00b7 head: '+JSON.stringify(String(txt||'').replace(/\s+/g,' ').slice(0,90)));
+      });
+    };
+    Object.keys((typeof WARM!=='undefined'&&WARM.email)||{}).forEach(function(k){scanArr('warm/'+k,WARM.email[k]);});
+    if(typeof COLD_EMAIL!=='undefined')Object.keys(COLD_EMAIL).forEach(function(src){
+      Object.keys(COLD_EMAIL[src]||{}).forEach(function(fld){scanArr('cold/'+src+'/'+fld,COLD_EMAIL[src][fld]);});
+    });
+    L.splice(L.length-scanned,0,'EMAIL TEMPLATES SCANNED: '+scanned+' (slot YES = template contains a {{body}}-style placeholder)');
+  }catch(eT){L.push('EMAIL TEMPLATES: unavailable ('+eT.message+')');}
+  // Claude training sections
+  try{
+    var secs=ctsSections();
+    L.push('TRAINING SECTIONS: '+secs.length);
+    secs.forEach(function(sec){
+      L.push('  ['+(sec.enabled!==false?'on ':'OFF')+'] '+(sec.title||'(untitled)')+' \u00b7 text '+String(sec.text||'').length+' chars \u00b7 attachments '+((sec.attachments||[]).length));
+      (sec.attachments||[]).forEach(function(a){
+        L.push('    \u2022 '+(a.name||'?')+' \u00b7 kind '+(a.kind||'?')+' \u00b7 data '+(a.b64?(a.b64.length+' b64 chars \u2713'):'MISSING \u26A0'));
+      });
+    });
+  }catch(eS){L.push('TRAINING SECTIONS: unavailable ('+eS.message+')');}
+  L.push('VOICE SAMPLES: '+(function(){try{return voiceCorpus().length;}catch(_){return '?';}})());
+  L.push('KEYS: anthropic '+(localStorage.getItem('claudeApiKey')?'\u2713':'MISSING')+' \u00b7 ghl '+(localStorage.getItem('ghlApiKey')?'\u2713':'MISSING'));
+  L.push('MODEL: '+(cfg('claudeModel')||'claude-sonnet-4-6')+' \u00b7 temperature 0.3 (fixed)');
+  // Recent sends
+  try{
+    var recent=(sentStore().list||[]).slice(0,3);
+    L.push('RECENT SENDS: '+recent.length);
+    recent.forEach(function(r5){L.push('  \u2022 '+String(r5.subj||'').slice(0,50)+' \u00b7 '+(r5.openedAt?('opened '+(r5.opens||1)+'\u00d7'):'no opens'));});
+  }catch(_){L.push('RECENT SENDS: unavailable');}
+  return L.join('\n');
+}
+function showDiagnosticReport(){
+  var txt=buildDiagnosticReport();
+  try{
+    var blob=new Blob([txt],{type:'text/plain'});
+    var url=URL.createObjectURL(blob);
+    window.open(url,'_blank');
+    setTimeout(function(){URL.revokeObjectURL(url);},60000);
+  }catch(e){alert(txt);}
+  try{navigator.clipboard&&navigator.clipboard.writeText(txt);toast('\ud83e\ude7a Report opened + copied to clipboard');}catch(_){}
 }
 function buildClaudeSystemPrompt(training){
   return 'You write outreach emails for Meir Schwimer, founder of Solura Home Care, a licensed Ohio home care agency in Cleveland (license 4574HHN, phone (216) 770-4886).'
@@ -8873,6 +8940,7 @@ function onClick(ev){
       break;
     case 'claude-generate': claudeGenerate(); break;
     case 'claude-preview-prompt': claudePromptPreview(); break;
+    case 'claude-diagnostic': showDiagnosticReport(); break;
     case 'claude-doc-open':
       (function(){
         var di2=el('claude-doc');var f2=di2&&di2.files&&di2.files[0];
