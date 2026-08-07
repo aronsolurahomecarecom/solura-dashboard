@@ -1371,7 +1371,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-21';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-22';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5170,6 +5170,16 @@ function trkB64(obj){
   // unicode-safe base64 (subjects can carry em-dashes etc.)
   try{return btoa(unescape(encodeURIComponent(JSON.stringify(obj))));}catch(_){return '';}
 }
+// Insert a fragment INSIDE a document if it's a full HTML doc (before
+// </body>), else append. Content after </html> gets dropped by clients.
+function injectBeforeClose(html,fragment){
+  if(!fragment)return html;
+  var lower=String(html).toLowerCase();
+  var bi=lower.lastIndexOf('</body>');
+  if(bi===-1)bi=lower.lastIndexOf('</html>');
+  if(bi>-1)return html.slice(0,bi)+fragment+html.slice(bi);
+  return html+fragment;
+}
 function trackingPixelHtml(ri,toAddr,subj,sendId){
   var tc=trackerCfg();if(!tc)return '';
   var d=trkB64({r:(ri!=null&&ri>=0)?(ri+1):'',e:toAddr||'',s:String(subj||'').slice(0,120),i:sendId||''});
@@ -6892,7 +6902,10 @@ async function sendEmail(){
   // Authored tracked-doc buttons (weekly link-mode PDF) route through /doc
   bodyHtml=rewriteTrackedDocAnchors(bodyHtml,_trkMeta);
   var _trkPx=trackingPixelHtml(ri,toAddr,subj,_sendId);
-  if(_trkPx)bodyHtml+=_trkPx;
+  // Inject INSIDE the document: full-doc bodies (HTML weekly variants) were
+  // getting the pixel appended after </html>, where clients drop it — that
+  // silently killed read receipts for those sends.
+  if(_trkPx)bodyHtml=injectBeforeClose(bodyHtml,_trkPx);
 
   // Before sending, swap blob: preview URLs back to cid: references. The
   // contenteditable shows inline images via blob URLs (cheap previews) but
