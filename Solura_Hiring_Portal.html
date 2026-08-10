@@ -5582,7 +5582,7 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
     var triggerList = opts.triggerList || [];
     var stageList = opts.stageList || [];
     var hubsList = opts.hubsList || [];
-    if (state.sequences.length) state.selSeqId = state.sequences[0].id;
+    if (state.sequences.length) state.selSeqId = (opts.selectedId && findSequence(state.sequences, opts.selectedId)) ? opts.selectedId : state.sequences[0].id; // host can deep-link a sequence (e.g. "edit this job's sequence")
 
     function selected() {
       return findSequence(state.sequences, state.selSeqId);
@@ -20871,6 +20871,7 @@ function renderSettingsJobs(){
         <div style="flex:1"></div>
         <button class="btn-sm bg-cream" style="cursor:pointer" onclick="_srcCopy('${esc(j.code)}',this)">🔗 copy link</button>
         <button class="btn-sm bg-cream" style="cursor:pointer" onclick="_jobOpenModal('${esc(j.id)}')">✎ edit</button>
+        ${j.sequenceId?`<button class="btn-sm bg-cream" style="cursor:pointer" onclick="_jobEditSeq('${esc(j.id)}')">⚙ sequence</button>`:''}
         <button class="btn-sm" style="background:#fff;border:1px solid var(--border);cursor:pointer" onclick="_jobToggle('${esc(j.id)}')">${j.active===false?'▶ activate':'⏸ deactivate'}</button>
       </div>
       <div style="font-size:12px;color:var(--mid);margin-top:7px">
@@ -20895,7 +20896,7 @@ function _jobOpenModal(id){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <label style="font-size:12px;color:var(--mid)">Job name<input id="job-name" type="text" value="${esc(j.name||'')}" placeholder="e.g. Overnight caregiver — Beachwood" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Client<input id="job-client" type="text" value="${esc(j.client||'')}" placeholder="client / family name" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
-      <label style="font-size:12px;color:var(--mid)">Sequence<select id="job-seq" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px;background:#fff"><option value="">— portal default —</option>${seqOpts}</select></label>
+      <label style="font-size:12px;color:var(--mid)">Sequence<select id="job-seq" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px;background:#fff"><option value="">— portal default —</option>${seqOpts}<option value="__NEW__">＋ Create a new sequence for this job…</option></select>${j.sequenceId?`<button class="btn-sm bg-cream" style="cursor:pointer;margin-top:5px" onclick="_jobEditSeq('${esc(j.id)}')">⚙ Open this job's sequence in the editor</button>`:''}</label>
       <label style="font-size:12px;color:var(--mid)">Pay (fills {pay}/{wage} in emails)<input id="job-wage" type="text" value="${esc(j.wage||'')}" placeholder="e.g. $16–$18/hr" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Client ZIP (proximity rating factor)<input id="job-zip" type="text" value="${esc(j.zip||'')}" placeholder="e.g. 44122" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Notes<input id="job-notes" type="text" value="${esc(j.notes||'')}" placeholder="anything about this posting" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
@@ -20918,7 +20919,24 @@ function _jobSave(){
     j={id:'job-'+Math.random().toString(36).slice(2,10),code:_sourceLinkCode(SETTINGS.config.sourceLinks),createdAt:new Date().toISOString(),active:true};
     SETTINGS.jobs.push(j);
   }
-  j.name=name;j.client=g('job-client');j.sequenceId=g('job-seq');j.wage=g('job-wage');j.zip=g('job-zip');j.notes=g('job-notes');
+  j.name=name;j.client=g('job-client');j.wage=g('job-wage');j.zip=g('job-zip');j.notes=g('job-notes');
+  const seqPick=g('job-seq');
+  if(seqPick==='__NEW__'){
+    /* A sequence OF THIS JOB: cloned from the ★default as the starting shape, fully
+       editable in the sequence editor like any other — just owned by the posting. */
+    const baseId=window.SeqBuilderV3?window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[]):null;
+    const base=(SETTINGS.sequences||[]).find(s=>s.id===baseId)||(SETTINGS.sequences||[])[0];
+    if(base){
+      const cl=JSON.parse(JSON.stringify(base));
+      cl.id='seq-job-'+Math.random().toString(36).slice(2,8);
+      cl.name=j.name+' — flow';
+      SETTINGS.sequences=SETTINGS.sequences||[];SETTINGS.sequences.push(cl);
+      j.sequenceId=cl.id;
+      toast('⚙ Sequence "'+cl.name+'" created — open it from the job card to customize');
+    }else{toast('No sequence to clone yet — pick one once a default exists');j.sequenceId='';}
+  }else{
+    j.sequenceId=seqPick;
+  }
   /* The job's source link carries the label + pay so every existing display/pay path works. */
   let l=SETTINGS.config.sourceLinks.find(x=>x.code===j.code);
   if(!l){l={id:_sourceLinkId(),code:j.code,createdAt:j.createdAt};SETTINGS.config.sourceLinks.push(l);}
@@ -20928,6 +20946,15 @@ function _jobSave(){
   if(j.sequenceId)SETTINGS.sequenceAssignments.push({match:{sourceCode:j.code},sequenceId:j.sequenceId});
   markSettingsDirty();closeModal();renderSettings();
   toast('🧳 Job saved — link code '+j.code);
+}
+/* Deep-link a job's sequence into the canvas editor — editing stays possible at any time
+   after posting; changes take effect live for that job's candidates on the next render. */
+function _jobEditSeq(id){
+  const j=(SETTINGS.jobs||[]).find(x=>x.id===id);
+  if(!j||!j.sequenceId){toast('This job uses the portal default sequence');return;}
+  window._seqJumpTo=j.sequenceId;
+  closeModal();
+  setSettingsSection('seqengine2');
 }
 function _jobToggle(id){
   const j=(SETTINGS.jobs||[]).find(x=>x.id===id);if(!j)return;
@@ -23188,6 +23215,7 @@ function _mountSeqEditorV2(){
   /* Same-id dedup on mount (keep newest) — re-importing an updated export behaves as replace. */
   SETTINGS.sequences=_dedupSequences(Array.isArray(SETTINGS.sequences)?SETTINGS.sequences:[]);
   window.SeqBuilderV3.renderSequenceBuilder(el,{
+    selectedId:window._seqJumpTo||undefined, /* job cards deep-link their sequence here */
     sequences:SETTINGS.sequences,
     assignments:SETTINGS.sequenceAssignments,
     packs:SETTINGS.actionPacks,
