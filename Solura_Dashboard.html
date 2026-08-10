@@ -1399,7 +1399,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-30';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-31';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3792,6 +3792,22 @@ function downloadFeedbackStackPdf(){
  * ─────────────────────────────────────────────────────────────────────── */
 var COMMS_LOG_SHEET='Comms Log';
 
+/* ─── ✈ Operation traces — black-box recorder ────────────────────────────
+ * Every send and every ✨ generate records what ACTUALLY happened with the
+ * REAL data — final body head/tail, slot state, shell, pixel, blocks. The
+ * 🩺 report prints the recent ones, ending debugging-by-description.    */
+function traceOp(entry){
+  try{
+    entry.ts=new Date().toISOString();
+    var k5='op_trace_v1';
+    var arr=[];try{arr=JSON.parse(localStorage.getItem(k5)||'[]');}catch(_){}
+    arr.unshift(entry);
+    if(arr.length>6)arr.length=6;
+    localStorage.setItem(k5,JSON.stringify(arr));
+  }catch(_){/* tracing must never break the operation */}
+}
+function readTraces(){try{return JSON.parse(localStorage.getItem('op_trace_v1')||'[]');}catch(_){return [];}}
+
 /* ─── 📊 Analytics hub — data layer ──────────────────────────────────────
  * Reads the full Comms Log (the durable cross-device record every send,
  * open, and inbound reply has been landing in) and builds the model the
@@ -4334,6 +4350,17 @@ function buildDiagnosticReport(){
     L.push('RECENT SENDS: '+recent.length);
     recent.forEach(function(r5){L.push('  \u2022 '+String(r5.subj||'').slice(0,50)+' \u00b7 '+(r5.openedAt?('opened '+(r5.opens||1)+'\u00d7'):'no opens'));});
   }catch(_){L.push('RECENT SENDS: unavailable');}
+  // Recent operation traces — what the machine ACTUALLY did
+  var tr=readTraces();
+  L.push('');
+  L.push('RECENT OPERATION TRACES: '+tr.length);
+  tr.forEach(function(t5){
+    L.push('  \u2500\u2500 '+t5.kind+' \u00b7 '+t5.ts);
+    Object.keys(t5).forEach(function(k6){
+      if(k6==='kind'||k6==='ts')return;
+      L.push('     '+k6+': '+JSON.stringify(t5[k6]));
+    });
+  });
   return L.join('\n');
 }
 function showDiagnosticReport(){
@@ -6322,6 +6349,13 @@ async function claudeGenerate(){
         bodyEl.innerHTML=newHtml;
       }
     }
+    traceOp({kind:'generate',instrLen:instructions.length,instrHead:instructions.slice(0,120),
+      trainingDocs:(function(){try{return collectTrainingBlocks().filter(function(b){return b.type==='document'||b.type==='image';}).length;}catch(_){return -1;}})(),
+      hollow:_ctsSkippedNoData.slice(0,4),
+      refDoc:(f&&f.name)||null,reply:!!_emailReplyTo,
+      respFormat:draft.format,gotDoc:!!(draft.doc&&draft.doc.html),
+      filledTemplateSlot:!!preSlot,
+      draftHead:String(draft.body||'').replace(/\s+/g,' ').slice(0,200)});
     closeModal('modal-claude');
     toast('✨ Draft ready — review before sending');
   }catch(e){
@@ -7326,9 +7360,17 @@ async function sendEmail(){
   // would see literal {{body}} — refuse and say exactly how to fix it.
   var _unfilled=findShellSlot(bodyHtml);
   if(_unfilled){
+    traceOp({kind:'send-BLOCKED',to:toAddr,subj:String(subj||'').slice(0,60),reason:'unfilled slot '+_unfilled,bodyHead:String(bodyHtml).slice(0,200)});
     throw new Error('The email still contains an unfilled '+_unfilled+' placeholder \u2014 use \u2728 to write the message into it, or delete the placeholder text before sending.');
   }
+  var _shellWas=!_shellSuppressed&&!!String(cfg('emailShellHtml')||'').trim();
   if(!_shellSuppressed)bodyHtml=applyEmailShell(bodyHtml,ri);
+  traceOp({kind:'send',to:toAddr,subj:String(subj||'').slice(0,60),
+    reply:!!_emailReplyTo,suppressed:!!_shellSuppressed,shellApplied:_shellWas,
+    slotAfter:findShellSlot(bodyHtml)?'STILL PRESENT \u26A0':'none',
+    pixel:!!_trkPx,atts:emailAttachments.map(function(a){return a.name;}),
+    bodyHead:String(bodyHtml).replace(/\s+/g,' ').slice(0,260),
+    bodyTail:String(bodyHtml).replace(/\s+/g,' ').slice(-160)});
 
   // Temporarily swap emailAttachments to effectiveAttachments so the existing
   // send code reads the right list. Restore in finally.
