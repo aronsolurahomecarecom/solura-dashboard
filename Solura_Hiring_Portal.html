@@ -20857,7 +20857,12 @@ function _srcToggleActive(id){
 function _jobFor(c){
   const code=c&&c.st&&c.st.sourceCode;
   if(!code)return null;
-  return (SETTINGS.jobs||[]).find(j=>j.code===code)||null;
+  return (SETTINGS.jobs||[]).find(j=>(j.links||[]).some(l=>l.code===code)||j.code===code)||null;
+}
+/* Legacy single-code jobs → links[] (idempotent). */
+function _jobLinks(j){
+  if(!j.links||!j.links.length)j.links=j.code?[{code:j.code,platform:'General'}]:[];
+  return j.links;
 }
 function renderSettingsJobs(){
   SETTINGS.jobs=SETTINGS.jobs||[];
@@ -20867,9 +20872,8 @@ function renderSettingsJobs(){
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <b style="font-size:14px">🧳 ${esc(j.name)}</b>
         ${j.client?`<span style="color:var(--soft);font-size:12px">for ${esc(j.client)}</span>`:''}
-        <span class="pill psoft" style="font-size:10px">code ${esc(j.code)}</span>
         <div style="flex:1"></div>
-        <button class="btn-sm bg-cream" style="cursor:pointer" onclick="_srcCopy('${esc(j.code)}',this)">🔗 copy link</button>
+        ${_jobLinks(j).map(l2=>`<button class="btn-sm bg-cream" style="cursor:pointer" onclick="_srcCopy('${esc(l2.code)}',this)" title="code ${esc(l2.code)}">🔗 ${esc(l2.platform)}</button>`).join('')}
         <button class="btn-sm bg-cream" style="cursor:pointer" onclick="_jobOpenModal('${esc(j.id)}')">✎ edit</button>
         ${j.sequenceId?`<button class="btn-sm bg-cream" style="cursor:pointer" onclick="_jobEditSeq('${esc(j.id)}')">⚙ sequence</button>`:''}
         <button class="btn-sm" style="background:#fff;border:1px solid var(--border);cursor:pointer" onclick="_jobToggle('${esc(j.id)}')">${j.active===false?'▶ activate':'⏸ deactivate'}</button>
@@ -20901,7 +20905,10 @@ function _jobOpenModal(id){
       <label style="font-size:12px;color:var(--mid)">Client ZIP (proximity rating factor)<input id="job-zip" type="text" value="${esc(j.zip||'')}" placeholder="e.g. 44122" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Notes<input id="job-notes" type="text" value="${esc(j.notes||'')}" placeholder="anything about this posting" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
     </div>
-    ${j.code?`<div style="margin-top:12px;padding:9px 12px;background:var(--cream);border-radius:8px;font-size:12px">🔗 Link: <span style="font-family:ui-monospace,monospace">${esc(_sourceLinkUrl(j.code))}</span> <button class="btn-sm bg-cream" style="cursor:pointer;margin-left:6px" onclick="_srcCopy('${esc(j.code)}',this)">copy</button></div>`:'<div style="margin-top:12px;font-size:11.5px;color:var(--soft)">The tracked link is generated when you save — copy it from the job card and post it anywhere.</div>'}
+    <label style="font-size:12px;color:var(--mid);display:block;margin-top:12px">Link platforms — one tracked link per source, comma-separated
+      <input id="job-platforms" type="text" value="${esc((j.id?_jobLinks(j):[]).map(l2=>l2.platform).join(', ')||'')}" placeholder="e.g. Indeed, Facebook, Craigslist" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px">
+    </label>
+    ${(j.id?_jobLinks(j):[]).map(l2=>`<div style="margin-top:6px;padding:7px 11px;background:var(--cream);border-radius:7px;font-size:11.5px">🔗 <b>${esc(l2.platform)}</b> · <span style="font-family:ui-monospace,monospace">${esc(_sourceLinkUrl(l2.code))}</span> <button class="btn-sm bg-cream" style="cursor:pointer;margin-left:6px" onclick="_srcCopy('${esc(l2.code)}',this)">copy</button></div>`).join('')||'<div style="margin-top:8px;font-size:11.5px;color:var(--soft)">A tracked link per platform is generated when you save — copy each from the job card and post it on its platform.</div>'}
     <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
       <button class="btn-sec" onclick="closeModal()">Cancel</button>
       <button class="btn-primary bg-grn" onclick="_jobSave()">💾 Save job</button>
@@ -20916,9 +20923,10 @@ function _jobSave(){
   SETTINGS.sequenceAssignments=SETTINGS.sequenceAssignments||[];
   let j=SETTINGS.jobs.find(x=>x.id===g('job-id'));
   if(!j){
-    j={id:'job-'+Math.random().toString(36).slice(2,10),code:_sourceLinkCode(SETTINGS.config.sourceLinks),createdAt:new Date().toISOString(),active:true};
+    j={id:'job-'+Math.random().toString(36).slice(2,10),links:[],createdAt:new Date().toISOString(),active:true};
     SETTINGS.jobs.push(j);
   }
+  _jobLinks(j);
   j.name=name;j.client=g('job-client');j.wage=g('job-wage');j.zip=g('job-zip');j.notes=g('job-notes');
   const seqPick=g('job-seq');
   if(seqPick==='__NEW__'){
@@ -20937,15 +20945,32 @@ function _jobSave(){
   }else{
     j.sequenceId=seqPick;
   }
-  /* The job's source link carries the label + pay so every existing display/pay path works. */
-  let l=SETTINGS.config.sourceLinks.find(x=>x.code===j.code);
-  if(!l){l={id:_sourceLinkId(),code:j.code,createdAt:j.createdAt};SETTINGS.config.sourceLinks.push(l);}
-  l.platform='Job: '+j.name;l.method=j.client||'job package';l.wage=j.wage;l.notes=j.notes;l.jobZip=j.zip;l.active=j.active!==false;
-  /* Sequence assignment lives in the engine's own registry, keyed by this job's code. */
-  SETTINGS.sequenceAssignments=SETTINGS.sequenceAssignments.filter(a=>!(a.match&&a.match.sourceCode===j.code));
-  if(j.sequenceId)SETTINGS.sequenceAssignments.push({match:{sourceCode:j.code},sequenceId:j.sequenceId});
+  /* ONE LINK PER SOURCE PLATFORM. The platforms field is the truth: keep codes stable for
+     platforms that stay, mint codes for new ones, deactivate removed ones. Each link lands
+     in SETTINGS.config.sourceLinks under its REAL platform — so it lives among its platform
+     peers in Source links & tracking — flagged jobId so that section shows it read-only
+     (sequence/pay/customization happen only here on the job). */
+  const wanted=(g('job-platforms')||'General').split(',').map(s=>s.trim()).filter(Boolean);
+  const keep=[];
+  wanted.forEach(p=>{
+    let lk=j.links.find(x=>String(x.platform).toLowerCase()===p.toLowerCase());
+    if(!lk){lk={code:_sourceLinkCode(SETTINGS.config.sourceLinks.concat(keep)),platform:p};}
+    lk.platform=p;keep.push(lk);
+  });
+  const removed=j.links.filter(x=>!keep.some(k=>k.code===x.code));
+  j.links=keep;
+  const syncLink=(lk,active)=>{
+    let l=SETTINGS.config.sourceLinks.find(x=>x.code===lk.code);
+    if(!l){l={id:_sourceLinkId(),code:lk.code,createdAt:new Date().toISOString()};SETTINGS.config.sourceLinks.push(l);}
+    l.platform=lk.platform;l.method='Job: '+j.name+(j.client?' — '+j.client:'');
+    l.wage=j.wage;l.notes=j.notes;l.jobZip=j.zip;l.jobId=j.id;l.active=active;
+    SETTINGS.sequenceAssignments=SETTINGS.sequenceAssignments.filter(a=>!(a.match&&a.match.sourceCode===lk.code));
+    if(active&&j.sequenceId)SETTINGS.sequenceAssignments.push({match:{sourceCode:lk.code},sequenceId:j.sequenceId});
+  };
+  j.links.forEach(lk=>syncLink(lk,j.active!==false));
+  removed.forEach(lk=>syncLink(lk,false));
   markSettingsDirty();closeModal();renderSettings();
-  toast('🧳 Job saved — link code '+j.code);
+  toast('🧳 Job saved — '+j.links.length+' link'+(j.links.length===1?'':'s')+' ('+j.links.map(l2=>l2.platform).join(', ')+')');
 }
 /* Deep-link a job's sequence into the canvas editor — editing stays possible at any time
    after posting; changes take effect live for that job's candidates on the next render. */
@@ -23059,6 +23084,12 @@ function _seqPayOverride(){
 /* Source-link inline: bound sequence + effective pay, with a bind action. */
 function _srcSeqInline(l){
   try{
+    if(l.jobId){
+      /* Job-owned link: it lives here among its platform peers for visibility, but
+         sequence/pay/customization belong to the job package alone. */
+      const jb=(SETTINGS.jobs||[]).find(j2=>j2.id===l.jobId);
+      return '🧳 managed by job “'+esc(jb?jb.name:'?')+'” — sequence & pay are set in Job packages';
+    }
     if(!window.SeqBuilderV3)return '';
     _seqV3Migrate();
     const seq=window.SeqBuilderV3.resolveSequenceFor({st:{sourceCode:l.code}},SETTINGS.sequenceAssignments||[],SETTINGS.sequences||[]);
