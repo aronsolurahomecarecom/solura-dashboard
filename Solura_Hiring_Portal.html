@@ -18611,6 +18611,7 @@ const SETTINGS_SECTIONS=[
   {key:'scoring',   label:'Scoring engine',       icon:'⚖'},
   {key:'verify',    label:'Verification & refs',  icon:'🧾'},
   {key:'referrals', label:'Referral program',     icon:'🎁'},
+  {key:'jobs',label:'Job packages', icon:'🧳'},
   {key:'sourcelinks',label:'Source links & tracking', icon:'🔗'},
   {key:'calendars', label:'Cal.com booking URLs', icon:'📅'},
   {key:'bgchecks',  label:'Background registries',icon:'🛡'},
@@ -18724,6 +18725,7 @@ function renderSettings(){
   else if(settingsSection==='scoring') body=renderSettingsScoring();
   else if(settingsSection==='verify') body=renderSettingsVerification();
   else if(settingsSection==='referrals') body=renderSettingsReferrals();
+  else if(settingsSection==='jobs') body=renderSettingsJobs();
   else if(settingsSection==='sourcelinks') body=renderSettingsSourceLinks();
   else if(settingsSection==='calendars') body=renderSettingsCalendars();
   else if(settingsSection==='bgchecks') body=renderSettingsBgChecks();
@@ -20843,6 +20845,97 @@ function _srcToggleActive(id){
   l.active=l.active===false; /* toggle: false → true, everything else → false */
   markSettingsDirty();renderSettings();
 }
+
+/* ══════════ JOB PACKAGES ══════════
+   One package per posted job: the tracked link, the sequence, the pay, and the client's
+   rating factors (ZIP etc.) — so each posting controls exactly what its candidates go
+   through without any general rule. A job OWNS a source link (created under the hood) and
+   WRITES the per-source sequence assignment + link wage, so every existing system —
+   resolveSequenceFor, pay precedence ({pay}/{wage} substitution), source labels on cards —
+   runs off the same data as before. This is the primary way to bind sequence + pay to a
+   link; the Source links section remains for raw/legacy links. */
+function _jobFor(c){
+  const code=c&&c.st&&c.st.sourceCode;
+  if(!code)return null;
+  return (SETTINGS.jobs||[]).find(j=>j.code===code)||null;
+}
+function renderSettingsJobs(){
+  SETTINGS.jobs=SETTINGS.jobs||[];
+  const seqName=id=>{const s=(SETTINGS.sequences||[]).find(q=>q.id===id);return s?s.name:'(default)';};
+  const rows=SETTINGS.jobs.map(j=>`
+    <div style="border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:${j.active===false?'#FAFAF7':'#fff'};${j.active===false?'opacity:.6;':''}">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <b style="font-size:14px">🧳 ${esc(j.name)}</b>
+        ${j.client?`<span style="color:var(--soft);font-size:12px">for ${esc(j.client)}</span>`:''}
+        <span class="pill psoft" style="font-size:10px">code ${esc(j.code)}</span>
+        <div style="flex:1"></div>
+        <button class="btn-sm bg-cream" style="cursor:pointer" onclick="_srcCopy('${esc(j.code)}',this)">🔗 copy link</button>
+        <button class="btn-sm bg-cream" style="cursor:pointer" onclick="_jobOpenModal('${esc(j.id)}')">✎ edit</button>
+        <button class="btn-sm" style="background:#fff;border:1px solid var(--border);cursor:pointer" onclick="_jobToggle('${esc(j.id)}')">${j.active===false?'▶ activate':'⏸ deactivate'}</button>
+      </div>
+      <div style="font-size:12px;color:var(--mid);margin-top:7px">
+        ⚙ ${esc(seqName(j.sequenceId))} · 💵 ${esc(j.wage||'default pay')} · 📍 ${j.zip?('client ZIP '+esc(j.zip)):'no ZIP set'}
+        ${j.notes?` · <span style="color:var(--soft)">${esc(j.notes)}</span>`:''}
+      </div>
+    </div>`).join('');
+  return `<div class="set-content">
+    <h2 style="margin-top:0">🧳 Job packages</h2>
+    <p class="set-help">Each job bundles its <b>link</b>, <b>sequence</b>, <b>pay</b> and the client's <b>rating factors</b> into one package. Post the link for a specific client's job and its candidates get exactly this treatment — sequence and pay assignments are written through the package, not as general rules.</p>
+    <button class="btn-primary bg-gold" style="margin-bottom:14px" onclick="_jobOpenModal('')">＋ New job</button>
+    ${rows||'<p style="color:var(--soft);font-style:italic">No jobs yet — create the first one.</p>'}
+  </div>`;
+}
+function _jobOpenModal(id){
+  SETTINGS.jobs=SETTINGS.jobs||[];
+  const j=SETTINGS.jobs.find(x=>x.id===id)||{};
+  const seqOpts=(SETTINGS.sequences||[]).map(s=>`<option value="${esc(s.id)}" ${s.id===j.sequenceId?'selected':''}>${esc(s.name)}</option>`).join('');
+  document.getElementById('m-title').textContent=j.id?('🧳 Edit job — '+j.name):'🧳 New job';
+  document.getElementById('m-body').innerHTML=`
+    <input type="hidden" id="job-id" value="${esc(j.id||'')}">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <label style="font-size:12px;color:var(--mid)">Job name<input id="job-name" type="text" value="${esc(j.name||'')}" placeholder="e.g. Overnight caregiver — Beachwood" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Client<input id="job-client" type="text" value="${esc(j.client||'')}" placeholder="client / family name" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Sequence<select id="job-seq" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px;background:#fff"><option value="">— portal default —</option>${seqOpts}</select></label>
+      <label style="font-size:12px;color:var(--mid)">Pay (fills {pay}/{wage} in emails)<input id="job-wage" type="text" value="${esc(j.wage||'')}" placeholder="e.g. $16–$18/hr" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Client ZIP (proximity rating factor)<input id="job-zip" type="text" value="${esc(j.zip||'')}" placeholder="e.g. 44122" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Notes<input id="job-notes" type="text" value="${esc(j.notes||'')}" placeholder="anything about this posting" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+    </div>
+    ${j.code?`<div style="margin-top:12px;padding:9px 12px;background:var(--cream);border-radius:8px;font-size:12px">🔗 Link: <span style="font-family:ui-monospace,monospace">${esc(_sourceLinkUrl(j.code))}</span> <button class="btn-sm bg-cream" style="cursor:pointer;margin-left:6px" onclick="_srcCopy('${esc(j.code)}',this)">copy</button></div>`:'<div style="margin-top:12px;font-size:11.5px;color:var(--soft)">The tracked link is generated when you save — copy it from the job card and post it anywhere.</div>'}
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button class="btn-sec" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary bg-grn" onclick="_jobSave()">💾 Save job</button>
+    </div>`;
+  document.getElementById('modal').classList.add('open');
+}
+function _jobSave(){
+  const g=i=>((document.getElementById(i)||{}).value||'').trim();
+  const name=g('job-name');if(!name){toast('Job name required');return;}
+  SETTINGS.jobs=SETTINGS.jobs||[];
+  SETTINGS.config=SETTINGS.config||{};SETTINGS.config.sourceLinks=SETTINGS.config.sourceLinks||[];
+  SETTINGS.sequenceAssignments=SETTINGS.sequenceAssignments||[];
+  let j=SETTINGS.jobs.find(x=>x.id===g('job-id'));
+  if(!j){
+    j={id:'job-'+Math.random().toString(36).slice(2,10),code:_sourceLinkCode(SETTINGS.config.sourceLinks),createdAt:new Date().toISOString(),active:true};
+    SETTINGS.jobs.push(j);
+  }
+  j.name=name;j.client=g('job-client');j.sequenceId=g('job-seq');j.wage=g('job-wage');j.zip=g('job-zip');j.notes=g('job-notes');
+  /* The job's source link carries the label + pay so every existing display/pay path works. */
+  let l=SETTINGS.config.sourceLinks.find(x=>x.code===j.code);
+  if(!l){l={id:_sourceLinkId(),code:j.code,createdAt:j.createdAt};SETTINGS.config.sourceLinks.push(l);}
+  l.platform='Job: '+j.name;l.method=j.client||'job package';l.wage=j.wage;l.notes=j.notes;l.jobZip=j.zip;l.active=j.active!==false;
+  /* Sequence assignment lives in the engine's own registry, keyed by this job's code. */
+  SETTINGS.sequenceAssignments=SETTINGS.sequenceAssignments.filter(a=>!(a.match&&a.match.sourceCode===j.code));
+  if(j.sequenceId)SETTINGS.sequenceAssignments.push({match:{sourceCode:j.code},sequenceId:j.sequenceId});
+  markSettingsDirty();closeModal();renderSettings();
+  toast('🧳 Job saved — link code '+j.code);
+}
+function _jobToggle(id){
+  const j=(SETTINGS.jobs||[]).find(x=>x.id===id);if(!j)return;
+  j.active=j.active===false;
+  const l=(SETTINGS.config.sourceLinks||[]).find(x=>x.code===j.code);
+  if(l)l.active=j.active;
+  markSettingsDirty();renderSettings();
+}
 function _srcDelete(id){
   if(!confirm('Delete this source link? Existing candidates with this code will still show it as raw data.'))return;
   SETTINGS.config.sourceLinks=(SETTINGS.config.sourceLinks||[]).filter(x=>x.id!==id);
@@ -22399,6 +22492,22 @@ function _seqInputEval(key,c){
   if(parts[0]==='tenure'&&parts[1]==='years')return (st.employers||[]).reduce((s2,e2)=>s2+(Number(e2.years)||0),0);
   if(parts[0]==='ai')return st.ai?st.ai[parts[1]]:undefined;
   if(parts[0]==='st'){let cur=st;for(let i=1;i<parts.length;i++){if(cur==null)return undefined;cur=cur[parts[i]];}return cur;}
+  /* Job-package rating factors — scoring stations can key on the posting's client data:
+     job.zip (client ZIP), job.zipMatch (1 when the candidate's ZIP prefix-3 matches the
+     client's — a coarse same-area signal), job.wage, job.name. Fail closed when the
+     candidate didn't come through a job link. */
+  if(parts[0]==='job'){
+    const job=(typeof _jobFor==='function')?_jobFor(c):null;
+    if(!job)return undefined;
+    if(parts[1]==='zip')return job.zip||undefined;
+    if(parts[1]==='zipMatch'){
+      const cz=String((st.facts&&st.facts.zip)||'').slice(0,3),jz=String(job.zip||'').slice(0,3);
+      return (cz&&jz)?(cz===jz?1:0):undefined;
+    }
+    if(parts[1]==='wage')return job.wage||undefined;
+    if(parts[1]==='name')return job.name||undefined;
+    return undefined;
+  }
   return undefined;
 }
 
