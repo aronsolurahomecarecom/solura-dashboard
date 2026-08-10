@@ -1399,7 +1399,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-33';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-34';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5222,15 +5222,28 @@ function applyEmailShell(bodyHtml,ri){
   var slot=findShellSlot(shell);
   var out;
   if(slot){
-    // function replacer: content with $ signs (rates!) must never trigger
-    // String.replace's $-pattern substitutions
-    out=shell.replace(slot,function(){return content;});
-    // Shells often carry the slot MORE THAN ONCE (preheader + main). The
-    // first gets the message; every remaining occurrence is stripped so a
-    // literal {{body}} can never survive into the sent email.
-    var guard=0,extra;
-    while((extra=findShellSlot(out))&&guard<6){
-      out=out.replace(extra,function(){return '';});
+    // Shells carry the slot in MULTIPLE places with different jobs: a
+    // hidden preheader (display:none — the inbox preview line) and the
+    // visible message area. Hidden occurrences get a plain-text excerpt
+    // (that's what preheaders are for); visible ones get the full message.
+    // Index-splice replacement — immune to $-pattern substitutions.
+    var textExcerpt=content.replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim().slice(0,160);
+    out=shell;
+    var guard=0,m2;
+    while((m2=findShellSlot(out))&&guard<8){
+      var idx=out.indexOf(m2);
+      var back=out.slice(Math.max(0,idx-400),idx);
+      // Hidden only if a hidden-style container OPENS in the window and is
+      // NOT closed again before the slot (a </div> after display:none means
+      // we've left the preheader and are in visible territory).
+      var hm=back.search(/display\s*:\s*none|visibility\s*:\s*hidden|max-height\s*:\s*0/i);
+      var hiddenCtx=false;
+      if(hm>-1){
+        var afterHidden=back.slice(hm);
+        hiddenCtx=!/(<\/div>|<\/td>|<\/span>|<\/table>)/i.test(afterHidden);
+      }
+      var repl=hiddenCtx?escapeHtml(textExcerpt):content;
+      out=out.slice(0,idx)+repl+out.slice(idx+m2.length);
       guard++;
     }
   }else{
