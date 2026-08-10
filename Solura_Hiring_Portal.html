@@ -20905,15 +20905,59 @@ function _jobOpenModal(id){
       <label style="font-size:12px;color:var(--mid)">Client ZIP (proximity rating factor)<input id="job-zip" type="text" value="${esc(j.zip||'')}" placeholder="e.g. 44122" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Notes<input id="job-notes" type="text" value="${esc(j.notes||'')}" placeholder="anything about this posting" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
     </div>
-    <label style="font-size:12px;color:var(--mid);display:block;margin-top:12px">Link platforms — one tracked link per source, comma-separated
-      <input id="job-platforms" type="text" value="${esc((j.id?_jobLinks(j):[]).map(l2=>l2.platform).join(', ')||'')}" placeholder="e.g. Indeed, Facebook, Craigslist" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px">
-    </label>
-    ${(j.id?_jobLinks(j):[]).map(l2=>`<div style="margin-top:6px;padding:7px 11px;background:var(--cream);border-radius:7px;font-size:11.5px">🔗 <b>${esc(l2.platform)}</b> · <span style="font-family:ui-monospace,monospace">${esc(_sourceLinkUrl(l2.code))}</span> <button class="btn-sm bg-cream" style="cursor:pointer;margin-left:6px" onclick="_srcCopy('${esc(l2.code)}',this)">copy</button></div>`).join('')||'<div style="margin-top:8px;font-size:11.5px;color:var(--soft)">A tracked link per platform is generated when you save — copy each from the job card and post it on its platform.</div>'}
+    <div style="font-size:12px;color:var(--mid);margin-top:12px;font-weight:600">Links — one per source platform</div>
+    <div id="job-links-box"></div>
+    <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
+      <select id="job-plat-sel" onchange="document.getElementById('job-plat-new').style.display=this.value==='__NEW__'?'inline-block':'none'" style="padding:7px 9px;border:1.5px solid var(--border);border-radius:7px;background:#fff;font-size:12px">
+        ${_jobPlatformOptions()}
+        <option value="__NEW__">＋ New platform…</option>
+      </select>
+      <input id="job-plat-new" type="text" placeholder="platform name" style="display:none;padding:7px 9px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;width:140px">
+      <button class="btn-sm bg-gold" style="cursor:pointer" onclick="_jobAddPlatform()">＋ Add link</button>
+    </div>
+    <div style="font-size:10.5px;color:var(--soft);margin-top:5px">Each added platform gets its own tracked link on save; existing links keep their code. Remove with ✕ (deactivates the posted link).</div>
     <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
       <button class="btn-sec" onclick="closeModal()">Cancel</button>
       <button class="btn-primary bg-grn" onclick="_jobSave()">💾 Save job</button>
     </div>`;
   document.getElementById('modal').classList.add('open');
+  /* Working copy of the job's links for individual add/remove — committed on Save. */
+  window._jobDraftLinks=(j.id?_jobLinks(j):[]).map(l2=>({platform:l2.platform,code:l2.code}));
+  _jobRenderLinks();
+}
+/* Platform picker options: every platform already known to Source links (organic or
+   job-owned) plus common defaults, deduped, alphabetical. */
+function _jobPlatformOptions(){
+  const set={};
+  ['Indeed','Facebook','Craigslist','ZipRecruiter','Referral','General'].forEach(p=>set[p]=1);
+  ((SETTINGS.config&&SETTINGS.config.sourceLinks)||[]).forEach(l=>{if(l.platform)set[l.platform]=1;});
+  return Object.keys(set).sort().map(p=>'<option value="'+esc(p)+'">'+esc(p)+'</option>').join('');
+}
+function _jobRenderLinks(){
+  const box=document.getElementById('job-links-box');if(!box)return;
+  const d=window._jobDraftLinks||[];
+  box.innerHTML=d.length?d.map((lk,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:7px 11px;background:var(--cream);border-radius:7px;font-size:11.5px">
+      🔗 <b>${esc(lk.platform)}</b>
+      ${lk.code?`<span style="font-family:ui-monospace,monospace">${esc(_sourceLinkUrl(lk.code))}</span><button class="btn-sm bg-cream" style="cursor:pointer" onclick="_srcCopy('${esc(lk.code)}',this)">copy</button>`:'<span style="color:var(--soft)">link minted on save</span>'}
+      <div style="flex:1"></div>
+      <button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="_jobRemovePlatform(${i})" title="Remove — deactivates this posted link on save">✕</button>
+    </div>`).join(''):'<div style="margin-top:6px;font-size:11.5px;color:var(--soft)">No links yet — add the first platform below.</div>';
+}
+function _jobAddPlatform(){
+  const sel=document.getElementById('job-plat-sel');
+  let p=sel?sel.value:'';
+  if(p==='__NEW__')p=((document.getElementById('job-plat-new')||{}).value||'').trim();
+  if(!p){toast('Pick or name a platform');return;}
+  window._jobDraftLinks=window._jobDraftLinks||[];
+  if(window._jobDraftLinks.some(l=>String(l.platform).toLowerCase()===p.toLowerCase())){toast('That platform already has a link on this job');return;}
+  window._jobDraftLinks.push({platform:p,code:null});
+  const ni=document.getElementById('job-plat-new');if(ni){ni.value='';ni.style.display='none';}
+  if(sel)sel.value=sel.options[0].value;
+  _jobRenderLinks();
+}
+function _jobRemovePlatform(i){
+  (window._jobDraftLinks||[]).splice(i,1);
+  _jobRenderLinks();
 }
 function _jobSave(){
   const g=i=>((document.getElementById(i)||{}).value||'').trim();
@@ -20950,12 +20994,12 @@ function _jobSave(){
      in SETTINGS.config.sourceLinks under its REAL platform — so it lives among its platform
      peers in Source links & tracking — flagged jobId so that section shows it read-only
      (sequence/pay/customization happen only here on the job). */
-  const wanted=(g('job-platforms')||'General').split(',').map(s=>s.trim()).filter(Boolean);
+  const draft=(window._jobDraftLinks&&window._jobDraftLinks.length)?window._jobDraftLinks:[{platform:'General',code:null}];
   const keep=[];
-  wanted.forEach(p=>{
-    let lk=j.links.find(x=>String(x.platform).toLowerCase()===p.toLowerCase());
-    if(!lk){lk={code:_sourceLinkCode(SETTINGS.config.sourceLinks.concat(keep)),platform:p};}
-    lk.platform=p;keep.push(lk);
+  draft.forEach(d=>{
+    let lk=d.code?j.links.find(x=>x.code===d.code):null;
+    if(!lk)lk={code:d.code||_sourceLinkCode(SETTINGS.config.sourceLinks.concat(keep)),platform:d.platform};
+    lk.platform=d.platform;keep.push(lk);
   });
   const removed=j.links.filter(x=>!keep.some(k=>k.code===x.code));
   j.links=keep;
