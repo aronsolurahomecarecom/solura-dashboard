@@ -1399,7 +1399,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-31';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-32';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4336,7 +4336,10 @@ function buildDiagnosticReport(){
     secs.forEach(function(sec){
       L.push('  ['+(sec.enabled!==false?'on ':'OFF')+'] '+(sec.title||'(untitled)')+' \u00b7 text '+String(sec.text||'').length+' chars \u00b7 attachments '+((sec.attachments||[]).length));
       (sec.attachments||[]).forEach(function(a){
-        L.push('    \u2022 '+(a.name||'?')+' \u00b7 kind '+(a.kind||'?')+' \u00b7 data '+(a.b64?(a.b64.length+' b64 chars \u2713'):'MISSING \u26A0'));
+        var dataDesc;
+        if(a.kind==='text')dataDesc=(a.text&&a.text.length)?(a.text.length+' text chars \u2713 (inlined into training)'):'MISSING \u26A0 (re-add the file)';
+        else dataDesc=a.b64?(a.b64.length+' b64 chars \u2713'):'MISSING \u26A0 (re-add the file)';
+        L.push('    \u2022 '+(a.name||'?')+' \u00b7 kind '+(a.kind||'?')+' \u00b7 data '+dataDesc);
       });
     });
   }catch(eS){L.push('TRAINING SECTIONS: unavailable ('+eS.message+')');}
@@ -5206,6 +5209,14 @@ function applyEmailShell(bodyHtml,ri){
     // function replacer: content with $ signs (rates!) must never trigger
     // String.replace's $-pattern substitutions
     out=shell.replace(slot,function(){return content;});
+    // Shells often carry the slot MORE THAN ONCE (preheader + main). The
+    // first gets the message; every remaining occurrence is stripped so a
+    // literal {{body}} can never survive into the sent email.
+    var guard=0,extra;
+    while((extra=findShellSlot(out))&&guard<6){
+      out=out.replace(extra,function(){return '';});
+      guard++;
+    }
   }else{
     // No slot. NEVER append after a full HTML document — email clients drop
     // everything past </html>. Inject before </body> (or </html>) instead.
@@ -7497,6 +7508,7 @@ async function sendEmail(){
     })).then(function(commsRow){
       recordSentEmail(_sendId,ri,toAddr,subj,commsRow,
         (_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri)?_weeklyAppliedFor.label:'');
+      traceOp({kind:'send-OK',to:toAddr,subj:String(subj||'').slice(0,60),path:useUploadSession?'draft':'fast'});
       try{captureVoiceSample(subj,bodyHtml,(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri)?_weeklyAppliedFor.label:'');}catch(_){}
       _weeklyAppliedFor=null;
       _emailReplyTo=null;
@@ -9210,7 +9222,12 @@ function onClick(ev){
     case 'open-email': if(ri!=null)openEmail(ri); break;
     case 'open-script': if(ri!=null)openScript(ri); break;
     case 'send-sms': sendSMS(); break;
-    case 'send-email': sendEmail(); break;
+    case 'send-email':
+      Promise.resolve(sendEmail()).catch(function(eS){
+        traceOp({kind:'send-FAIL',err:String(eS&&eS.message||eS).slice(0,200)});
+        showErr(String(eS&&eS.message||eS));
+      });
+      break;
     case 'claude-write-email':
       var _cri=parseInt(el('modal-email').dataset.ri,10);
       openClaudeWriter(isNaN(_cri)?-1:_cri);
