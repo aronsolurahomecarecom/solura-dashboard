@@ -1399,7 +1399,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-32';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-33';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4343,15 +4343,20 @@ function buildDiagnosticReport(){
       });
     });
   }catch(eS){L.push('TRAINING SECTIONS: unavailable ('+eS.message+')');}
+  try{
+    var _tt=buildClaudeSystemTraining().length;
+    L.push('TRAINING TEXT BUDGET: '+_tt+' chars (~'+Math.round(_tt/4/1000)+'K tokens)'+(_tt>120000?' \u26A0 heavy \u2014 every draft pays this':' \u2713'));
+  }catch(_){}
   L.push('VOICE SAMPLES: '+(function(){try{return voiceCorpus().length;}catch(_){return '?';}})());
   var _ak='';try{_ak=localStorage.getItem('claudeApiKey')||(enginesDoc.config&&enginesDoc.config.claudeApiKey)||'';}catch(_){}
   L.push('KEYS: anthropic '+(_ak?'\u2713':'MISSING')+' \u00b7 ghl '+(GHL_KEY()?'\u2713':'MISSING'));
   L.push('MODEL: '+(cfg('claudeModel')||'claude-sonnet-4-6')+' \u00b7 temperature 0.3 (fixed)');
   // Recent sends
   try{
-    var recent=(sentStore().list||[]).slice(0,3);
+    var st=sentStore();
+    var recent=Object.keys(st).map(function(k7){return st[k7];}).sort(function(a,b){return (b.ts||0)-(a.ts||0);}).slice(0,3);
     L.push('RECENT SENDS: '+recent.length);
-    recent.forEach(function(r5){L.push('  \u2022 '+String(r5.subj||'').slice(0,50)+' \u00b7 '+(r5.openedAt?('opened '+(r5.opens||1)+'\u00d7'):'no opens'));});
+    recent.forEach(function(r5){L.push('  \u2022 '+String(r5.subj||'').slice(0,50)+' \u00b7 '+(r5.openedAt?('opened '+(r5.opens||1)+'\u00d7'):'no opens yet'));});
   }catch(_){L.push('RECENT SENDS: unavailable');}
   // Recent operation traces — what the machine ACTUALLY did
   var tr=readTraces();
@@ -4412,13 +4417,24 @@ function renderClaudeDocChip(){
 function buildClaudeSystemTraining(){
   var secs=ctsSections();
   if(!secs.length)return String(cfg('claudeTraining')||'').trim();
+  // Text attachments are TRAINING, not payload dumps: embedded base64
+  // images are pure token noise (one 787KB template = the model's ENTIRE
+  // context), so data-URIs are stripped and each attachment's inline
+  // contribution is capped. The structure survives; the bloat doesn't.
+  var inlineText=function(x){
+    var v=String(x||'')
+      .replace(/data:[\w/+.-]+;base64,[A-Za-z0-9+/=]{200,}/g,'[embedded-image removed]')
+      .replace(/[ \t]{3,}/g,' ');
+    if(v.length>25000)v=v.slice(0,25000)+'\n\u2026[truncated \u2014 attachment exceeds the training inline budget; keep training files lean]';
+    return v;
+  };
   return secs.map(function(sec){
     var out='## '+(sec.title||'Instructions')+'\n'+String(sec.text||'').trim();
     (sec.attachments||[]).forEach(function(a){
       if(a.kind&&a.kind!=='text'){
         out+='\n\n### Attached template (binary): '+a.name+' — provided as a document/image alongside this message.';
       }else{
-        out+='\n\n### Attached template: '+a.name+'\n'+String(a.text||'');
+        out+='\n\n### Attached template: '+a.name+'\n'+inlineText(a.text);
       }
     });
     return out;
