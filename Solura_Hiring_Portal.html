@@ -21101,7 +21101,7 @@ function _jobRenderLinks(){
   const box=document.getElementById('job-links-box');if(!box)return;
   const d=window._jobDraftLinks||[];
   box.innerHTML=d.length?d.map((lk,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:7px 11px;background:var(--cream);border-radius:7px;font-size:11.5px;flex-wrap:wrap">
-      🔗 <b>${esc(lk.platform)}</b>
+      🔗 <input type="text" value="${esc(lk.platform)}" title="Platform name — editable; the link code and URL never change" style="width:110px;padding:4px 7px;border:1.5px solid var(--border);border-radius:5px;font-size:11px;font-weight:700" oninput="(window._jobDraftLinks||[])[${i}].platform=this.value">
       ${lk.code?`<span style="font-family:ui-monospace,monospace">${esc(_sourceLinkUrl(lk.code))}</span><button class="btn-sm bg-cream" style="cursor:pointer" onclick="_srcCopy('${esc(lk.code)}',this)">copy</button>`:'<span style="color:var(--soft)">link minted on save</span>'}
       <input type="text" value="${esc(lk.wage||'')}" placeholder="pay for this link (else job pay)" title="Per-link pay override — fills {pay}/{wage} for candidates from THIS link" style="width:170px;padding:4px 7px;border:1.5px solid var(--border);border-radius:5px;font-size:11px" oninput="(window._jobDraftLinks||[])[${i}].wage=this.value">
       <div style="flex:1"></div>
@@ -21159,7 +21159,8 @@ function _jobSave(){
      in SETTINGS.config.sourceLinks under its REAL platform — so it lives among its platform
      peers in Source links & tracking — flagged jobId so that section shows it read-only
      (sequence/pay/customization happen only here on the job). */
-  const draft=(window._jobDraftLinks&&window._jobDraftLinks.length)?window._jobDraftLinks:[{platform:'General',code:null}];
+  const draftAll=(window._jobDraftLinks||[]).filter(d0=>String(d0.platform||'').trim()); /* a blanked-out platform name = row ignored */
+  const draft=draftAll.length?draftAll:[{platform:'General',code:null}];
   const keep=[];
   draft.forEach(d=>{
     let lk=d.code?j.links.find(x=>x.code===d.code):null;
