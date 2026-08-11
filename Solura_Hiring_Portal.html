@@ -10033,7 +10033,7 @@ async function loadData(){
      lives in the Inbox under the ⚡ Blasts filter. Diagnostics remain available in console via
      window._blastDiag. */
   document.getElementById('sync-time').textContent='Synced '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
-  _reconcileBookingStages().then(()=>_seqV3RepairPass()).catch(e=>console.warn('load heals:',e.message));
+  _reconcileBookingStages().then(()=>_seqV3RepairPass()).then(()=>_jobRequirementsPass()).catch(e=>console.warn('load heals:',e.message));
   render();
 }
 
@@ -10661,7 +10661,20 @@ function action(c){
   /* All certs in → cross-check hub is the action, until ✓ Done with checks is pressed there. */
   if(c&&c.st&&c.st.certsReadyReview&&c.stage!=='Hired'&&c.stage!=='Declined'){
     return{bucket:'action',timing:{txt:'Certs in \u2014 cross-check them',pill:'pnew',date:_fmtBooking(c.st.booking)},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'checks',label:'\ud83d\udccb Cross-check certs',cls:'gold'}};
-  }let e=_actMemo.get(c);if(e&&e.g===_memGen)return e.v;
+  }
+  /* Job-requirements gate (review policy): came through a job link, doesn't show everything
+     the role needs, no decision yet → surfaced outlined for Meir to decide. Early stages
+     only — past the screen, a human already engaged. */
+  if(c&&c.st&&(c.stage==='Applied'||c.stage==='Screen invite')&&!c.st.jobReqDecision&&!c.st.jobReqRouted){
+    const _jb=(typeof _jobFor==='function')?_jobFor(c):null;
+    if(_jb&&_jb.req&&(_jb.req.policy||'review')==='review'){
+      const _miss=_jobMissingReqs(c,_jb);
+      if(_miss.length){
+        return{bucket:'action',timing:{txt:'🧾 '+_jb.name+' — missing: '+_miss.slice(0,3).join(', ')+(_miss.length>3?' +'+(_miss.length-3)+' more':''),pill:'pa',date:''},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'jobreq',label:'🧾 Review vs job requirements',cls:'gold'}};
+      }
+    }
+  }
+  let e=_actMemo.get(c);if(e&&e.g===_memGen)return e.v;
   /* One candidate's evaluation error must never blank the whole board: fail to a visible
      repair row for that candidate only (the baseInfo crash of 2026-07-28 took down render). */
   let v;try{v=_actionC(c);}
@@ -12360,6 +12373,7 @@ function doPrimary(r){_memGen++;const c=pipeline.find(x=>x.excelRow===r);if(!c)r
     setTimeout(()=>{orderYardstikCheck();},250);
     return;
   }
+  if(p.kind==='jobreq'){_jobReqModal(r);return;}
   if(p.kind==='bg-decision'){
     /* Open the BG decision modal — shows the flagged report status, lets user decide proceed/decline,
        and capture a note that gets logged + uploaded alongside the report PDF. */
@@ -20882,6 +20896,82 @@ function _jobLinks(j){
   if(!j.links||!j.links.length)j.links=j.code?[{code:j.code,platform:'General'}]:[];
   return j.links;
 }
+/* Everything THIS job requires that the candidate doesn't show. Unknown data counts as
+   missing with a '(not answered)' note — surfaced for a human, never guessed past. */
+function _jobMissingReqs(c,job){
+  const r=(job&&job.req)||{};const miss=[];const st=c.st||{};
+  const has=(arr,n)=>(arr||[]).some(x=>String(x).toLowerCase().indexOf(String(n).toLowerCase())>-1);
+  const certNames=(st.certs||[]).concat((st.credentials||[]).map(cr=>cr.name||''));
+  (r.certs||[]).forEach(n=>{if(!has(certNames,n))miss.push('cert: '+n);});
+  (r.expertise||[]).forEach(n=>{if(!has(st.pills,n))miss.push('expertise: '+n);});
+  if(r.minYears>0){const y=parseInt((st.facts&&st.facts.years)||c.years)||0;if(y<r.minYears)miss.push('experience: '+y+'y (needs '+r.minYears+'y)');}
+  const sc=st.screening||{},fa=st.formAnswers||{};
+  if(r.dl&&!(sc.dl==='Y'||sc.dl==='yes'))miss.push('driver’s license'+(sc.dl?'':' (not answered)'));
+  if(r.car&&String(fa.transport||'').toLowerCase()!=='car')miss.push('own car'+(fa.transport?'':' (not answered)'));
+  if(r.personalCare&&sc.personalCare!=='yes')miss.push('personal care'+(sc.personalCare?'':' (not answered)'));
+  if(r.lifting&&sc.lifting!=='yes')miss.push('lifting 25 lbs'+(sc.lifting?'':' (not answered)'));
+  if(r.nonSmoker&&!(sc.smoker==='no'||sc.smoker==='N'))miss.push('non-smoker'+(sc.smoker?'':' (not answered)'));
+  if(r.workauth&&fa.workauth!=='Y')miss.push('work authorization'+(fa.workauth?'':' (not answered)'));
+  return miss;
+}
+/* GENERIC policy: candidates missing requirements route to the default pipeline on load —
+   stamped + logged, once. REVIEW policy is handled as an action row (see action()). */
+async function _jobRequirementsPass(){
+  try{
+    const defId=window.SeqBuilderV3?window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[]):null;
+    const defSeq=(SETTINGS.sequences||[]).find(s=>s.id===defId);
+    let n=0;
+    for(const c of pipeline){
+      if(!c||!c.st)continue;
+      if(c.stage!=='Applied'&&c.stage!=='Screen invite')continue;
+      if(c.st.jobReqRouted||c.st.jobReqDecision)continue;
+      if(W&&W.row===c.excelRow)continue;
+      const jb=_jobFor(c);
+      if(!jb||!jb.req||(jb.req.policy||'review')!=='generic')continue;
+      const miss=_jobMissingReqs(c,jb);
+      if(!miss.length)continue;
+      if(defSeq&&jb.sequenceId&&jb.sequenceId!==defSeq.id){
+        const ptr=_classicPointerFor(c,defSeq);
+        c.st.sequenceId=defSeq.id;c.st.sequenceStepId=ptr;
+        c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
+      }
+      c.st.jobReqRouted=1;
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧾 Missing for "'+jb.name+'": '+miss.join(', ')+' → routed to the generic pipeline (job policy)'});
+      try{await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);n++;}catch(e){console.warn('jobreq route:',c.name,e.message);}
+    }
+    if(n){toast('🧾 '+n+' candidate'+(n===1?'':'s')+' routed to the generic pipeline (job requirements)');if(typeof render==='function')render();}
+  }catch(e){console.warn('job requirements pass:',e);}
+}
+function _jobReqModal(r){
+  const c=pipeline.find(x=>x.excelRow===r);if(!c)return;
+  const jb=_jobFor(c);if(!jb){toast('No job package for this candidate');return;}
+  const miss=_jobMissingReqs(c,jb);
+  document.getElementById('m-title').textContent='🧾 '+(c.name||'')+' vs '+jb.name;
+  document.getElementById('m-body').innerHTML=`
+    <p style="font-size:13px;margin:0 0 10px">Applied through <b>${esc(jb.name)}</b>${jb.client?' ('+esc(jb.client)+')':''} and is missing:</p>
+    <div style="margin-bottom:14px">${miss.map(m=>'<div style="padding:6px 10px;border:1.5px solid var(--gold-mid);background:#FEF7E8;border-radius:7px;margin-bottom:5px;font-size:12.5px">⚠ '+esc(m)+'</div>').join('')||'<i>nothing — requirements met</i>'}</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn-sec" onclick="closeModal()">Later</button>
+      <button class="btn-sm bg-cream" style="cursor:pointer;padding:9px 14px" onclick="_jobReqDecide(${r},'generic')">→ Generic pipeline</button>
+      <button class="btn-primary bg-grn" onclick="_jobReqDecide(${r},'proceed')">✓ Proceed on this job’s flow</button>
+    </div>`;
+  document.getElementById('modal').classList.add('open');
+}
+async function _jobReqDecide(r,choice){
+  const c=pipeline.find(x=>x.excelRow===r);if(!c)return;
+  const jb=_jobFor(c);
+  const miss=jb?_jobMissingReqs(c,jb):[];
+  c.st.jobReqDecision={choice:choice,at:new Date().toISOString(),missing:miss};
+  c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧾 Requirements decision for "'+(jb?jb.name:'?')+'": '+(choice==='proceed'?'proceed on the job flow':'generic pipeline')+(miss.length?' · was missing: '+miss.join(', '):'')});
+  closeModal();
+  await _seqCommitState(c,{});
+  if(choice==='generic'){
+    const defId=window.SeqBuilderV3?window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[]):null;
+    if(defId&&defId!==c.st.sequenceId)await _seqAssignTo(c.excelRow,defId);
+  }
+  if(typeof render==='function')render();
+  toast('✓ Decision recorded');
+}
 function renderSettingsJobs(){
   SETTINGS.jobs=SETTINGS.jobs||[];
   const seqName=id=>{const s=(SETTINGS.sequences||[]).find(q=>q.id===id);return s?s.name:'(default)';};
@@ -20938,13 +21028,28 @@ function _jobOpenModal(id){
       <button class="btn-sm bg-gold" style="cursor:pointer" onclick="_jobAddPlatform()">＋ Add link</button>
     </div>
     <div style="font-size:10.5px;color:var(--soft);margin-top:5px">Each added platform gets its own tracked link on save; existing links keep their code. Remove with ✕ (deactivates the posted link).</div>
+    <div style="font-size:12px;color:var(--mid);margin-top:14px;font-weight:600">Role requirements — what THIS job needs</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
+      <label style="font-size:12px;color:var(--mid)">Required certs (comma-separated)<input id="job-req-certs" type="text" value="${esc(((j.req||{}).certs||[]).join(', '))}" placeholder="e.g. STNA, CPR" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Required expertise (comma-separated)<input id="job-req-exp" type="text" value="${esc(((j.req||{}).expertise||[]).join(', '))}" placeholder="e.g. dementia, hoyer lift" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Minimum years of experience<input id="job-req-years" type="number" min="0" value="${esc((j.req||{}).minYears||'')}" placeholder="0 = no minimum" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <div style="font-size:12px;color:var(--mid);display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding-bottom:2px">
+        ${[['dl','Driver’s license'],['car','Own car'],['personalCare','Personal care'],['lifting','Lift 25 lbs'],['nonSmoker','Non-smoker'],['workauth','Work authorization']].map(([k,lb])=>`<label style="display:flex;gap:4px;align-items:center;font-size:11.5px;cursor:pointer"><input type="checkbox" id="job-req-${k}" ${(j.req||{})[k]?'checked':''} style="accent-color:var(--gold-deep)">${lb}</label>`).join('')}
+      </div>
+    </div>
+    <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">When a candidate is missing any of the above
+      <select id="job-req-policy" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px;background:#fff">
+        <option value="review" ${((j.req||{}).policy||'review')==='review'?'selected':''}>🧾 Show them to me — outlined with everything missing, I decide</option>
+        <option value="generic" ${((j.req||{}).policy)==='generic'?'selected':''}>→ Send them down the generic hiring pipeline automatically</option>
+      </select>
+    </label>
     <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
       <button class="btn-sec" onclick="closeModal()">Cancel</button>
       <button class="btn-primary bg-grn" onclick="_jobSave()">💾 Save job</button>
     </div>`;
   document.getElementById('modal').classList.add('open');
   /* Working copy of the job's links for individual add/remove — committed on Save. */
-  window._jobDraftLinks=(j.id?_jobLinks(j):[]).map(l2=>({platform:l2.platform,code:l2.code}));
+  window._jobDraftLinks=(j.id?_jobLinks(j):[]).map(l2=>({platform:l2.platform,code:l2.code,wage:l2.wage||''}));
   _jobRenderLinks();
 }
 /* Platform picker options: every platform already known to Source links (organic or
@@ -20958,9 +21063,10 @@ function _jobPlatformOptions(){
 function _jobRenderLinks(){
   const box=document.getElementById('job-links-box');if(!box)return;
   const d=window._jobDraftLinks||[];
-  box.innerHTML=d.length?d.map((lk,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:7px 11px;background:var(--cream);border-radius:7px;font-size:11.5px">
+  box.innerHTML=d.length?d.map((lk,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:7px 11px;background:var(--cream);border-radius:7px;font-size:11.5px;flex-wrap:wrap">
       🔗 <b>${esc(lk.platform)}</b>
       ${lk.code?`<span style="font-family:ui-monospace,monospace">${esc(_sourceLinkUrl(lk.code))}</span><button class="btn-sm bg-cream" style="cursor:pointer" onclick="_srcCopy('${esc(lk.code)}',this)">copy</button>`:'<span style="color:var(--soft)">link minted on save</span>'}
+      <input type="text" value="${esc(lk.wage||'')}" placeholder="pay for this link (else job pay)" title="Per-link pay override — fills {pay}/{wage} for candidates from THIS link" style="width:170px;padding:4px 7px;border:1.5px solid var(--border);border-radius:5px;font-size:11px" oninput="(window._jobDraftLinks||[])[${i}].wage=this.value">
       <div style="flex:1"></div>
       <button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="_jobRemovePlatform(${i})" title="Remove — deactivates this posted link on save">✕</button>
     </div>`).join(''):'<div style="margin-top:6px;font-size:11.5px;color:var(--soft)">No links yet — add the first platform below.</div>';
@@ -20972,7 +21078,7 @@ function _jobAddPlatform(){
   if(!p){toast('Pick or name a platform');return;}
   window._jobDraftLinks=window._jobDraftLinks||[];
   if(window._jobDraftLinks.some(l=>String(l.platform).toLowerCase()===p.toLowerCase())){toast('That platform already has a link on this job');return;}
-  window._jobDraftLinks.push({platform:p,code:null});
+  window._jobDraftLinks.push({platform:p,code:null,wage:''});
   const ni=document.getElementById('job-plat-new');if(ni){ni.value='';ni.style.display='none';}
   if(sel)sel.value=sel.options[0].value;
   _jobRenderLinks();
@@ -21021,7 +21127,7 @@ function _jobSave(){
   draft.forEach(d=>{
     let lk=d.code?j.links.find(x=>x.code===d.code):null;
     if(!lk)lk={code:d.code||_sourceLinkCode(SETTINGS.config.sourceLinks.concat(keep)),platform:d.platform};
-    lk.platform=d.platform;keep.push(lk);
+    lk.platform=d.platform;lk.wage=(d.wage||'').trim();keep.push(lk);
   });
   const removed=j.links.filter(x=>!keep.some(k=>k.code===x.code));
   j.links=keep;
@@ -21029,12 +21135,26 @@ function _jobSave(){
     let l=SETTINGS.config.sourceLinks.find(x=>x.code===lk.code);
     if(!l){l={id:_sourceLinkId(),code:lk.code,createdAt:new Date().toISOString()};SETTINGS.config.sourceLinks.push(l);}
     l.platform=lk.platform;l.method='Job: '+j.name+(j.client?' — '+j.client:'');
-    l.wage=j.wage;l.notes=j.notes;l.jobZip=j.zip;l.jobId=j.id;l.active=active;
+    l.wage=(lk.wage&&lk.wage.trim())||j.wage;/* per-link pay override wins; job pay is the default */
+    l.notes=j.notes;l.jobZip=j.zip;l.jobId=j.id;l.active=active;
     SETTINGS.sequenceAssignments=SETTINGS.sequenceAssignments.filter(a=>!(a.match&&a.match.sourceCode===lk.code));
     if(active&&j.sequenceId)SETTINGS.sequenceAssignments.push({match:{sourceCode:lk.code},sequenceId:j.sequenceId});
   };
   j.links.forEach(lk=>syncLink(lk,j.active!==false));
   removed.forEach(lk=>syncLink(lk,false));
+  /* Role requirements + miss policy. */
+  j.req={
+    certs:(g('job-req-certs')||'').split(',').map(s=>s.trim()).filter(Boolean),
+    expertise:(g('job-req-exp')||'').split(',').map(s=>s.trim()).filter(Boolean),
+    minYears:parseInt(g('job-req-years'))||0,
+    dl:!!(document.getElementById('job-req-dl')||{}).checked,
+    car:!!(document.getElementById('job-req-car')||{}).checked,
+    personalCare:!!(document.getElementById('job-req-personalCare')||{}).checked,
+    lifting:!!(document.getElementById('job-req-lifting')||{}).checked,
+    nonSmoker:!!(document.getElementById('job-req-nonSmoker')||{}).checked,
+    workauth:!!(document.getElementById('job-req-workauth')||{}).checked,
+    policy:g('job-req-policy')||'review'
+  };
   /* Application form binding: custom → clone the global as the starting shape on first
      pick (edit via the job's 📋 button); back to global → the custom config is dropped. */
   const formPick=g('job-form');
