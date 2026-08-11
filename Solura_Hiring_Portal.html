@@ -19853,6 +19853,20 @@ function _fcDefaultConfig(){
 /* Accessor — seeds the default config in memory on first use. Nothing persists until the
    operator actually edits something (markSettingsDirty is only called from edit handlers). */
 function _fc(){
+  /* Job-scoped editing: while a job's custom form is open in the editor
+     (window._fcJobScope = jobId), every read/write through _fc() targets that job's
+     config in SETTINGS.jobFormConfigs — same editor, same autosave, no divergence.
+     First touch clones the global form as the starting shape. */
+  if(window._fcJobScope){
+    SETTINGS.jobFormConfigs=SETTINGS.jobFormConfigs||{};
+    let c=SETTINGS.jobFormConfigs[window._fcJobScope];
+    if(!c||!Array.isArray(c.questions)||!c.questions.length){
+      if(!SETTINGS.formConfig||!Array.isArray(SETTINGS.formConfig.questions)||!SETTINGS.formConfig.questions.length)SETTINGS.formConfig=_fcDefaultConfig();
+      c=JSON.parse(JSON.stringify(SETTINGS.formConfig));
+      SETTINGS.jobFormConfigs[window._fcJobScope]=c;
+    }
+    return c;
+  }
   if(!SETTINGS.formConfig||!Array.isArray(SETTINGS.formConfig.questions)||!SETTINGS.formConfig.questions.length){
     SETTINGS.formConfig=_fcDefaultConfig();
   }
@@ -20909,6 +20923,10 @@ function _jobOpenModal(id){
       <label style="font-size:12px;color:var(--mid)">Pay (fills {pay}/{wage} in emails)<input id="job-wage" type="text" value="${esc(j.wage||'')}" placeholder="e.g. $16–$18/hr" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Client ZIP (proximity rating factor)<input id="job-zip" type="text" value="${esc(j.zip||'')}" placeholder="e.g. 44122" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Notes<input id="job-notes" type="text" value="${esc(j.notes||'')}" placeholder="anything about this posting" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Application form<select id="job-form" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px;background:#fff">
+        <option value="__GLOBAL__">— the global form —</option>
+        <option value="__CUSTOM__" ${(SETTINGS.jobFormConfigs&&SETTINGS.jobFormConfigs[j.id])?'selected':''}>Custom form for this job</option>
+      </select>${(SETTINGS.jobFormConfigs&&SETTINGS.jobFormConfigs[j.id])?`<button class="btn-sm bg-cream" style="cursor:pointer;margin-top:5px" onclick="_jobEditForm('${esc(j.id)}')">📋 Open this job's form in the editor</button>`:''}</label>
     </div>
     <div style="font-size:12px;color:var(--mid);margin-top:12px;font-weight:600">Links — one per source platform</div>
     <div id="job-links-box"></div>
@@ -21018,8 +21036,27 @@ function _jobSave(){
   };
   j.links.forEach(lk=>syncLink(lk,j.active!==false));
   removed.forEach(lk=>syncLink(lk,false));
+  /* Application form binding: custom → clone the global as the starting shape on first
+     pick (edit via the job's 📋 button); back to global → the custom config is dropped. */
+  const formPick=g('job-form');
+  SETTINGS.jobFormConfigs=SETTINGS.jobFormConfigs||{};
+  if(formPick==='__CUSTOM__'&&!SETTINGS.jobFormConfigs[j.id]){
+    const prevScope=window._fcJobScope;window._fcJobScope=j.id;_fc();window._fcJobScope=prevScope||null;
+    toast('📋 Custom form created — open it from the job to customize');
+  }else if(formPick==='__GLOBAL__'&&SETTINGS.jobFormConfigs[j.id]){
+    delete SETTINGS.jobFormConfigs[j.id];
+  }
   markSettingsDirty();closeModal();renderSettings();
   toast('🧳 Job saved — '+j.links.length+' link'+(j.links.length===1?'':'s')+' ('+j.links.map(l2=>l2.platform).join(', ')+')');
+}
+/* Deep-link a job's custom application form into the form editor (scoped via _fcJobScope —
+   read _fc()). Editable any time after posting; live within the worker's 5-min cache. */
+function _jobEditForm(id){
+  const j=(SETTINGS.jobs||[]).find(x=>x.id===id);
+  if(!j){toast('Job not found');return;}
+  window._fcJobScope=j.id;
+  closeModal();
+  setSettingsSection('formconfig');
 }
 /* Deep-link a job's sequence into the canvas editor — editing stays possible at any time
    after posting; changes take effect live for that job's candidates on the next render. */
@@ -23188,8 +23225,14 @@ function _mountHubCenterV3(){
   });
 }
 function _fcV3Shell(){
-  return `<div class="wscard" style="padding:12px 16px">
-    <h3>📋 Application form <span style="font-size:11px;color:var(--soft);font-weight:600">live two-pane editor · what candidates see at apply.solurahomecare.com</span></h3>
+  const scopeJob=window._fcJobScope?(SETTINGS.jobs||[]).find(x=>x.id===window._fcJobScope):null;
+  const scopeBanner=window._fcJobScope?`<div style="margin-bottom:10px;padding:10px 14px;background:linear-gradient(135deg,#FEF3DC,#fff);border:1.5px solid var(--gold);border-radius:9px;font-size:12.5px;display:flex;align-items:center;gap:10px">
+      🧳 Editing the custom form of <b>${esc(scopeJob?scopeJob.name:window._fcJobScope)}</b> — only candidates applying through this job's links see these changes.
+      <div style="flex:1"></div>
+      <button class="btn-sm bg-cream" style="cursor:pointer" onclick="window._fcJobScope=null;renderSettings()">← Back to the global form</button>
+    </div>`:'';
+  return `${scopeBanner}<div class="wscard" style="padding:12px 16px">
+    <h3>📋 Application form ${scopeJob?'<span style="color:var(--gold-deep)">— '+esc(scopeJob.name)+'</span> ':''}<span style="font-size:11px;color:var(--soft);font-weight:600">live two-pane editor · what candidates see at apply.solurahomecare.com</span></h3>
     <p class="set-help">Drag questions to reorder, click one to edit. Scoring totals update live per dimension and per column; the right pane previews the form exactly as candidates see it — scoring and gates are never sent to the form. Changes auto-save and go live within <b>5 minutes</b>.</p>
   </div>
   <div id="sux3-fc-mount"></div>`;

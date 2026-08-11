@@ -900,7 +900,8 @@ function _wireConfigForm(qs){
 (function loadFormConfig(){
   let ctrl=null,timer=null;
   try{ctrl=new AbortController();timer=setTimeout(()=>ctrl.abort(),2500);}catch(e){}
-  fetch(WEBHOOK_URL+'/form-config',ctrl?{signal:ctrl.signal}:{})
+  /* ?src rides along so a job link with a custom application form gets ITS form projected. */
+  fetch(WEBHOOK_URL+'/form-config'+(typeof SOURCE_CODE!=='undefined'&&SOURCE_CODE?('?src='+encodeURIComponent(SOURCE_CODE)):''),ctrl?{signal:ctrl.signal}:{})
     .then(r=>{if(!r.ok)throw new Error('status '+r.status);return r.json();})
     .then(j=>{
       if(timer)clearTimeout(timer);
