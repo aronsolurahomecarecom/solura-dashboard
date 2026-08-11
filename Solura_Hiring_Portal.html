@@ -21016,6 +21016,10 @@ function _jobOpenModal(id){
         <option value="__GLOBAL__">— the global form —</option>
         <option value="__CUSTOM__" ${(SETTINGS.jobFormConfigs&&SETTINGS.jobFormConfigs[j.id])?'selected':''}>Custom form for this job</option>
       </select>${(SETTINGS.jobFormConfigs&&SETTINGS.jobFormConfigs[j.id])?`<button class="btn-sm bg-cream" style="cursor:pointer;margin-top:5px" onclick="_jobEditForm('${esc(j.id)}')">📋 Open this job's form in the editor</button>`:''}</label>
+      <label style="font-size:12px;color:var(--mid)">Confirmation email (sent on apply)<select id="job-confirm" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px;background:#fff">
+        <option value="__GLOBAL__">— the standard confirmation —</option>
+        <option value="__CUSTOM__" ${(SETTINGS.jobConfirmEmails&&SETTINGS.jobConfirmEmails[j.id])?'selected':''}>Custom for this job</option>
+      </select>${(SETTINGS.jobConfirmEmails&&SETTINGS.jobConfirmEmails[j.id])?`<button class="btn-sm bg-cream" style="cursor:pointer;margin-top:5px" onclick="_jobEditConfirm('${esc(j.id)}')">✉ Edit this job's confirmation</button>`:''}</label>
     </div>
     <div style="font-size:12px;color:var(--mid);margin-top:12px;font-weight:600">Links — one per source platform</div>
     <div id="job-links-box"></div>
@@ -21155,6 +21159,20 @@ function _jobSave(){
     workauth:!!(document.getElementById('job-req-workauth')||{}).checked,
     policy:g('job-req-policy')||'review'
   };
+  /* Confirmation email binding: custom → seeded from the global template (or a sensible
+     default naming the job); back to standard → the custom copy is dropped. */
+  const confPick=g('job-confirm');
+  SETTINGS.jobConfirmEmails=SETTINGS.jobConfirmEmails||{};
+  if(confPick==='__CUSTOM__'&&!SETTINGS.jobConfirmEmails[j.id]){
+    const baseT=(SETTINGS.templates&&SETTINGS.templates.application_confirmation)||{};
+    SETTINGS.jobConfirmEmails[j.id]={
+      s:baseT.s||'We received your application — Solura Home Care',
+      b:baseT.b||('Hi {first},\n\nThanks for applying for '+j.name+' with Solura Home Care. Your application is in and someone from our team will reach out shortly about the next step.\n\nIf you don\'t hear from us within a few business days, feel free to reply to this email.\n\nSolura Home Care')
+    };
+    toast('✉ Custom confirmation created — open it from the job to edit');
+  }else if(confPick==='__GLOBAL__'&&SETTINGS.jobConfirmEmails[j.id]){
+    delete SETTINGS.jobConfirmEmails[j.id];
+  }
   /* Application form binding: custom → clone the global as the starting shape on first
      pick (edit via the job's 📋 button); back to global → the custom config is dropped. */
   const formPick=g('job-form');
@@ -21167,6 +21185,35 @@ function _jobSave(){
   }
   markSettingsDirty();closeModal();renderSettings();
   toast('🧳 Job saved — '+j.links.length+' link'+(j.links.length===1?'':'s')+' ('+j.links.map(l2=>l2.platform).join(', ')+')');
+}
+/* Per-job confirmation email editor — subject + plaintext body with the same placeholders
+   the worker substitutes: {first} {name} {job} {pay} {refLink} {refCode}. */
+function _jobEditConfirm(id){
+  const j=(SETTINGS.jobs||[]).find(x=>x.id===id);if(!j){toast('Job not found');return;}
+  const t=(SETTINGS.jobConfirmEmails||{})[j.id]||{s:'',b:''};
+  document.getElementById('m-title').textContent='✉ Confirmation email — '+j.name;
+  document.getElementById('m-body').innerHTML=`
+    <label style="font-size:12px;color:var(--mid);display:block">Subject
+      <input id="jc-subj" type="text" value="${esc(t.s||'')}" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px">
+    </label>
+    <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">Body (plain text — paragraphs become the branded email)
+      <textarea id="jc-body" rows="10" style="width:100%;padding:9px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px;font-family:inherit;font-size:13px">${esc(t.b||'')}</textarea>
+    </label>
+    <div style="font-size:10.5px;color:var(--soft);margin-top:6px">Placeholders: <code>{first}</code> <code>{name}</code> <code>{job}</code> <code>{pay}</code> (the pay of the link they applied through) <code>{refLink}</code> <code>{refCode}</code></div>
+    <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+      <button class="btn-sec" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary bg-grn" onclick="_jobSaveConfirm('${esc(j.id)}')">💾 Save</button>
+    </div>`;
+  document.getElementById('modal').classList.add('open');
+}
+function _jobSaveConfirm(id){
+  SETTINGS.jobConfirmEmails=SETTINGS.jobConfirmEmails||{};
+  SETTINGS.jobConfirmEmails[id]={
+    s:((document.getElementById('jc-subj')||{}).value||'').trim(),
+    b:((document.getElementById('jc-body')||{}).value||'')
+  };
+  markSettingsDirty();closeModal();
+  toast('✉ Confirmation saved — live for new applicants within ~5 minutes');
 }
 /* Deep-link a job's custom application form into the form editor (scoped via _fcJobScope —
    read _fc()). Editable any time after posting; live within the worker's 5-min cache. */
