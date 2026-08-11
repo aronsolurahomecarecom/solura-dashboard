@@ -20787,8 +20787,7 @@ function renderSettingsSourceLinks(){
         <div style="text-align:center"><b>${s.hired}</b><div style="font-size:10px;color:var(--soft)">hired ${s.applied?'('+s.conversionHirePct+'%)':''}</div></div>
         <div style="display:flex;gap:5px">
           <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcCopy('${esc(l.code)}',this)" title="Copy the tracking URL">\u{1F517} copy</button>
-          <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcEdit('${esc(l.id)}')">edit</button>
-          ${l.jobId?'':`<button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcEdit('${esc(l.id)}')" title="Edit platform, method, pay, notes">\u270E</button>`}
+          ${l.jobId?'':`<button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcEdit('${esc(l.id)}')" title="Edit platform, method, pay, notes">\u270E edit</button>`}
           <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcToggleActive('${esc(l.id)}')" title="${inactive?'Reactivate':'Deactivate'}">${inactive?'\u25B6':'\u23F8'}</button>
           <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;font-size:10.5px" onclick="_srcDelete('${esc(l.id)}')">\u00d7</button>
         </div>
@@ -21279,23 +21278,8 @@ function _srcDelete(id){
   SETTINGS.config.sourceLinks=(SETTINGS.config.sourceLinks||[]).filter(x=>x.id!==id);
   markSettingsDirty();renderSettings();
 }
-function _srcEdit(id){
-  const l=(SETTINGS.config.sourceLinks||[]).find(x=>x.id===id);
-  if(!l)return;
-  const newPlatform=prompt('Platform:',l.platform||'');
-  if(newPlatform===null)return;
-  const newMethod=prompt('Method:',l.method||'');
-  if(newMethod===null)return;
-  const newNotes=prompt('Notes:',l.notes||'');
-  if(newNotes===null)return;
-  const newWage=prompt('Wage for this source (fills {wage} in emails; empty = default):',l.wage||'');
-  if(newWage===null)return;
-  l.platform=(newPlatform||'').trim();
-  l.method=(newMethod||'').trim();
-  l.notes=(newNotes||'').trim();
-  l.wage=(newWage||'').trim();
-  markSettingsDirty();renderSettings();
-}
+/* (the old prompt-chain link editor was replaced by the _srcEdit modal defined earlier —
+   one button, all details, job-owned links edited only from their job package) */
 
 /* ----- CALENDARS section ----- */
 function renderSettingsCalendars(){
