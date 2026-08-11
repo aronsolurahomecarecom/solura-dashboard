@@ -562,6 +562,25 @@ const WEBHOOK_URL='https://solura-hiring-webhook.meir-865.workers.dev';
    real pill clicks, the employers list), highlights the required questions still unanswered,
    and stuffs the file into the normal #resume input so submission uploads it as always.
    Every failure degrades to "fill by hand" — the form never blocks on AI. */
+/* The hero card's HTML — one source of truth so applyFormConfig can re-insert it after a
+   config-driven rebuild wipes the form's children (the "card disappears after ~2s" bug). */
+function _aiFillCardHtml(){
+  return `<div class="card" id="ai-fill-card" style="border:2px dashed #C59B4E;background:linear-gradient(135deg,#FEF9EC,#FFFDF6)">
+      <h2 style="margin-top:0">⚡ Fastest way: start with your résumé</h2>
+      <p style="margin:4px 0 12px;font-size:14px;line-height:1.5">Upload it (PDF) and we'll fill this application for you — then just review and complete anything we couldn't find. Or skip this and fill the form by hand.</p>
+      <input type="file" id="ai-resume" accept="application/pdf" onchange="_aiFillFromResume(this)">
+      <div id="ai-fill-status" style="margin-top:10px;font-size:13.5px;color:#8a7a55;line-height:1.5"></div>
+    </div>`;
+}
+function _aiEnsureFillCard(){
+  const f=document.getElementById('form');if(!f)return;
+  if(!document.getElementById('ai-fill-card'))f.insertAdjacentHTML('afterbegin',_aiFillCardHtml());
+  /* Candidate uploaded before the rebuild? Re-apply their extract + re-attach the file. */
+  if(window._aiLastExtract)_aiApplyExtract(window._aiLastExtract);
+  if(window._aiResumeFile){
+    try{const rEl=document.getElementById('resume');if(rEl){const dt=new DataTransfer();dt.items.add(window._aiResumeFile);rEl.files=dt.files;}}catch(e){}
+  }
+}
 async function _aiFillFromResume(inp){
   const st=document.getElementById('ai-fill-status');
   const file=inp&&inp.files&&inp.files[0];
@@ -569,12 +588,26 @@ async function _aiFillFromResume(inp){
   if(!(file.type==='application/pdf'||/\.pdf$/i.test(file.name))){st.textContent='Please upload a PDF résumé (other formats can\'t be read automatically) — or fill the form by hand.';return;}
   if(file.size>5*1024*1024){st.textContent='That PDF is larger than 5MB — please use a smaller file, or fill the form by hand.';return;}
   st.textContent='⏳ Reading your résumé… this takes a few seconds.';
+  window._aiResumeFile=file;
   try{
     const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]||'');r.onerror=rej;r.readAsDataURL(file);});
     const resp=await fetch(WEBHOOK_URL+'/apply/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pdfBase64:b64,filename:file.name})});
     const j=await resp.json();
     if(!j.ok||!j.extract)throw new Error(j.error||'no extract');
-    const x=j.extract;let filled=0;
+    window._aiLastExtract=j.extract;
+    _aiApplyExtract(j.extract);
+  }catch(e){
+    console.warn('ai fill:',e);
+    st.textContent='We couldn\'t read that automatically — no problem, just fill the form by hand. Your résumé will still be attached.';
+    try{const rEl=document.getElementById('resume');if(rEl&&file){const dt=new DataTransfer();dt.items.add(file);rEl.files=dt.files;}}catch(e2){}
+  }
+}
+/* Apply a cached extract to whatever form is currently in the DOM — safe to run again after
+   a config rebuild (idempotent: only fills empties, pill clicks skip already-on options). */
+function _aiApplyExtract(x){
+  const st=document.getElementById('ai-fill-status')||{};
+  try{
+    let filled=0;
     const f=document.getElementById('form');
     const setIn=(n,v)=>{const el=f&&f.elements&&f.elements[n];if(el&&v!=null&&String(v).trim()&&!el.value){el.value=String(v).trim();filled++;}};
     if(x.name&&!((f.elements.firstName||{}).value)){const parts=String(x.name).trim().split(/\s+/);setIn('firstName',parts[0]);setIn('lastName',parts.slice(1).join(' '));}
@@ -599,7 +632,7 @@ async function _aiFillFromResume(inp){
     /* the résumé itself rides the normal upload path */
     try{
       const rEl=document.getElementById('resume');
-      if(rEl){const dt=new DataTransfer();dt.items.add(file);rEl.files=dt.files;}
+      if(rEl&&window._aiResumeFile){const dt=new DataTransfer();dt.items.add(window._aiResumeFile);rEl.files=dt.files;}
     }catch(e){}
     /* outline the required singles still unanswered so "review and fill the rest" is visual */
     let open=0;
@@ -609,9 +642,8 @@ async function _aiFillFromResume(inp){
     });
     st.innerHTML='✓ Filled <b>'+filled+'</b> answer'+(filled===1?'':'s')+' from your résumé.'+(open?' Please review everything and answer the <b style="color:#E78B29">'+open+' outlined question'+(open===1?'':'s')+'</b> below.':' Please review everything below before submitting.');
   }catch(e){
-    console.warn('ai fill:',e);
-    st.textContent='We couldn\'t read that automatically — no problem, just fill the form by hand. Your résumé will still be attached.';
-    try{const rEl=document.getElementById('resume');if(rEl&&inp.files[0]){const dt=new DataTransfer();dt.items.add(inp.files[0]);rEl.files=dt.files;}}catch(e2){}
+    console.warn('ai apply extract:',e);
+    if(st)st.textContent='We filled what we could — please review the form and complete the rest by hand.';
   }
 }
 
@@ -941,6 +973,9 @@ function applyFormConfig(fc){
   _wireConfigForm(qs);
   /* Restore identity text typed before the swap */
   Object.keys(keep).forEach(n=>{const el=f.elements&&f.elements[n];if(el)el.value=keep[n];});
+  /* The AI résumé card lives inside the form and the rebuild just wiped it — put it back,
+     and if the candidate already uploaded (extract cached), re-apply their fills too. */
+  if(typeof _aiEnsureFillCard==='function')_aiEnsureFillCard();
   updateProgress();
 }
 
