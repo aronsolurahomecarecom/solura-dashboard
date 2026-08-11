@@ -8896,7 +8896,12 @@ async function onSignedIn(){setConn(true);
     const j=await r.json();itemId=j.id;driveId=j.parentReference.driveId;
     /* Settings MUST load before data so the first pipeline render uses them — otherwise the UI
        paints with defaults and the user has to reload to see their saved settings applied. */
-    await loadSettings();await loadData();await loadAvailability();
+    await loadSettings();
+    /* Re-apply Settings-tab visibility NOW THAT config.admins is loaded — the earlier check
+       ran against the default (empty) admin list, which hid the tab from every granted
+       admin except the hardcoded super-admin for the whole session. */
+    {const _setTab=document.getElementById('tab-set');if(_setTab)_setTab.style.display=isAdmin()?'inline-flex':'none';}
+    await loadData();await loadAvailability();
     /* fire-and-forget email poll so signin isn't blocked by it. After it completes, force-render
        the inbox view if that's where the user is — otherwise the just-loaded emails sit in memory
        but the UI keeps showing the stale (often empty) state. */
