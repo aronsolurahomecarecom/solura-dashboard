@@ -21086,7 +21086,10 @@ function _jobOpenModal(id){
     </div>`;
   document.getElementById('modal').classList.add('open');
   /* Working copy of the job's links for individual add/remove — committed on Save. */
-  window._jobDraftLinks=(j.id?_jobLinks(j):[]).map(l2=>({platform:l2.platform,code:l2.code,wage:l2.wage||''}));
+  window._jobDraftLinks=(j.id?_jobLinks(j):[]).map(l2=>{
+    const sl=(SETTINGS.config&&SETTINGS.config.sourceLinks||[]).find(x=>x.code===l2.code)||{};
+    return {platform:l2.platform,code:l2.code,wage:l2.wage||'',method:l2.method||sl.method||'',notes:l2.notes||sl.notes||''};
+  });
   _jobRenderLinks();
 }
 /* Platform picker options: every platform already known to Source links (organic or
@@ -21100,12 +21103,18 @@ function _jobPlatformOptions(){
 function _jobRenderLinks(){
   const box=document.getElementById('job-links-box');if(!box)return;
   const d=window._jobDraftLinks||[];
-  box.innerHTML=d.length?d.map((lk,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:7px 11px;background:var(--cream);border-radius:7px;font-size:11.5px;flex-wrap:wrap">
-      🔗 <input type="text" value="${esc(lk.platform)}" title="Platform name — editable; the link code and URL never change" style="width:110px;padding:4px 7px;border:1.5px solid var(--border);border-radius:5px;font-size:11px;font-weight:700" oninput="(window._jobDraftLinks||[])[${i}].platform=this.value">
-      ${lk.code?`<span style="font-family:ui-monospace,monospace">${esc(_sourceLinkUrl(lk.code))}</span><button class="btn-sm bg-cream" style="cursor:pointer" onclick="_srcCopy('${esc(lk.code)}',this)">copy</button>`:'<span style="color:var(--soft)">link minted on save</span>'}
-      <input type="text" value="${esc(lk.wage||'')}" placeholder="pay for this link (else job pay)" title="Per-link pay override — fills {pay}/{wage} for candidates from THIS link" style="width:170px;padding:4px 7px;border:1.5px solid var(--border);border-radius:5px;font-size:11px" oninput="(window._jobDraftLinks||[])[${i}].wage=this.value">
-      <div style="flex:1"></div>
-      <button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="_jobRemovePlatform(${i})" title="Remove — deactivates this posted link on save">✕</button>
+  box.innerHTML=d.length?d.map((lk,i)=>`<div style="margin-top:6px;padding:8px 11px;background:var(--cream);border-radius:7px;font-size:11.5px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        🔗 <input type="text" value="${esc(lk.platform)}" title="Platform name — editable; the link code and URL never change" style="width:110px;padding:4px 7px;border:1.5px solid var(--border);border-radius:5px;font-size:11px;font-weight:700" oninput="(window._jobDraftLinks||[])[${i}].platform=this.value">
+        ${lk.code?`<span style="font-family:ui-monospace,monospace">${esc(_sourceLinkUrl(lk.code))}</span><button class="btn-sm bg-cream" style="cursor:pointer" onclick="_srcCopy('${esc(lk.code)}',this)">copy</button>`:'<span style="color:var(--soft)">link minted on save</span>'}
+        <div style="flex:1"></div>
+        <button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="_jobRemovePlatform(${i})" title="Remove — deactivates this posted link on save">✕</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+        <input type="text" value="${esc(lk.wage||'')}" placeholder="pay for this link (else job pay)" title="Per-link pay — fills {pay}/{wage} for candidates from THIS link" style="flex:1;min-width:150px;padding:4px 7px;border:1.5px solid var(--border);border-radius:5px;font-size:11px" oninput="(window._jobDraftLinks||[])[${i}].wage=this.value">
+        <input type="text" value="${esc(lk.method||'')}" placeholder="method / label (else 'Job: ${esc((document.getElementById('job-name')||{}).value||'…')}')" title="How this link is posted, e.g. 'sponsored post' — shown in Source links" style="flex:1;min-width:150px;padding:4px 7px;border:1.5px solid var(--border);border-radius:5px;font-size:11px" oninput="(window._jobDraftLinks||[])[${i}].method=this.value">
+        <input type="text" value="${esc(lk.notes||'')}" placeholder="notes for this link" style="flex:1;min-width:150px;padding:4px 7px;border:1.5px solid var(--border);border-radius:5px;font-size:11px" oninput="(window._jobDraftLinks||[])[${i}].notes=this.value">
+      </div>
     </div>`).join(''):'<div style="margin-top:6px;font-size:11.5px;color:var(--soft)">No links yet — add the first platform below.</div>';
 }
 function _jobAddPlatform(){
@@ -21115,7 +21124,7 @@ function _jobAddPlatform(){
   if(!p){toast('Pick or name a platform');return;}
   window._jobDraftLinks=window._jobDraftLinks||[];
   if(window._jobDraftLinks.some(l=>String(l.platform).toLowerCase()===p.toLowerCase())){toast('That platform already has a link on this job');return;}
-  window._jobDraftLinks.push({platform:p,code:null,wage:''});
+  window._jobDraftLinks.push({platform:p,code:null,wage:'',method:'',notes:''});
   const ni=document.getElementById('job-plat-new');if(ni){ni.value='';ni.style.display='none';}
   if(sel)sel.value=sel.options[0].value;
   _jobRenderLinks();
@@ -21165,16 +21174,18 @@ function _jobSave(){
   draft.forEach(d=>{
     let lk=d.code?j.links.find(x=>x.code===d.code):null;
     if(!lk)lk={code:d.code||_sourceLinkCode(SETTINGS.config.sourceLinks.concat(keep)),platform:d.platform};
-    lk.platform=d.platform;lk.wage=(d.wage||'').trim();keep.push(lk);
+    lk.platform=d.platform;lk.wage=(d.wage||'').trim();lk.method=(d.method||'').trim();lk.notes=(d.notes||'').trim();keep.push(lk);
   });
   const removed=j.links.filter(x=>!keep.some(k=>k.code===x.code));
   j.links=keep;
   const syncLink=(lk,active)=>{
     let l=SETTINGS.config.sourceLinks.find(x=>x.code===lk.code);
     if(!l){l={id:_sourceLinkId(),code:lk.code,createdAt:new Date().toISOString()};SETTINGS.config.sourceLinks.push(l);}
-    l.platform=lk.platform;l.method='Job: '+j.name+(j.client?' — '+j.client:'');
+    l.platform=lk.platform;
+    l.method=(lk.method&&lk.method.trim())||('Job: '+j.name+(j.client?' — '+j.client:''));/* per-link label wins; job label is the default */
     l.wage=(lk.wage&&lk.wage.trim())||j.wage;/* per-link pay override wins; job pay is the default */
-    l.notes=j.notes;l.jobZip=j.zip;l.jobId=j.id;l.active=active;
+    l.notes=(lk.notes&&lk.notes.trim())||j.notes;/* per-link notes win; job notes are the default */
+    l.jobZip=j.zip;l.jobId=j.id;l.active=active;
     SETTINGS.sequenceAssignments=SETTINGS.sequenceAssignments.filter(a=>!(a.match&&a.match.sourceCode===lk.code));
     if(active&&j.sequenceId)SETTINGS.sequenceAssignments.push({match:{sourceCode:lk.code},sequenceId:j.sequenceId});
   };
