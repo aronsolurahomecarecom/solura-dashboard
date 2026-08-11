@@ -20788,6 +20788,7 @@ function renderSettingsSourceLinks(){
         <div style="display:flex;gap:5px">
           <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcCopy('${esc(l.code)}',this)" title="Copy the tracking URL">\u{1F517} copy</button>
           <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcEdit('${esc(l.id)}')">edit</button>
+          ${l.jobId?'':`<button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcEdit('${esc(l.id)}')" title="Edit platform, method, pay, notes">\u270E</button>`}
           <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcToggleActive('${esc(l.id)}')" title="${inactive?'Reactivate':'Deactivate'}">${inactive?'\u25B6':'\u23F8'}</button>
           <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;font-size:10.5px" onclick="_srcDelete('${esc(l.id)}')">\u00d7</button>
         </div>
@@ -20876,6 +20877,39 @@ function _srcToggleActive(id){
   if(!l)return;
   l.active=l.active===false; /* toggle: false → true, everything else → false */
   markSettingsDirty();renderSettings();
+}
+/* Edit any link's info after creation — platform, method, pay, notes. The code (and thus
+   the posted URL) never changes, so links already published keep working. Job-owned links
+   are excluded (the ✎ button is hidden for them): the job package re-syncs their info on
+   every job save, so edits belong there. */
+function _srcEdit(id){
+  const l=(SETTINGS.config.sourceLinks||[]).find(x=>x.id===id);
+  if(!l){toast('Link not found');return;}
+  if(l.jobId){toast('🧳 This link is managed by a job package — edit it there');return;}
+  document.getElementById('m-title').textContent='✎ Edit link — code '+l.code;
+  document.getElementById('m-body').innerHTML=`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <label style="font-size:12px;color:var(--mid)">Platform<input id="se-platform" type="text" value="${esc(l.platform||'')}" placeholder="e.g. Indeed" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Method / label<input id="se-method" type="text" value="${esc(l.method||'')}" placeholder="e.g. sponsored post" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Pay (fills {pay}/{wage} for this link's candidates)<input id="se-wage" type="text" value="${esc(l.wage||'')}" placeholder="e.g. $16–$18/hr" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Notes<input id="se-notes" type="text" value="${esc(l.notes||'')}" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+    </div>
+    <div style="margin-top:10px;padding:8px 11px;background:var(--cream);border-radius:7px;font-size:11.5px">🔗 <span style="font-family:ui-monospace,monospace">${esc(_sourceLinkUrl(l.code))}</span> <span style="color:var(--soft)">— the URL never changes, posted links keep working</span></div>
+    <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+      <button class="btn-sec" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary bg-grn" onclick="_srcSaveEdit('${esc(l.id)}')">💾 Save</button>
+    </div>`;
+  document.getElementById('modal').classList.add('open');
+}
+function _srcSaveEdit(id){
+  const l=(SETTINGS.config.sourceLinks||[]).find(x=>x.id===id);
+  if(!l)return;
+  const g=i=>((document.getElementById(i)||{}).value||'').trim();
+  const platform=g('se-platform'),method=g('se-method');
+  if(!platform||!method){toast('Platform and method required');return;}
+  l.platform=platform;l.method=method;l.wage=g('se-wage');l.notes=g('se-notes');
+  markSettingsDirty();closeModal();renderSettings();
+  toast('✓ Link updated');
 }
 
 /* ══════════ JOB PACKAGES ══════════
