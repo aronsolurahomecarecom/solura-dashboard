@@ -114,6 +114,12 @@ input:focus{border-color:var(--sky);box-shadow:0 0 0 3px var(--sky-pale)}
   <div class="prog"><i id="prog"></i></div>
 
   <form id="form" onsubmit="submitForm(event)">
+    <div class="card" id="ai-fill-card" style="border:2px dashed #C59B4E;background:linear-gradient(135deg,#FEF9EC,#FFFDF6)">
+      <h2 style="margin-top:0">⚡ Fastest way: start with your résumé</h2>
+      <p style="margin:4px 0 12px;font-size:14px;line-height:1.5">Upload it (PDF) and we'll fill this application for you — then just review and complete anything we couldn't find. Or skip this and fill the form by hand.</p>
+      <input type="file" id="ai-resume" accept="application/pdf" onchange="_aiFillFromResume(this)">
+      <div id="ai-fill-status" style="margin-top:10px;font-size:13.5px;color:#8a7a55;line-height:1.5"></div>
+    </div>
     <div class="card">
       <h2>About you</h2>
       <div class="q" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -549,6 +555,65 @@ document.addEventListener('DOMContentLoaded',()=>setTimeout(renderEmployers,50))
 // ---- webhook submission ----
 // Cloudflare Worker URL — owner's deployed worker. If this changes, edit here AND in Solura_References_Form.html.
 const WEBHOOK_URL='https://solura-hiring-webhook.meir-865.workers.dev';
+
+/* ── Résumé-first AI autofill ──
+   Reads the uploaded PDF via the worker's public /apply/extract (rate-limited, whitelisted
+   fields only), fills what it finds through the SAME pathways as manual entry (input values,
+   real pill clicks, the employers list), highlights the required questions still unanswered,
+   and stuffs the file into the normal #resume input so submission uploads it as always.
+   Every failure degrades to "fill by hand" — the form never blocks on AI. */
+async function _aiFillFromResume(inp){
+  const st=document.getElementById('ai-fill-status');
+  const file=inp&&inp.files&&inp.files[0];
+  if(!file)return;
+  if(!(file.type==='application/pdf'||/\.pdf$/i.test(file.name))){st.textContent='Please upload a PDF résumé (other formats can\'t be read automatically) — or fill the form by hand.';return;}
+  if(file.size>5*1024*1024){st.textContent='That PDF is larger than 5MB — please use a smaller file, or fill the form by hand.';return;}
+  st.textContent='⏳ Reading your résumé… this takes a few seconds.';
+  try{
+    const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]||'');r.onerror=rej;r.readAsDataURL(file);});
+    const resp=await fetch(WEBHOOK_URL+'/apply/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pdfBase64:b64,filename:file.name})});
+    const j=await resp.json();
+    if(!j.ok||!j.extract)throw new Error(j.error||'no extract');
+    const x=j.extract;let filled=0;
+    const f=document.getElementById('form');
+    const setIn=(n,v)=>{const el=f&&f.elements&&f.elements[n];if(el&&v!=null&&String(v).trim()&&!el.value){el.value=String(v).trim();filled++;}};
+    if(x.name&&!((f.elements.firstName||{}).value)){const parts=String(x.name).trim().split(/\s+/);setIn('firstName',parts[0]);setIn('lastName',parts.slice(1).join(' '));}
+    setIn('phone',x.phone);setIn('email',x.email);setIn('address',x.address);setIn('city',x.city);setIn('state',x.state);setIn('zip',x.zip);
+    const clickOpt=(q,v)=>{const b=document.querySelector('[data-q="'+q+'"] .opt[data-v="'+v+'"]');if(b&&!b.classList.contains('on')){b.click();filled++;return true;}return false;};
+    const clickOptByLabel=(q,label)=>{const bs=document.querySelectorAll('[data-q="'+q+'"] .opt');for(const b of bs){if(b.textContent.toLowerCase().indexOf(String(label).toLowerCase())>-1){if(!b.classList.contains('on')){b.click();filled++;}return true;}}return false;};
+    (x.certs||[]).forEach(cName=>{if(!clickOpt('cred',cName))clickOptByLabel('cred',cName);});
+    (x.skills||[]).forEach(s2=>clickOptByLabel('expertise',s2));
+    if(typeof x.yearsExperience==='number'){
+      const yv=x.yearsExperience<=0?'0':x.yearsExperience<1?'u1':x.yearsExperience<=2?'12':x.yearsExperience<=5?'35':'5p';
+      clickOpt('years',yv);
+    }
+    if(Array.isArray(x.employers)&&x.employers.length&&typeof _employers!=='undefined'&&!_employers.some(e=>e.name&&e.name.trim())){
+      x.employers.slice(0,4).forEach(e2=>{
+        if(!e2||!e2.name)return;
+        const to=String(e2.to||'').toLowerCase();
+        _employers.push({name:e2.name,startYear:String(parseInt(e2.from)||''),endYear:to==='present'?'':String(parseInt(e2.to)||''),current:to==='present'});
+        filled++;
+      });
+      if(typeof renderEmployers==='function')renderEmployers();
+    }
+    /* the résumé itself rides the normal upload path */
+    try{
+      const rEl=document.getElementById('resume');
+      if(rEl){const dt=new DataTransfer();dt.items.add(file);rEl.files=dt.files;}
+    }catch(e){}
+    /* outline the required singles still unanswered so "review and fill the rest" is visual */
+    let open=0;
+    ['age18','workauth','transport','dl','bgcheck','revoked','abuseFinding','years','longest','personalCare','lifting','smoker'].forEach(q=>{
+      const box=document.querySelector('[data-q="'+q+'"]');
+      if(box&&ans[q]===undefined){box.style.outline='2px solid #E78B29';box.style.borderRadius='8px';open++;}
+    });
+    st.innerHTML='✓ Filled <b>'+filled+'</b> answer'+(filled===1?'':'s')+' from your résumé.'+(open?' Please review everything and answer the <b style="color:#E78B29">'+open+' outlined question'+(open===1?'':'s')+'</b> below.':' Please review everything below before submitting.');
+  }catch(e){
+    console.warn('ai fill:',e);
+    st.textContent='We couldn\'t read that automatically — no problem, just fill the form by hand. Your résumé will still be attached.';
+    try{const rEl=document.getElementById('resume');if(rEl&&inp.files[0]){const dt=new DataTransfer();dt.items.add(inp.files[0]);rEl.files=dt.files;}}catch(e2){}
+  }
+}
 
 /* Live-format phone as (xxx) xxx-xxxx while the candidate types. Strips non-digits, then rebuilds
    the formatted string. Works with paste, backspace, and any cursor position because we always

@@ -13226,7 +13226,7 @@ async function removeAwaitingItem(idx){
   renderWorkspace();
 }
 
-function payRange(){const _sp=(typeof _seqPayOverride==='function')?_seqPayOverride():null;if(_sp)return _sp;const floor=14,ceil=18;let base=15.5;if(W&&(W.st.certs||[]).some(x=>/CNA|STNA/i.test(x)))base+=1.25;const sc=W?scoreW():{Q:null};if(W&&(W.q.cmp>=4||(sc.Q&&sc.Q>=85)))base+=1;
+function payRange(cand){const cc=cand||W;const _sp=(typeof _seqPayOverride==='function')?_seqPayOverride(cc):null;if(_sp)return _sp;const floor=14,ceil=18;let base=15.5;if(cc&&cc.st&&(cc.st.certs||[]).some(x=>/CNA|STNA/i.test(x)))base+=1.25;let _q=null;try{_q=(cc===W&&W)?scoreW().Q:(cc?scoreRow(cc).Q:null);}catch(e){}if(cc&&((cc.q&&cc.q.cmp>=4)||(_q&&_q>=85)))base+=1;
   let lo=Math.max(floor,Math.round((base-0.5)*2)/2),hi=Math.min(ceil,Math.round((base+1)*2)/2);if(hi<lo)hi=lo;
   return '$'+(''+lo).replace(/\.0$/,'')+'–$'+(''+hi).replace(/\.0$/,'')+'/hr';}
 function getEffectiveTemplate(tplKey,c){
@@ -13255,7 +13255,7 @@ function getEffectiveTemplate(tplKey,c){
       .replace(/\{missing\}/g,(c&&c.__missing||[]).map(x=>'• '+x).join('\n'))
       .replace(/\{name\}/g,fullName)
       .replace(/\{first\}/g,first)
-      .replace(/\{pay\}/g,payRange())
+      .replace(/\{pay\}/g,payRange(c))
       .replace(/\{refCode\}/g,referralCode);
     return {s:sub(custom.s||''),b:sub(custom.b||'')};
   }
@@ -13356,7 +13356,7 @@ function substituteLive(text,candidate){
     .replace(/\{refLink\}/g,refLink)
     .replace(/\{name\}/g,fullName)
     .replace(/\{first\}/g,first)
-    .replace(/\{pay\}/g,payRange())
+    .replace(/\{pay\}/g,payRange(c))
     .replace(/\{refCode\}/g,referralCode);
 }
 function doEmail(tpl,advanceTo){const t=getEffectiveTemplate(tpl,W);emailModal(tpl,t.s,t.b,advanceTo);}
@@ -23281,11 +23281,16 @@ function _seqCreateTemplateNamed(label){
 /* Effective pay for the OPEN candidate's {pay}: source-link wage first (the number
    their ad promised — that promise wins), sequence.payRange as the fallback. Returns
    null when neither exists so payRange() falls through to the computed default. */
-function _seqPayOverride(){
+function _seqPayOverride(cand){
+  /* Effective pay for THIS candidate's conditions: their link's wage (per-link job override
+     → job pay, both written to the source link) wins; their sequence's payRange is the
+     fallback; null lets payRange() compute the generic band. Candidate-aware — never
+     silently the open workspace's pay for someone else's email. */
   try{
-    if(!window.SeqBuilderV3||!W||!W.st)return null;
-    const src=(W.st.sourceCode&&typeof _lookupSourceLink==='function')?_lookupSourceLink(W.st.sourceCode):null;
-    const seq=W.st.sequenceId?(SETTINGS.sequences||[]).find(q=>q.id===W.st.sequenceId):null;
+    const cc=cand||W;
+    if(!window.SeqBuilderV3||!cc||!cc.st)return null;
+    const src=(cc.st.sourceCode&&typeof _lookupSourceLink==='function')?_lookupSourceLink(cc.st.sourceCode):null;
+    const seq=cc.st.sequenceId?(SETTINGS.sequences||[]).find(q=>q.id===cc.st.sequenceId):null;
     const rp=window.SeqBuilderV3.resolvePay(seq||null,(src&&src.wage)||null);
     return (rp&&rp.text)||null;
   }catch(e){return null;}
