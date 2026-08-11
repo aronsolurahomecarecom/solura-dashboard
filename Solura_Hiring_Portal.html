@@ -11121,7 +11121,7 @@ function _saveFilterOpen(key,isOpen){
 
 /* ===================== render ===================== */
 function setView(v){
-  if(v==='settings'&&!isAdmin()){toast('Settings is restricted to admins. Ask Aron to grant access.');return;}
+  if(v==='settings'&&!isAdmin()){toast('Settings is restricted to admins. Ask Aron to grant access for: '+(userEmail||'your account (sign in first)'));return;}
   view=v;
   document.getElementById('tab-pipe').classList.toggle('on',v==='pipeline');
   document.getElementById('tab-inbox').classList.toggle('on',v==='inbox');
@@ -21832,6 +21832,11 @@ function renderSettingsAccess(){
   const pwSet=isSeqPasswordSet();
   const pwSetDate=SETTINGS.seqPasswordSetAt?new Date(SETTINGS.seqPasswordSetAt).toLocaleDateString():'';
   return `<div class="wscard"><h3>Settings access</h3>
+    <div style="margin-bottom:12px;padding:9px 12px;background:var(--cream);border:1px solid var(--border);border-radius:8px;font-size:12.5px">
+      👤 Signed in as <b style="font-family:ui-monospace,monospace">${esc(userEmail||'(unknown — identity not loaded)')}</b>${userName?' ('+esc(userName)+')':''}
+      · ${isAdmin()?'<span style="color:var(--grn-deep);font-weight:700">admin ✓</span>':'<span style="color:var(--red);font-weight:700">not admin</span>'}
+      <div style="font-size:10.5px;color:var(--soft);margin-top:3px">Grants must match THIS exact address as Microsoft reports it — if someone can't see Settings, have them read their address off this line on their own screen and grant that.</div>
+    </div>
     <p class="set-help"><b>${esc(SUPER_ADMINS.join(', '))}</b> is always admin. Add other Microsoft 365 accounts below to grant them Settings access.</p>
     ${admins.length?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">'+admins.map(e=>`<span class="added-chip">${esc(e)}<button onclick="removeAdmin('${esc(e).replace(/'/g,"\\'")}')">✕</button></span>`).join('')+'</div>':'<p style="font-size:12px;color:var(--soft);font-style:italic;margin-bottom:14px">No additional admins yet — only the super-admin can access Settings.</p>'}
     <div class="set-row">
