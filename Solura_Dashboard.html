@@ -1399,7 +1399,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-36';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0804-38';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1952,6 +1952,11 @@ function getNames(ri){
   return {dm:dmFirst,pt:ptFirst,hasDM:!!dmFirst,apfm:isAPFM(ri)};
 }
 function fillNames(s,names){
+  // Graceful fallbacks — a missing name must never ship a broken phrase
+  // like "\u2014's care" to a real family.
+  names=names||{};
+  if(!String(names.pt||'').trim())names=Object.assign({},names,{pt:'your loved one'});
+  if(!String(names.dm||'').trim())names=Object.assign({},names,{dm:'there'});
   var dm=names.dm||'there';
   // Normalize placeholder dialects FIRST: {{name}}, {name}, {Name}, {{dm}},
   // {{pt}} → the canonical {dm}/{pt} forms, then fill as before. HTML pasted
@@ -6081,6 +6086,17 @@ function parseClaudeEmailJSON(text){
 }
 // Wrap Claude-generated document HTML in Solura letterhead and package it
 // as a Word-compatible .doc (Word opens styled HTML natively — zero deps).
+// A body that is ITSELF a complete email design (own preheader, 600px
+// wrapper, full <html> doc, or multi-table layout) must never be wrapped
+// in the Settings shell — pasted HTML emails included.
+function isFullDesignHtml(html){
+  var v=String(html||'');
+  var probe=v.replace(/<!--[\s\S]*?-->/g,'').slice(0,600);
+  return /<html[\s>]/i.test(probe)
+    ||/display\s*:\s*none[^>]*>/i.test(probe)
+    ||/<table[^>]+width=["']?600/i.test(probe)
+    ||(v.length>3500&&(v.match(/<\/table>/gi)||[]).length>=3);
+}
 // Claude sometimes mirrors mockup scaffolding and returns bare <tr>/<td>
 // fragments. Orphan rows inside the shell's slot (a <td>) are invalid HTML
 // that clients mangle — wrap them into a complete, embeddable table.
@@ -6413,6 +6429,14 @@ async function claudeGenerate(){
       // If the composer already holds a template with a {{body}}-style slot
       // (the preset-template workflow), the draft FILLS the slot instead of
       // replacing the template — the template is the design wrapper.
+      // If Claude produced a COMPLETE email design (its own preheader /
+      // full layout — the care-plan mockup flow), the Settings shell must
+      // stand down or the recipient gets an email nested inside an email.
+      var isCompleteDesign=isFullDesignHtml(newHtml);
+      if(isCompleteDesign){
+        _shellSuppressed=true;
+        toast('\ud83c\udfa8 Full-design draft \u2014 sending as-is, without the Settings shell');
+      }
       var pre=String(bodyEl.innerHTML||'');
       var preSlot=findShellSlot(pre);
       if(preSlot){
@@ -6428,6 +6452,7 @@ async function claudeGenerate(){
       hollow:_ctsSkippedNoData.slice(0,4),
       refDoc:(f&&f.name)||null,reply:!!_emailReplyTo,
       respFormat:draft.format,gotDoc:!!(draft.doc&&draft.doc.html),
+      fullDesign:!!_shellSuppressed,
       filledTemplateSlot:!!preSlot,
       draftHead:String(draft.body||'').replace(/\s+/g,' ').slice(0,200)});
     closeModal('modal-claude');
@@ -7437,10 +7462,13 @@ async function sendEmail(){
     traceOp({kind:'send-BLOCKED',to:toAddr,subj:String(subj||'').slice(0,60),reason:'unfilled slot '+_unfilled,bodyHead:String(bodyHtml).slice(0,200)});
     throw new Error('The email still contains an unfilled '+_unfilled+' placeholder \u2014 use \u2728 to write the message into it, or delete the placeholder text before sending.');
   }
-  var _shellWas=!_shellSuppressed&&!!String(cfg('emailShellHtml')||'').trim();
-  if(!_shellSuppressed)bodyHtml=applyEmailShell(bodyHtml,ri);
+  // Universal gate: a full-design body (pasted HTML email, mockup draft,
+  // weekly variant) sends AS-IS — the shell only wraps plain content.
+  var _bodyIsDesign=isFullDesignHtml(bodyHtml);
+  var _shellWas=!_shellSuppressed&&!_bodyIsDesign&&!!String(cfg('emailShellHtml')||'').trim();
+  if(_shellWas)bodyHtml=applyEmailShell(bodyHtml,ri);
   traceOp({kind:'send',to:toAddr,subj:String(subj||'').slice(0,60),
-    reply:!!_emailReplyTo,suppressed:!!_shellSuppressed,shellApplied:_shellWas,
+    reply:!!_emailReplyTo,suppressed:!!_shellSuppressed,fullDesignBody:_bodyIsDesign,shellApplied:_shellWas,
     slotAfter:findShellSlot(bodyHtml)?'STILL PRESENT \u26A0':'none',
     pixel:!!_trkPx,atts:emailAttachments.map(function(a){return a.name;}),
     bodyHead:String(bodyHtml).replace(/\s+/g,' ').slice(0,260),
