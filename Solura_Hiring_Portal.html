@@ -16658,10 +16658,23 @@ async function openEmailDetail(messageId){
     /* Outlook button — open in popup, not new tab */
     const outBtn=document.getElementById('em-outlook-btn');
     if(outBtn)outBtn.onclick=()=>openLinkPopup(msg.webLink||'#','outlookEmail',1100,800);
-    /* attachments — show all NON-inline ones in the panel; inline ones rendered in body */
-    const atts=allAtts.filter(a=>(a['@odata.type']==='#microsoft.graph.fileAttachment'||a.contentType)&&!a.isInline);
+    /* Assignable attachments: regular files PLUS meaningful INLINE images — candidates
+       often paste cert photos straight into the email body, which Outlook marks isInline;
+       those must be assignable too. Tiny inline images (signature logos, pixels) skipped
+       by a 15KB floor. Each row carries its ORIGINAL index into msg.attachments: the
+       assign handlers index the unfiltered array, and using the filtered position could
+       assign the WRONG attachment whenever inline images existed. */
+    const attsIdx=[];
+    allAtts.forEach((a0,oi)=>{
+      if(!(a0['@odata.type']==='#microsoft.graph.fileAttachment'||a0.contentType))return;
+      if(a0.isInline){
+        const approxSize=a0.size||((a0.contentBytes||'').length*0.75);
+        if((a0.contentType||'').startsWith('image/')&&a0.contentBytes&&approxSize>15000)attsIdx.push({a:a0,oi});
+      }else attsIdx.push({a:a0,oi});
+    });
+    const atts=attsIdx.map(x=>x.a);
     /* Image attachments (non-inline) also get an inline preview at the top of the body */
-    const imageAtts=atts.filter(a=>(a.contentType||'').startsWith('image/')&&a.contentBytes);
+    const imageAtts=attsIdx.filter(x=>!x.a.isInline&&(x.a.contentType||'').startsWith('image/')&&x.a.contentBytes).map(x=>x.a);
     if(imageAtts.length){
       const previews=imageAtts.map(a=>`<div style="margin:12px 0;padding:8px;background:var(--cream);border-radius:8px;display:inline-block;max-width:100%"><img src="data:${esc(a.contentType)};base64,${a.contentBytes}" style="max-width:100%;max-height:400px;border-radius:6px;display:block" alt="${esc(a.name||'')}"><div style="font-size:11px;color:var(--soft);margin-top:6px">${esc(a.name||'image')}</div></div>`).join('');
       document.getElementById('em-body').insertAdjacentHTML('beforeend','<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-soft)"><div style="font-size:11px;color:var(--soft);font-weight:700;text-transform:uppercase;margin-bottom:6px">Image attachments</div>'+previews+'</div>');
@@ -16677,7 +16690,7 @@ async function openEmailDetail(messageId){
         <div style="margin-top:4px;color:var(--ink);font-size:12.5px">${awaiting.map(a=>'<span style="background:#fff;border:1px solid var(--gold-mid);padding:2px 8px;border-radius:5px;margin-right:5px;font-weight:600">'+esc(_awaitingItemLabel(a))+'</span>').join('')}</div>
         <div style="margin-top:4px;color:var(--soft);font-size:11px">Click "Assign as…" on the matching attachment below to fulfill the request and file it correctly.</div>
       </div>`:'';
-      const attRows=atts.map((a,i)=>_renderAttachmentRow(a,i,messageId,candForEmail,awaiting)).join('');
+      const attRows=attsIdx.map(x=>_renderAttachmentRow(x.a,x.oi,messageId,candForEmail,awaiting)).join('');
       document.getElementById('em-attach-list').innerHTML=awaitingHeader+attRows;
     }
     /* #9 — mark-received controls for any outstanding awaiting items (works even with no attachment) */
@@ -16830,8 +16843,11 @@ function _renderAttachmentRow(a,i,messageId,cand,awaiting){
   return `<div class="attach-row" style="display:block">
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
       <div class="ai" style="font-size:20px">${icon}</div>
-      <div class="an" style="flex:1;font-weight:600">${esc(a.name||'attachment')}</div>
+      <div class="an" style="flex:1;font-weight:600">${esc(a.name||'attachment')}${a.isInline?' <span style="font-size:9.5px;background:#EDF3FA;color:var(--sky-deep);border:1px solid #B8D4F0;border-radius:4px;padding:1px 5px;font-weight:700">INLINE PHOTO</span>':''}</div>
       <div class="as" style="color:var(--soft);font-size:11px">${kb} KB</div>
+      <label style="display:flex;align-items:center;gap:4px;font-size:10.5px;color:var(--soft)" title="Received date — backdate when this actually arrived earlier (stamped on the credential and the log)">received
+        <input type="date" id="att-date-${i}" value="${new Date().toISOString().slice(0,10)}" max="${new Date().toISOString().slice(0,10)}" style="padding:3px 5px;border:1.5px solid var(--border);border-radius:5px;font-size:10.5px;font-family:inherit">
+      </label>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-left:32px">
       ${primaryBtn}
@@ -16907,7 +16923,10 @@ async function _assignAttachmentToAwaiting(messageId,attIdx,row){
   if(!cand){toast('Candidate not found');return;}
   const awaiting=_currentAwaitingItems(cand);
   if(!awaiting.length){toast('Nothing awaiting');return;}
-  await _doAssignment(messageId,attIdx,cand,awaiting[0]);
+  const it0=Object.assign({},awaiting[0]);
+  const bd=((document.getElementById('att-date-'+attIdx)||{}).value||'');
+  if(bd&&bd!==new Date().toISOString().slice(0,10))it0.backdate=bd;
+  await _doAssignment(messageId,attIdx,cand,it0);
 }
 /* Assign via the dropdown selection */
 async function _assignAttachmentCustom(messageId,attIdx,row){
@@ -16938,7 +16957,10 @@ async function _assignAttachmentCustom(messageId,attIdx,row){
     name=document.getElementById('att-custom-'+attIdx).value.trim();
     if(!name){toast('Enter a file name');return;}
   }
-  await _doAssignment(messageId,attIdx,cand,{kind,name});
+  const item={kind,name};
+  const bd=((document.getElementById('att-date-'+attIdx)||{}).value||'');
+  if(bd&&bd!==new Date().toISOString().slice(0,10))item.backdate=bd;
+  await _doAssignment(messageId,attIdx,cand,item);
 }
 /* Common assignment path — downloads from email, uploads to onboarding folder under the right
    filename, updates candidate state, removes from awaiting queue. */
@@ -16994,7 +17016,7 @@ async function _doAssignment(messageId,attIdx,cand,item){
           issuedAt:'',expiresAt:'',
           fileUrl:uploaded.webUrl,fileName:finalName,
           remindDaysBefore:60,
-          addedAt:new Date().toISOString(),
+          addedAt:item.backdate?new Date(item.backdate+'T12:00:00').toISOString():new Date().toISOString(),
           addedBy:window.userEmail||''
         });
       }
@@ -17013,6 +17035,7 @@ async function _doAssignment(messageId,attIdx,cand,item){
     /* Remove this item from awaiting queue */
     cand.st.awaitingItems=(cand.st.awaitingItems||[]).filter(a=>!(a.kind===item.kind&&(a.name||'')===(item.name||'')));
     cand.st.awaitingItemsReceived=(cand.st.awaitingItemsReceived||0)+1; /* attachment genuinely arrived */
+    if(item.backdate)cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'📎 Receipt backdated to '+item.backdate+' — it actually arrived then'});
     /* AUTO-RELEASE: if the queue is now empty AND the candidate was parked in awaiting, release
        them automatically. The user's intent when they parked was "wait for this stuff" — once
        all of it has arrived, there's no reason to keep them parked behind a release button. The
