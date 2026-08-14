@@ -16318,7 +16318,7 @@ function _credEditModal(existing){
       <label class="set-field">Issued date <span style="color:var(--soft);font-size:10px;font-weight:400">(optional)</span>
         <input id="cred-issued" type="date" value="${esc(c.issuedAt)}" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px">
       </label>
-      <label class="set-field">Expiration date <span style="color:var(--red);font-size:10px;font-weight:600">REQUIRED</span>
+      <label class="set-field">Expiration date <span style="color:var(--soft);font-size:10px;font-weight:400">(optional — leave empty if it doesn't expire; no renewal reminders without it)</span>
         <input id="cred-expires" type="date" value="${esc(c.expiresAt)}" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px">
       </label>
       <label class="set-field" style="grid-column:1/-1">Notes <span style="color:var(--soft);font-size:10px;font-weight:400">(optional)</span>
@@ -16337,8 +16337,7 @@ async function _credSave(id,isEdit){
   const get=k=>(document.getElementById('cred-'+k)||{}).value||'';
   const name=get('name').trim();
   if(!name){toast('Name required');return;}
-  const expires=get('expires');
-  if(!expires){toast('Expiration date required — that\'s the whole point of tracking');return;}
+  const expires=get('expires'); /* optional — CPR cards expire, an STNA listing doesn't; no date just means no renewal reminders (credStatus already renders 'No expiration') */
   W.st.credentials=W.st.credentials||[];
   let cred;
   if(isEdit==='true'||isEdit===true){
