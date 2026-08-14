@@ -10308,6 +10308,8 @@ const TRIGGERS={
   interviewDone:    c => !!(c.st&&c.st.interviewAnsweredAt),
   onboardingDone:   c => c.stage==='Hired',
   employersVerified:c => {
+    /* An explicit operator waiver satisfies the trigger (logged; see skipEmployerVerification) */
+    if(c.st&&c.st.employerVerifyWaived)return true;
     /* All employers either marked verified, unable, or denied */
     const emp=(c.st&&c.st.employers)||[];
     return emp.length>0&&emp.every(e=>e.v==='ok'||e.v==='no'||e.v==='denied');
@@ -15234,11 +15236,30 @@ function vrT2Advance(){advanceWS('References','Independent references complete')
 function vrDisqualify(){if(confirm('Disqualify — employment could not be verified?'))quickDecline(W.excelRow);}
 
 /* Three-tier verification + reference hub (replaces the old flat verify list). */
+/* Operator skip: waives employer verification (logged), satisfies the employersVerified
+   trigger, and moves the stage to the next one in THIS candidate's sequence — releasing the
+   vrAction intercept that otherwise owns the 'Verify employers' stage. The stage-snap then
+   walks the sequence pointer forward on the next render. */
+async function skipEmployerVerification(){
+  if(!W)return;
+  if(!confirm('Skip employer verification for '+W.name+'?\n\nThis waives the check (logged on the candidate) and moves them to the next stage.'))return;
+  W.st.employerVerifyWaived=new Date().toISOString();
+  logW('⏭ Employer verification waived by '+(userEmail||'operator'));
+  const cand=pipeline.find(x=>x.excelRow===W.row);
+  const stages=(typeof _seqStagesFor==='function')?_seqStagesFor(cand||{st:W.st,stage:W.stage}):[];
+  const i=stages.indexOf('Verify employers');
+  const next=(i>=0&&stages[i+1])?stages[i+1]:'Interview invite';
+  W.stage=next;
+  await saveW(true);
+  toast('⏭ Verification skipped — moved to '+next);
+  renderWorkspace();
+}
 function verifyBlock(){
   vrInit(W.st);
   const emp=W.st.employers||[];
   const cfg=vrCfg();
   const tier=W.st.vr.tier||1;
+  const skipBar=`<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn-sm" style="background:#fff;border:1.5px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer" onclick="skipEmployerVerification()" title="Waive the check and move to the next stage — logged">⏭ Skip verification</button></div>`;
   /* tier stepper header */
   const step=(n,label,active,done)=>`<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;${active?'background:#C59B4E;color:#fff':done?'background:#EBF5EA;color:#3D7A34':'background:#F1EFEA;color:#9A958C'}">${done?'✓':n}&nbsp;${label}</span>`;
   const t1done=tier>=2;
@@ -15247,12 +15268,12 @@ function verifyBlock(){
     ${step(2,'Independent refs',tier===2,false)}<span style="color:var(--soft)">→</span>
     ${step(3,'Candidate refs',false,false)}</div>`;
   if(!emp.length){
-    return `<div class="wscard" id="ws-verify"><h3>Verify past employers</h3>${header}`+
+    return `<div class="wscard" id="ws-verify"><h3>Verify past employers</h3>${skipBar}${header}`+
       emptyCard('🏢','No past employers on file','+ add employer',"W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:'',source:'manual'});renderWorkspace()")+
       `<div class="brow" style="margin-top:6px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Skipped employer verify')" style="flex:0 0 auto;padding:8px 14px">Skip → candidate references →</button></div></div>`;
   }
-  if(tier>=2)return `<div class="wscard" id="ws-verify"><h3>Independent references</h3>${header}${vrTier2View(emp,cfg)}</div>`;
-  return `<div class="wscard" id="ws-verify"><h3>Verify past employers</h3>${header}${vrTier1View(emp,cfg)}</div>`;
+  if(tier>=2)return `<div class="wscard" id="ws-verify"><h3>Independent references</h3>${skipBar}${header}${vrTier2View(emp,cfg)}</div>`;
+  return `<div class="wscard" id="ws-verify"><h3>Verify past employers</h3>${skipBar}${header}${vrTier1View(emp,cfg)}</div>`;
 }
 
 /* ---------- TIER 1 : hard facts ---------- */
