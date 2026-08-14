@@ -17953,8 +17953,12 @@ async function _pullYardstikReport(){
   if(!wtok){toast('Set the internal worker token first (Settings → 🔌 Integrations)');return;}
   toast('📥 Pulling the report from Yardstik…');
   try{
-    const r=await fetch(ZI_WORKER_URL+'/yardstik/report-pdf?reportId='+encodeURIComponent(W.st.yardstik.reportId),{headers:{'X-Solura-Token':wtok}});
-    if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||('HTTP '+r.status));}
+    const qs='reportId='+encodeURIComponent(W.st.yardstik.reportId)+(W.st.yardstik.candidateId?'&candidateId='+encodeURIComponent(W.st.yardstik.candidateId):'');
+    const r=await fetch(ZI_WORKER_URL+'/yardstik/report-pdf?'+qs,{headers:{'X-Solura-Token':wtok}});
+    if(!r.ok||(r.headers.get('Content-Type')||'').indexOf('pdf')<0){
+      const j=await r.json().catch(()=>({}));
+      throw new Error(j.error||('HTTP '+r.status));
+    }
     const blob=await r.blob();
     const fileName='background-report-'+((W.st.tpCheck||'')==='clear'?'CLEAR':((W.st.tpCheck||'')==='flag'?'FLAG':'RESULT'))+'-'+today()+'.pdf';
     const uploaded=await uploadPdfToOnboarding(W.name,fileName,blob);
