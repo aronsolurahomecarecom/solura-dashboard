@@ -1059,6 +1059,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <button class="st-nav-btn" data-action="st-nav" data-sec="claude">✨ Claude AI</button>
       <button class="st-nav-btn" data-action="st-nav" data-sec="notify">🔔 Notifications</button>
       <button class="st-nav-btn" data-action="st-nav" data-sec="data">🗄 Data &amp; analytics</button>
+      <button class="st-nav-btn" data-action="st-nav" data-sec="voiceagent">🎙 Voice agent</button>
       <button class="st-nav-btn" data-action="st-nav" data-sec="about">ℹ About</button>
     </nav>
     <div class="st-content">
@@ -1207,6 +1208,25 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
             <button data-action="st-wipe-feedback" class="st-btn-ghost" style="margin-left:8px;padding:5px 11px;font-size:11px">Wipe stack</button>
           </div>
         </div>
+      </section>
+
+      <section class="st-sec" id="st-sec-voiceagent" hidden>
+        <h3 class="st-h">🎙 Voice agent (Retell / Vapi)</h3>
+        <p class="st-p">Connects the AI phone agent to this dashboard through your <strong>voice bridge worker</strong> (a second Cloudflare worker, separate from the tracking one — see <code style="font-size:11px">Voice_Agent_Setup.md</code>). The dashboard pushes each lead's context up so the agent greets callers by name, and pulls every call result back down: outcomes, captured details, booked consults, and opt-outs land on the lead automatically. Unknown inbound callers become new leads. Nothing here dials anyone — outbound calls are triggered by Make.com or the voice platform itself.</p>
+        <div class="st-field">
+          <label class="ee-lbl">Voice bridge worker URL</label>
+          <input type="text" class="ee-inp" placeholder="https://solura-voice.yourname.workers.dev" data-cfg="voiceAgentUrl" data-cfgtype="str">
+        </div>
+        <div class="st-field">
+          <label class="ee-lbl">Dashboard token (DASH_TOKEN from the worker)</label>
+          <input type="password" class="ee-inp" autocomplete="off" data-cfg="voiceAgentToken" data-cfgtype="str">
+        </div>
+        <div class="st-field" style="display:flex;gap:8px;flex-wrap:wrap">
+          <button data-action="va-test" class="st-btn-sky">🔌 Test connection</button>
+          <button data-action="va-sync" class="st-btn-ghost">📤 Push lead mirror now</button>
+        </div>
+        <div id="va-test-out" style="font-size:12px;margin-top:4px;line-height:1.7;color:var(--mid);white-space:pre-line"></div>
+        <p class="st-p" style="margin-top:14px">How results are applied: a live conversation marks the lead <em>responded</em> (off-sequence, Last Contact stamped) · a booked consult sets status to Assessment Scheduled and puts the visit date in Next Follow-Up · opt-outs join the do-not-call list here <em>and</em> on the worker, which blocks future dials even when the dashboard is closed · every call is written to the Comms Log with its A/B/C script variant, so the analytics hub can compare booked-consult rate per variant. Statuses a human already advanced (assessment / proposal / signed / on service) are never auto-changed.</p>
       </section>
 
       <section class="st-sec" id="st-sec-about" hidden>
@@ -1399,7 +1419,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0804-38';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0814-39';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1770,6 +1790,8 @@ var CONFIG_DEFAULTS={
   emailShellHtml:'',
   trackerUrl:'',
   trackerToken:'',
+  voiceAgentUrl:'',
+  voiceAgentToken:'',
   claudeModel:'claude-sonnet-4-6',
   claudeTraining:'',
   emailSignature:'',
@@ -1795,6 +1817,8 @@ function applyConfig(){
   if(inboundEmailPollTimer){stopInboundPolling();startInboundPolling();}
   // Open-tracking poller runs on its own timer (independent of the inbox)
   try{startTrackerPolling();}catch(_){}
+  // Voice-agent writeback poller — also independent
+  try{startVoicePolling();}catch(_){}
 }
 
 /* ─── Engine starting-point presets ────────────────────────────────────
@@ -2156,6 +2180,8 @@ async function loadData(){
     await maybeRunMigration();
 
     buildUI();
+    // Voice agent: push the fresh phone→context mirror (no-op if unchanged)
+    try{vaSyncMirror();}catch(_){}
   }catch(e){showErr(e.message);}
 }
 
@@ -4353,6 +4379,11 @@ function buildDiagnosticReport(){
     L.push('TRAINING TEXT BUDGET: '+_tt+' chars (~'+Math.round(_tt/4/1000)+'K tokens)'+(_tt>120000?' \u26A0 heavy \u2014 every draft pays this':' \u2713'));
   }catch(_){}
   L.push('VOICE SAMPLES: '+(function(){try{return voiceCorpus().length;}catch(_){return '?';}})());
+  L.push('VOICE AGENT: '+(function(){try{
+    if(!vaCfg())return 'not configured';
+    return _vaStatus+' · last poll '+(_vaLastPollAt?Math.round((Date.now()-_vaLastPollAt)/1000)+'s ago':'never')
+      +' · seen '+Object.keys(vaSeen()).length+' writebacks · DNC '+Object.keys(vaDnc()).length;
+  }catch(_){return '?';}})());
   var _ak='';try{_ak=localStorage.getItem('claudeApiKey')||(enginesDoc.config&&enginesDoc.config.claudeApiKey)||'';}catch(_){}
   L.push('KEYS: anthropic '+(_ak?'\u2713':'MISSING')+' \u00b7 ghl '+(GHL_KEY()?'\u2713':'MISSING'));
   L.push('MODEL: '+(cfg('claudeModel')||'claude-sonnet-4-6')+' \u00b7 temperature 0.3 (fixed)');
@@ -5908,6 +5939,359 @@ async function pollTrackerEvents(){
       toast('👀 '+(f0.leadName||'Someone')+(f0.outcome==='doc-opened'?' opened your document':' opened your email'));
     }
   }catch(_){/* best-effort */}
+}
+
+/* ─── 🎙 Voice agent bridge (Integration Spec v2) ────────────────────────
+ * The dashboard can't serve HTTPS endpoints (it's a static page), so a
+ * small Cloudflare Worker (solura-voice-worker.js) fronts the voice
+ * platform (Retell/Vapi):
+ *   · platform calls the worker's /api/voice/lookup + /api/voice/writeback
+ *   · dashboard PUSHES a phone→context mirror to the worker (vaSyncMirror,
+ *     one KV write per changed sync — free-tier write budget)
+ *   · dashboard POLLS queued writebacks (vaPoll), applies each to the
+ *     sheet (notes, status, off-sequence, comms log), then acks.
+ * A/B/C variant is derived deterministically from the phone digits, so
+ * every device agrees without storing a new sheet column. Opt-outs land
+ * in a local DNC set AND the worker's dnc_list (hard gate server-side).
+ * "va" prefix throughout — "voice" alone is taken by the writing-voice
+ * corpus above. ─────────────────────────────────────────────────────── */
+var VA_SEEN_KEY='va_seen_wb_v1';
+var VA_DNC_KEY='va_dnc_v1';
+var _vaPollTimer=null,_vaLastSyncHash='',_vaLastSyncAt=0,_vaLastPollAt=0,_vaStatus='not configured';
+
+function vaCfg(){
+  var u=String(cfg('voiceAgentUrl')||'').replace(/[^\x20-\x7E]/g,'').trim().replace(/\/+$/,'');
+  var t2=String(cfg('voiceAgentToken')||'').replace(/[^\x21-\x7E]/g,'');
+  return (u&&/^https:\/\//.test(u)&&t2)?{url:u,token:t2}:null;
+}
+// Last 10 digits — same normalization the worker uses, so keys always match.
+function vaNormPhone(s){
+  var d=String(s==null?'':s).replace(/\D/g,'');
+  return d.length>10?d.slice(-10):d;
+}
+// Deterministic A/B/C from the phone digits: stable across devices and
+// reloads with zero storage, evenly spread across leads.
+function vaVariantFor(phone){
+  var d=vaNormPhone(phone);if(!d)return 'A';
+  var sum=0;for(var i=0;i<d.length;i++)sum+=d.charCodeAt(i);
+  return 'ABC'.charAt(sum%3);
+}
+function vaDnc(){try{return JSON.parse(localStorage.getItem(VA_DNC_KEY)||'{}');}catch(_){return {};}}
+function vaAddDnc(phone){
+  var d=vaNormPhone(phone);if(!d)return;
+  var o=vaDnc();
+  if(!o[d]){o[d]=Date.now();try{localStorage.setItem(VA_DNC_KEY,JSON.stringify(o));}catch(_){}}
+}
+function vaSourceKey(ri){
+  if(isAPFM(ri))return 'apfm';
+  var s=lc((rows[ri]||[])[C.SO]);
+  if(s.indexOf('facebook')>-1||s.indexOf('fb ')===0)return 'facebook';
+  if(s.indexOf('web')>-1)return 'website';
+  return 'other';
+}
+function vaCareFor(ri){
+  var rel=lc((rows[ri]||[])[C.REL]);
+  if(!rel)return '';
+  if(rel.indexOf('self')>-1)return 'self';
+  if(/daughter|son|child/.test(rel))return 'parent';
+  if(/wife|husband|spouse|partner/.test(rel))return 'spouse';
+  return 'other_family';
+}
+function vaCareType(ri){
+  var sv=lc((rows[ri]||[])[C.SV]);
+  var out=[];
+  if(sv.indexOf('companion')>-1)out.push('companionship');
+  if(!out.length||/home|personal|aide|hha|care/.test(sv))out.push('in_home');
+  return out;
+}
+function vaUrgency(ri){
+  var es=lc((rows[ri]||[])[C.ES]);
+  if(!es)return 'unsure';
+  if(/asap|immediate|now|urgent|today/.test(es))return 'asap';
+  if(/week/.test(es))return 'few_weeks';
+  if(/month|plan|future|later/.test(es))return 'planning';
+  return 'unsure';
+}
+// The lookup context the agent gets before it speaks — exactly the spec's
+// response shape. Minimum needed to personalize; nothing extra leaks.
+function vaLeadContext(ri){
+  var r=rows[ri]||[];
+  var p10=vaNormPhone(r[C.PH]);
+  if(!p10||p10.length<7)return null;
+  var dm=String(r[C.DM]||'').trim(),nm=String(r[C.NM]||'').trim();
+  var first=(dm||nm)?String(dm||nm).split(/\s+/)[0]:'';
+  var src=vaSourceKey(ri);
+  var hasConsent=(src==='apfm'||src==='facebook'||src==='website'); // they submitted a form
+  var notes=String(r[C.NT]||'').replace(/\s+/g,' ').trim().slice(0,300);
+  return {
+    lead_id:'sol_r'+(ri+1),
+    first_name:first,
+    care_for:vaCareFor(ri),
+    relationship:String(r[C.REL]||'').trim().toLowerCase(),
+    loved_one_term:(nm?nm.split(/\s+/)[0]:'your loved one'),
+    city:String(r[C.AR]||'').trim(),
+    zip:'',
+    lead_source:src,
+    care_type:vaCareType(ri),
+    urgency:vaUrgency(ri),
+    consent:{has_consent:hasConsent,source:src==='apfm'?'apfm_form':(src+'_form'),captured_at:''},
+    opt_out:!!vaDnc()[p10]||isExcluded(r[C.ST]),
+    prior_notes:notes,
+    last_contact_at:String(r[C.LC]||'').trim()||null,
+    assigned_variant:vaVariantFor(p10),
+    status:String(r[C.ST]||'').trim()
+  };
+}
+function vaBuildMirror(){
+  var m={};
+  for(var i=DATA_START;i<rows.length;i++){
+    var r=rows[i];if(!r)continue;
+    if(!String(r[C.NM]||r[C.DM]||'').trim())continue;
+    var ctx=vaLeadContext(i);
+    if(ctx)m[vaNormPhone(r[C.PH])]=ctx;
+  }
+  return m;
+}
+async function vaSyncMirror(force){
+  var vc=vaCfg();if(!vc)return;
+  var mirror=vaBuildMirror();
+  var dncArr=Object.keys(vaDnc());
+  var body=JSON.stringify({token:vc.token,leads:mirror,dnc:dncArr});
+  var h=0;for(var i=0;i<body.length;i++){h=(h*31+body.charCodeAt(i))|0;}
+  var hash=body.length+':'+h;
+  // Unchanged mirror → skip the KV write (free-tier budget: 1000 writes/day)
+  if(!force&&hash===_vaLastSyncHash&&(Date.now()-_vaLastSyncAt)<6*3600*1000)return;
+  try{
+    var r=await fetch(vc.url+'/sync?token='+encodeURIComponent(vc.token),{
+      method:'POST',headers:{'Content-Type':'application/json'},body:body});
+    if(r.ok){
+      _vaLastSyncHash=hash;_vaLastSyncAt=Date.now();
+      _vaStatus='mirror synced: '+Object.keys(mirror).length+' leads, '+dncArr.length+' DNC';
+    }else _vaStatus='sync failed: http '+r.status;
+  }catch(e){_vaStatus='sync failed: '+(e.message||'network');}
+}
+function vaSeen(){
+  try{
+    var o=JSON.parse(localStorage.getItem(VA_SEEN_KEY)||'{}');
+    var cut=Date.now()-60*24*3600*1000,kept={};
+    Object.keys(o).forEach(function(k){if(o[k]>cut)kept[k]=o[k];});
+    return kept;
+  }catch(_){return {};}
+}
+function vaFindLead(wb){
+  // lead_id 'sol_r<row>' wins when it still points at the same phone; else scan
+  var p=vaNormPhone(wb.phone);
+  var m=String(wb.lead_id||'').match(/^sol_r(\d+)$/);
+  if(m){
+    var ri=parseInt(m[1],10)-1;
+    if(ri>=DATA_START&&ri<rows.length&&(!p||vaNormPhone((rows[ri]||[])[C.PH])===p))return ri;
+  }
+  if(p){for(var i=DATA_START;i<rows.length;i++){if(vaNormPhone((rows[i]||[])[C.PH])===p)return i;}}
+  return -1;
+}
+var VA_OUTCOME_WORDS={consult_booked:'consult booked ✅',callback_scheduled:'callback scheduled',
+  reached_no_booking:'reached, no booking',voicemail_left:'left voicemail',no_answer:'no answer',
+  wrong_number:'wrong number',not_interested:'not interested',opt_out:'asked not to be contacted',
+  escalated_urgent:'⚠ URGENT — escalated to human'};
+function vaSummary(wb){
+  var c=wb.captured||{};
+  var bits=[VA_OUTCOME_WORDS[wb.outcome]||String(wb.outcome||'call')];
+  if(c.trigger_event)bits.push('Trigger: '+c.trigger_event);
+  if(c.care_needs&&c.care_needs.length)bits.push('Needs: '+c.care_needs.join(', ').replace(/_/g,' '));
+  if(c.recent_fall===true)bits.push('recent fall');
+  if(c.safe_alone===false)bits.push('not safe alone');
+  if(c.hospital_readmission_concern===true)bits.push('readmission concern');
+  if(c.primary_caregiver===true)bits.push('is the primary caregiver');
+  if(c.best_time_to_reach)bits.push('best time: '+c.best_time_to_reach);
+  if(c.situation_notes)bits.push(String(c.situation_notes));
+  if(wb.consult&&wb.consult.booked){
+    var cd=wb.consult.datetime?new Date(wb.consult.datetime):null;
+    bits.push('Consult: '+((cd&&!isNaN(cd.getTime()))?(fd(cd)+' '+cd.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})):'booked')
+      +' ('+(wb.consult.mode||'in_home').replace('_',' ')+')'
+      +((wb.consult.mode||'in_home')==='in_home'&&c.assessment_address?(' at '+c.assessment_address):''));
+  }
+  if(wb.escalation_flags&&wb.escalation_flags.length)bits.push('⚠ Human follow-up: '+wb.escalation_flags.join(', ').replace(/_/g,' '));
+  return bits.join(' · ');
+}
+function vaNoteLine(wb){
+  var when=wb.ended_at?new Date(wb.ended_at):new Date();
+  if(isNaN(when.getTime()))when=new Date();
+  var dateStr=when.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  var timeStr=when.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+  var dur=wb.call_duration_sec?(' ('+Math.round(wb.call_duration_sec/60*10)/10+' min)'):'';
+  var line='🎙 ['+dateStr+' '+timeStr+'] '+((wb.direction==='inbound')?'Inbound':'Outbound')
+    +' voice-agent call'+dur+(wb.variant?(' [variant '+wb.variant+']'):'')+' — '+vaSummary(wb);
+  if(wb.transcript_url)line+='\nTranscript: '+wb.transcript_url;
+  if(wb.recording_url)line+='\nRecording: '+wb.recording_url;
+  return line;
+}
+async function vaUpdateLead(ri,wb){
+  var r=rows[ri]||[];
+  var c=wb.captured||{};
+  var updates={};
+  var existingNotes=String(r[C.NT]||'').trim();
+  var line=vaNoteLine(wb);
+  updates[C.NT]=existingNotes?(line+'\n\n'+existingNotes):line;
+  // Live human conversation = lead responded → same off-sequence semantic
+  // as the drawer's "responded" flow. Voicemail/no-answer touches nothing.
+  if(wb.reached===true&&wb.outcome!=='wrong_number'){
+    updates[C.LC]=new Date().toISOString().slice(0,10);
+    updates[C.MT]='Call';
+    updates[C.STEP]=STEP_OFF_SEQUENCE;
+    updates[C.STEP_AT]=new Date().toISOString();
+  }
+  // Fill blanks the agent captured — never overwrite what's already there
+  if(c.email&&!String(r[C.EM]||'').trim())updates[C.EM]=String(c.email).trim();
+  if(c.city&&!String(r[C.AR]||'').trim())updates[C.AR]=String(c.city).trim();
+  if(c.relationship&&!String(r[C.REL]||'').trim())updates[C.REL]=String(c.relationship).trim();
+  // Status: automatic moves only where unambiguous, and never on a lead a
+  // human already advanced (signed / on service / proposal / assessment).
+  var protectedSt=/signed|on service|proposal|assessment/.test(lc(r[C.ST]));
+  var newSt='';
+  if(wb.outcome==='consult_booked')newSt='Assessment Scheduled';
+  else if(wb.outcome==='opt_out'||wb.outcome==='not_interested')newSt='Not Interested';
+  else if(wb.outcome==='wrong_number')newSt='Wrong Number';
+  if(newSt&&!protectedSt)updates[C.ST]=newSt;
+  if(wb.consult&&wb.consult.booked&&wb.consult.datetime){
+    var cd2=new Date(wb.consult.datetime);
+    if(!isNaN(cd2.getTime()))updates[C.NF]=fd(cd2); // surfaces in Due that day
+  }
+  await writeRow(ri,updates);
+}
+// Inbound caller with no matching lead → a real lead row, so after-hours
+// callers never evaporate. Caller name lands in NM or DM by care_for.
+async function vaCreateLead(wb){
+  var c=wb.captured||{};
+  var caller=String(c.first_name||'').trim();
+  var isSelf=(c.care_for==='self');
+  var reached=(wb.reached===true&&wb.outcome!=='wrong_number');
+  var todayStr=fd(localToday());
+  var status=(wb.outcome==='consult_booked')?'Assessment Scheduled'
+    :(wb.outcome==='opt_out'||wb.outcome==='not_interested')?'Not Interested':'New';
+  var vals=[
+    '',todayStr,
+    isSelf?caller:'',                       // C  Client Name (patient)
+    String(wb.phone||''),                   // D  Phone
+    String(c.email||''),                    // E  Email
+    String(c.city||''),                     // F  Area
+    'Voice Agent — Inbound',           // G  Source
+    (c.care_type||[]).join(', ').replace(/_/g,' '), // H  Services
+    '','',                                  // I  Hrs/Wk · J  Est. Start
+    status,                                 // K  Status
+    reached?new Date().toISOString().slice(0,10):'', // L  Last Contact
+    reached?'Call':'',                      // M  Method
+    todayStr,                               // N  Next Follow-Up → Due Now
+    isSelf?'':caller,                       // O  Decision Maker
+    '','','',                               // P Pay · Q MV · R Agreement
+    vaNoteLine(wb),                         // S  Notes
+    '','','',                               // T/U/V legacy
+    (c.safe_alone===false||c.recent_fall===true)?'⚠ fall/safety':'', // W
+    String(c.relationship||''),             // X  Relationship
+    '',                                     // Y
+    reached?STEP_OFF_SEQUENCE:0,            // Z  step_idx
+    reached?new Date().toISOString():'',    // AA
+    '',''                                   // AB · AC
+  ];
+  var ri=firstEmptyDataRow();
+  var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
+  var res=await gfetch(base+"/range(address='A"+(ri+1)+":AC"+(ri+1)+"')",{
+    method:'PATCH',body:JSON.stringify({values:[vals]})});
+  if(!res.ok)return -1;
+  rows[ri]=vals.slice();
+  return ri;
+}
+async function vaApplyWriteback(wb){
+  if(wb.opt_out===true&&wb.phone)vaAddDnc(wb.phone); // hard gate, before anything can fail
+  var ri=vaFindLead(wb);
+  var created=false;
+  if(ri<0){ri=await vaCreateLead(wb);created=(ri>=0);if(ri<0)return false;}
+  else await vaUpdateLead(ri,wb);
+  logComms(commsEntryForLead(ri,{
+    direction:(wb.direction==='inbound')?'in':'out',
+    channel:'call',
+    contact:String(wb.phone||''),
+    subject:'Voice agent: '+(VA_OUTCOME_WORDS[wb.outcome]||wb.outcome||'call'),
+    preview:vaSummary(wb).slice(0,480),
+    outcome:String(wb.outcome||''),
+    messageId:String(wb.call_id||''),
+    variant:String(wb.variant||'')
+  }));
+  traceOp({op:'voice-writeback',callId:String(wb.call_id||''),leadRi:ri,created:created,
+    outcome:String(wb.outcome||''),reached:wb.reached===true,variant:String(wb.variant||''),
+    consultBooked:!!(wb.consult&&wb.consult.booked),optOut:wb.opt_out===true});
+  return true;
+}
+async function vaPoll(){
+  var vc=vaCfg();if(!vc||!tok||!fid)return;
+  _vaLastPollAt=Date.now();
+  var burl=vc.url+'/pending?token='+encodeURIComponent(vc.token);
+  var j;
+  try{
+    try{
+      var r=await fetch(burl);
+      if(!r.ok)throw new Error('http '+r.status);
+      j=await r.json();
+    }catch(e){j=await jsonpFetch(burl);} // AV fetch-shield fallback
+  }catch(e){_vaStatus='poll failed: '+(e.message||'network');return;}
+  var evs=(j&&j.events)||[];
+  if(!evs.length)return;
+  var seen=vaSeen(),ackKeys=[],applied=0,urgent=false;
+  for(var i=0;i<evs.length;i++){
+    var ev=evs[i],wb=ev.wb||{},cid=String(wb.call_id||'');
+    if(cid&&!seen[cid]){
+      try{
+        if(await vaApplyWriteback(wb)){
+          applied++;seen[cid]=Date.now();
+          if(wb.outcome==='escalated_urgent'||(wb.escalation_flags||[]).length)urgent=true;
+        }else continue;   // apply failed → no ack → retried next poll
+      }catch(e){console.warn('Voice writeback apply failed (will retry):',e.message);continue;}
+    }
+    ackKeys.push(ev.qkey);
+  }
+  try{localStorage.setItem(VA_SEEN_KEY,JSON.stringify(seen));}catch(_){}
+  if(ackKeys.length){
+    try{
+      await fetch(vc.url+'/ack?token='+encodeURIComponent(vc.token),{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({token:vc.token,keys:ackKeys})});
+    }catch(_){/* still marked seen locally; re-ack next poll */}
+  }
+  if(applied){
+    toast((urgent?'⚠ ':'🎙 ')+applied+' voice-agent call'+(applied!==1?'s':'')+' logged'+(urgent?' — one needs YOU':''));
+    try{await buildUI();}catch(_){}
+    try{vaSyncMirror(true);}catch(_){} // statuses changed → refresh the mirror
+  }
+}
+function startVoicePolling(){
+  if(_vaPollTimer){clearInterval(_vaPollTimer);_vaPollTimer=null;}
+  if(!vaCfg())return;
+  _vaPollTimer=setInterval(function(){vaPoll().catch(function(){});},INBOUND_POLL_MS);
+  setTimeout(function(){vaPoll().catch(function(){});},2500);
+}
+async function vaTestConnection(){
+  var out=el('va-test-out');
+  function line(t2){if(out)out.textContent+=t2+'\n';}
+  if(out)out.textContent='';
+  var vc=vaCfg();
+  if(!vc){line('Enter the worker URL (https://…) and dashboard token first, then hit Save.');return;}
+  line('1. Pinging '+vc.url+' …');
+  var j=null;
+  try{
+    try{j=await jsonpFetch(vc.url+'/ping',6000);}
+    catch(_){var r=await fetch(vc.url+'/ping');j=await r.json();}
+  }catch(e){line('   ✗ Unreachable: '+(e.message||'network')+' — is the worker deployed at that URL?');return;}
+  if(!j||!j.ok){line('   ✗ Unexpected reply — wrong URL? (This must be the VOICE worker, not the tracker.)');return;}
+  line('   Worker '+(j.v||'?')+' · platform key '+(j.hasToken?'set ✓':'MISSING ✗')
+    +' · dashboard token '+(j.hasDash?'set ✓':'MISSING ✗')
+    +' · KV '+(j.hasKV?'bound ✓':'MISSING ✗'));
+  line('   Mirror on worker: '+(j.leads||0)+' leads · queue: '+(j.pending||0)+' pending');
+  line('2. Pushing lead mirror …');
+  await vaSyncMirror(true);
+  line('   '+_vaStatus);
+  line('3. Draining writeback queue …');
+  try{await vaPoll();line('   Poll OK — calls will land automatically every '+Math.round(INBOUND_POLL_MS/1000)+'s while the dashboard is open.');}
+  catch(e){line('   ✗ '+(e.message||'poll failed'));}
+  line('Done.');
 }
 
 /* ─── ✨ Claude email writer ────────────────────────────────────────────
@@ -9117,6 +9501,10 @@ function onClick(ev){
       document.querySelectorAll('.st-sec').forEach(function(sec){sec.hidden=(sec.id!=='st-sec-'+t.dataset.sec);});
       break;
     case 'st-save-config': stSaveConfig(); break;
+    case 'va-test': vaTestConnection(); break;
+    case 'va-sync':
+      vaSyncMirror(true).then(function(){toast('🎙 '+_vaStatus);});
+      break;
     case 'st-wipe-feedback':
       if(confirm('Wipe all queued feedback items?')){saveFeedbackStack([]);var fb2=el('st-fb-count');if(fb2)fb2.textContent='0';toast('Stack wiped');}
       break;
