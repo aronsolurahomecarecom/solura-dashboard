@@ -15877,7 +15877,7 @@ function yardstikBlock(){
       ${ys.applyUrl?`<a href="${esc(ys.applyUrl)}" target="_blank" class="btn-sm bg-sky-l" style="text-decoration:none">📋 Candidate intake link</a>`:''}
       <button class="btn-sm bg-cream" onclick="refreshYardstik()" style="cursor:pointer">🔄 Refresh status</button>
       ${ys.reportId?`<a href="https://app.yardstik.com/report/${esc(ys.reportId)}" target="_blank" class="btn-sm bg-cream" style="text-decoration:none">↗ View in Yardstik</a>`:''}
-      ${ys.reportPdfUrl?`<a href="${esc(ys.reportPdfUrl)}" target="_blank" class="btn-sm bg-cream" style="text-decoration:none">📎 Report PDF</a>`:''}
+      ${ys.reportPdfUrl?`<a href="${esc(ys.reportPdfUrl)}" target="_blank" class="btn-sm bg-cream" style="text-decoration:none">📎 Report PDF</a>`:(ys.reportId?`<button class="btn-sm bg-cream" style="cursor:pointer" onclick="_pullYardstikReport()" title="Download the report from Yardstik and file it in the candidate's SharePoint onboarding folder">📥 Pull report to SharePoint</button>`:'')}
     </div>
     ${ys.lastUpdate?`<div style="font-size:10.5px;color:var(--soft);margin-top:8px">Last update: ${esc(new Date(ys.lastUpdate).toLocaleString())}</div>`:''}
     ${ys.decision?`<div style="margin-top:10px;padding:9px 12px;border-radius:8px;background:${ys.decision==='proceed'?'#EBF5EA':'#FDECEA'};border:1px solid ${ys.decision==='proceed'?'#B9DBB2':'#F0C4B0'}">
@@ -17943,6 +17943,29 @@ function generateActivityLogPdf(c){
 }
 
 /* ===================== upload helper ===================== */
+/* Pull a completed Yardstik report into the candidate's SharePoint onboarding folder and
+   surface it in the portal (st.yardstik.reportPdfUrl — the yardstik card and BG-decision
+   modal already render it). The worker's webhook auto-captures new completions; this button
+   covers reports that completed before that existed or whose webhook never arrived. */
+async function _pullYardstikReport(){
+  if(!W||!W.st.yardstik||!W.st.yardstik.reportId){toast('No Yardstik report id on file');return;}
+  const wtok=(SETTINGS.config||{}).ziToken||'';
+  if(!wtok){toast('Set the internal worker token first (Settings → 🔌 Integrations)');return;}
+  toast('📥 Pulling the report from Yardstik…');
+  try{
+    const r=await fetch(ZI_WORKER_URL+'/yardstik/report-pdf?reportId='+encodeURIComponent(W.st.yardstik.reportId),{headers:{'X-Solura-Token':wtok}});
+    if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||('HTTP '+r.status));}
+    const blob=await r.blob();
+    const fileName='background-report-'+((W.st.tpCheck||'')==='clear'?'CLEAR':((W.st.tpCheck||'')==='flag'?'FLAG':'RESULT'))+'-'+today()+'.pdf';
+    const uploaded=await uploadPdfToOnboarding(W.name,fileName,blob);
+    W.st.yardstik.reportPdfUrl=(uploaded&&uploaded.webUrl)||'';
+    W.st.yardstik.reportPdfFile=fileName;
+    logW('📥 Yardstik report pulled into SharePoint — '+fileName);
+    await saveW(true);
+    toast('✓ Report filed in the onboarding folder');
+    renderWorkspace();
+  }catch(e){toast('✗ Could not pull the report: '+e.message);}
+}
 async function uploadPdfToOnboarding(candidateName,fileName,blob){
   const folder='caregivers/'+safeFileName(candidateName)+'/onboarding';
   await ensureFolderPath(folder);
