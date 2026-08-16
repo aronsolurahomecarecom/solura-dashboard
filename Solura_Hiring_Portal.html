@@ -961,7 +961,8 @@ html:has(.email-modal.open){overflow:hidden;}
 .email-modal-head .meta{font-size:11.5px;color:rgba(255,255,255,.75);}
 .email-modal-head .close-x{position:absolute;top:14px;right:18px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center;}
 .email-modal-head .close-x:hover{background:rgba(255,255,255,.28);}
-.email-modal-body{padding:20px 22px;overflow-y:auto;flex:1;min-height:0;font-size:13.5px;line-height:1.6;color:var(--dark);} /* min-height:0 — without it a long email prevents the flex body from shrinking, pushing the footer buttons out of the clipped card (#10) */
+.email-modal-scroll{overflow-y:auto;flex:1;min-height:0;display:flex;flex-direction:column;} /* the ONE scroll region: body + awaiting + assign sections scroll together (min-height:0 keeps the footer in the card, #10) */
+.email-modal-body{padding:20px 22px;flex:none;font-size:13.5px;line-height:1.6;color:var(--dark);}
 .email-modal-body img{max-width:100%;height:auto;}
 .email-modal-attach{padding:14px 22px;border-top:1px solid var(--border);background:#FAFAF7;}
 .email-modal-attach h4{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--soft);margin-bottom:10px;font-weight:700;}
@@ -1735,9 +1736,11 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
       <h3 id="em-subject">Loading…</h3>
       <div class="meta" id="em-meta"></div>
     </div>
-    <div class="email-modal-body" id="em-body"><div style="color:var(--soft);text-align:center;padding:40px">Fetching message…</div></div>
-    <div class="email-modal-attach" id="em-await" style="display:none"></div>
-    <div class="email-modal-attach" id="em-attach" style="display:none"><h4>Attachments</h4><div id="em-attach-list"></div></div>
+    <div class="email-modal-scroll"><!-- ONE scroll region: body AND the assign/awaiting sections scroll together, so the assign controls are always reachable -->
+      <div class="email-modal-body" id="em-body"><div style="color:var(--soft);text-align:center;padding:40px">Fetching message…</div></div>
+      <div class="email-modal-attach" id="em-await" style="display:none"></div>
+      <div class="email-modal-attach" id="em-attach" style="display:none"><h4>Attachments</h4><div id="em-attach-list"></div></div>
+    </div>
     <div class="email-modal-foot">
       <button class="btn-primary bg-sky-l" id="em-reply" onclick="replyToCurrentEmail()" style="padding:8px 16px;background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer">↩ Reply</button>
       <button class="btn-sec bg-cream" id="em-open-candidate" onclick="openCandidateFromCurrentEmail()" style="padding:8px 14px;cursor:pointer" title="Open this candidate's workspace">👤 Open candidate</button>
