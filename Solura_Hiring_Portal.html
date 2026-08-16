@@ -22813,7 +22813,18 @@ async function _seqAutomationTick(){
           budget--;
         }
       }
-      /* everything else (park, decline, integration, manual) stays human-only by design */
+      else if(it.type==='integration'&&it.provider==='claude'&&/resume[-_]screen/.test(it.action||'')){
+        /* Advisory-only AI screen (~1¢) — safe to automate when the step opts in. Runs the
+           screen, advances on success; failures leave the card for a human. */
+        if(await _claudeResumeScreen(c.excelRow)===true){
+          const adv=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
+          if(!adv.error)Object.assign(c.st,adv.partialState||{});
+          c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-ran Claude screen (sequence automation)'});
+          await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+          budget--;
+        }
+      }
+      /* everything else (park, decline, yardstik/other integrations, manual) stays human-only by design */
     }catch(e){console.warn('automation:',e.message);}
   }
 }
@@ -23117,9 +23128,16 @@ function _seqV3Action(c,info){
        automation gate OFF nothing will ever run it — surface it as an operator action instead
        of letting the candidate sit in Scheduled forever. Genuinely time-gated rows (sessions
        waiting on a booking — no automatable intent) stay scheduled. */
-    if(ev.bucket==='scheduled'&&!(SETTINGS.config&&SETTINGS.config.seqAutomation)&&(ev.intents||[]).some(i2=>i2&&i2.automatable===true)){
-      ev.bucket='action';
-      ev.label=String(ev.label||'').replace(/^Automated: /,'');
+    {
+      const _autoOn=!!(SETTINGS.config&&SETTINGS.config.seqAutomation);
+      /* What the tick can ACTUALLY execute — anything else marked automate would sit in
+         Scheduled forever waiting for an executor that never comes (the "new candidates
+         land in scheduled" bug: an automate-flagged claude step with automation ON). */
+      const _tickCan=i2=>i2&&(i2.type==='send-email'||i2.type==='set-stage'||(i2.type==='integration'&&i2.provider==='claude'&&/resume[-_]screen/.test(i2.action||'')));
+      if(ev.bucket==='scheduled'&&(ev.intents||[]).some(i2=>i2&&i2.automatable===true)&&(!_autoOn||!(ev.intents||[]).some(_tickCan))){
+        ev.bucket='action';
+        ev.label=String(ev.label||'').replace(/^Automated: /,'');
+      }
     }
     const pill=ev.bucket==='awaiting'?'psoft':ev.bucket==='scheduled'?'pg':'pnew';
     const bucket=ev.bucket==='done'?'action':ev.bucket;
