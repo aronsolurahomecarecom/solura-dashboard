@@ -1419,7 +1419,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0814-39';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0814-40';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5392,6 +5392,33 @@ function weeklyAgeDays(){return setAgeDays(currentDraftSet());}
 // variant pins per composer-open so re-clicking 📰 doesn't shuffle.
 var _weeklyAppliedFor=null; // {ri,label,setId}
 var _shellSuppressed=false; // HTML weekly newsletter applied → don't double-wrap
+/* ─── Raw-HTML send mode ────────────────────────────────────────────────
+ * A pasted HTML email must send EXACTLY as pasted. Assigning it to the
+ * contenteditable's innerHTML silently strips <html>/<head> (killing the
+ * <style> block and media queries) and can erase the very signatures the
+ * full-design detector looks for — which is how pasted designs kept
+ * getting wrapped in the Settings shell. So the </> paste flow now keeps
+ * the verbatim source here, shows a sandboxed preview in the composer,
+ * and sendEmail uses this string with the shell forced off. Cleared on
+ * every modal open and whenever another flow fills the composer.       */
+var _emailRawHtml='';
+function emailRenderRawPreview(){
+  var bodyEl=el('email-body');if(!bodyEl)return;
+  bodyEl.setAttribute('contenteditable','false');
+  bodyEl.innerHTML='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-family:\'Plus Jakarta Sans\',sans-serif;font-size:11.5px;font-weight:700;color:var(--gold);background:rgba(200,135,10,.08);border:1px solid rgba(200,135,10,.35);border-radius:8px;padding:7px 11px;margin-bottom:8px">'
+    +'🎨 HTML email — sends exactly as pasted, no design shell'
+    +'<b data-action="email-clear-rawhtml" style="cursor:pointer;color:var(--red);margin-left:auto">✕ Remove</b></div>'
+    +'<iframe id="email-rawhtml-frame" style="width:100%;height:280px;border:1.5px solid var(--border);border-radius:8px;background:#fff" sandbox=""></iframe>'
+    +'<div style="font-size:10.5px;color:var(--soft);margin-top:5px">Preview only — inline (cid:) images appear at send. {dm} and {pt} fill per lead.</div>';
+  var fr=el('email-rawhtml-frame');
+  if(fr)fr.srcdoc=_emailRawHtml;
+}
+function emailClearRawHtml(opts){
+  _emailRawHtml='';
+  var bodyEl=el('email-body');if(!bodyEl)return;
+  bodyEl.setAttribute('contenteditable','true');
+  if(!(opts&&opts.keepBody))bodyEl.innerHTML='';
+}
 function pickWeeklyVariant(peekOrSet,maybePeek){
   var set,peek;
   if(peekOrSet===true||peekOrSet===false||peekOrSet===undefined){set=currentDraftSet();peek=!!peekOrSet;}
@@ -5544,6 +5571,7 @@ function applyWeeklyDraft(ri,opts){
   var names=getNames(ri);
   var subjEl=el('email-subj');if(subjEl&&w.subject)subjEl.value=fillNames(w.subject,names);
   var bodyEl=el('email-body');
+  emailClearRawHtml({keepBody:true}); // weekly draft replaces any pasted raw HTML
   if(bodyEl&&w.body){
     var filled=fillNames(w.body,names);
     if(looksLikeHtml(filled)){
@@ -6479,6 +6507,9 @@ function isFullDesignHtml(html){
   return /<html[\s>]/i.test(probe)
     ||/display\s*:\s*none[^>]*>/i.test(probe)
     ||/<table[^>]+width=["']?600/i.test(probe)
+    // Div-based designs: an email-width container (550–650px) near the top
+    // is a layout decision, not prose — catches modern no-table designs
+    ||/(max-)?width\s*:\s*(5[5-9]\d|6[0-5]\d)px/i.test(probe)
     ||(v.length>3500&&(v.match(/<\/table>/gi)||[]).length>=3);
 }
 // Claude sometimes mirrors mockup scaffolding and returns bare <tr>/<td>
@@ -6806,6 +6837,7 @@ async function claudeGenerate(){
     }
     var subjEl=el('email-subj');if(subjEl)subjEl.value=draft.subject;
     var bodyEl=el('email-body');
+    emailClearRawHtml({keepBody:true}); // Claude draft replaces any pasted raw HTML
     if(bodyEl){
       var newHtml=(draft.format==='html'||looksLikeHtml(draft.body))
         ?adaptDraftFragment(sanitizeDraftHtml(draft.body))
@@ -7302,6 +7334,7 @@ function openEmail(ri,opts){
   el('email-subj').value=c.subject;
   // Body: plaintext template → HTML in contenteditable
   var bodyEl=el('email-body');
+  emailClearRawHtml({keepBody:true}); // fresh composer → normal edit mode
   var bodyText=c.body;
   // Settings → General: append signature if configured
   var sig=String(cfg('emailSignature')||'').trim();
@@ -7416,12 +7449,15 @@ async function emailPasteHtml(){
     convertedCount++;
     return '<img'+pre+'src="cid:'+cid+'"'+post+'>';
   });
-  bodyEl.innerHTML=html;
+  // Keep the source VERBATIM \u2014 the contenteditable would strip <head> (and
+  // its styles) and defeat the full-design detection at send time.
+  _emailRawHtml=html;
+  emailRenderRawPreview();
   emailRenderAttachList();
   if(convertedCount){
-    toast('\u2713 Pasted HTML \u2014 '+convertedCount+' inline image'+(convertedCount!==1?'s':'')+' attached');
+    toast('\u2713 HTML email loaded \u2014 '+convertedCount+' inline image'+(convertedCount!==1?'s':'')+' attached \u00b7 sends as-is, no shell');
   }else{
-    toast('\u2713 Pasted HTML template');
+    toast('\u2713 HTML email loaded \u2014 sends exactly as pasted, no shell');
   }
 }
 
@@ -7741,8 +7777,12 @@ async function sendEmail(){
   var toAddr=m?m[1]:'';if(!toAddr){toast('No email');return;}
   var subj=el('email-subj').value;
   var bodyEl=el('email-body');
-  var bodyHtml=bodyEl?bodyEl.innerHTML:'';
-  if(!bodyEl.textContent.trim()){toast('Message body is empty');return;}
+  // Raw-HTML mode: the pasted source is the body, verbatim — the composer
+  // only holds a preview. {dm}/{pt} still personalize per lead.
+  var _rawMode=!!_emailRawHtml;
+  var bodyHtml=_rawMode?_emailRawHtml:(bodyEl?bodyEl.innerHTML:'');
+  if(_rawMode){try{bodyHtml=fillNames(bodyHtml,getNames(ri));}catch(_){}}
+  if(!_rawMode&&!bodyEl.textContent.trim()){toast('Message body is empty');return;}
   // Open tracking: per-send id rides in the pixel + tracked doc links, so
   // opens resolve back to THIS email's record (inert if unconfigured)
   var _sendId='m'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
@@ -7848,11 +7888,12 @@ async function sendEmail(){
   }
   // Universal gate: a full-design body (pasted HTML email, mockup draft,
   // weekly variant) sends AS-IS — the shell only wraps plain content.
-  var _bodyIsDesign=isFullDesignHtml(bodyHtml);
+  // Raw-HTML mode is an explicit declaration, not a heuristic: always design.
+  var _bodyIsDesign=_rawMode||isFullDesignHtml(bodyHtml);
   var _shellWas=!_shellSuppressed&&!_bodyIsDesign&&!!String(cfg('emailShellHtml')||'').trim();
   if(_shellWas)bodyHtml=applyEmailShell(bodyHtml,ri);
   traceOp({kind:'send',to:toAddr,subj:String(subj||'').slice(0,60),
-    reply:!!_emailReplyTo,suppressed:!!_shellSuppressed,fullDesignBody:_bodyIsDesign,shellApplied:_shellWas,
+    reply:!!_emailReplyTo,suppressed:!!_shellSuppressed,rawHtml:_rawMode,fullDesignBody:_bodyIsDesign,shellApplied:_shellWas,
     slotAfter:findShellSlot(bodyHtml)?'STILL PRESENT \u26A0':'none',
     pixel:!!_trkPx,atts:emailAttachments.map(function(a){return a.name;}),
     bodyHead:String(bodyHtml).replace(/\s+/g,' ').slice(0,260),
@@ -7967,6 +8008,7 @@ async function sendEmail(){
     }
 
     el('modal-email').classList.remove('open');
+    emailClearRawHtml();
     emailAttachments=[];
     origAttachments=[];
     toast(oneDriveShared.length?'\u2713 Email sent \u2014 large files shared via OneDrive':'\u2713 Email sent');
@@ -7984,7 +8026,7 @@ async function sendEmail(){
       recordSentEmail(_sendId,ri,toAddr,subj,commsRow,
         (_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri)?_weeklyAppliedFor.label:'');
       traceOp({kind:'send-OK',to:toAddr,subj:String(subj||'').slice(0,60),path:useUploadSession?'draft':'fast'});
-      try{captureVoiceSample(subj,bodyHtml,(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri)?_weeklyAppliedFor.label:'');}catch(_){}
+      try{if(!_rawMode)captureVoiceSample(subj,bodyHtml,(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri)?_weeklyAppliedFor.label:'');}catch(_){}
       _weeklyAppliedFor=null;
       _emailReplyTo=null;
     });
@@ -9833,6 +9875,7 @@ function onClick(ev){
       break;
     case 'email-link': emailInsertLink(); break;
     case 'email-paste-html': emailPasteHtml(); break;
+    case 'email-clear-rawhtml': emailClearRawHtml(); break;
     case 'open-ep':
       if(ri!=null&&mode){
         // For Done, animate the button (bubble) and pass it as anchor for popover positioning
