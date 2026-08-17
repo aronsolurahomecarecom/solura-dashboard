@@ -10359,9 +10359,11 @@ function _missingAppCerts(c){
   const st=(c&&c.st)||{};
   const claimed=Array.isArray(st.certs)?st.certs:[];
   const creds=Array.isArray(st.credentials)?st.credentials:[];
+  const waived=(Array.isArray(st.certsWaived)?st.certsWaived:[]).map(x=>String(x).trim().toLowerCase());
   return claimed.filter(n=>{
     const nm=String(n||'').trim().toLowerCase();
-    return nm&&!creds.some(cr=>cr&&cr.fileUrl&&String(cr.name||'').trim().toLowerCase()===nm);
+    if(!nm||waived.indexOf(nm)>-1)return false; /* operator said 'no longer awaited' — the interview gate must not warn/cancel over it */
+    return !creds.some(cr=>cr&&cr.fileUrl&&String(cr.name||'').trim().toLowerCase()===nm);
   });
 }
 /* Yardstik form done: their part complete → Yardstik creates the report. */
@@ -13224,6 +13226,15 @@ async function removeAwaitingItem(idx){
     }
     W.st.awaitingItemsReceived=(W.st.awaitingItemsReceived||0)+1;
     applied=true;
+  }
+  /* Cert kinds: 'no longer awaited' is an operator WAIVER for the interview gate too \u2014
+     without this, _missingAppCerts still counted the cert (claimed, no file) and the
+     T-60/T-30 choreography kept warning and cancelling the interview anyway. */
+  if(['cert','cert_clarification','cert_question'].includes(item.kind)){
+    const names=(Array.isArray(item.certsAsked)&&item.certsAsked.length)?item.certsAsked:(item.name?[item.name]:[]);
+    W.st.certsWaived=Array.isArray(W.st.certsWaived)?W.st.certsWaived:[];
+    names.forEach(n=>{const nm=String(n||'').trim();if(nm&&!W.st.certsWaived.some(x=>String(x).toLowerCase()===nm.toLowerCase()))W.st.certsWaived.push(nm);});
+    if(names.length)logW('\u23ed Cert requirement waived for the interview gate: '+names.join(', '));
   }
   W.st.awaitingItems.splice(idx,1);
   logW('Stopped awaiting: '+_awaitingItemLabel(item)+(applied?' \u00b7 recorded on profile':''));
