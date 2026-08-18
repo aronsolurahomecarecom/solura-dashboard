@@ -16888,21 +16888,38 @@ function _renderAttachmentRow(a,i,messageId,cand,awaiting){
       <select id="${dropdownId}" style="padding:5px 9px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px;background:#fff" onchange="_onAssignKindChange(${i},this.value)">
         <option value="">— or assign as… —</option>
         ${(function(){
-          /* The candidate's claimed certs are first-class one-click options; the generic
-             cert entry below opens the full type list. */
-          const claimed=(cand&&cand.st&&Array.isArray(cand.st.certs)?cand.st.certs:[]).filter(x=>x&&String(x).trim());
-          return claimed.map(n=>`<option value="cert::${esc(n)}">🎓 Cert: ${esc(n)} (from application)</option>`).join('');
+          /* One-click cert options: everything AWAITED comes first (that's what they were
+             asked to send), then the application-claimed certs; the generic entry below
+             opens the full type list for anything else. */
+          const awaited=[];
+          (awaiting||[]).forEach(aw=>{
+            if(!aw||['cert','cert_clarification','cert_question'].indexOf(aw.kind)<0)return;
+            const ns=(Array.isArray(aw.certsAsked)&&aw.certsAsked.length)?aw.certsAsked:(aw.name?[aw.name]:[]);
+            ns.forEach(n=>{const nm=String(n||'').trim();if(nm&&!awaited.some(x=>x.toLowerCase()===nm.toLowerCase()))awaited.push(nm);});
+          });
+          const claimed=(cand&&cand.st&&Array.isArray(cand.st.certs)?cand.st.certs:[]).filter(x=>x&&String(x).trim())
+            .filter(n=>!awaited.some(x=>x.toLowerCase()===String(n).toLowerCase()));
+          return awaited.map(n=>`<option value="cert::${esc(n)}">🎓 Cert: ${esc(n)} (awaited)</option>`).join('')
+            +claimed.map(n=>`<option value="cert::${esc(n)}">🎓 Cert: ${esc(n)} (from application)</option>`).join('');
         })()}
         ${ASSIGNMENT_KINDS.filter(k=>k.key!=='cert_clarification').map(k=>`<option value="${k.key}">${k.icon} ${esc(k.key==='cert'?'Certificate — all types…':k.label)}</option>`).join('')}
       </select>
       <select id="${certNameId}" style="display:none;padding:5px 9px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px;background:#fff;min-width:180px" onchange="_onCertNameChange(${i},this.value)">
         <option value="">— Pick the cert type —</option>
         ${(function(){
-          const claimed=(cand&&cand.st&&Array.isArray(cand.st.certs)?cand.st.certs.filter(x=>x&&x.trim()):[]);
-          const claimedOpts=claimed.map(c=>`<option value="${esc(c)}">🎓 ${esc(c)} (from application)</option>`).join('');
-          const rest=COMMON_CERT_TYPES.filter(t=>!claimed.some(c2=>String(c2).toLowerCase()===t.toLowerCase()));
-          return claimedOpts
-            +(claimed.length?'<option value="" disabled>── all cert types ──</option>':'')
+          /* Awaited certs first, then application-claimed, then every other type. */
+          const awaited=[];
+          (awaiting||[]).forEach(aw=>{
+            if(!aw||['cert','cert_clarification','cert_question'].indexOf(aw.kind)<0)return;
+            const ns=(Array.isArray(aw.certsAsked)&&aw.certsAsked.length)?aw.certsAsked:(aw.name?[aw.name]:[]);
+            ns.forEach(n=>{const nm=String(n||'').trim();if(nm&&!awaited.some(x=>x.toLowerCase()===nm.toLowerCase()))awaited.push(nm);});
+          });
+          const claimed=(cand&&cand.st&&Array.isArray(cand.st.certs)?cand.st.certs.filter(x=>x&&x.trim()):[])
+            .filter(n=>!awaited.some(x=>x.toLowerCase()===String(n).toLowerCase()));
+          const rest=COMMON_CERT_TYPES.filter(t=>!awaited.some(x=>x.toLowerCase()===t.toLowerCase())&&!claimed.some(c2=>String(c2).toLowerCase()===t.toLowerCase()));
+          return awaited.map(n=>`<option value="${esc(n)}">⏳ ${esc(n)} (awaited)</option>`).join('')
+            +claimed.map(c=>`<option value="${esc(c)}">🎓 ${esc(c)} (from application)</option>`).join('')
+            +((awaited.length||claimed.length)?'<option value="" disabled>── all cert types ──</option>':'')
             +rest.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
         })()}
         <option value="" disabled>──────────</option>
