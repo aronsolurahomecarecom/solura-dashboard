@@ -16861,12 +16861,27 @@ function _renderAttachmentRow(a,i,messageId,cand,awaiting){
   const kb=a.size?Math.round(a.size/1024):0;
   const ct=(a.contentType||'').toLowerCase();
   const icon=ct.indexOf('pdf')>-1?'📄':ct.indexOf('image')>-1?'🖼':ct.indexOf('word')>-1?'📝':'📎';
-  /* Smart suggestion: pick the first awaiting item as the "primary" suggested assignment. If
-     there are multiple awaitings (e.g., multiple certs), the user picks via the dropdown. */
-  const suggestion=awaiting.length?awaiting[0]:null;
+  /* Smart suggestion — PER ROW: match this attachment's filename against the awaiting
+     items (e.g. 'cpr-card.jpg' → the CPR item), so clicking ✓ on each attachment assigns
+     the item that attachment actually is. Previously every row suggested awaiting[0], so
+     assigning the second cert filed it as the first one. No filename match → awaiting[0]. */
+  let suggestion=null,suggestIdx=0;
+  if(awaiting.length){
+    const fn=String(a.name||'').toLowerCase();
+    let bestScore=-1;
+    awaiting.forEach((aw,ix)=>{
+      const names=(Array.isArray(aw.certsAsked)&&aw.certsAsked.length)?aw.certsAsked:[aw.name||''];
+      let s2=0;
+      names.forEach(n=>{const t=String(n||'').toLowerCase().replace(/[^a-z0-9]/g,'');if(t&&fn.replace(/[^a-z0-9]/g,'').indexOf(t)>-1)s2+=t.length;});
+      if(aw.kind==='resume'&&/(resume|cv)/.test(fn))s2+=6;
+      if(aw.kind==='bg_consent'&&/(consent|background|bg)/.test(fn))s2+=4;
+      if(s2>bestScore){bestScore=s2;suggestIdx=ix;}
+    });
+    suggestion=awaiting[suggestIdx];
+  }
   const suggestionLabel=suggestion?_awaitingItemLabel(suggestion):'';
   const primaryBtn=suggestion
-    ? `<button class="att-assign-primary" onclick="_assignAttachmentToAwaiting('${esc(messageId)}',${i},${cand?cand.excelRow:'null'})" style="background:linear-gradient(135deg,#8B6500,#C59B4E);color:#fff;border:none;padding:6px 12px;border-radius:6px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer">✓ Assign as ${esc(suggestionLabel)}</button>`
+    ? `<button class="att-assign-primary" onclick="_assignAttachmentToAwaiting('${esc(messageId)}',${i},${cand?cand.excelRow:'null'},${suggestIdx})" style="background:linear-gradient(135deg,#8B6500,#C59B4E);color:#fff;border:none;padding:6px 12px;border-radius:6px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer">✓ Assign as ${esc(suggestionLabel)}</button>`
     : '';
   /* The dropdown lets the user override the primary suggestion (assign to a non-awaiting kind),
      or assign when there's no current awaiting request at all. Each kind shows up; "cert" expands
@@ -16969,12 +16984,12 @@ function _onCertNameChange(i,value){
 }
 
 /* Assign attachment to whatever's at the top of the awaiting queue */
-async function _assignAttachmentToAwaiting(messageId,attIdx,row){
+async function _assignAttachmentToAwaiting(messageId,attIdx,row,awIdx){
   const cand=pipeline.find(c=>c.excelRow===row);
   if(!cand){toast('Candidate not found');return;}
   const awaiting=_currentAwaitingItems(cand);
   if(!awaiting.length){toast('Nothing awaiting');return;}
-  const it0=Object.assign({},awaiting[0]);
+  const it0=Object.assign({},awaiting[awIdx]||awaiting[0]); /* the row's OWN suggested item */
   const bd=((document.getElementById('att-date-'+attIdx)||{}).value||'');
   if(bd&&bd!==new Date().toISOString().slice(0,10))it0.backdate=bd;
   await _doAssignment(messageId,attIdx,cand,it0);
