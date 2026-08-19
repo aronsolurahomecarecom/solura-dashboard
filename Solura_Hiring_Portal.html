@@ -14138,10 +14138,15 @@ function renderWorkspace(){_memGen++;
      Visible at any stage except Hired/Declined. The Park button pops a small modal to enter an
      optional reason + optional follow-up date. Resume button only shows when currently parked. */
   const isParked=!!W.st.manualAwaiting;
+  const moveBtn=_stageMoveAllowed()?'<button class="btn-sm bg-cream" onclick="moveToStageWS()" title="Manually place this candidate at any pipeline stage">⇄ Move to stage</button>':'';
   let quickActions='';
-  if(W.stage!=='Hired'&&W.stage!=='Declined'&&W.stage!=='Withdrawn'){
+  if(W.stage==='Hired'||W.stage==='Declined'||W.stage==='Withdrawn'){
+    /* Terminal stages: the stage move IS the escape hatch (mistaken decline, un-hire, etc.). */
+    if(moveBtn)quickActions=`<div class="ws-quick">${moveBtn}</div>`;
+  }
+  else if(W.stage!=='Hired'&&W.stage!=='Declined'&&W.stage!=='Withdrawn'){
     if(isParked){
-      quickActions=`<div class="ws-quick"><button class="btn-sm bg-sky-l" onclick="releaseAwaiting()" title="Move out of awaiting">▶ Resume from awaiting</button><button class="btn-sm" style="background:#fff;border:1px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer" onclick="withdrawCandidate()">↩ Withdraw</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
+      quickActions=`<div class="ws-quick"><button class="btn-sm bg-sky-l" onclick="releaseAwaiting()" title="Move out of awaiting">▶ Resume from awaiting</button>${moveBtn}<button class="btn-sm" style="background:#fff;border:1px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer" onclick="withdrawCandidate()">↩ Withdraw</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
     }else{
       quickActions=`<div class="ws-quick"><button class="btn-sm bg-cream" onclick="parkInAwaiting()" title="Move this candidate to Awaiting bucket — pause for follow-up">⏸ Park in awaiting</button>${_stageMoveAllowed()?'<button class="btn-sm bg-cream" onclick="moveToStageWS()" title="Manually place this candidate at any pipeline stage">⇄ Move to stage</button>':''}<button class="btn-sm" style="background:#fff;border:1px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer" onclick="withdrawCandidate()" title="Candidate withdrew their application">↩ Withdraw</button><button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="declineCandidate()">✕ Decline</button></div>`;
     }
