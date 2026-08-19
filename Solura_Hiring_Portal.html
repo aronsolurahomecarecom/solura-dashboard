@@ -15808,11 +15808,37 @@ function checksBlock(){
     <div class="kvrow">Required state check ${flagPill(W.st.reqCheck)}<select onchange="W.st.reqCheck=this.value;saveW(true);renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('reqCheck')}</select></div>
     <div class="kvrow">3rd-party check ${flagPill(W.st.tpCheck)}<select onchange="W.st.tpCheck=this.value;saveW(true);renderWorkspace()" style="padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">${chkOpts('tpCheck')}</select></div>
     <div style="font-size:11px;color:var(--soft);margin-top:8px">Background-check API webhook flips 3rd-party status automatically. State check (BCII Webcheck) is done by the candidate — link is in the BG-consent email.</div>
-    <div class="brow" style="margin-top:16px;gap:10px;align-items:center">
+    <div class="brow" style="margin-top:16px;gap:10px;align-items:center;flex-wrap:wrap">
       <button class="btn-primary bg-grn" onclick="checksMarkDone()" style="padding:9px 18px">✓ Done with checks</button>
+      ${(W.stage==='Interview booked'&&_missingAppCerts(W).length&&_stageMoveAllowed())?`<button class="btn-sm" style="background:#fff;border:1.5px solid var(--red);color:var(--red);cursor:pointer;padding:9px 14px" onclick="runInterviewAnyway()" title="Password-protected — runs the interview despite missing certs; recorded on the candidate">🔓 Run interview anyway</button>`:''}
       <span style="font-size:11px;color:var(--soft)">${W.st.certChecksDoneAt?'Last completed '+new Date(W.st.certChecksDoneAt).toLocaleString():'Marks cross-checking complete — the candidate returns to Scheduled until 15 minutes before the interview.'}</span>
     </div>
   </div>`;
+}
+/* 🔓 Password-gated override: run the interview even though certs are missing. Same
+   protection as Move to stage (allowlist + password from Settings → Pipeline config).
+   Stamps the checks sign-off (which the choreography and the automation tick already
+   honor — no more warnings or auto-cancel) plus an explicit override record with who,
+   when, and exactly what was missing. */
+async function runInterviewAnyway(){
+  if(!W)return;
+  if(!_stageMoveAllowed()){toast('Override is restricted — see Settings → Pipeline config');return;}
+  const _smCfg=(SETTINGS.config&&SETTINGS.config.stageMove)||{};
+  if(_smCfg.password){
+    const pw=prompt('Enter the override password:');
+    if(pw===null)return;
+    if(pw!==_smCfg.password){toast('✕ Wrong password');return;}
+  }
+  const miss=_missingAppCerts(W);
+  if(!confirm('Run the interview even though '+(miss.length?('these are missing: '+miss.join(', ')):'checks are incomplete')+'?\n\nThis is recorded on the candidate.'))return;
+  W.st.certChecksDoneAt=new Date().toISOString();
+  delete W.st.certsReadyReview;
+  W.st.interviewCertOverride={at:new Date().toISOString(),by:userEmail||'operator',missing:miss};
+  logW('🔓 Interview override — running despite missing items ('+(miss.join(', ')||'checks incomplete')+') by '+(userEmail||'operator'));
+  await saveW(true);
+  toast('🔓 Override recorded — the interview can run');
+  renderWorkspace();
+  if(typeof render==='function')render();
 }
 /* ✓ Done with checks — the operator confirms every registry/cert check is recorded. Clears
    the cross-check action; an interview-booked candidate returns to Scheduled and resurfaces
