@@ -1419,7 +1419,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0814-42';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0814-43';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5605,20 +5605,17 @@ function applyWeeklyDraft(ri,opts){
       var already=emailAttachments.some(function(a){return a._weekly;});
       if(!already){
         var wSize=Math.floor(w.pdf.b64.length*0.75);
-        // Same semantics as composer files: big ones flag large so the send
-        // uses the chunked upload-session and attaches DIRECTLY.
         var wAtt={name:w.pdf.name,size:wSize,
-          type:'application/pdf',dataBase64:w.pdf.b64,
-          large:wSize>EMAIL_INLINE_PUT_CEILING-(500*1024),_weekly:true};
-        // The send-time OneDrive fallback uploads from att.file — without
-        // real bytes an oversized weekly PDF had no escape route past
-        // Exchange's message cap (the reason the editor used to cap at 10MB).
-        if(wSize>=EMAIL_ONEDRIVE_FALLBACK_MIN){
-          try{
-            var wbc=atob(w.pdf.b64),wbn=new Array(wbc.length);
-            for(var wbi=0;wbi<wbc.length;wbi++)wbn[wbi]=wbc.charCodeAt(wbi);
-            wAtt.file=new File([new Uint8Array(wbn)],w.pdf.name,{type:'application/pdf'});
-          }catch(_){/* keep base64-only — small sends still work */}
+          type:'application/pdf',dataBase64:w.pdf.b64,large:false,_weekly:true};
+        // Real bytes power BOTH big-file routes (chunked direct attach and
+        // the OneDrive fallback). large only flags when the File actually
+        // exists — a large-flagged attachment without .file crashes the
+        // chunked uploader ("reading 'slice'").
+        if(wSize>=EMAIL_ONEDRIVE_FALLBACK_MIN)wAtt.file=emailB64ToFile(w.pdf.b64,w.pdf.name,'application/pdf');
+        wAtt.large=!!wAtt.file&&wSize>EMAIL_INLINE_PUT_CEILING-(500*1024);
+        if(!wAtt.file&&wSize>EMAIL_INLINE_PUT_CEILING){
+          traceOp({kind:'weekly-pdf-nofile',name:w.pdf.name,size:wSize});
+          toast('⚠ '+w.pdf.name+' could not be prepared for sending — remove and re-attach it in the weekly editor');
         }
         emailAttachments.push(wAtt);
         try{emailRenderAttachList();}catch(_){}
@@ -7248,6 +7245,21 @@ var EMAIL_PER_FILE_LIMIT=150*1024*1024;      // 150MB — per individual attachm
 var EMAIL_TOTAL_BUDGET=1024*1024*1024;      // 1GB — total budget (individual files still limited to 150MB via OneDrive)
 var EMAIL_CHUNK_SIZE=3276800;                // ~3.1MB (10 x 320KB) — must be a multiple of 320KB per Graph spec
 
+// base64 → File, decoding straight into a Uint8Array — no intermediate
+// Number[] (which costs ~8x the file size in heap and can throw on big
+// PDFs, silently leaving attachments file-less). Returns null on failure.
+function emailB64ToFile(b64,name,type){
+  try{
+    var bin=atob(String(b64||'').replace(/\s+/g,''));
+    var u8=new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+    return new File([u8],name||'file',{type:type||'application/octet-stream'});
+  }catch(e){
+    console.warn('emailB64ToFile failed for',name,e.message);
+    return null;
+  }
+}
+
 // Convert a plain-text template body to HTML for the contenteditable.
 // Double newlines become paragraph breaks, single newlines become <br>.
 function emailPlainToHtml(s){
@@ -7460,17 +7472,9 @@ async function emailPasteHtml(){
     // to a Blob → File for that case.
     var lastAtt=emailAttachments[emailAttachments.length-1];
     if(lastAtt.large){
-      try{
-        var byteChars=atob(b64);
-        var byteNums=new Array(byteChars.length);
-        for(var j=0;j<byteChars.length;j++)byteNums[j]=byteChars.charCodeAt(j);
-        var blob=new Blob([new Uint8Array(byteNums)],{type:mime});
-        lastAtt.file=new File([blob],lastAtt.name,{type:mime});
-        delete lastAtt.dataBase64;
-      }catch(e){
-        // Fallback: keep as inline base64; sendEmail will reject if total too big
-        lastAtt.large=false;
-      }
+      lastAtt.file=emailB64ToFile(b64,lastAtt.name,mime);
+      if(lastAtt.file)delete lastAtt.dataBase64;
+      else lastAtt.large=false; // keep as inline base64; sendEmail will reject if total too big
     }
     convertedCount++;
     return '<img'+pre+'src="cid:'+cid+'"'+post+'>';
@@ -7591,6 +7595,10 @@ function emailReadSliceAsArrayBuffer(file,start,end){
 // Upload a single large attachment via session.
 // Returns when the final chunk completes successfully (HTTP 201).
 async function emailUploadLargeAttachment(messageId,att,progressCb){
+  // Self-heal: a large attachment carrying only base64 (no File) gets its
+  // bytes materialized here instead of crashing on att.file.slice below.
+  if(!att.file&&att.dataBase64)att.file=emailB64ToFile(att.dataBase64,att.name,att.type);
+  if(!att.file)throw new Error('Attachment "'+att.name+'" is missing its file data — remove it and attach it again');
   // Create the upload session
   var sessReq={
     AttachmentItem:{
