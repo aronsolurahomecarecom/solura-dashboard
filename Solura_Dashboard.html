@@ -1097,7 +1097,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div class="st-field">
           <label class="ee-lbl">Message-size ceiling (adaptive)</label>
           <div style="font-size:13px;color:var(--mid)">Current: <strong id="es-emailcap"></strong>. Shrinks automatically if Exchange rejects a send.
-            <button data-action="es-reset-emailcap" class="st-btn-ghost" style="margin-left:8px;padding:5px 11px;font-size:11px">Reset to 10MB</button>
+            <button data-action="es-reset-emailcap" class="st-btn-ghost" style="margin-left:8px;padding:5px 11px;font-size:11px">Reset to 35MB</button>
           </div>
         </div>
         <div class="st-field">
@@ -1419,7 +1419,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0814-41';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0814-42';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5605,8 +5605,11 @@ function applyWeeklyDraft(ri,opts){
       var already=emailAttachments.some(function(a){return a._weekly;});
       if(!already){
         var wSize=Math.floor(w.pdf.b64.length*0.75);
+        // Same semantics as composer files: big ones flag large so the send
+        // uses the chunked upload-session and attaches DIRECTLY.
         var wAtt={name:w.pdf.name,size:wSize,
-          type:'application/pdf',dataBase64:w.pdf.b64,large:false,_weekly:true};
+          type:'application/pdf',dataBase64:w.pdf.b64,
+          large:wSize>EMAIL_INLINE_PUT_CEILING-(500*1024),_weekly:true};
         // The send-time OneDrive fallback uploads from att.file — without
         // real bytes an oversized weekly PDF had no escape route past
         // Exchange's message cap (the reason the editor used to cap at 10MB).
@@ -7231,7 +7234,12 @@ var EMAIL_INLINE_PUT_CEILING=3*1024*1024;   // 3MB — Graph sendMail single-PUT
 // (including yours, per the ErrorMessageSizeExceeded at ~12.5MB) are capped lower.
 // We start at 10MB post-base64 which handles most tenants, and shrink adaptively
 // if we ever hit ErrorMessageSizeExceeded (remembered per session).
-var EMAIL_MSG_ATTACH_CAP=parseInt(sessionStorage.getItem('emailMsgCap'),10)||(10*1024*1024);
+// Default is the 35MB Exchange Online tenant default so big files attach
+// DIRECTLY via the chunked upload-session (Graph allows 150MB/attachment).
+// A recorded ErrorMessageSizeExceeded at ~12.5MB once pinned this to 10MB —
+// treat that as stale: if the tenant really is tighter, the failed send
+// shrinks the cap for the session and OneDrive routing takes over.
+var EMAIL_MSG_ATTACH_CAP=parseInt(sessionStorage.getItem('emailMsgCap'),10)||(35*1024*1024);
 // Base64 inflates binary by ~4/3. So a 10MB raw file becomes ~13.3MB in the message
 // body. The willFallback check must use the inflated projection, not raw bytes.
 var EMAIL_B64_INFLATION=1.37;                // 4/3 + small envelope overhead
@@ -8068,7 +8076,7 @@ async function sendEmail(){
           try{sessionStorage.setItem('emailMsgCap',String(newCap));}catch(_){}
         }
       }
-      showErr('Message too large for your Exchange mailbox (your tenant\'s send-size limit is lower than expected). Attachments over '+asmtFmtSize(EMAIL_MSG_ATTACH_CAP)+' will now auto-route through OneDrive share links. Try sending again \u2014 large files will be uploaded to OneDrive and a share link will appear in the email body instead of blowing past the limit.');
+      showErr('Exchange rejected this message as too large \u2014 your tenant\'s send-size limit is below what this email needs. For THIS send: try again and attachments over '+asmtFmtSize(EMAIL_MSG_ATTACH_CAP)+' will auto-route through OneDrive share links. To send files this big as REAL attachments: raise the limit in Microsoft 365 admin center \u2192 Users \u2192 your mailbox \u2192 Mail \u2192 Max send size (up to 150MB), wait ~15 min, then \u2699 Settings \u2192 Email \u2192 "Reset to 35MB".');
     }else if(/Access is denied|InvalidAuthenticationToken/i.test(msg)){
       showErr('Access denied \u2014 sign out and sign back in to refresh permissions.');
     }else{
@@ -9691,9 +9699,9 @@ function onClick(ev){
     case 'trk-test': testTrackerConnection(); break;
     case 'es-reset-emailcap':
       try{sessionStorage.removeItem('emailMsgCap');}catch(_){}
-      EMAIL_MSG_ATTACH_CAP=10*1024*1024;
+      EMAIL_MSG_ATTACH_CAP=35*1024*1024;
       var capEl=el('es-emailcap');if(capEl)capEl.textContent=asmtFmtSize(EMAIL_MSG_ATTACH_CAP);
-      toast('Email cap reset');
+      toast('Email cap reset to 35MB');
       break;
     case 'ee-add-phase': eeAddPhase(); break;
     case 'ee-del-phase':
