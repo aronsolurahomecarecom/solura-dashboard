@@ -1419,7 +1419,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0814-40';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0814-41';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4942,7 +4942,9 @@ document.addEventListener('change',function(ev){
     (function(){
       var wf=t.files[0];t.value='';
       if(!/\.pdf$/i.test(wf.name)){toast('PDF only for the weekly attachment');return;}
-      if(wf.size>WEEKLY_PDF_CAP){toast('Weekly PDF caps at 10MB');return;}
+      // Same ceiling as any attachment (150MB) — no special weekly cap.
+      // Oversized-for-Exchange PDFs auto-route as OneDrive share links at send.
+      if(wf.size>EMAIL_PER_FILE_LIMIT){toast('⚠ PDF too large — max '+asmtFmtSize(EMAIL_PER_FILE_LIMIT));return;}
       var rd=new FileReader();
       rd.onload=function(){
         var vcur=weeklyVariants()[_wkIdx];
@@ -4950,7 +4952,8 @@ document.addEventListener('change',function(ev){
         vcur.pdf={name:wf.name,b64:String(rd.result).split(',')[1]};
         vcur.updatedAt=Date.now();
         renderWeeklyPdfChip();
-        toast('📕 '+wf.name+' attached to variant '+(vcur.label||'')+' — save to sync');
+        var viaLink=wf.size*EMAIL_B64_INFLATION>EMAIL_MSG_ATTACH_CAP;
+        toast('📕 '+wf.name+' attached to variant '+(vcur.label||'')+(viaLink?' — too big to attach directly, will send as a OneDrive link':'')+' — save to sync');
       };
       rd.readAsDataURL(wf);
     })();
@@ -5333,7 +5336,6 @@ function renderShellPreview(){
  * nurture contact; one click (📰 in the composer) for anyone else.
  * {dm}/{pt} placeholders fill per lead. Stale after 8 days → warning.
  * ─────────────────────────────────────────────────────────────────────── */
-var WEEKLY_PDF_CAP=10*1024*1024;
 var WK_LABELS='ABCDEFGH';
 /* Draft SETS: each set carries its own rotating email variants, an SMS
  * template, a refresh cadence, and an engine assignment. The set whose
@@ -5520,9 +5522,13 @@ function renderWeeklyEditor(){
 function renderWeeklyPdfChip(){
   var v=weeklyVariants()[_wkIdx]||{};
   var host=el('weekly-pdf-chip');if(!host)return;
-  host.innerHTML=(v.pdf&&v.pdf.b64)?'<span class="ee-chip call" style="margin-bottom:8px">📕 '+escapeHtml(v.pdf.name)
-    +' <span style="opacity:.6;font-weight:500">'+Math.round(v.pdf.b64.length*0.75/1024)+'KB</span>'
-    +' <b data-action="weekly-del-pdf">×</b></span>':'';
+  if(!(v.pdf&&v.pdf.b64)){host.innerHTML='';return;}
+  var pdfBytes=v.pdf.b64.length*0.75;
+  var sizeStr=pdfBytes>=1024*1024?(Math.round(pdfBytes/1024/102.4)/10+'MB'):(Math.round(pdfBytes/1024)+'KB');
+  var viaLink=pdfBytes*EMAIL_B64_INFLATION>EMAIL_MSG_ATTACH_CAP;
+  host.innerHTML='<span class="ee-chip call" style="margin-bottom:8px">📕 '+escapeHtml(v.pdf.name)
+    +' <span style="opacity:.6;font-weight:500">'+sizeStr+(viaLink?' · sends as OneDrive link':'')+'</span>'
+    +' <b data-action="weekly-del-pdf">×</b></span>';
 }
 async function saveWeeklyDraft(){
   wkStash();
@@ -5598,8 +5604,20 @@ function applyWeeklyDraft(ri,opts){
     }else if(w.pdf.b64){
       var already=emailAttachments.some(function(a){return a._weekly;});
       if(!already){
-        emailAttachments.push({name:w.pdf.name,size:Math.floor(w.pdf.b64.length*0.75),
-          type:'application/pdf',dataBase64:w.pdf.b64,large:false,_weekly:true});
+        var wSize=Math.floor(w.pdf.b64.length*0.75);
+        var wAtt={name:w.pdf.name,size:wSize,
+          type:'application/pdf',dataBase64:w.pdf.b64,large:false,_weekly:true};
+        // The send-time OneDrive fallback uploads from att.file — without
+        // real bytes an oversized weekly PDF had no escape route past
+        // Exchange's message cap (the reason the editor used to cap at 10MB).
+        if(wSize>=EMAIL_ONEDRIVE_FALLBACK_MIN){
+          try{
+            var wbc=atob(w.pdf.b64),wbn=new Array(wbc.length);
+            for(var wbi=0;wbi<wbc.length;wbi++)wbn[wbi]=wbc.charCodeAt(wbi);
+            wAtt.file=new File([new Uint8Array(wbn)],w.pdf.name,{type:'application/pdf'});
+          }catch(_){/* keep base64-only — small sends still work */}
+        }
+        emailAttachments.push(wAtt);
         try{emailRenderAttachList();}catch(_){}
       }
     }
