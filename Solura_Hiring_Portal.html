@@ -21563,6 +21563,24 @@ async function _claudeIntStatus(){
     }
   }catch(e){if(el){el.textContent='✕ worker unreachable: '+e.message;el.className='pill pbad';}}
 }
+
+/* Live Yardstik connection test — exercises the worker's YARDSTIK_API_KEY via the packages
+   list. Distinguishes 'API key stale' (Yardstik 401) from 'worker token wrong' (our 401)
+   from 'network/other'. */
+async function _yardstikTestConnection(){
+  const el=document.getElementById('yk-conn-status');
+  const tok=(SETTINGS.config||{}).ziToken||'';
+  if(!tok){if(el){el.textContent='no internal worker token set';el.className='pill pr2';}return;}
+  if(el){el.textContent='testing…';el.className='pill psoft';}
+  try{
+    const r=await fetch(ZI_WORKER_URL+'/yardstik/packages',{headers:{'X-Solura-Token':tok}});
+    const j=await r.json().catch(()=>({}));
+    if(r.status===401&&!j.packages){if(el){el.textContent='✗ worker token rejected (Settings → Integrations)';el.className='pill pr2';}return;}
+    if(j&&Array.isArray(j.packages)){if(el){el.textContent='✓ Yardstik reachable — '+j.packages.length+' package'+(j.packages.length===1?'':'s');el.className='pill pg';}return;}
+    const msg=(j&&(j.error||j.message))||('HTTP '+r.status);
+    if(el){el.textContent='✗ '+(/401|unauthor/i.test(String(msg)+r.status)?'Yardstik rejected the API key — update YARDSTIK_API_KEY on the worker':msg);el.className='pill pr2';}
+  }catch(e){if(el){el.textContent='✗ '+e.message;el.className='pill pr2';}}
+}
 function renderSettingsYardstik(){
   const cfg=SETTINGS.config||{};
   const accountId=cfg.yardstikAccountId||'';
@@ -21572,7 +21590,7 @@ function renderSettingsYardstik(){
   const verifyPackageName=cfg.yardstikVerifyPackageName||'';
   const enabled=!!cfg.yardstikEnabled;
   const configured=!!(accountId&&packageId);
-  return `<div class="wscard"><h3>Yardstik background checks ${configured?'<span class="pill pg" style="font-size:9px;margin-left:6px">CONFIGURED</span>':'<span class="pill psoft" style="font-size:9px;margin-left:6px">NOT SET UP</span>'}</h3>
+  return `<div class="wscard"><h3>Yardstik background checks ${configured?'<span class="pill pg" style="font-size:9px;margin-left:6px">CONFIGURED</span>':'<span class="pill psoft" style="font-size:9px;margin-left:6px">NOT SET UP</span>'}</h3><div style="display:flex;gap:8px;align-items:center;margin:6px 0 10px"><span id="yk-conn-status" class="pill psoft" style="font-size:11px">connection untested</span><button class="btn-sm bg-cream" style="cursor:pointer" onclick="_yardstikTestConnection()">Test connection</button><span style="font-size:10.5px;color:var(--soft)">calls Yardstik with the worker's API key — a 401 here means the key on the worker is stale (rotated in Yardstik?)</span></div>
     <p class="set-help">FCRA-compliant background screening via the Yardstik API. The candidate gets an email from Yardstik with a secure link to enter their SSN, DOB, and consent. Results land back here via webhook — clear results auto-advance to Offer; consider/adverse results flag for review. The API key + webhook signature live in Cloudflare env vars (never in the browser).</p>
 
     <div class="set-row" style="gap:12px;flex-wrap:wrap;margin-top:14px">
