@@ -9189,6 +9189,12 @@ async function _autoLinkUnmatchedBookings(){
   const norm=s=>String(s||'').toLowerCase().replace(/[^a-z]/g,'');
   let linked=0;const keep=[];
   for(const u of AVAIL.unmatched){
+    /* UPCOMING bookings only (same 2h-grace rule as the backfill): auto-linking a days-old
+       no-show entry would stamp a fresh bookingReceivedAt, which the smart-awaiting override
+       reads as a fresh booking — destroying parked state and advancing stages for a meeting
+       that already happened. Stale entries stay in the pool for the manual flow. */
+    const uT=Date.parse(u&&u.start);
+    if(!isFinite(uT)||uT<Date.now()-2*3600*1000){keep.push(u);continue;}
     let cand=null;
     const byEmail=u.email?pipeline.filter(c=>c.email&&String(c.email).toLowerCase()===String(u.email).toLowerCase()):[];
     const byName=norm(u.name)?pipeline.filter(c=>norm(c.name)===norm(u.name)):[];
@@ -10052,12 +10058,21 @@ async function loadData(){
 async function _seqV3RepairPass(){
   try{
     if(!window.SeqBuilderV3)return;
+    /* Re-entrancy: loadData/backfill/auto-link can each fire this chain; a stale instance
+       iterating the OLD pipeline array after loadData replaced it would patch AJ with
+       stale state. One instance at a time + abort if the pipeline was swapped underneath. */
+    if(window._seqRepairRunning)return;window._seqRepairRunning=true;
+    const _myPipe=pipeline;
+    try{
     _seqV3Migrate();
     /* THE OPERATOR'S ★DEFAULT IS AUTHORITY: repair targets whatever sequence is starred in
-       the editor — any shape, any author. The Classic+Claude bootstrap below only runs when
-       no usable default exists at all; it never overrides a choice made in the editor. */
+       the editor — any shape, any author. The known-bad legacy shape (manual phone-screen
+       step) is swapped out ONCE as a migration; after that one heal the ★ stands exactly
+       as the operator set it (it used to be re-overridden on every load). */
     const _defId=window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[]);
-    let target=(SETTINGS.sequences||[]).find(s=>s.id===_defId&&Array.isArray(s.steps)&&s.steps.length&&!(s.steps||[]).some(s2=>s2.kind==='manual'&&/phone.?screen/i.test(s2.label||'')));
+    const _starred=(SETTINGS.sequences||[]).find(s=>s.id===_defId&&Array.isArray(s.steps)&&s.steps.length);
+    const _legacyBadShape=s=>(s.steps||[]).some(s2=>s2.kind==='manual'&&/phone.?screen/i.test(s2.label||''));
+    let target=(_starred&&(!_legacyBadShape(_starred)||(SETTINGS.config&&SETTINGS.config._seqDefaultHealedV1)))?_starred:null;
     if(!target)target=(SETTINGS.sequences||[]).find(s=>s.name==='Classic flow + Claude screen');
     if(!target){
       const base=(SETTINGS.sequences||[]).find(s=>s.id==='classic-flow');
@@ -10081,9 +10096,12 @@ async function _seqV3RepairPass(){
       SETTINGS.sequenceAssignments=window.SeqBuilderV3.setDefaultSequence(SETTINGS.sequenceAssignments||[],target.id);
       markSettingsDirty();
     }
+    /* One-time legacy-shape heal is done — from here on the ★ stands as the operator set it. */
+    if(!(SETTINGS.config&&SETTINGS.config._seqDefaultHealedV1)){SETTINGS.config=SETTINGS.config||{};SETTINGS.config._seqDefaultHealedV1=true;markSettingsDirty();}
     const badSeq=(sq)=>!sq||!(sq.steps||[]).length||(sq.steps||[]).some(s=>s.kind==='manual'&&/phone.?screen/i.test(s.label||''));
     let n=0;
     for(const c of pipeline){
+      if(pipeline!==_myPipe)return; /* loadData replaced the pipeline — this instance is stale */
       if(!c||!c.st)continue;
       if(c.stage==='Hired'||c.stage==='Declined')continue;
       if(W&&W.row===c.excelRow)continue; /* workspace open — saveW would clobber; next load */
@@ -10091,21 +10109,34 @@ async function _seqV3RepairPass(){
       const ptrOk=!!(cur&&(cur.steps||[]).some(s=>s.id===c.st.sequenceStepId));
       if(c.st.sequenceId===target.id&&ptrOk)continue;
       if(c.st.sequenceId&&!badSeq(cur)&&ptrOk)continue; /* healthy on another sequence — tag-for-life stands */
-      if(!target.steps.some(s=>s.kind==='stage'&&s.stage&&s.stage.setStage===c.stage))continue; /* target has no stage step for their stage — leave alone */
+      /* SOURCE BINDING BEATS THE DEFAULT: an unadopted candidate who came through a job link
+         (or any sequenceAssignments match) adopts THEIR bound sequence, not the ★default —
+         otherwise every fresh job-link applicant was captured by the default flow on the
+         next load, before the job's binding could resolve. */
+      let dest=target;
+      if(!c.st.sequenceId){
+        try{
+          const bound=window.SeqBuilderV3.resolveSequenceFor(c,SETTINGS.sequenceAssignments||[],SETTINGS.sequences||[]);
+          if(bound&&Array.isArray(bound.steps)&&bound.steps.length&&!badSeq(bound))dest=bound;
+        }catch(e){}
+      }
+      if(!dest.steps.some(s=>s.kind==='stage'&&s.stage&&s.stage.setStage===c.stage))continue; /* target has no stage step for their stage — leave alone */
       const wasAdopted=!!c.st.sequenceId;
-      const ptr=_classicPointerFor(c,target);
-      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧬 '+(wasAdopted?'Repaired onto':'Adopted')+' "'+target.name+'" — pointer '+ptr});
-      c.st.sequenceId=target.id;c.st.sequenceStepId=ptr;
+      const ptr=_classicPointerFor(c,dest);
+      if(!ptr)continue;
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧬 '+(wasAdopted?'Repaired onto':'Adopted')+' "'+dest.name+'" — pointer '+ptr});
+      c.st.sequenceId=dest.id;c.st.sequenceStepId=ptr;
       c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
       c.st.sequenceCompletedAt=null;c.st.sequenceNudges=c.st.sequenceNudges||{};
       try{await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);n++;}
       catch(e){console.warn('repair persist failed:',c.name,e.message);}
     }
     if(n){
-      toast('🧬 '+n+' candidate'+(n===1?'':'s')+' repaired onto "'+target.name+'"');
+      toast('🧬 '+n+' candidate'+(n===1?'':'s')+' repaired onto a sequence');
       if(typeof render==='function')render();
     }
-  }catch(e){console.warn('seq repair pass:',e);}
+    }finally{window._seqRepairRunning=false;}
+  }catch(e){window._seqRepairRunning=false;console.warn('seq repair pass:',e);}
 }
 
 /* Booking-stage catch-up (same auto-heal spirit as above): candidates whose booking arrived
@@ -10143,8 +10174,14 @@ async function _reconcileBookingStages(){
     'Interview invite':['interview','Interview booked'],
     'Offer':['onboarding','Onboarding booked'],'Onboarding':['onboarding','Onboarding booked']};
   const bookedStages=['Screen booked','Interview booked','Onboarding booked'];
+  /* Re-entrancy (load chain + post-backfill + post-link can overlap): one instance at a
+     time; abort if loadData swapped the pipeline array out from under this instance. */
+  if(window._reconRunning)return;window._reconRunning=true;
+  const _myPipe=pipeline;
+  try{
   let n=0,swept=0;
   for(const c of pipeline){
+    if(pipeline!==_myPipe)return; /* stale instance — a fresher load owns the board now */
     if(!c||!c.st||!c.st.booking)continue;
     if(c.stage==='Hired'||c.stage==='Declined')continue;
     if(W&&W.row===c.excelRow)continue; /* workspace open on them — saveW would clobber the heal; next load catches it */
@@ -10205,6 +10242,7 @@ async function _reconcileBookingStages(){
     if(swept)console.info('📅 Swept '+swept+' stale consumed booking'+(swept===1?'':'s'));
     if(typeof render==='function')render();
   }
+  }finally{window._reconRunning=false;}
 }
 async function refreshRow(excelRow){
   const sid=await getWorkbookSession();const h=sid?{'workbook-session-id':sid}:{};
@@ -10371,6 +10409,40 @@ function _yardstikFormFilled(c){
   const ys=(c&&c.st&&c.st.yardstik)||null;
   if(!ys)return false;
   return !!(ys.reportId||/report|complete|clear|consider/i.test(ys.status||''));
+}
+/* ---- Interview cert-gate helpers ------------------------------------------------
+   Both action() and the automation tick consult THESE — the board and the robot must
+   never disagree about warn/cancel/sign-off state. All three are scoped PER BOOKING:
+   a stamp from a previous interview cycle can't silence (or re-fire) the gate on a
+   rescheduled one. Legacy unscoped stamps degrade safely (see each rule). */
+function _certSignoffValid(c){
+  /* ✓ Done with checks. Scoped stamps must match the current booking; legacy stamps
+     (no certChecksFor) count only if made AFTER the current booking arrived —
+     otherwise a sign-off clicked months ago at Applied would disable the gate for
+     every future interview. */
+  const st=c&&c.st;if(!st||!st.certChecksDoneAt)return false;
+  if(st.certChecksFor!==undefined)return st.certChecksFor===String(st.booking||'');
+  const bAt=st.bookingReceivedAt?Date.parse(st.bookingReceivedAt):0;
+  return Date.parse(st.certChecksDoneAt)>=(bAt||0);
+}
+function _certWarnSentFor(c){
+  /* Once-only cancellation warning, per booking. Legacy flag with no scope counts as
+     sent (never double-send an outward email on upgrade). */
+  const st=c&&c.st;if(!st||!(st.sent&&st.sent.interview_cert_warning))return false;
+  return st.warnedForBooking===undefined||st.warnedForBooking===String(st.booking||'');
+}
+function _autoCancelDoneFor(c){
+  /* Auto-cancel fires at most once per booking — but a RESCHEDULED interview gets
+     fresh enforcement (the old lifetime autoCancelledAt guard meant one auto-cancel
+     ever, leaving later bookings unpoliced). */
+  const st=c&&c.st;if(!st||!st.autoCancelledAt)return false;
+  return st.autoCancelledFor===undefined||st.autoCancelledFor===String(st.booking||'');
+}
+function _bgFormBlocks(c){
+  /* The BG-form blocker applies only when a Yardstik check was actually initiated — a
+     candidate who was never sent the form cannot be warned/cancelled over it. */
+  const ys=c&&c.st&&c.st.yardstik;
+  return !!(ys&&!_yardstikFormFilled(c));
 }
 function evalTrigger(name,c){
   if(!name)return false;
@@ -10630,14 +10702,14 @@ function action(c){
          certs computation (a deliberately waived cert or an unticked BG-form flag must
          not drag a signed-off candidate back into the warning/cancel path). A new cert
          arriving after sign-off re-sets certsReadyReview and re-opens the review. */
-      if(c.st.certChecksDoneAt&&!c.st.certsReadyReview){
+      if(_certSignoffValid(c)&&!c.st.certsReadyReview){
         if(_mins<=15){
           return{bucket:'action',timing:{txt:'\ud83c\udfa5 Interview in '+Math.max(0,Math.round(_mins))+'m \u2014 run it',pill:'pnew',date:_when},info:_info,primary:{kind:'questions',stage:'Interview',nextStage:'Offer',label:'\ud83c\udfa5 Run interview',cls:'grn'}};
         }
         return{bucket:'scheduled',timing:{txt:'\u2713 Checks done \u2014 interview upcoming',pill:'pg',date:_when},info:_info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
       }
       const _miss=_missingAppCerts(c);
-      const _form=_yardstikFormFilled(c);
+      const _form=!_bgFormBlocks(c); /* only blocks when a Yardstik check was actually initiated */
       const _missing=!!(_miss.length||!_form);
       const why=(_miss.length?_miss.length+' cert'+(_miss.length===1?'':'s')+' missing':'')+(_miss.length&&!_form?' + ':'')+(!_form?'BG form not completed':'');
       /* Fresh certs arrived (certsReadyReview) → the cross-check action below outranks the
@@ -10646,7 +10718,7 @@ function action(c){
         return{bucket:'action',timing:{txt:'\u26a0 Interview in '+Math.max(0,Math.round(_mins))+'m \u2014 '+why,pill:'pbad',date:_when},info:_info,primary:{kind:'cancelInterview',label:'\u2715 Cancel interview (Cal.com)',cls:'red'}};
       }
       if(_missing&&_mins<=60&&!c.st.certsReadyReview){
-        if(!(c.st.sent&&c.st.sent.interview_cert_warning)){
+        if(!_certWarnSentFor(c)){
           return{bucket:'action',timing:{txt:'\u26a0 Interview in '+Math.round(_mins)+'m \u2014 '+why,pill:'pbad',date:_when},info:_info,primary:{kind:'email-tpl',tpl:'interview_cert_warning',label:'\u26a0 Send cancellation warning',cls:'red'}};
         }
         return{bucket:'scheduled',timing:{txt:'\u26a0 Warned \u2014 certs due 30 min before the interview',pill:'pa',date:_when},info:_info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
@@ -10672,15 +10744,17 @@ function action(c){
   /* Job-requirements gate (review policy): came through a job link, doesn't show everything
      the role needs, no decision yet → surfaced outlined for Meir to decide. Early stages
      only — past the screen, a human already engaged. */
-  if(c&&c.st&&(c.stage==='Applied'||c.stage==='Screen invite')&&!c.st.jobReqDecision&&!c.st.jobReqRouted){
-    const _jb=(typeof _jobFor==='function')?_jobFor(c):null;
-    if(_jb&&_jb.req&&(_jb.req.policy||'review')==='review'){
-      const _miss=_jobMissingReqs(c,_jb);
-      if(_miss.length){
-        return{bucket:'action',timing:{txt:'🧾 '+_jb.name+' — missing: '+_miss.slice(0,3).join(', ')+(_miss.length>3?' +'+(_miss.length-3)+' more':''),pill:'pa',date:''},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'jobreq',label:'🧾 Review vs job requirements',cls:'gold'}};
+  try{
+    if(c&&c.st&&(c.stage==='Applied'||c.stage==='Screen invite')&&!c.st.jobReqDecision&&!c.st.jobReqRouted){
+      const _jb=(typeof _jobFor==='function')?_jobFor(c):null;
+      if(_jb&&_jb.req&&(_jb.req.policy||'review')==='review'){
+        const _miss=_jobMissingReqs(c,_jb);
+        if(_miss.length){
+          return{bucket:'action',timing:{txt:'🧾 '+_jb.name+' — missing: '+_miss.slice(0,3).join(', ')+(_miss.length>3?' +'+(_miss.length-3)+' more':''),pill:'pa',date:''},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'jobreq',label:'🧾 Review vs job requirements',cls:'gold'}};
+        }
       }
     }
-  }
+  }catch(err){console.warn('job-req gate failed for',c&&c.name,err);} /* one bad job record must never blank the board — fall through to the guarded engine below */
   let e=_actMemo.get(c);if(e&&e.g===_memGen)return e.v;
   /* One candidate's evaluation error must never blank the whole board: fail to a visible
      repair row for that candidate only (the baseInfo crash of 2026-07-28 took down render). */
@@ -10762,6 +10836,11 @@ function _actionC(c){
       return{bucket:'action',timing:{txt:'New document assigned',pill:'pnew',date:remaining+' more awaited'},info,primary:{kind:'open',label:'📎 Review — '+remaining+' awaited remaining',cls:'gold'},manuallyAwaiting:true,awaitingReSurfaceReason:'attachment'};
     }
     if(!_autoReleased){
+      /* Timed park expired → surface for a decision. Without this the "until" date was
+         purely decorative and a time-boxed park was a silent dead-end. */
+      if(st.awaitingUntil&&isFinite(Date.parse(st.awaitingUntil))&&Date.parse(st.awaitingUntil)<=Date.now()){
+        return{bucket:'action',timing:{txt:'⏰ Awaiting period ended ('+fmtDay(st.awaitingUntil)+')',pill:'pa',date:st.awaitingReason||''},info,primary:{kind:'release-awaiting',label:'⏰ Review — awaiting expired',cls:'gold'},manuallyAwaiting:true,awaitingReSurfaceReason:'timer'};
+      }
       /* No new activity — silently parked. */
       const awaitingItemsLabel=awaitingItems.length?(' ('+awaitingItems.length+' item'+(awaitingItems.length===1?'':'s')+')'):'';
       return{bucket:'awaiting',timing:{txt:(st.awaitingReason||'Manually parked')+awaitingItemsLabel,pill:'psoft',date:st.awaitingUntil?('until '+fmtDay(st.awaitingUntil)):''},info,primary:{kind:'release-awaiting',label:'Move out of awaiting',cls:'sky'},manuallyAwaiting:true};
@@ -10854,10 +10933,19 @@ function matchFilters(c){
        plus friendly words for coded values so "car" finds transport:'car', etc. */
     const s0=c.st||{};
     const trWords={car:'own car',transit:'public transit bus',rides:'rides',none:'no transport no car'}[(s0.formAnswers||{}).transport]||'';
-    const hay=(c.name+' '+c.email+' '+(s0.pills||[]).join(' ')+' '+(s0.certs||[]).join(' ')+' '+c.stage
-      +' '+trWords+(s0.liveIn?' live-in':'')
-      +' '+JSON.stringify(s0.formAnswers||{})+' '+JSON.stringify(s0.screening||{})
-      +' '+JSON.stringify(s0.facts||{})+' '+(c.row&&c.row[34]?String(c.row[34]):'')).toLowerCase();
+    /* VALUES only, memoized per candidate — raw JSON.stringify matched key names and coded
+       ids ("y", "fq-…") as false positives, and four stringifys ran per candidate per
+       keystroke. Cache invalidates with the standard memo generation. */
+    window._hayMemo=window._hayMemo||new WeakMap();
+    let _hayE=window._hayMemo.get(c);
+    let hay=(_hayE&&_hayE.g===_memGen)?_hayE.hay:null;
+    if(hay==null){
+      const vals=o=>{const out=[];(function walk(x){if(x==null)return;if(Array.isArray(x))x.forEach(walk);else if(typeof x==='object')Object.keys(x).forEach(k=>walk(x[k]));else{const sv=String(x);if(sv.length>1)out.push(sv);}})(o);return out.join(' ');};
+      hay=(c.name+' '+c.email+' '+(s0.pills||[]).join(' ')+' '+(s0.certs||[]).join(' ')+' '+c.stage
+        +' '+trWords+(s0.liveIn?' live-in':'')
+        +' '+vals(s0.formAnswers)+' '+vals(s0.screening)+' '+vals(s0.facts)).toLowerCase();
+      window._hayMemo.set(c,{g:_memGen,hay});
+    }
     if(hay.indexOf(t)<0)return false;
   }
   const s=c.st||{},sc=s.screening||{},g=s.gates||{};
@@ -12182,6 +12270,7 @@ async function _sendNudgeHeadless(c){
   await sendMailViaGraph(c.email,subj,_finalBody,true,[]);
   c.st=c.st||{};
   c.st.sent=c.st.sent||{};c.st.sent[tpl]=today();
+  if(tpl==='interview_cert_warning')c.st.warnedForBooking=String(c.st.booking||''); /* warning is per booking — a reschedule re-arms it */
   c.st.emails=c.st.emails||[];
   c.st.emails.unshift({id:'local-'+Date.now()+'-'+c.excelRow,direction:'out',subject:(subj||'').slice(0,140),preview:(body||'').slice(0,200),from:'careers@solurahomecare.com',to:c.email,received:new Date().toISOString(),seen:true});
   if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
@@ -13715,6 +13804,7 @@ async function reallySend(tpl,advanceTo){
     body=_soluraShell(body);
     await sendMailViaGraph(W.email,subj,body,isHtml,atts);
     W.st.sent=W.st.sent||{};W.st.sent[tpl]=today();
+    if(tpl==='interview_cert_warning')W.st.warnedForBooking=String(W.st.booking||''); /* warning is per booking — a reschedule re-arms it */
     /* Alias: a missed-stage rebook email IS functionally the rebook invite. If the user hits
        "no-show" and sends missed_screen/interview/onboarding, the sequence engine should NOT
        then surface "Send screen invite" as if nothing was sent — the missed_* email covers it.
@@ -13944,6 +14034,10 @@ function openWorkspace(r,jump){wsRow=r;loadW(r);renderWorkspace(jump);
        surfacing them until another fresh event happens — auto-re-park, exactly as requested. */
     if(c.st&&c.st.manualAwaiting){
       c.st.lastAwaitingReview=new Date().toISOString();
+      /* Mirror into the workspace's DEEP COPY too — loadW already ran above, so stamping
+         only c.st means the next saveW rewrites AJ from W.st WITHOUT the stamp and the
+         same stale event re-surfaces this candidate forever. */
+      if(W&&W.row===r&&W.st)W.st.lastAwaitingReview=c.st.lastAwaitingReview;
       /* Persist this stamp so refreshes don't re-surface them */
       patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]).catch(err=>console.warn('Awaiting review stamp:',err.message));
     }
@@ -15837,6 +15931,7 @@ async function runInterviewAnyway(){
   const miss=_missingAppCerts(W);
   if(!confirm('Run the interview even though '+(miss.length?('these are missing: '+miss.join(', ')):'checks are incomplete')+'?\n\nThis is recorded on the candidate.'))return;
   W.st.certChecksDoneAt=new Date().toISOString();
+  W.st.certChecksFor=String(W.st.booking||''); /* sign-off is per booking, never per lifetime */
   delete W.st.certsReadyReview;
   W.st.interviewCertOverride={at:new Date().toISOString(),by:userEmail||'operator',missing:miss};
   logW('🔓 Interview override — running despite missing items ('+(miss.join(', ')||'checks incomplete')+') by '+(userEmail||'operator'));
@@ -15851,6 +15946,7 @@ async function runInterviewAnyway(){
 async function checksMarkDone(){
   if(!W)return;
   W.st.certChecksDoneAt=new Date().toISOString();
+  W.st.certChecksFor=String(W.st.booking||''); /* sign-off is per booking, never per lifetime */
   delete W.st.certsReadyReview;
   logW('📋 Cert & registry checks marked done');
   await saveW(true);
@@ -16746,7 +16842,10 @@ async function openEmailDetail(messageId){
       if(!(a0['@odata.type']==='#microsoft.graph.fileAttachment'||a0.contentType))return;
       if(a0.isInline){
         const approxSize=a0.size||((a0.contentBytes||'').length*0.75);
-        if((a0.contentType||'').startsWith('image/')&&a0.contentBytes&&approxSize>15000)attsIdx.push({a:a0,oi});
+        const ct0=(a0.contentType||'').toLowerCase();
+        /* Inline PDFs are always real documents; inline images over ~6KB count too — phone
+           cert photos can be small, and only signature-logo territory sits below that. */
+        if(a0.contentBytes&&(ct0.indexOf('pdf')>-1||(ct0.startsWith('image/')&&approxSize>6000)))attsIdx.push({a:a0,oi});
       }else attsIdx.push({a:a0,oi});
     });
     const atts=attsIdx.map(x=>x.a);
@@ -16924,7 +17023,7 @@ function _renderAttachmentRow(a,i,messageId,cand,awaiting){
   }
   const suggestionLabel=suggestion?_awaitingItemLabel(suggestion):'';
   const primaryBtn=suggestion
-    ? `<button class="att-assign-primary" onclick="_assignAttachmentToAwaiting('${esc(messageId)}',${i},${cand?cand.excelRow:'null'},${suggestIdx})" style="background:linear-gradient(135deg,#8B6500,#C59B4E);color:#fff;border:none;padding:6px 12px;border-radius:6px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer">✓ Assign as ${esc(suggestionLabel)}</button>`
+    ? `<button class="att-assign-primary" onclick="_assignAttachmentToAwaiting('${esc(messageId)}',${i},${cand?cand.excelRow:'null'},${suggestIdx},'${esc(suggestion.kind)}','${encodeURIComponent(String(suggestion.name||''))}')" style="background:linear-gradient(135deg,#8B6500,#C59B4E);color:#fff;border:none;padding:6px 12px;border-radius:6px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer">✓ Assign as ${esc(suggestionLabel)}</button>`
     : '';
   /* The dropdown lets the user override the primary suggestion (assign to a non-awaiting kind),
      or assign when there's no current awaiting request at all. Each kind shows up; "cert" expands
@@ -16987,7 +17086,7 @@ function _renderAttachmentRow(a,i,messageId,cand,awaiting){
       <input id="${customNameId}" type="text" placeholder="Custom file name" style="display:none;padding:5px 9px;border:1.5px solid var(--border);border-radius:5px;font-family:inherit;font-size:11.5px;width:160px">
       <span id="att-cert-hint-${i}" style="display:none;font-size:10.5px;color:var(--gold-deep);font-style:italic">✓ Adds to Cert Center</span>
       <button id="att-go-${i}" style="display:none;padding:5px 12px;border:none;background:var(--grn);color:#fff;border-radius:5px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer" onclick="_assignAttachmentCustom('${esc(messageId)}',${i},${cand?cand.excelRow:'null'})">Assign &amp; save</button>
-      <button onclick="saveAttachment('${esc(messageId)}',${i})" id="att-btn-${i}" style="padding:5px 11px;border:1.5px solid var(--border);background:#fff;color:var(--soft);border-radius:5px;font-family:inherit;font-size:11px;cursor:pointer" title="Save with original filename, don't assign to a doc slot">Just save</button>
+      <button onclick="saveAttachment('${esc(messageId)}',${i},${cand?cand.excelRow:'null'})" id="att-btn-${i}" style="padding:5px 11px;border:1.5px solid var(--border);background:#fff;color:var(--soft);border-radius:5px;font-family:inherit;font-size:11px;cursor:pointer" title="Save with original filename, don't assign to a doc slot">Just save</button>
     </div>
   </div>`;
 }
@@ -17026,13 +17125,34 @@ function _onCertNameChange(i,value){
   }
 }
 
-/* Assign attachment to whatever's at the top of the awaiting queue */
-async function _assignAttachmentToAwaiting(messageId,attIdx,row,awIdx){
+/* Assign attachment to the awaiting item the row suggested. The button carries the item's
+   IDENTITY (kind + name), not just its render-time index — the queue can mutate between
+   render and click (assignment elsewhere, workspace edits), and silently filing the doc
+   as a DIFFERENT item was worse than refusing. */
+async function _assignAttachmentToAwaiting(messageId,attIdx,row,awIdx,awKind,awNameEnc){
   const cand=pipeline.find(c=>c.excelRow===row);
   if(!cand){toast('Candidate not found');return;}
   const awaiting=_currentAwaitingItems(cand);
-  if(!awaiting.length){toast('Nothing awaiting');return;}
-  const it0=Object.assign({},awaiting[awIdx]||awaiting[0]); /* the row's OWN suggested item */
+  if(!awaiting.length){toast('Nothing awaiting anymore — use the "assign as…" dropdown');return;}
+  const awName=(typeof awNameEnc==='string')?decodeURIComponent(awNameEnc):null;
+  let base=awaiting[awIdx];
+  if(awKind&&(!base||base.kind!==awKind||(awName!==null&&String(base.name||'')!==awName))){
+    base=awaiting.find(a=>a&&a.kind===awKind&&(awName===null||String(a.name||'')===awName))||null;
+  }
+  if(!base){toast('That request is no longer awaiting — use the "assign as…" dropdown to file this');return;}
+  /* Multi-cert question bundles: one file can't be several certs — force an explicit pick. */
+  const bundleNames=(Array.isArray(base.certsAsked)&&base.certsAsked.length)?base.certsAsked:(base.name?[base.name]:[]);
+  if((base.kind==='cert_question'||base.kind==='cert_clarification')&&bundleNames.length>1){
+    toast('This request covers several certs ('+bundleNames.join(', ')+') — pick which one this file is from the "assign as…" dropdown');
+    return;
+  }
+  let it0=Object.assign({},base);
+  /* A cert question/clarification answered WITH a document IS that cert — file it as one
+     (real cert-{name} filename, credential entry, Cert Center) instead of the kind-less
+     junk path. */
+  if(base.kind==='cert_question'||base.kind==='cert_clarification'){
+    it0={kind:'cert',name:bundleNames[0]||base.name||''};
+  }
   const bd=((document.getElementById('att-date-'+attIdx)||{}).value||'');
   if(bd&&bd!==new Date().toISOString().slice(0,10))it0.backdate=bd;
   await _doAssignment(messageId,attIdx,cand,it0);
@@ -17117,6 +17237,7 @@ async function _doAssignment(messageId,attIdx,cand,item){
       if(existing){
         existing.fileUrl=uploaded.webUrl;
         existing.fileName=finalName;
+        if(item.backdate)existing.addedAt=new Date(item.backdate+'T12:00:00').toISOString();
       }else{
         cand.st.credentials.push({
           id:'cred-'+Math.random().toString(36).slice(2,10),
@@ -17131,6 +17252,10 @@ async function _doAssignment(messageId,attIdx,cand,item){
       }
       /* Keep st.certs flat-string array in sync (legacy code reads this) */
       cand.st.certs=cand.st.credentials.map(c=>c.name);
+      /* A cert just landed — the interview cert gate should re-open for operator review
+         (this was only being set on the narrow parked-queue-drain path before, so certs
+         assigned from email never resurfaced a signed-off candidate). */
+      cand.st.certsReadyReview=true;
     }else if(item.kind==='license'){
       cand.st.licenseWebUrl=uploaded.webUrl;
       cand.st.licenseFile=finalName;
@@ -17141,9 +17266,30 @@ async function _doAssignment(messageId,attIdx,cand,item){
       cand.st.bgConsentWebUrl=uploaded.webUrl;
       cand.st.bgConsentFile=finalName;
     }
-    /* Remove this item from awaiting queue */
-    cand.st.awaitingItems=(cand.st.awaitingItems||[]).filter(a=>!(a.kind===item.kind&&(a.name||'')===(item.name||'')));
-    cand.st.awaitingItemsReceived=(cand.st.awaitingItemsReceived||0)+1; /* attachment genuinely arrived */
+    /* Drain the awaiting queue INTELLIGENTLY: a cert assignment fulfills any entry that
+       names that cert — exact cert items AND multi-cert question/clarification bundles
+       (the assigned name is removed from the bundle; the bundle survives until empty).
+       The old exact kind+name filter never drained cert_question items at all. */
+    (function(){
+      const nmL=String(item.name||'').trim().toLowerCase();
+      let drained=false;
+      cand.st.awaitingItems=(cand.st.awaitingItems||[]).filter(a=>{
+        if(!a)return false;
+        if(a.kind===item.kind&&String(a.name||'')===String(item.name||'')){drained=true;return false;}
+        if(item.kind==='cert'&&nmL&&['cert','cert_question','cert_clarification'].indexOf(a.kind)>-1){
+          const ns=(Array.isArray(a.certsAsked)&&a.certsAsked.length)?a.certsAsked:(a.name?[a.name]:[]);
+          if(ns.some(x=>String(x).trim().toLowerCase()===nmL)){
+            const rest=ns.filter(x=>String(x).trim().toLowerCase()!==nmL);
+            drained=true;
+            if(!rest.length)return false;
+            a.certsAsked=rest;a.name=rest.join(', ');
+            return true;
+          }
+        }
+        return true;
+      });
+      if(drained)cand.st.awaitingItemsReceived=(cand.st.awaitingItemsReceived||0)+1; /* attachment genuinely arrived */
+    })();
     if(item.backdate)cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'📎 Receipt backdated to '+item.backdate+' — it actually arrived then'});
     /* AUTO-RELEASE: if the queue is now empty AND the candidate was parked in awaiting, release
        them automatically. The user's intent when they parked was "wait for this stuff" — once
@@ -17184,12 +17330,15 @@ async function _doAssignment(messageId,attIdx,cand,item){
   }
 }
 
-async function saveAttachment(messageId,attIdx){
+async function saveAttachment(messageId,attIdx,row){
   const msg=_emailCache[messageId];if(!msg)return;
   const atts=(msg.attachments||[]);const att=atts[attIdx];if(!att||!att.contentBytes){toast('No content available for this attachment');return;}
   const btn=document.getElementById('att-btn-'+attIdx);btn.disabled=true;btn.textContent='Saving…';
   try{
-    const candidateName=W?W.name:'';if(!candidateName){toast('No candidate context');return;}
+    /* File to the EMAIL'S candidate — never whichever workspace happens to be open. */
+    const ownerC=(row!==null&&row!==undefined&&typeof pipeline!=='undefined')?pipeline.find(c=>c.excelRow===row):null;
+    const candidateName=(ownerC&&ownerC.name)||(W?W.name:'');
+    if(!candidateName){toast('No candidate context');btn.disabled=false;btn.textContent='Just save';return;}
     const folder='caregivers/'+safeFileName(candidateName)+'/onboarding';
     await ensureFolderPath(folder);
     /* decode base64 → bytes → upload */
@@ -18774,7 +18923,12 @@ function deleteCustomTemplate(key){
 }
 /* ===================== SETTINGS — sidebar-driven page ===================== */
 let settingsSection='seqengine2'; /* legacy 'workflow'/'sequence' sections retired — the v3 builder is the sequence surface */
-function setSettingsSection(k){settingsSection=k;renderSettings();}
+function setSettingsSection(k){
+  /* Leaving the form editor drops the job scope — otherwise later edits (or _fc() touches
+     from previews) silently target, or even recreate, a job's custom form. */
+  if(k!=='formconfig'&&window._fcJobScope)window._fcJobScope=null;
+  settingsSection=k;renderSettings();
+}
 
 const SETTINGS_SECTIONS=[
   {key:'preferences',label:'Settings preferences', icon:'🎛'},
@@ -20045,7 +20199,7 @@ function _fc(){
   return SETTINGS.formConfig;
 }
 function _fcStamp(){
-  SETTINGS.formConfig.updatedAt=new Date().toISOString();
+  _fc().updatedAt=new Date().toISOString(); /* scope-aware: a job's custom form stamps ITS OWN config, never the global's */
   markSettingsDirty();
 }
 function _fcQ(qid){return _fc().questions.find(q=>q.id===qid);}
@@ -20507,6 +20661,10 @@ function _extraAnswerRows(c){
   });
   let custom={};try{custom=JSON.parse((c&&c.row&&c.row[34])||'{}')||{};}catch(e){}
   Object.keys(custom).forEach(k=>{
+    /* Column AI ALSO holds the operator's QBANK scoring answers (saveW writes W.answers
+       there) — only fq- ids are actual application form answers. Without this filter,
+       every screened candidate showed rows like "rel1 — 4" labeled as application data. */
+    if(!/^fq-/.test(String(k)))return;
     const v=custom[k];if(v==null||v==='')return;
     rows.push([String(k).replace(/^fq-/,'').replace(/[-_]/g,' '),Array.isArray(v)?v.join(', '):String(v)]);
   });
@@ -20948,7 +21106,7 @@ function renderSettingsSourceLinks(){
           <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcCopy('${esc(l.code)}',this)" title="Copy the tracking URL">\u{1F517} copy</button>
           ${l.jobId?'':`<button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcEdit('${esc(l.id)}')" title="Edit platform, method, pay, notes">\u270E edit</button>`}
           <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcToggleActive('${esc(l.id)}')" title="${inactive?'Reactivate':'Deactivate'}">${inactive?'\u25B6':'\u23F8'}</button>
-          <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;font-size:10.5px" onclick="_srcDelete('${esc(l.id)}')">\u00d7</button>
+          ${l.jobId?'':`<button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;font-size:10.5px" onclick="_srcDelete('${esc(l.id)}')">\u00d7</button>`}
         </div>
       </div>`;
     }).join('');
@@ -21064,7 +21222,7 @@ function _srcSaveEdit(id){
   if(!l)return;
   const g=i=>((document.getElementById(i)||{}).value||'').trim();
   const platform=g('se-platform'),method=g('se-method');
-  if(!platform||!method){toast('Platform and method required');return;}
+  if(!platform){toast('Platform required');return;} /* method stays optional — legacy links routinely have none, and requiring it made them uneditable */
   l.platform=platform;l.method=method;l.wage=g('se-wage');l.notes=g('se-notes');
   markSettingsDirty();closeModal();renderSettings();
   toast('✓ Link updated');
@@ -21110,10 +21268,12 @@ function _jobMissingReqs(c,job){
    stamped + logged, once. REVIEW policy is handled as an action row (see action()). */
 async function _jobRequirementsPass(){
   try{
+    const _myPipe=pipeline; /* abort if a fresher load swaps the board mid-pass */
     const defId=window.SeqBuilderV3?window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[]):null;
     const defSeq=(SETTINGS.sequences||[]).find(s=>s.id===defId);
     let n=0;
     for(const c of pipeline){
+      if(pipeline!==_myPipe)return;
       if(!c||!c.st)continue;
       if(c.stage!=='Applied'&&c.stage!=='Screen invite')continue;
       if(c.st.jobReqRouted||c.st.jobReqDecision)continue;
@@ -21123,9 +21283,11 @@ async function _jobRequirementsPass(){
       const miss=_jobMissingReqs(c,jb);
       if(!miss.length)continue;
       if(defSeq&&jb.sequenceId&&jb.sequenceId!==defSeq.id){
-        const ptr=_classicPointerFor(c,defSeq);
-        c.st.sequenceId=defSeq.id;c.st.sequenceStepId=ptr;
-        c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
+        const ptr=_classicPointerFor(c,defSeq); /* null for an empty default — keep their sequence rather than dangle */
+        if(ptr){
+          c.st.sequenceId=defSeq.id;c.st.sequenceStepId=ptr;
+          c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
+        }
       }
       c.st.jobReqRouted=1;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧾 Missing for "'+jb.name+'": '+miss.join(', ')+' → routed to the generic pipeline (job policy)'});
@@ -21386,6 +21548,9 @@ function _jobSave(){
     toast('📋 Custom form created — open it from the job to customize');
   }else if(formPick==='__GLOBAL__'&&SETTINGS.jobFormConfigs[j.id]){
     delete SETTINGS.jobFormConfigs[j.id];
+    /* If the form editor was scoped to this job, drop the scope too — a later _fc() call
+       would silently re-create the config we just deleted. */
+    if(window._fcJobScope===j.id)window._fcJobScope=null;
   }
   markSettingsDirty();closeModal();renderSettings();
   toast('🧳 Job saved — '+j.links.length+' link'+(j.links.length===1?'':'s')+' ('+j.links.map(l2=>l2.platform).join(', ')+')');
@@ -21440,13 +21605,24 @@ function _jobEditSeq(id){
 function _jobToggle(id){
   const j=(SETTINGS.jobs||[]).find(x=>x.id===id);if(!j)return;
   j.active=j.active===false;
-  const l=(SETTINGS.config.sourceLinks||[]).find(x=>x.code===j.code);
-  if(l)l.active=j.active;
+  /* EVERY link of the job pauses/resumes, and its sequence assignments follow — a paused
+     job must not keep routing applicants through still-live links (only the legacy single
+     j.code link was being toggled before). */
+  _jobLinks(j).forEach(lk=>{
+    const l=(SETTINGS.config.sourceLinks||[]).find(x=>x.code===lk.code);
+    if(l)l.active=j.active!==false;
+    SETTINGS.sequenceAssignments=(SETTINGS.sequenceAssignments||[]).filter(a=>!(a.match&&a.match.sourceCode===lk.code));
+    if(j.active!==false&&j.sequenceId)SETTINGS.sequenceAssignments.push({match:{sourceCode:lk.code},sequenceId:j.sequenceId});
+  });
   markSettingsDirty();renderSettings();
 }
 function _srcDelete(id){
   if(!confirm('Delete this source link? Existing candidates with this code will still show it as raw data.'))return;
+  const gone=(SETTINGS.config.sourceLinks||[]).find(x=>x.id===id);
   SETTINGS.config.sourceLinks=(SETTINGS.config.sourceLinks||[]).filter(x=>x.id!==id);
+  /* Its sequence assignment goes with it — an assignment for a dead code can never match
+     and only confuses the resolution table. */
+  if(gone&&gone.code)SETTINGS.sequenceAssignments=(SETTINGS.sequenceAssignments||[]).filter(a=>!(a.match&&a.match.sourceCode===gone.code));
   markSettingsDirty();renderSettings();
 }
 /* (the old prompt-chain link editor was replaced by the _srcEdit modal defined earlier —
@@ -21587,7 +21763,14 @@ async function _yardstikTestConnection(){
   try{
     const r=await fetch(ZI_WORKER_URL+'/yardstik/packages',{headers:{'X-Solura-Token':tok}});
     const j=await r.json().catch(()=>({}));
-    if(r.status===401&&!j.packages){if(el){el.textContent='✗ worker token rejected (Settings → Integrations)';el.className='pill pr2';}return;}
+    if(r.status===401&&!j.packages){
+      /* A 401 can be OURS (worker token) or YARDSTIK'S proxied through (stale API key) —
+         the worker's own rejection carries no Yardstik-shaped body, so use the body to
+         tell them apart instead of blaming the token for both. */
+      const yard=/yardstik|api.?key|unauthoriz/i.test(JSON.stringify(j||{}));
+      if(el){el.textContent=yard?'✗ Yardstik rejected the API key — update YARDSTIK_API_KEY on the worker':'✗ worker token rejected (Settings → Integrations) — or, if the token is right, Yardstik rejected the worker’s API key';el.className='pill pr2';}
+      return;
+    }
     if(j&&Array.isArray(j.packages)){if(el){el.textContent='✓ Yardstik reachable — '+j.packages.length+' package'+(j.packages.length===1?'':'s');el.className='pill pg';}return;}
     const msg=(j&&(j.error||j.message))||('HTTP '+r.status);
     if(el){el.textContent='✗ '+(/401|unauthor/i.test(String(msg)+r.status)?'Yardstik rejected the API key — update YARDSTIK_API_KEY on the worker':msg);el.className='pill pr2';}
@@ -22870,15 +23053,25 @@ async function _seqAutomationTick(){
   for(const c of pipeline){
     if(budget<=0)break;
     if(!c.st||!c.st.sequenceId||c.stage==='Hired'||c.stage==='Declined')continue;
+    /* Workspace open on this candidate → skip entirely. Every heal pass has this guard;
+       the tick was the one place without it — loadW deep-copies state, so a tick action
+       here gets erased by the operator's next saveW and then RE-FIRES (duplicate outward
+       sends / double cancels). */
+    if(W&&W.row===c.excelRow)continue;
     /* 1-hour auto-cancel: automation ON makes the warned rule real. Once per booking. */
-    if(c.st.booking&&c.stage==='Interview booked'&&!c.st.autoCancelledAt&&c.st.calBookingId&&!(c.st.certChecksDoneAt&&!c.st.certsReadyReview)){
-      /* ✓ Done with checks is the operator's sign-off — automation never warns or cancels past it. */
+    if(c.st.booking&&c.stage==='Interview booked'&&!_autoCancelDoneFor(c)&&c.st.calBookingId&&!(_certSignoffValid(c)&&!c.st.certsReadyReview)
+       &&!(c.st.emails||[]).some(e2=>!e2.seen)){
+      /* ✓ Done with checks is the operator's sign-off — automation never warns or cancels past it.
+         An UNREAD reply also parks the robot: action() yields to the email override ("they may
+         be rescheduling"), and the tick must not cancel behind the very reply the operator is
+         being told to open. */
       const m=minsUntil(c.st.booking),miss=_missingAppCerts(c);
-      const missingAny=(miss.length||!_yardstikFormFilled(c))&&!c.st.certsReadyReview; /* fresh certs awaiting review → never auto-warn/cancel */
-      /* T-60→T-30: auto-send the cancellation warning (once). T-30→0: auto-cancel. */
-      if(m!=null&&m<=60&&m>30&&missingAny&&!(c.st.sent&&c.st.sent.interview_cert_warning)){
+      const missingAny=(miss.length||_bgFormBlocks(c))&&!c.st.certsReadyReview; /* fresh certs awaiting review → never auto-warn/cancel */
+      /* T-60→T-30: auto-send the cancellation warning (once per booking). T-30→0: auto-cancel. */
+      if(m!=null&&m<=60&&m>30&&missingAny&&!_certWarnSentFor(c)){
         try{
           if(await _autoSendTpl(c,'interview_cert_warning')){
+            c.st.warnedForBooking=String(c.st.booking||'');
             c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-sent interview cert warning (cancel at T-30)'});
             await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
             budget--;continue; /* one action per candidate per tick */
@@ -22889,6 +23082,7 @@ async function _seqAutomationTick(){
         const reason=miss.length?('Required certificates not received before the interview: '+miss.join(', ')):'Background-check form not completed before the interview';
         if(await _cancelBookingHeadless(c,reason)){
           c.st.autoCancelledAt=new Date().toISOString();
+          c.st.autoCancelledFor=String(c.st.booking||'');
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-cancelled interview (30-minute rule; warned at T-60) — '+reason});
           await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
           budget--;continue; /* one action per candidate per tick */
@@ -23046,15 +23240,19 @@ function _seqInputEval(key,c){
   if(parts[0]==='job'){
     const job=(typeof _jobFor==='function')?_jobFor(c):null;
     if(!job)return undefined;
+    /* The portal stores the candidate ZIP at st.zip (application form path); st.facts.zip
+       is only the legacy altPath — reading facts alone made every proximity input
+       undefined for virtually all candidates. */
+    const _candZip=String(st.zip||(st.facts&&st.facts.zip)||'');
     if(parts[1]==='zip')return job.zip||undefined;
     if(parts[1]==='zipMatch'){
-      const cz=String((st.facts&&st.facts.zip)||'').slice(0,3),jz=String(job.zip||'').slice(0,3);
+      const cz=_candZip.slice(0,3),jz=String(job.zip||'').slice(0,3);
       return (cz&&jz)?(cz===jz?1:0):undefined;
     }
-    if(parts[1]==='distanceMiles')return _zipMiles((st.facts&&st.facts.zip)||'',job.zip||'');
+    if(parts[1]==='distanceMiles')return _zipMiles(_candZip,job.zip||'');
     if(parts[1]==='distanceScore'){
       /* Banded 0–5 for direct use as a station input: ≤5mi=5, ≤10=4, ≤15=3, ≤25=2, ≤40=1, farther=0. */
-      const mi=_zipMiles((st.facts&&st.facts.zip)||'',job.zip||'');
+      const mi=_zipMiles(_candZip,job.zip||'');
       if(mi===undefined)return undefined;
       return mi<=5?5:mi<=10?4:mi<=15?3:mi<=25?2:mi<=40?1:0;
     }
@@ -23099,6 +23297,7 @@ function _classicPointerFor(c,seq){
   /* SEQUENCE-AGNOSTIC: the stage step is found by its DATA (stage.setStage === column G),
      not by the migration's stage_* id convention — canvas-authored sequences with random
      step ids get identical stage-matched placement. Id lookup kept as fallback. */
+  if(!seq||!Array.isArray(seq.steps)||!seq.steps.length)return null; /* empty sequence: no pointer, never a throw (an exception here aborted whole heal passes mid-loop) */
   const byId={};seq.steps.forEach(s2=>byId[s2.id]=s2);
   const key='stage_'+String(c.stage||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
   const stageStep=seq.steps.find(s2=>s2.kind==='stage'&&s2.stage&&s2.stage.setStage===c.stage)||byId[key];
@@ -23114,6 +23313,39 @@ function _classicPointerFor(c,seq){
     break;
   }
   return (ptr||stageStep).id;
+}
+
+/* Is `targetId` reachable DOWNSTREAM of `fromId` by following the sequence's links?
+   Used by the stage-snap: "pointer is behind the stage step" must be decided by the CHAIN,
+   not by step ARRAY order — canvas-authored sequences store steps in arbitrary array order,
+   and the old index comparison (sIdx>pIdx) made snap and walk fight each other every render,
+   growing log/history until the 32k AJ cap killed all saves. Follows every outgoing edge
+   (next, elseNext, route options…) breadth-first. */
+function _seqReachesDownstream(seq,fromId,targetId){
+  if(!fromId||!targetId)return false;
+  const byId={};(seq.steps||[]).forEach(s2=>{if(s2&&s2.id)byId[s2.id]=s2;});
+  const outgoing=step=>{
+    const out=[];
+    (function walk(o){
+      if(!o||typeof o!=='object')return;
+      for(const k in o){
+        const v=o[k];
+        if((k==='next'||/Next$/.test(k))&&typeof v==='string'&&v)out.push(v);
+        else if(v&&typeof v==='object')walk(v);
+      }
+    })(step);
+    return out;
+  };
+  const seen={};const q=[fromId];seen[fromId]=1;
+  let guard=0;
+  while(q.length&&guard++<(seq.steps||[]).length*4){
+    const cur=byId[q.shift()];if(!cur)continue;
+    for(const nid of outgoing(cur)){
+      if(nid===targetId)return true;
+      if(!seen[nid]){seen[nid]=1;q.push(nid);}
+    }
+  }
+  return false;
 }
 
 function _seqV3Unadopted(){
@@ -23173,24 +23405,29 @@ function _seqV3Action(c,info){
     if(c.stage){
       /* Stage step matched by DATA (setStage === column G), not the migration id convention —
          works for any sequence authored in the editor. */
-      const sIdx=seq.steps.findIndex(s2=>s2.kind==='stage'&&s2.stage&&s2.stage.setStage===c.stage);
-      const pIdx=seq.steps.findIndex(s2=>s2.id===(cand.st&&cand.st.sequenceStepId));
-      if(sIdx>=0&&pIdx>=0&&sIdx>pIdx){
+      const stageStep=seq.steps.find(s2=>s2.kind==='stage'&&s2.stage&&s2.stage.setStage===c.stage);
+      const pId=cand.st&&cand.st.sequenceStepId;
+      /* "Pointer behind the stage step" is decided by CHAIN reachability (the stage step
+         lies downstream of the pointer), never by array order — see _seqReachesDownstream.
+         Pointer already at/past the stage step, or on a disjoint branch → no snap. */
+      if(stageStep&&pId&&pId!==stageStep.id&&_seqReachesDownstream(seq,pId,stageStep.id)){
         const ptr=_classicPointerFor(cand,seq);
         if(ptr&&ptr!==cand.st.sequenceStepId){
           cand.st.sequenceStepId=ptr;
-          cand.st.sequenceHistory=(cand.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
           if(cand===c&&c.st.sequenceId&&!(W&&W.row===c.excelRow)){
-            /* Once per row+pointer per page session — a canvas-authored sequence whose array
-               order diverges from link order could otherwise re-snap (and re-commit) on
-               every render, bloating st.log toward the 32k AJ cap. */
+            /* Once per row+pointer per page session — belt over the chain test: nothing
+               may re-commit/re-log the same snap every render (32k AJ cap protection).
+               History is appended HERE, inside the guard, for the same reason. */
             window._snapOnce=window._snapOnce||{};
             const _sk=c.excelRow+':'+ptr;
             if(!window._snapOnce[_sk]){
               window._snapOnce[_sk]=1;
+              cand.st.sequenceHistory=(cand.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
               cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Pointer snapped to stage '+c.stage+' → '+ptr});
               _seqCommitState(cand,{}).catch(e2=>console.warn('stage snap persist:',e2));
             }
+          }else{
+            cand.st.sequenceHistory=(cand.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
           }
           ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
         }
@@ -23227,7 +23464,14 @@ function _seqV3Action(c,info){
         ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
       }
       if(walked&&cand===c&&c.st&&c.st.sequenceId&&!(W&&W.row===c.excelRow)){
-        cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Sequence advanced '+(walked===1?'a step':walked+' steps')+' — condition met'});
+        /* Log once per row+landing — a pathological loop must bloat neither st.log nor
+           sequenceHistory toward the 32k AJ cap. The commit itself is idempotent. */
+        window._walkOnce=window._walkOnce||{};
+        const _wk=c.excelRow+':'+(cand.st.sequenceStepId||'');
+        if(!window._walkOnce[_wk]){
+          window._walkOnce[_wk]=1;
+          cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Sequence advanced '+(walked===1?'a step':walked+' steps')+' — condition met'});
+        }
         _seqCommitState(cand,{}).catch(e2=>console.warn('sequence walk persist:',e2));
       }
     }
@@ -23333,6 +23577,7 @@ async function _sendTplDirect(cand,tpl){
   const subj=substituteLive(t.s,cand),body=substituteLive(t.b,cand);
   await sendMailViaGraph(cand.email,subj,body,false,[]);
   cand.st.sent=cand.st.sent||{};cand.st.sent[tpl]=today();
+  if(tpl==='interview_cert_warning')cand.st.warnedForBooking=String(cand.st.booking||''); /* warning is per booking — a reschedule re-arms it */
   cand.st.emails=cand.st.emails||[];
   cand.st.emails.unshift({id:'local-'+Date.now(),direction:'out',subject:(subj||'').slice(0,140),preview:(body||'').slice(0,200),from:'careers@solurahomecare.com',to:cand.email,received:new Date().toISOString(),seen:true});
   if(cand.st.emails.length>40)cand.st.emails=cand.st.emails.slice(0,40);
@@ -23738,8 +23983,9 @@ function _mountSeqEditorV2(){
   _seqV3Migrate();
   /* Same-id dedup on mount (keep newest) — re-importing an updated export behaves as replace. */
   SETTINGS.sequences=_dedupSequences(Array.isArray(SETTINGS.sequences)?SETTINGS.sequences:[]);
+  const _jump=window._seqJumpTo;window._seqJumpTo=null; /* deep-link is ONE-SHOT — consumed on this mount, later visits keep their own selection */
   window.SeqBuilderV3.renderSequenceBuilder(el,{
-    selectedId:window._seqJumpTo||undefined, /* job cards deep-link their sequence here */
+    selectedId:_jump||undefined, /* job cards deep-link their sequence here */
     sequences:SETTINGS.sequences,
     assignments:SETTINGS.sequenceAssignments,
     packs:SETTINGS.actionPacks,
