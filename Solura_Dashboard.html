@@ -942,6 +942,10 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <label class="ee-lbl">Extra instructions for this email (optional)</label>
         <textarea id="claude-instructions" rows="3" class="ee-inp" placeholder="e.g. Reference that her mom just left the hospital. Goal: get the in-home visit booked this week. Or ask for a document: include a one-page fall-prevention checklist as an attached doc."></textarea>
       </div>
+      <div style="margin-bottom:12px">
+        <label class="st-check" style="font-size:12.5px"><input type="checkbox" id="claude-want-pdf"> 📄 Also generate a PDF attachment — a designed, branded document</label>
+        <div style="font-size:10.5px;color:var(--soft);margin-top:3px;margin-left:24px">Describe what it should contain in the instructions above (e.g. "a one-page fall-prevention checklist for Margaret"). Solura letterhead and license footer are added automatically.</div>
+      </div>
       <div style="margin-bottom:14px">
         <label class="ee-lbl">Attach a document for Claude to reference (optional — PDF, text, or image, e.g. a care plan)</label>
         <input type="file" id="claude-doc" accept=".pdf,.txt,.md,.html,.htm,.png,.jpg,.jpeg,.webp,.gif" style="font-size:12px">
@@ -1419,7 +1423,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0814-43';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0821-44';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4423,12 +4427,17 @@ function buildClaudeSystemPrompt(training){
     +'\n\nPRIORITY ORDER when anything conflicts: (1) Meir\'s specific instructions for THIS email — they override everything; (2) the message being replied to; (3) the NON-NEGOTIABLE STANDING RULES below — they outrank voice samples and any reference template\'s own text; (4) reference templates and voice samples; (5) all other context. Never let background context override a direct instruction or a standing rule.'
     +(parts.reference?('\n\nREFERENCE MATERIAL from Meir (style and structure source ONLY — imitate the look, never copy scaffolding verbatim, never let template text override the rules):\n'+parts.reference):'')
     +(parts.rules?('\n\n=== NON-NEGOTIABLE STANDING RULES — verify EACH rule is satisfied before finalizing; where voice samples or reference templates conflict with these, the rules win ===\n'+parts.rules+'\n=== END STANDING RULES ==='):'')
-    +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — and IF the instructions ask to attach, include, create, or send ANY document, plan, checklist, summary, letter, or one-pager, you MUST ALSO include "doc":{"name":"Descriptive_Name.pdf","html":"<complete simple HTML document, headings + paragraphs + lists, inline styles only>"} — name it .pdf (default) or .doc only when Word format is explicitly requested; omit "doc" entirely otherwise — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). NEVER return bare <tr> or <td> fragments copied from template scaffolding \u2014 return self-contained blocks (<p>, <div>; a complete nested <table> is fine). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it. If a block of specific instructions is provided at the end of the user message, every point in it is BINDING — re-read it before finalizing and verify each point is satisfied.';
+    +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — and IF the instructions ask to attach, include, create, or send ANY document, plan, checklist, summary, letter, or one-pager, you MUST ALSO include "doc":{"name":"Descriptive_Name.pdf","html":"<the document body as inline-styled HTML>"} — name it .pdf (default) or .doc only when Word format is explicitly requested; omit "doc" entirely otherwise. PDF documents are RENDERED VISUALLY, so design them like a real branded document: styled headings, short paragraphs, tables, checklists (☐/☑), colored section accents using the brand palette (navy #1B2A4A, gold #C8870A, warm cream #F5F1E8 backgrounds, light rules #E4DCCB), generous white space. Inline styles only; fluid width (never fix widths above 700px); avoid page-unfriendly elements (no fixed positioning, no external images). The Solura letterhead and license footer are added automatically — never add your own. Target 1–3 pages of genuinely personalized content — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). NEVER return bare <tr> or <td> fragments copied from template scaffolding \u2014 return self-contained blocks (<p>, <div>; a complete nested <table> is fine). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it. If a block of specific instructions is provided at the end of the user message, every point in it is BINDING — re-read it before finalizing and verify each point is satisfied.';
 }
 function claudePromptPreview(){
   var ri=_claudeRi;if(ri<0)return;
   var context=buildClaudeEmailContext(ri,{replyTo:_emailReplyTo});
   var instructions=String((el('claude-instructions')||{}).value||'').trim();
+  // Mirror claudeGenerate exactly — the PDF checkbox appends its binding line
+  if((el('claude-want-pdf')||{}).checked){
+    instructions+=(instructions?'\n\n':'')
+      +'MANDATORY: include the "doc" field in your JSON — a PDF document. If the instructions above describe one, build exactly that; otherwise build a one-page, personalized summary of how Solura would help this specific family, drawn from the lead context. Design it properly (headings, color accents, tables or checklists where they help) and name the file descriptively, ending in .pdf.';
+  }
   var di=el('claude-doc');var f4=di&&di.files&&di.files[0];
   var txt='══════════ SYSTEM PROMPT ══════════\n'
     +buildClaudeSystemPrompt(buildClaudeSystemTraining())
@@ -6544,6 +6553,54 @@ function adaptDraftFragment(html){
   }
   return v;
 }
+/* ─── Branded PDF renderer — Claude's doc HTML becomes a DESIGNED PDF ───
+ * html2pdf (html2canvas + jsPDF) renders the real styled HTML — colors,
+ * tables, layout — onto Letter pages under the Solura letterhead. Loaded
+ * lazily from cdnjs (same CDN as SheetJS) only when a PDF is generated;
+ * the minimal text-only writer below stays as the offline fallback.    */
+var _html2pdfLoading=null;
+function loadHtml2Pdf(){
+  if(window.html2pdf)return Promise.resolve();
+  if(_html2pdfLoading)return _html2pdfLoading;
+  _html2pdfLoading=new Promise(function(res,rej){
+    var sc=document.createElement('script');
+    sc.src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+    sc.onload=function(){res();};
+    sc.onerror=function(){_html2pdfLoading=null;rej(new Error('PDF renderer failed to load — check the connection'));};
+    document.head.appendChild(sc);
+  });
+  return _html2pdfLoading;
+}
+async function buildBrandedPdfFile(name,innerHtml){
+  await loadHtml2Pdf();
+  var fname=String(name||'Document').replace(/[^\w\- .]/g,'').trim()||'Document';
+  if(!/\.pdf$/i.test(fname))fname+='.pdf';
+  var inner=extractInnerHtml(sanitizeDraftHtml(innerHtml));
+  var host=document.createElement('div');
+  host.style.cssText='position:fixed;left:-10000px;top:0;width:740px;background:#ffffff';
+  host.innerHTML='<div style="font-family:Georgia,serif;color:#222;padding:8px 6px;background:#ffffff">'
+    +'<div style="border-bottom:3px solid #C8870A;padding-bottom:12px;margin-bottom:20px">'
+    +'<span style="font-size:24px;font-weight:bold;color:#1B2A4A;letter-spacing:1px">SOLURA</span>'
+    +'<span style="font-size:10px;color:#C8870A;letter-spacing:3px;margin-left:10px">HOME CARE</span>'
+    +'<div style="font-size:8.5px;color:#888;margin-top:5px">815 Superior Ave E, Suite 1618, Cleveland, OH 44114 · (216) 770-4886 · www.solurahomecare.com</div>'
+    +'</div>'
+    +inner
+    +'<div style="border-top:1px solid #ddd;margin-top:26px;padding-top:9px;font-size:8.5px;color:#999">Prepared by Solura Home Care · License 4574HHN</div>'
+    +'</div>';
+  document.body.appendChild(host);
+  try{
+    var blob=await html2pdf().set({
+      margin:[14,12,16,12],
+      image:{type:'jpeg',quality:0.92},
+      html2canvas:{scale:2,useCORS:true,logging:false},
+      jsPDF:{unit:'mm',format:'letter',orientation:'portrait'},
+      pagebreak:{mode:['css','legacy']}
+    }).from(host.firstChild).outputPdf('blob');
+    return new File([blob],fname,{type:'application/pdf'});
+  }finally{
+    try{document.body.removeChild(host);}catch(_){}
+  }
+}
 function buildGeneratedDoc(name,innerHtml){
   var safe=sanitizeDraftHtml(innerHtml);
   var inner=extractInnerHtml(safe);
@@ -6710,6 +6767,7 @@ function openClaudeWriter(ri){
     return;
   }
   _claudeRi=ri;
+  var wpReset=el('claude-want-pdf');if(wpReset)wpReset.checked=false; // fresh open → off
   var r=rows[ri]||[];
   var name=String(r[C.DM]||r[C.NM]||'').trim();
   var step=getStep(ri);
@@ -6798,9 +6856,15 @@ async function claudeGenerate(){
     userContent.push({type:'text',text:'Lead context:\n'+context});
     // Instructions ride in their OWN final block, loudly framed — buried
     // mid-context they were losing to "weigh heavily"-style directives.
-    if(instructions){
+    var wantPdf=!!((el('claude-want-pdf')||{}).checked);
+    var instrText=instructions;
+    if(wantPdf){
+      instrText+=(instrText?'\n\n':'')
+        +'MANDATORY: include the "doc" field in your JSON — a PDF document. If the instructions above describe one, build exactly that; otherwise build a one-page, personalized summary of how Solura would help this specific family, drawn from the lead context. Design it properly (headings, color accents, tables or checklists where they help) and name the file descriptively, ending in .pdf.';
+    }
+    if(instrText){
       userContent.push({type:'text',text:'=== MEIR\'S INSTRUCTIONS FOR THIS EMAIL — HIGHEST PRIORITY ===\n'
-        +instructions
+        +instrText
         +'\n=== END INSTRUCTIONS ===\nWrite the email now. Satisfy every instruction above exactly; where they conflict with anything in the context, the instructions win.'});
     }else{
       userContent.push({type:'text',text:'Write the email now.'});
@@ -6839,14 +6903,21 @@ async function claudeGenerate(){
     // If the instructions asked for a document but none came back, surface
     // it — silence here read as "Claude doesn't attach files".
     var wantedDoc=/\b(attach|include|add|create|make|send)\b[\s\S]{0,60}\b(doc|document|plan|checklist|summary|one[- ]?pager|letter|pdf)\b/i.test(String((el('claude-instructions')||{}).value||''));
-    if(wantedDoc&&!(draft.doc&&draft.doc.html)){
+    if((wantedDoc||wantPdf)&&!(draft.doc&&draft.doc.html)){
       toast('⚠ Claude wrote the email but skipped the document — regenerate with wording like: include a one-page fall checklist as an attached doc');
     }
-    // Claude generated a document → branded .doc, attached automatically
+    // Claude generated a document → branded PDF (or .doc), attached automatically
     if(draft.doc&&draft.doc.html){
       try{
         var wantWord=/\.docx?$/i.test(String(draft.doc.name||''));
-        var genFile=wantWord?buildGeneratedDoc(draft.doc.name,draft.doc.html):buildGeneratedPdf(draft.doc.name,draft.doc.html);
+        var genFile;
+        if(wantWord)genFile=buildGeneratedDoc(draft.doc.name,draft.doc.html);
+        else{
+          // Designed PDF first (real rendered HTML); text-only writer is the
+          // offline fallback so a CDN hiccup never loses the document.
+          try{genFile=await buildBrandedPdfFile(draft.doc.name,draft.doc.html);}
+          catch(ePdf){console.warn('Branded PDF render failed, using text fallback:',ePdf.message);genFile=buildGeneratedPdf(draft.doc.name,draft.doc.html);}
+        }
         if(!emailAttachments.some(function(a){return a.name===genFile.name;})){
           await emailAddFiles([genFile]);
           toast('📄 Claude drafted '+genFile.name+' — attached');
