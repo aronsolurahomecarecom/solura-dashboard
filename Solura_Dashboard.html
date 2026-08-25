@@ -1423,7 +1423,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0821-44';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0821-45';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -6558,27 +6558,30 @@ function adaptDraftFragment(html){
  * tables, layout — onto Letter pages under the Solura letterhead. Loaded
  * lazily from cdnjs (same CDN as SheetJS) only when a PDF is generated;
  * the minimal text-only writer below stays as the offline fallback.    */
-var _html2pdfLoading=null;
-function loadHtml2Pdf(){
-  if(window.html2pdf)return Promise.resolve();
-  if(_html2pdfLoading)return _html2pdfLoading;
-  _html2pdfLoading=new Promise(function(res,rej){
-    var sc=document.createElement('script');
-    sc.src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+var _pdfLibsLoading=null;
+function loadPdfLibs(){
+  if(window.html2canvas&&window.jspdf)return Promise.resolve();
+  if(_pdfLibsLoading)return _pdfLibsLoading;
+  var one=function(src){return new Promise(function(res,rej){
+    var sc=document.createElement('script');sc.src=src;
     sc.onload=function(){res();};
-    sc.onerror=function(){_html2pdfLoading=null;rej(new Error('PDF renderer failed to load — check the connection'));};
+    sc.onerror=function(){rej(new Error('PDF renderer failed to load — check the connection'));};
     document.head.appendChild(sc);
-  });
-  return _html2pdfLoading;
+  });};
+  _pdfLibsLoading=Promise.all([
+    one('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'),
+    one('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+  ]).catch(function(e){_pdfLibsLoading=null;throw e;});
+  return _pdfLibsLoading;
 }
 async function buildBrandedPdfFile(name,innerHtml){
-  await loadHtml2Pdf();
+  await loadPdfLibs();
   var fname=String(name||'Document').replace(/[^\w\- .]/g,'').trim()||'Document';
   if(!/\.pdf$/i.test(fname))fname+='.pdf';
   var inner=extractInnerHtml(sanitizeDraftHtml(innerHtml));
   var host=document.createElement('div');
-  host.style.cssText='position:fixed;left:-10000px;top:0;width:740px;background:#ffffff';
-  host.innerHTML='<div style="font-family:Georgia,serif;color:#222;padding:8px 6px;background:#ffffff">'
+  host.style.cssText='position:absolute;left:-10000px;top:0;width:740px;background:#ffffff';
+  host.innerHTML='<div style="font-family:Georgia,serif;color:#222;padding:2px 4px;background:#ffffff">'
     +'<div style="border-bottom:3px solid #C8870A;padding-bottom:12px;margin-bottom:20px">'
     +'<span style="font-size:24px;font-weight:bold;color:#1B2A4A;letter-spacing:1px">SOLURA</span>'
     +'<span style="font-size:10px;color:#C8870A;letter-spacing:3px;margin-left:10px">HOME CARE</span>'
@@ -6589,14 +6592,55 @@ async function buildBrandedPdfFile(name,innerHtml){
     +'</div>';
   document.body.appendChild(host);
   try{
-    var blob=await html2pdf().set({
-      margin:[14,12,16,12],
-      image:{type:'jpeg',quality:0.92},
-      html2canvas:{scale:2,useCORS:true,logging:false},
-      jsPDF:{unit:'mm',format:'letter',orientation:'portrait'},
-      pagebreak:{mode:['css','legacy']}
-    }).from(host.firstChild).outputPdf('blob');
-    return new File([blob],fname,{type:'application/pdf'});
+    try{if(document.fonts&&document.fonts.ready)await document.fonts.ready;}catch(_){}
+    var contentEl=host.firstChild;
+    // Page geometry: US Letter, content column mapped into the printable area
+    var MARG_X=14,MARG_TOP=13,MARG_BOT=15;                 // mm
+    var printWmm=215.9-2*MARG_X,printHmm=279.4-MARG_TOP-MARG_BOT;
+    var cssW=contentEl.offsetWidth;
+    var capacityPx=printHmm*(cssW/printWmm);               // page height in CSS px
+    // Candidate cut lines = bottom edges of leaf blocks (paragraphs, list
+    // items, TABLE ROWS, headings). Breaking ONLY on these lines is what
+    // fixed-offset slicing (the old renderer) couldn't do — it cut text
+    // lines and table rows in half at every page boundary.
+    var hostTop=contentEl.getBoundingClientRect().top;
+    var cands=[];
+    contentEl.querySelectorAll('p,h1,h2,h3,h4,h5,li,tr,img,blockquote,pre,hr').forEach(function(elm){
+      var r=elm.getBoundingClientRect();
+      if(r.height>0)cands.push(r.bottom-hostTop);
+    });
+    cands=cands.map(function(y){return Math.ceil(y);}).sort(function(a,b){return a-b;});
+    var totalH=Math.ceil(contentEl.getBoundingClientRect().height);
+    var breaks=[0],cur=0;
+    while(cur+capacityPx<totalH){
+      var limit=cur+capacityPx,best=-1;
+      for(var ci=0;ci<cands.length;ci++){
+        if(cands[ci]>cur+capacityPx*0.25&&cands[ci]<=limit)best=cands[ci];
+        if(cands[ci]>limit)break;
+      }
+      cur=best>0?best:limit; // limit-cut only if one element exceeds a whole page
+      breaks.push(cur);
+    }
+    breaks.push(totalH);
+    // A tiny final remnant (footer line alone) merges into the previous
+    // page's bottom margin instead of spawning a nearly-blank page.
+    if(breaks.length>2&&(breaks[breaks.length-1]-breaks[breaks.length-2])<capacityPx*0.05){
+      breaks.splice(breaks.length-2,1);
+    }
+    var SCALE=2;
+    var canvas=await html2canvas(contentEl,{scale:SCALE,backgroundColor:'#ffffff',useCORS:true,logging:false});
+    var pdf=new window.jspdf.jsPDF({unit:'mm',format:'letter',orientation:'portrait'});
+    for(var p=0;p<breaks.length-1;p++){
+      var y0=Math.round(breaks[p]*SCALE),y1=Math.min(Math.round(breaks[p+1]*SCALE),canvas.height);
+      var h=y1-y0;if(h<4)continue;
+      var pc=document.createElement('canvas');pc.width=canvas.width;pc.height=h;
+      var ctx=pc.getContext('2d');
+      ctx.fillStyle='#ffffff';ctx.fillRect(0,0,pc.width,h); // white ground — JPEG has no alpha
+      ctx.drawImage(canvas,0,y0,canvas.width,h,0,0,canvas.width,h);
+      if(p>0)pdf.addPage();
+      pdf.addImage(pc.toDataURL('image/jpeg',0.85),'JPEG',MARG_X,MARG_TOP,printWmm,(h/canvas.width)*printWmm);
+    }
+    return new File([pdf.output('blob')],fname,{type:'application/pdf'});
   }finally{
     try{document.body.removeChild(host);}catch(_){}
   }
