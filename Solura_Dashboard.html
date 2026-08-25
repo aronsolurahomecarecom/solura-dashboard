@@ -947,14 +947,10 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div style="font-size:10.5px;color:var(--soft);margin-top:3px;margin-left:24px">Describe what it should contain in the instructions above (e.g. "a one-page fall-prevention checklist for Margaret"). Solura letterhead and license footer are added automatically.</div>
       </div>
       <div style="margin-bottom:14px">
-        <label class="ee-lbl">Attach a document for Claude to reference (optional — PDF, text, or image, e.g. a care plan)</label>
-        <input type="file" id="claude-doc" accept=".pdf,.txt,.md,.html,.htm,.png,.jpg,.jpeg,.webp,.gif" style="font-size:12px">
-        <div id="claude-doc-chip" style="display:none;margin-top:6px;align-items:center;gap:8px;font-size:12px;background:var(--cream);border:1px solid var(--border);border-radius:8px;padding:6px 10px">
-          <span id="claude-doc-name" data-action="claude-doc-open" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;font-weight:600"></span>
-          <span id="claude-doc-size" style="color:var(--soft)"></span>
-          <b data-action="claude-doc-clear" style="cursor:pointer;color:var(--red);margin-left:auto" title="Remove">\u00D7</b>
-        </div>
-        <div style="font-size:10.5px;color:var(--soft);margin-top:4px">Claude reads it, works its contents into the email, and the file is attached to the email automatically. Remove it from the attachment list if you don\u2019t want it sent.</div>
+        <label class="ee-lbl">Attach documents for Claude to reference (optional — PDFs, text, or images; add as many as you need)</label>
+        <input type="file" id="claude-doc" multiple accept=".pdf,.txt,.md,.html,.htm,.png,.jpg,.jpeg,.webp,.gif" style="font-size:12px">
+        <div id="claude-doc-list"></div>
+        <div style="font-size:10.5px;color:var(--soft);margin-top:4px">Claude reads every file and works their contents into the email; each is also attached to the email automatically. Remove any from the composer\u2019s attachment list if you don\u2019t want it sent.</div>
       </div>
       <div style="display:flex;gap:8px;padding-top:14px;border-top:1px solid var(--border-soft)">
         <span data-action="claude-preview-prompt" style="font-size:11px;color:var(--soft);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;margin-right:12px" title="See the exact system + user text that will be sent">view exact prompt</span><button data-action="claude-generate" id="claude-gen-btn" style="padding:10px 22px;background:linear-gradient(135deg,#7C5CBF,#5B4BAA);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(91,75,170,.3)">✨ Write the draft</button>
@@ -1423,7 +1419,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0821-45';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0821-46';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4438,11 +4434,11 @@ function claudePromptPreview(){
     instructions+=(instructions?'\n\n':'')
       +'MANDATORY: include the "doc" field in your JSON — a PDF document. If the instructions above describe one, build exactly that; otherwise build a one-page, personalized summary of how Solura would help this specific family, drawn from the lead context. Design it properly (headings, color accents, tables or checklists where they help) and name the file descriptively, ending in .pdf.';
   }
-  var di=el('claude-doc');var f4=di&&di.files&&di.files[0];
+  var refList=_claudeRefFiles.map(function(x){return '[attached document block: '+x.name+']';}).join('\n');
   var txt='══════════ SYSTEM PROMPT ══════════\n'
     +buildClaudeSystemPrompt(buildClaudeSystemTraining())
     +'\n\n══════════ USER MESSAGE ══════════\n'
-    +(f4?('[attached document block: '+f4.name+']\n\n'):'')
+    +(refList?(refList+'\n\n'):'')
     +'Lead context:\n'+context
     +'\n\n'+(instructions
       ?('=== MEIR\'S INSTRUCTIONS FOR THIS EMAIL — HIGHEST PRIORITY ===\n'+instructions+'\n=== END INSTRUCTIONS ===\nWrite the email now. Satisfy every instruction above exactly; where they conflict with anything in the context, the instructions win.')
@@ -4453,13 +4449,32 @@ function claudePromptPreview(){
   setTimeout(function(){URL.revokeObjectURL(url);},60000);
 }
 function renderClaudeDocChip(){
-  var di=el('claude-doc');var chip=el('claude-doc-chip');
-  if(!di||!chip)return;
-  var f=di.files&&di.files[0];
-  if(!f){chip.style.display='none';return;}
-  chip.style.display='flex';
-  var nm=el('claude-doc-name');if(nm)nm.textContent=f.name;
-  var sz=el('claude-doc-size');if(sz)sz.textContent=asmtFmtSize(f.size);
+  var host=el('claude-doc-list');if(!host)return;
+  host.innerHTML=_claudeRefFiles.map(function(f,i){
+    return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;background:var(--cream);border:1px solid var(--border);border-radius:8px;padding:6px 10px;margin-top:6px">'
+      +'<span data-action="claude-doc-open" data-idx="'+i+'" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;font-weight:600">'+escapeHtml(f.name)+'</span>'
+      +'<span style="color:var(--soft)">'+asmtFmtSize(f.size)+'</span>'
+      +'<b data-action="claude-doc-clear" data-idx="'+i+'" style="cursor:pointer;color:var(--red);margin-left:auto" title="Remove">×</b>'
+      +'</div>';
+  }).join('');
+}
+// Managed list — a file input replaces its selection on every pick, so files
+// are copied out on change; picking again ADDS instead of replacing.
+var _claudeRefFiles=[];
+function claudeAddRefFiles(fileList){
+  var added=0,rejected=[];
+  Array.prototype.slice.call(fileList||[]).forEach(function(f){
+    if(_claudeRefFiles.length>=8){rejected.push(f.name+' (max 8 files)');return;}
+    if(_claudeRefFiles.some(function(x){return x.name===f.name&&x.size===f.size;}))return; // dup
+    var det=detectAttachKind(f.name,f.type);
+    if(det.kind==='office'){rejected.push(f.name+' (export Word/Excel as PDF first)');return;}
+    if(det.kind==='pdf'&&f.size>CTS_MAX_PDF){rejected.push(f.name+' (PDFs cap at 30MB)');return;}
+    if(det.kind==='image'&&f.size>CTS_MAX_IMAGE){rejected.push(f.name+' (images cap at 5MB)');return;}
+    _claudeRefFiles.push(f);added++;
+  });
+  renderClaudeDocChip();
+  if(rejected.length)toast('⚠ Skipped: '+rejected.join(', '));
+  else if(added)toast('📎 '+added+' file'+(added!==1?'s':'')+' ready for Claude');
 }
 function buildClaudeSystemTraining(){
   var secs=ctsSections();
@@ -6831,13 +6846,13 @@ function openClaudeWriter(ri){
     var tCount=tb.filter(function(b){return b.type==='document'||b.type==='image';}).length;
     if(tCount)histBits.push(tCount+' training attachment'+(tCount!==1?'s':'')+' (full contents)');
     if(_ctsSkippedNoData.length)histBits.push('\u26A0 '+_ctsSkippedNoData.length+' training attachment'+(_ctsSkippedNoData.length!==1?'s':'')+' have NO stored data ('+_ctsSkippedNoData.slice(0,3).join(', ')+') — re-add them in Settings \u2192 Claude AI');
-    var pd2=el('claude-doc');
-    if(pd2&&pd2.files&&pd2.files[0])histBits.push('reference doc '+pd2.files[0].name+' (full contents)');
+    if(_claudeRefFiles.length)histBits.push(_claudeRefFiles.length+' reference doc'+(_claudeRefFiles.length!==1?'s':'')+' (full contents)');
   }catch(_){}
   el('claude-ctx-summary').innerHTML='Claude will draft for <strong>'+escapeHtml(name)+'</strong> using: lead details, position <strong>'+escapeHtml(posStr)+'</strong> on <strong>'+escapeHtml(engineFor(ri).name)+'</strong>'
     +(histBits.length?(', plus '+histBits.join(', ')):'')
     +(buildClaudeSystemTraining()?'. Your training sections apply.':'. <em>Tip: add training sections in Settings → Claude AI to teach it your voice.</em>');
   var ins=el('claude-instructions');if(ins)ins.value='';
+  _claudeRefFiles=[]; // fresh modal → empty reference list
   renderClaudeDocChip();
   var doc=el('claude-doc');if(doc)doc.value='';
   el('claude-err').textContent='';
@@ -6857,10 +6872,9 @@ async function claudeGenerate(){
   // Pre-flight: the API rejects requests over 32MB — fail with a clear
   // message BEFORE burning the call. base64 inflates binary ~4/3.
   var projected=Math.floor(ctsTotalBytes()*4/3);
-  var pdoc=(el('claude-doc')||{}).files;
-  if(pdoc&&pdoc[0])projected+=Math.floor(pdoc[0].size*4/3);
+  _claudeRefFiles.forEach(function(rf){projected+=Math.floor(rf.size*4/3);});
   if(projected>31*1024*1024){
-    throw new Error('Training + attached document total ~'+Math.round(projected/1024/1024)+'MB encoded — the API rejects past 32MB. Slim the training attachments (Settings → Claude AI) or attach a smaller document.');
+    throw new Error('Training + reference documents total ~'+Math.round(projected/1024/1024)+'MB encoded — the API rejects past 32MB. Slim the training attachments (Settings → Claude AI) or remove a reference document.');
   }
   var context=buildClaudeEmailContext(ri,{replyTo:_emailReplyTo});
     var instructions=String((el('claude-instructions')||{}).value||'').trim();
@@ -6873,23 +6887,23 @@ async function claudeGenerate(){
     // presence is test-locked.
     // Training attachments that are PDFs/images ride as native blocks
     collectTrainingBlocks().forEach(function(b3){userContent.push(b3);});
-    // Optional document (PDF as document block; txt/md inlined)
-    var docInput=el('claude-doc');
-    var f=docInput&&docInput.files&&docInput.files[0];
-    if(f){
-      // Kind-specific caps below are the real guards (30MB PDF / 5MB image /
-      // 800KB text) — the old blanket 4MB check lived here and blocked them.
+    // Reference documents (any number): PDFs/images as native blocks,
+    // txt/md/html inlined. Kind caps were enforced at pick time; re-checked
+    // here so a stale list can never slip an oversized file through.
+    for(var rfi=0;rfi<_claudeRefFiles.length;rfi++){
+      var f=_claudeRefFiles[rfi];
       var det2=detectAttachKind(f.name,f.type);
-      if(det2.kind==='office')throw new Error('Word/Excel can\'t be read directly — export as PDF first');
+      if(det2.kind==='office')throw new Error(f.name+': Word/Excel can\'t be read directly — export as PDF first');
       if(det2.kind==='pdf'&&f.size>CTS_MAX_PDF)throw new Error(f.name+': PDFs cap at 30MB (the API rejects requests past 32MB). Compress or split it.');
       if(det2.kind==='image'&&f.size>CTS_MAX_IMAGE)throw new Error(f.name+': images cap at 5MB — that\'s the API\'s own hard limit per image.');
       if(det2.kind==='pdf'||det2.kind==='image'){
         var b64=await new Promise(function(res,rej){
           var rd=new FileReader();
           rd.onload=function(){res(String(rd.result).split(',')[1]);};
-          rd.onerror=function(){rej(new Error('Could not read file'));};
+          rd.onerror=function(){rej(new Error('Could not read '+f.name));};
           rd.readAsDataURL(f);
         });
+        userContent.push({type:'text',text:'The next '+(det2.kind==='pdf'?'document':'image')+' block is reference file "'+f.name+'":'});
         if(det2.kind==='pdf')userContent.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}});
         else userContent.push({type:'image',source:{type:'base64',media_type:det2.media||'image/png',data:b64}});
       }else{
@@ -6941,8 +6955,10 @@ async function claudeGenerate(){
     // The reference doc Claude just read rides the email automatically —
     // no more attaching it twice. Remove it from the composer chip list
     // if you don't want it sent.
-    if(f&&!emailAttachments.some(function(a){return a.name===f.name;})){
-      try{await emailAddFiles([f]);toast('📎 '+f.name+' attached to the email');}catch(eAtt){toast('⚠ Could not attach '+f.name+': '+eAtt.message);}
+    for(var afi=0;afi<_claudeRefFiles.length;afi++){
+      var af=_claudeRefFiles[afi];
+      if(emailAttachments.some(function(a){return a.name===af.name;}))continue;
+      try{await emailAddFiles([af]);toast('📎 '+af.name+' attached to the email');}catch(eAtt){toast('⚠ Could not attach '+af.name+': '+eAtt.message);}
     }
     // If the instructions asked for a document but none came back, surface
     // it — silence here read as "Claude doesn't attach files".
@@ -6999,7 +7015,7 @@ async function claudeGenerate(){
     traceOp({kind:'generate',instrLen:instructions.length,instrHead:instructions.slice(0,120),
       trainingDocs:(function(){try{return collectTrainingBlocks().filter(function(b){return b.type==='document'||b.type==='image';}).length;}catch(_){return -1;}})(),
       hollow:_ctsSkippedNoData.slice(0,4),
-      refDoc:(f&&f.name)||null,reply:!!_emailReplyTo,
+      refDocs:_claudeRefFiles.map(function(x){return x.name;}),reply:!!_emailReplyTo,
       respFormat:draft.format,gotDoc:!!(draft.doc&&draft.doc.html),
       fullDesign:!!_shellSuppressed,
       filledTemplateSlot:!!preSlot,
@@ -9913,7 +9929,7 @@ function onClick(ev){
       break;
     case 'claude-doc-open':
       (function(){
-        var di2=el('claude-doc');var f2=di2&&di2.files&&di2.files[0];
+        var f2=_claudeRefFiles[parseInt(t.dataset.idx,10)];
         if(!f2)return;
         var u2=URL.createObjectURL(f2);window.open(u2,'_blank');
         setTimeout(function(){URL.revokeObjectURL(u2);},60000);
@@ -9921,7 +9937,8 @@ function onClick(ev){
       break;
     case 'claude-doc-clear':
       (function(){
-        var di3=el('claude-doc');if(di3)di3.value='';
+        var ci2=parseInt(t.dataset.idx,10);
+        if(ci2>=0&&ci2<_claudeRefFiles.length)_claudeRefFiles.splice(ci2,1);
         renderClaudeDocChip();
       })();
       break;
@@ -10198,9 +10215,13 @@ window.addEventListener('load',async function(){
     // If no HTML available, let the browser handle plain-text paste normally
   });
 
-  // Reference-doc chip refresh when a file is picked
+  // Reference docs: each pick ADDS to the managed list (the input itself
+  // replaces its selection every time, so files are copied out and cleared)
   var cdIn=el('claude-doc');
-  if(cdIn)cdIn.addEventListener('change',renderClaudeDocChip);
+  if(cdIn)cdIn.addEventListener('change',function(){
+    claudeAddRefFiles(cdIn.files);
+    cdIn.value='';
+  });
 
   // Attachment-remove (delegated since list is rendered dynamically)
   document.body.addEventListener('click',function(ev){
