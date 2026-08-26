@@ -1202,6 +1202,9 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <button data-action="trk-test" class="st-btn-sky">🔌 Test connection</button>
           <div id="trk-test-out" style="font-size:12px;margin-top:10px;line-height:1.7;color:var(--mid);white-space:pre-line"></div>
         </div>
+        <h4 class="st-h2">Deliverability &amp; self-open protection</h4>
+        <p class="st-p"><strong>Bounce &amp; spam-block watch</strong> is always on: postmaster delivery-failure reports get matched to leads — the lead gets a ⚠ note, a Comms Log row (<code style="font-size:11px">bounce</code> / <code style="font-size:11px">spam-block</code>), and a toast. Replies containing opt-out language ("unsubscribe", "remove me"…) are flagged the same way. True "marked as spam" click reports aren't available to Microsoft&nbsp;365 senders — server-side spam <em>blocks</em> are the closest real signal.</p>
+        <p class="st-p"><strong>Self-open filtering</strong> needs tracking worker <strong>v2</strong>: paste <code style="font-size:11px">solura-track-worker.js</code> (in the dashboard repo) over your worker's code in Cloudflare and Deploy — same URL, token, and storage. It learns your devices from the dashboard's own polling, so opening your own sent emails (or reading replies that quote them) stops counting as lead opens. Reading mail on a network where the dashboard never runs isn't filtered — open the dashboard there once to teach it.</p>
         <div class="st-field">
           <label class="ee-lbl">Feedback stack</label>
           <div style="font-size:13px;color:var(--mid)"><span id="st-fb-count">0</span> items queued locally.
@@ -1419,7 +1422,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0821-46';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0821-47';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5144,6 +5147,10 @@ async function pollInboundMail(){
           if(m.ri!=null&&m.ri>=0){
             leadName=String((rows[m.ri]||[])[C.NM]||(rows[m.ri]||[])[C.DM]||'').trim();
           }
+          // Opt-out language is a compliance signal — flag it loudly, but
+          // the human decides what to do (nothing auto-changes on the lead).
+          var unsub=/unsubscribe|stop\s+(all\s+)?(email|emails|messages|messaging|contact|texting)|remove me|take me off|opt me out|do not (contact|email)|leave (me|us) alone/i
+            .test((m.entry.subject||'')+' '+(m.entry.preview||''));
           await logComms({
             direction:'in',
             channel:'email',
@@ -5152,9 +5159,13 @@ async function pollInboundMail(){
             contact:m.entry.fromAddr,
             subject:m.entry.subject,
             preview:m.entry.preview,
-            outcome:'received',
+            outcome:unsub?'unsubscribe-request':'received',
             messageId:m.message.id
           });
+          if(unsub){
+            traceOp({kind:'unsubscribe-request',lead:leadName||senderName,email:m.entry.fromAddr});
+            (function(nm6){setTimeout(function(){toast('🚫 '+nm6+' asked to stop contact — consider marking them Not Interested');},3200);})(leadName||senderName);
+          }
           newIds[m.message.id]=Date.now();
         }
         // Only mark as logged AFTER attempts complete
@@ -5174,6 +5185,97 @@ async function pollInboundMail(){
       try{refresh();}catch(_){}
     }
   }catch(e){/* silent — polling is best-effort */}
+}
+
+/* ─── Deliverability watch: bounces + spam blocks ────────────────────────
+ * True "recipient clicked Report Spam" feedback does NOT exist for M365
+ * senders (JMRP needs your own sending IPs; Gmail exposes only aggregate
+ * domain stats). The closest REAL per-lead signal is the NDR: postmaster/
+ * mailer-daemon delivery reports, including "550 blocked as spam" policy
+ * rejections. This scanner matches those reports to leads and surfaces
+ * them — ⚠ note on the lead, Comms Log row (bounce / spam-block), toast.*/
+var NDR_SEEN_KEY='ndr_seen_v1';
+function ndrSeen(){
+  try{
+    var o=JSON.parse(localStorage.getItem(NDR_SEEN_KEY)||'{}');
+    var cut=Date.now()-14*24*3600*1000,kept={};
+    Object.keys(o).forEach(function(k){if(o[k]>cut)kept[k]=o[k];});
+    return kept;
+  }catch(_){return {};}
+}
+function ndrClassify(text){
+  return /spam|junk|blocked|black.?list|5\.7\.\d|550|rejected|policy|reputation|banned/i.test(String(text||''))
+    ?'spam-block':'bounce';
+}
+function ndrExtractLeads(text,emailToRi){
+  var found={};
+  String(text||'').replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,function(em){
+    var n=normEmail(em);
+    if(emailToRi[n]!=null)found[n]=emailToRi[n];
+    return em;
+  });
+  return found;
+}
+async function pollNdrMail(){
+  if(!tok)return;
+  var sinceISO=new Date(Date.now()-INBOUND_LOOKBACK_HR*3600*1000).toISOString();
+  var url=GR+"/me/mailFolders/Inbox/messages?$filter=receivedDateTime ge "+sinceISO
+    +" and (startswith(from/emailAddress/address,'postmaster') or startswith(from/emailAddress/address,'mailer-daemon') or startswith(from/emailAddress/address,'MicrosoftExchange'))"
+    +'&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview&$top=20';
+  try{
+    var res=await gfetch(url);
+    if(!res.ok)return;
+    var j=await res.json();
+    var msgs=j.value||[];
+    if(!msgs.length)return;
+    var seen=ndrSeen(),changed=false;
+    var emailToRi={};
+    for(var i2=DATA_START;i2<rows.length;i2++){
+      var e2=normEmail((rows[i2]||[])[C.EM]);
+      if(e2&&emailToRi[e2]==null)emailToRi[e2]=i2;
+    }
+    for(var mi=0;mi<msgs.length;mi++){
+      var m=msgs[mi];
+      if(seen[m.id])continue;
+      seen[m.id]=Date.now();changed=true;
+      var text=(m.subject||'')+' '+(m.bodyPreview||'');
+      var hits=ndrExtractLeads(text,emailToRi);
+      if(!Object.keys(hits).length){
+        // Preview didn't name the recipient — pull the full report once
+        try{
+          var r2=await gfetch(GR+'/me/messages/'+encodeURIComponent(m.id)+'?$select=body');
+          if(r2.ok){
+            var j2=await r2.json();
+            var bodyTxt=emailHtmlToPlain((j2.body&&j2.body.content)||'');
+            hits=ndrExtractLeads(bodyTxt,emailToRi);
+            text+=' '+bodyTxt.slice(0,800);
+          }
+        }catch(_){}
+      }
+      var kind=ndrClassify(text);
+      var hitEmails=Object.keys(hits);
+      for(var si=0;si<hitEmails.length;si++){
+        var em3=hitEmails[si],ri3=hits[em3];
+        var lead=rows[ri3]||[];
+        var nm3=String(lead[C.NM]||lead[C.DM]||em3).trim();
+        try{
+          var noteLine='⚠ ['+fd(localToday())+'] Email to '+em3+' '
+            +(kind==='spam-block'?'was BLOCKED as spam by their mail server':'bounced (undeliverable)')
+            +' — "'+String(m.subject||'').slice(0,80)+'"';
+          var existingN=String(lead[C.NT]||'').trim();
+          var u4={};u4[C.NT]=existingN?(noteLine+'\n\n'+existingN):noteLine;
+          await writeRow(ri3,u4);
+        }catch(_){}
+        logComms(commsEntryForLead(ri3,{direction:'in',channel:'email',contact:em3,
+          subject:String(m.subject||''),preview:String(m.bodyPreview||'').slice(0,400),
+          outcome:kind,messageId:m.id}));
+        traceOp({kind:'ndr-'+kind,lead:nm3,email:em3,subj:String(m.subject||'').slice(0,60)});
+        toast((kind==='spam-block'?'🚫 Blocked as spam: ':'↩ Bounced: ')+nm3
+          +(kind==='spam-block'?' — their server rejected your email':''));
+      }
+    }
+    if(changed){try{localStorage.setItem(NDR_SEEN_KEY,JSON.stringify(seen));}catch(_){}}
+  }catch(_){/* best-effort */}
 }
 
 // Track logged inbound message IDs so we don't double-log across sessions.
@@ -5201,9 +5303,14 @@ function addLoggedInboundIds(newIds){
 
 function startInboundPolling(){
   if(inboundEmailPollTimer)return;
-  // First poll immediately, then on interval
+  // First poll immediately, then on interval. The deliverability watch
+  // (bounces/spam blocks) rides the same cadence, independently caught.
   pollInboundMail();
-  inboundEmailPollTimer=setInterval(pollInboundMail,INBOUND_POLL_MS);
+  pollNdrMail().catch(function(){});
+  inboundEmailPollTimer=setInterval(function(){
+    pollInboundMail();
+    pollNdrMail().catch(function(){});
+  },INBOUND_POLL_MS);
 }
 function stopInboundPolling(){
   if(inboundEmailPollTimer){clearInterval(inboundEmailPollTimer);inboundEmailPollTimer=null;}
