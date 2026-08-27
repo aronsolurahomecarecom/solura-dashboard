@@ -22,7 +22,9 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = '6-owner'; // successor to the numeric v5 worker
+var VERSION = '6.1-owner'; // 6.1: paginated listing — v6.0 listed only the
+// OLDEST 100 keys (lexicographic = chronological), so once 100+ events
+// accumulated in the 7-day window, NEW events could never be returned.
 var EV_TTL = 7 * 24 * 3600;
 var SELF_TTL = 3 * 24 * 3600;
 var OWNER_TTL_MS = 45 * 24 * 3600 * 1000; // forget an owner IP after 45 quiet days
@@ -71,6 +73,35 @@ async function recordEvent(kv, isSelf, ev) {
   await kv.put(key, JSON.stringify(ev), { expirationTtl: isSelf ? SELF_TTL : EV_TTL });
 }
 
+// Walk the ENTIRE keyspace for a prefix (KV list pages at 1000/keys call).
+// The timestamp lives IN the key, so freshness filtering needs zero gets.
+async function listAllKeys(kv, prefix) {
+  var names = [], cursor;
+  do {
+    var res = await kv.list(cursor ? { prefix: prefix, limit: 1000, cursor: cursor } : { prefix: prefix, limit: 1000 });
+    for (var i = 0; i < res.keys.length; i++) names.push(res.keys[i].name);
+    cursor = res.list_complete ? null : res.cursor;
+  } while (cursor);
+  return names;
+}
+function tsOfKey(k) { return parseInt(String(k).split(':')[1], 10) || 0; }
+
+// Newest events for a prefix with ts > since — key-level filtering first,
+// values fetched only for what will actually be returned.
+async function freshEvents(kv, prefix, since, cap) {
+  var names = await listAllKeys(kv, prefix);
+  var fresh = names.filter(function (k) { return tsOfKey(k) > since; });
+  fresh.sort(function (a, b) { return tsOfKey(a) - tsOfKey(b); });
+  if (fresh.length > cap) fresh = fresh.slice(fresh.length - cap);
+  var out = [];
+  for (var i = 0; i < fresh.length; i++) {
+    var v = await kv.get(fresh[i], 'json');
+    if (v) out.push(v);
+  }
+  out.sort(function (a, b) { return a.ts - b.ts; });
+  return out;
+}
+
 export default {
   async fetch(req, env) {
     var url = new URL(req.url);
@@ -88,8 +119,8 @@ export default {
     if (path === '/ping') {
       var selfCount = 0, pend = 0;
       if (kv) {
-        try { selfCount = (await kv.list({ prefix: 'self:', limit: 100 })).keys.length; } catch (_) {}
-        try { pend = (await kv.list({ prefix: 'ev:', limit: 100 })).keys.length; } catch (_) {}
+        try { selfCount = (await listAllKeys(kv, 'self:')).length; } catch (_) {}
+        try { pend = (await listAllKeys(kv, 'ev:')).length; } catch (_) {}
       }
       return json({ ok: true, v: VERSION, hasToken: !!env.TRACK_TOKEN, hasKV: !!kv, events: pend, selfOpens: selfCount }, 200, cb);
     }
@@ -145,28 +176,14 @@ export default {
             }
           } catch (_) {}
         }
-        try {
-          var list = await kv.list({ prefix: 'ev:', limit: 100 });
-          for (var i = 0; i < list.keys.length; i++) {
-            var v = await kv.get(list.keys[i].name, 'json');
-            if (v && v.ts > since) out.push(v);
-          }
-          out.sort(function (a, b) { return a.ts - b.ts; });
-        } catch (_) {}
+        try { out = await freshEvents(kv, 'ev:', since, 200); } catch (_) {}
       }
       // Filtered self-opens ride along VISIBLY (separate stream, ignored by
       // v1-era dashboards) — so "my own open didn't count" is verifiable
       // instead of looking like tracking silently died.
       var selfOut = [];
       if (kv) {
-        try {
-          var slist = await kv.list({ prefix: 'self:', limit: 30 });
-          for (var s2 = 0; s2 < slist.keys.length; s2++) {
-            var sv = await kv.get(slist.keys[s2].name, 'json');
-            if (sv && sv.ts > since) selfOut.push(sv);
-          }
-          selfOut.sort(function (a, b) { return a.ts - b.ts; });
-        } catch (_) {}
+        try { selfOut = await freshEvents(kv, 'self:', since, 30); } catch (_) {}
       }
       return json({ ok: true, events: out, self: selfOut }, 200, cb);
     }
