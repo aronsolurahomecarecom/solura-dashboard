@@ -22,7 +22,7 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = 'v2-owner';
+var VERSION = '6-owner'; // successor to the numeric v5 worker
 var EV_TTL = 7 * 24 * 3600;
 var SELF_TTL = 3 * 24 * 3600;
 var OWNER_TTL_MS = 45 * 24 * 3600 * 1000; // forget an owner IP after 45 quiet days
@@ -80,6 +80,10 @@ export default {
     var ip = req.headers.get('CF-Connecting-IP') || '';
 
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+
+    if (path === '/') {
+      return new Response('solura-track ok v' + VERSION, { headers: Object.assign({ 'Content-Type': 'text/plain' }, CORS) });
+    }
 
     if (path === '/ping') {
       var selfCount = 0, pend = 0;
@@ -150,7 +154,21 @@ export default {
           out.sort(function (a, b) { return a.ts - b.ts; });
         } catch (_) {}
       }
-      return json({ ok: true, events: out }, 200, cb);
+      // Filtered self-opens ride along VISIBLY (separate stream, ignored by
+      // v1-era dashboards) — so "my own open didn't count" is verifiable
+      // instead of looking like tracking silently died.
+      var selfOut = [];
+      if (kv) {
+        try {
+          var slist = await kv.list({ prefix: 'self:', limit: 30 });
+          for (var s2 = 0; s2 < slist.keys.length; s2++) {
+            var sv = await kv.get(slist.keys[s2].name, 'json');
+            if (sv && sv.ts > since) selfOut.push(sv);
+          }
+          selfOut.sort(function (a, b) { return a.ts - b.ts; });
+        } catch (_) {}
+      }
+      return json({ ok: true, events: out, self: selfOut }, 200, cb);
     }
 
     return json({ error: 'not found', v: VERSION }, 404);

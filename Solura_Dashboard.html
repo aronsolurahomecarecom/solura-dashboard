@@ -1204,7 +1204,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         </div>
         <h4 class="st-h2">Deliverability &amp; self-open protection</h4>
         <p class="st-p"><strong>Bounce &amp; spam-block watch</strong> is always on: postmaster delivery-failure reports get matched to leads — the lead gets a ⚠ note, a Comms Log row (<code style="font-size:11px">bounce</code> / <code style="font-size:11px">spam-block</code>), and a toast. Replies containing opt-out language ("unsubscribe", "remove me"…) are flagged the same way. True "marked as spam" click reports aren't available to Microsoft&nbsp;365 senders — server-side spam <em>blocks</em> are the closest real signal.</p>
-        <p class="st-p"><strong>Self-open filtering</strong> needs tracking worker <strong>v2</strong>: paste <code style="font-size:11px">solura-track-worker.js</code> (in the dashboard repo) over your worker's code in Cloudflare and Deploy — same URL, token, and storage. It learns your devices from the dashboard's own polling, so opening your own sent emails (or reading replies that quote them) stops counting as lead opens. Reading mail on a network where the dashboard never runs isn't filtered — open the dashboard there once to teach it.</p>
+        <p class="st-p"><strong>Self-open filtering</strong> needs tracking worker <strong>v6</strong>: paste <code style="font-size:11px">solura-track-worker.js</code> (in the dashboard repo) over your worker's code in Cloudflare and Deploy — same URL, token, and storage. It learns your devices from the dashboard's own polling, so opening your own sent emails (or reading replies that quote them) stops counting as lead opens. Filtered self-opens stay visible: the connection test shows them, and the 🩺 report counts them — leads' opens land exactly as before. Reading mail on a network where the dashboard never runs isn't filtered — open the dashboard there once to teach it.</p>
         <div class="st-field">
           <label class="ee-lbl">Feedback stack</label>
           <div style="font-size:13px;color:var(--mid)"><span id="st-fb-count">0</span> items queued locally.
@@ -1422,7 +1422,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0821-47';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0821-48';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4382,6 +4382,9 @@ function buildDiagnosticReport(){
     L.push('TRAINING TEXT BUDGET: '+_tt+' chars (~'+Math.round(_tt/4/1000)+'K tokens)'+(_tt>120000?' \u26A0 heavy \u2014 every draft pays this':' \u2713'));
   }catch(_){}
   L.push('VOICE SAMPLES: '+(function(){try{return voiceCorpus().length;}catch(_){return '?';}})());
+  L.push('TRACKER SELF-OPENS FILTERED (this session): '+(function(){try{
+    return _trkSelfInfo.count+(_trkSelfInfo.lastTs?(' · last '+Math.round((Date.now()-_trkSelfInfo.lastTs)/60000)+'m ago'):'');
+  }catch(_){return '?';}})());
   L.push('VOICE AGENT: '+(function(){try{
     if(!vaCfg())return 'not configured';
     return _vaStatus+' · last poll '+(_vaLastPollAt?Math.round((Date.now()-_vaLastPollAt)/1000)+'s ago':'never')
@@ -6054,16 +6057,22 @@ async function testTrackerConnection(){
   });
   // KV is eventually consistent — list() can lag up to ~60s behind a fresh
   // write. Retry patiently instead of blaming the binding after 2 seconds.
-  var found=false;
+  var found=false,foundSelf=false;
   try{
-    for(var att5=1;att5<=5&&!found;att5++){
+    for(var att5=1;att5<=5&&!found&&!foundSelf;att5++){
       await new Promise(function(res){setTimeout(res,3000);});
       var j2=await fetchTrackerEvents(tc,0);
       found=(j2.events||[]).some(function(ev){return ev.i===testId;});
-      if(!found&&att5<5)line('   …not indexed yet (attempt '+att5+'/5 — KV lists new events with a delay)');
+      // Owner-aware worker (v6+): the test pixel fires from YOUR machine, so
+      // it lands in the SELF stream — that's the filter working, not a failure.
+      foundSelf=!found&&(j2.self||[]).some(function(ev){return ev.i===testId;});
+      if(!found&&!foundSelf&&att5<5)line('   …not indexed yet (attempt '+att5+'/5 — KV lists new events with a delay)');
     }
-    if(found){
-      line('5. Round trip: ✓ the event came back'+(_trkCompatMode?' (compatibility mode)':'')+'. Tracking works end to end.');
+    if(foundSelf){
+      line('5. Round trip: ✓ the event came back as a SELF-open — correctly filtered. This device is recognized as yours, so your own opens (Sent folder, reading replies, this test) no longer count as lead opens. Leads’ opens land normally.');
+      line('\nIf a real email shows no open: the recipient\'s mail client is blocking remote images (Outlook does by default — "Download pictures"). Gmail and Apple Mail load them automatically. Doc-link clicks always track.');
+    }else if(found){
+      line('5. Round trip: ✓ the event came back'+(_trkCompatMode?' (compatibility mode)':'')+'. Tracking works end to end.'+((ping&&String(ping.v||'').indexOf('owner')>-1)?' ⚠ Note: it came back as a LEAD open — this device’s network isn’t marked as yours yet; it will be after the next poll cycle.':''));
       line('\nIf a real email shows no open: the recipient\'s mail client is blocking remote images (Outlook does by default — "Download pictures"). Gmail and Apple Mail load them automatically. Doc-link clicks always track.');
     }else if(ping&&ping.hasKV){
       line('5. Round trip: ⏳ the test event hasn\'t been indexed yet — KV can take up to a minute to list fresh writes. Everything upstream is green (worker v'+ping.v+', token ✓, storage ✓, pixel served ✓), so tracking IS working — the dashboard poller checks every minute and will catch it. Re-run this in ~60s to see the ✓.');
@@ -6083,11 +6092,28 @@ function rewriteTrackedDocAnchors(html,meta){
     });
   });
 }
+var _trkSelfInfo={count:0,lastTs:0}; // filtered self-opens, for 🩺 visibility
 async function pollTrackerEvents(){
   var tc=trackerCfg();if(!tc||!tok)return;
   try{
     var since=0;try{since=parseInt(localStorage.getItem('trkLastTs'),10)||0;}catch(_){}
     var j=await fetchTrackerEvents(tc,since);
+    // Self-opens (owner-aware worker): never counted, but traced so the 🩺
+    // report can prove the filter is doing its job rather than "eating" opens.
+    try{
+      var selfEvs=(j&&j.self)||[];
+      if(selfEvs.length){
+        var seenS=trkSeen();var newSelf=0;
+        selfEvs.forEach(function(sv){
+          if(sv.id&&!seenS['s:'+sv.id]){seenS['s:'+sv.id]=Date.now();newSelf++;}
+        });
+        if(newSelf){
+          localStorage.setItem(TRK_SEEN_KEY,JSON.stringify(seenS));
+          _trkSelfInfo={count:_trkSelfInfo.count+newSelf,lastTs:Date.now()};
+          traceOp({kind:'self-open-filtered',count:newSelf,subj:String(selfEvs[selfEvs.length-1].s||'').slice(0,60)});
+        }
+      }
+    }catch(_){}
     var evs=(j&&j.events)||[];
     if(!evs.length)return;
     var seen=trkSeen();var maxTs=since;var fresh=[];
