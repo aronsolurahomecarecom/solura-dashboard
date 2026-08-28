@@ -9164,7 +9164,7 @@ async function _backfillCalBookings(){
       cand.st.calBooking=true;cand.st.calBookingId=b.uid||'';
       if(b.attendeeEmail&&String(cand.email||'').toLowerCase()!==b.attendeeEmail)cand.st.bookingAltEmail=b.attendeeEmail;
       cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🔗 Booking backfilled from Cal.com ('+(b.title||b.eventTypeSlug||'?')+') — '+new Date(t).toLocaleString()+' · the webhook never delivered this one'});
-      await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
+      await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
       linked++;
     }
     if(linked){
@@ -9212,7 +9212,7 @@ async function _autoLinkUnmatchedBookings(){
       const hay=String(u.eventType||'').toLowerCase();
       cand.st.bookingKind=/onboard|orientation|welcome|start/.test(hay)?'onboarding':/interview|final|in.person|meet|second|video/.test(hay)?'interview':/screen|phone|intro|initial|chat|call|first|consult/.test(hay)?'screen':null;
       cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🔗 Booking auto-linked ('+(u.email||'?')+(u.eventType?' · '+u.eventType:'')+') — '+new Date(u.start).toLocaleString()});
-      await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
+      await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
       linked++;
     }catch(e){console.warn('auto-link failed:',u.email,e.message);keep.push(u);}
   }
@@ -9260,40 +9260,37 @@ async function loadSettings(){
     }
   }catch(e){load.errors.push('Worker GET failed: '+e.message);}
 
-  /* 2. MIRROR — AL1 fallback */
+  /* 2+3. FALLBACKS — the AL1 mirror stops updating once settings exceed the 32k cell cap, so
+     it can be MONTHS staler than the browser cache. Parse BOTH, pick the copy with the newer
+     _savedAt stamp (unstamped legacy copies rank oldest), and NEVER overwrite the cache with
+     an older mirror — blind AL1-first trust is how ancient settings resurrected themselves.
+     A fallback load also never counts as primary: the save path refuses to auto-save over the
+     real file from a degraded session. */
   if(!primaryLoaded){
+    let al1Saved=null,cacheSaved=null;
     try{
       const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AL1')?$select=values");
       if(r.ok){
         const v=(await r.json()).values;
-        if(v&&v[0]&&v[0][0]){
-          try{
-            const saved=JSON.parse(v[0][0]);
-            SETTINGS=Object.assign({},SETTINGS,saved);
-            SETTINGS.config=Object.assign({},SETTINGS.config,saved.config||{});
-            SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},saved.flow||{});
-            primaryLoaded=true;
-            load.source='al1';load.al1=true;
-            try{localStorage.setItem('solura_settings',JSON.stringify(SETTINGS));}catch(e){}
-          }catch(e){load.errors.push('AL1 parse failed: '+e.message);}
-        }
+        if(v&&v[0]&&v[0][0]){try{al1Saved=JSON.parse(v[0][0]);}catch(e){load.errors.push('AL1 parse failed: '+e.message);}}
       }
     }catch(e){load.errors.push('AL1 read failed: '+e.message);}
-  }
-
-  /* 3. CACHE — localStorage final fallback */
-  if(!primaryLoaded){
     try{
       const localSettings=localStorage.getItem('solura_settings');
-      if(localSettings){
-        const saved=JSON.parse(localSettings);
-        SETTINGS=Object.assign({},SETTINGS,saved);
-        SETTINGS.config=Object.assign({},SETTINGS.config,saved.config||{});
-        SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},saved.flow||{});
-        load.source='localStorage';load.localStorage=true;
-        toast('⚠ Restored settings from browser cache — file sync may have failed earlier');
-      }
+      if(localSettings)cacheSaved=JSON.parse(localSettings);
     }catch(e){load.errors.push('localStorage parse failed: '+e.message);}
+    const _stampOf=o=>(o&&o._savedAt&&isFinite(Date.parse(o._savedAt)))?Date.parse(o._savedAt):0;
+    let saved=null;
+    if(al1Saved&&cacheSaved)saved=_stampOf(cacheSaved)>=_stampOf(al1Saved)?cacheSaved:al1Saved;
+    else saved=al1Saved||cacheSaved;
+    if(saved){
+      SETTINGS=Object.assign({},SETTINGS,saved);
+      SETTINGS.config=Object.assign({},SETTINGS.config,saved.config||{});
+      SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},saved.flow||{});
+      if(saved===al1Saved){load.source='al1';load.al1=true;}
+      else{load.source='localStorage';load.localStorage=true;}
+      toast('⚠ Settings restored from a fallback copy ('+load.source+') — settings editing is read-only until a reload reaches the primary file');
+    }
   }
 
   /* Restore internal worker token from localStorage if not in settings yet */
@@ -9398,7 +9395,10 @@ async function saveSettings(){
      once — the "did I really mean to change all that" case). One-or-two-field edits save
      straight through; the autosave pill still shows Saved. "Don't ask again this session"
      on the modal suppresses it entirely until reload. */
-  if(prefs.savePreview==='diff'&&window._settingsBaseline&&!window._suppressDiffSession){
+  /* The diff modal interrupts ONLY while the operator is actually in Settings — a background
+     autosave (heals, migrations) popping a modal that can be Cancelled silently dropped those
+     changes on the floor (they stayed dirty until tab close, then vanished). */
+  if(prefs.savePreview==='diff'&&window._settingsBaseline&&!window._suppressDiffSession&&(typeof view!=='undefined'&&view==='settings')){
     const diff=_diffConfig(window._settingsBaseline,SETTINGS);
     if(diff.length>=4){
       const ok=await _showSavePreview(diff);
@@ -9514,7 +9514,6 @@ function _showSavePreview(diff){
 }
 /* Original save logic — wrapped so we can add undo/diff/preview before calling. */
 async function _saveSettingsInternal(){
-  const json=JSON.stringify(SETTINGS);
   /* Track exactly where the settings made it so the diagnostic panel can show truth, not hope. */
   const status={
     localStorage:false,
@@ -9525,14 +9524,39 @@ async function _saveSettingsInternal(){
     errors:[],
     at:new Date().toISOString()
   };
+  /* PROVENANCE GATE — the #1 customization-loss mechanism: one transient worker hiccup at
+     load → the portal silently fell back to a months-stale AL1 mirror / browser cache →
+     the heal chain marked settings dirty → 700ms later the autosave OVERWROTE the real
+     primary with the ancient copy. A degraded load may NEVER auto-save over the primary. */
+  const _loadSrc=(window._lastSettingsLoadStatus||{}).source;
+  if(_loadSrc&&_loadSrc!=='workerFile'){
+    status.errors.push('Refused: settings were loaded from the '+_loadSrc+' fallback, not the primary file — saving would overwrite newer settings with this stale copy. Reload the portal once the worker is reachable.');
+    window._lastSettingsSaveStatus=status;
+    if(!window._degradedSaveWarned){window._degradedSaveWarned=true;toast('🛑 Settings NOT saved — this session loaded from a fallback copy ('+_loadSrc+'). Reload the portal to re-sync before editing settings.');}
+    console.warn('saveSettings refused — degraded load source:',_loadSrc);
+    return status;
+  }
+  /* Version stamps ride with every save; the loader picks the newest copy across tiers. */
+  SETTINGS._savedAt=new Date().toISOString();
+  SETTINGS._gen=(Number(SETTINGS._gen)||0)+1;
+  /* _undoHistory (10 deep clones of sequences/templates/scripts) is what blew the persisted
+     JSON past AL1's 32k mirror cap and froze that tier months stale. It stays browser-local. */
+  const persist=Object.assign({},SETTINGS);delete persist._undoHistory;
+  const json=JSON.stringify(persist);
   /* Defense: if SETTINGS is suspiciously empty (just default scaffolding, no user data), refuse
      to write — saves us from clobbering a previously-saved snapshot during a boot race. We
      consider the object "user-customized" if it has any of: sequence, templates, config.admins,
      scoringWeights, flow.custom, massSends, or seqPasswordHash. */
   const looksLikeDefaults=!(
+    SETTINGS._savedAt|| /* anything ever saved carries this stamp */
+    (SETTINGS.sequences&&SETTINGS.sequences.length)||
+    (SETTINGS.jobs&&SETTINGS.jobs.length)||
     (SETTINGS.sequence&&SETTINGS.sequence.length)||
     (SETTINGS.templates&&Object.keys(SETTINGS.templates).length)||
-    (SETTINGS.config&&(SETTINGS.config.admins||SETTINGS.config.payFloor!==undefined||SETTINGS.config.serviceZips||
+    /* NOTE: admins must be non-EMPTY and payFloor non-default — the default scaffold has
+       admins:[] (truthy!) and payFloor:14, which made this guard dead code: pure defaults
+       passed every clause and were happily saved over real settings. */
+    (SETTINGS.config&&((SETTINGS.config.admins&&SETTINGS.config.admins.length)||SETTINGS.config.serviceZips||
       SETTINGS.config.vr||SETTINGS.config.bandThresholds||SETTINGS.config.qualityWeights||SETTINGS.config.retentionWeights||
       SETTINGS.config.customQuestions||SETTINGS.config.fastTrackEnabled!==undefined||SETTINGS.config.ziToken||
       SETTINGS.config.calScreenUrl||SETTINGS.config.calInterviewUrl||SETTINGS.config.calOnboardingUrl||SETTINGS.config.applyFormUrl||SETTINGS.config.yardstikVerifyPackageId))||
@@ -9769,7 +9793,15 @@ const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const SHIFTS=['Morning','Afternoon','Evening','Overnight'];
 
 /* ===================== load ===================== */
-function pState(row){let s={};try{if(row[35])s=JSON.parse(row[35]);}catch(e){}
+function pState(row){let s={};let _corrupt=false;
+  try{if(row[35])s=JSON.parse(row[35]);}
+  catch(e){
+    /* NON-EMPTY but unparseable AJ = the cell was CORRUPTED (Graph silently truncates any
+       write past Excel's 32,767-char cell cap — confirmed live 2026-08-28). Flag it: every
+       writer refuses while this flag is set, because writing the default-shaped state over
+       the corrupt cell is what turns "truncated" into "profile permanently wiped". */
+    _corrupt=true;console.warn('AJ parse failed (corrupt cell) at row value len',String(row[35]).length);
+  }
   s=Object.assign({
     due:null,booking:null,zip:'',address:'',addressLine:'',city:'',state:'',firstName:'',lastName:'',
     pills:[],certs:[],licenseState:'OH',licenseNum:'',license:'',
@@ -9781,6 +9813,7 @@ function pState(row){let s={};try{if(row[35])s=JSON.parse(row[35]);}catch(e){}
   /* Auto-heal bloat on every read so candidates whose state was poisoned by earlier buggy
      code (full email bodies stored in st.emails) recover transparently. */
   if(typeof sanitizeState==='function')s=sanitizeState(s);
+  if(_corrupt)s.__ajCorrupt=true;
   return s;
 }
 function pAns(row){let a={};try{if(row[34])a=JSON.parse(row[34]);}catch(e){}return a;}
@@ -9792,7 +9825,7 @@ function cardOf(i,row){
   const facts=st.facts||{};
   return {excelRow:i+1,row:row,
     name:String(row[2]),phone:String(row[3]||''),email:String(row[4]||''),
-    source:String(row[5]||''),stage:String(row[6]||'Applied'),notes:String(row[33]||''),
+    source:String(row[5]||''),stage:String(row[6]||'').trim()||'Applied',notes:String(row[33]||''),
     years:facts.years||st.years||'',
     settings:facts.settings||st.settings||[],
     longest:facts.longest||st.longest||'',
@@ -10025,7 +10058,7 @@ async function loadData(){
     if(touched){
       /* Fire-and-forget persist — load shouldn't block. Single write per candidate covers both
          the awaiting heal and the email sweep, so the two can't race on the same AJ cell. */
-      patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]).catch(e=>console.warn('Heal/sweep write failed for row '+c.excelRow+':',e.message));
+      patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(e=>console.warn('Heal/sweep write failed for row '+c.excelRow+':',e.message));
     }
   }
   if(healed)console.info('Auto-healed '+healed+' stuck awaiting candidate'+(healed===1?'':'s'));
@@ -10098,37 +10131,53 @@ async function _seqV3RepairPass(){
     }
     /* One-time legacy-shape heal is done — from here on the ★ stands as the operator set it. */
     if(!(SETTINGS.config&&SETTINGS.config._seqDefaultHealedV1)){SETTINGS.config=SETTINGS.config||{};SETTINGS.config._seqDefaultHealedV1=true;markSettingsDirty();}
-    const badSeq=(sq)=>!sq||!(sq.steps||[]).length||(sq.steps||[]).some(s=>s.kind==='manual'&&/phone.?screen/i.test(s.label||''));
+    /* "Bad" = empty only. The old manual-phone-screen label regex condemned ANY operator-
+       authored sequence containing such a step and stripped its whole cohort onto the
+       ★default on every load — the "candidates randomly switch sequences" bug. A label
+       must never route candidates (sequence-agnostic rule); the legacy shape was handled
+       by the one-time _seqDefaultHealedV1 migration above. */
+    const badSeq=(sq)=>!sq||!(sq.steps||[]).length;
     let n=0;
     for(const c of pipeline){
       if(pipeline!==_myPipe)return; /* loadData replaced the pipeline — this instance is stale */
       if(!c||!c.st)continue;
       if(c.stage==='Hired'||c.stage==='Declined')continue;
       if(W&&W.row===c.excelRow)continue; /* workspace open — saveW would clobber; next load */
+      if(c.st.__ajCorrupt)continue; /* corrupt cell — nothing may write over it */
       const cur=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
       const ptrOk=!!(cur&&(cur.steps||[]).some(s=>s.id===c.st.sequenceStepId));
-      if(c.st.sequenceId===target.id&&ptrOk)continue;
-      if(c.st.sequenceId&&!badSeq(cur)&&ptrOk)continue; /* healthy on another sequence — tag-for-life stands */
-      /* SOURCE BINDING BEATS THE DEFAULT: an unadopted candidate who came through a job link
-         (or any sequenceAssignments match) adopts THEIR bound sequence, not the ★default —
-         otherwise every fresh job-link applicant was captured by the default flow on the
-         next load, before the job's binding could resolve. */
-      let dest=target;
-      if(!c.st.sequenceId){
-        try{
-          const bound=window.SeqBuilderV3.resolveSequenceFor(c,SETTINGS.sequenceAssignments||[],SETTINGS.sequences||[]);
-          if(bound&&Array.isArray(bound.steps)&&bound.steps.length&&!badSeq(bound))dest=bound;
-        }catch(e){}
+      if(c.st.sequenceId&&ptrOk)continue; /* healthy on ANY sequence — tag-for-life stands */
+      /* TAG-FOR-LIFE, REPAIR-IN-PLACE: a dangling pointer on a still-existing sequence is a
+         POINTER problem, not a sequence problem (step edits/re-imports mint new step ids).
+         Re-place stage-matched WITHIN their own sequence; never move them to the default —
+         that was the mass "random sequence switch" every time a sequence was edited. */
+      if(c.st.sequenceId&&cur&&!badSeq(cur)){
+        const rp=_classicPointerFor(c,cur);
+        if(!rp)continue; /* their stage isn't in their sequence (e.g. legacy References lane) — leave alone */
+        c.st.sequenceStepId=rp;
+        c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:rp,at:new Date().toISOString()});
+        c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧬 Pointer re-placed in "'+cur.name+'" (step was edited away) → '+rp});
+        try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);n++;}
+        catch(e){console.warn('pointer re-place persist failed:',c.name,e.message);}
+        continue;
       }
+      /* From here: truly unadopted, or their sequence was DELETED. SOURCE BINDING BEATS THE
+         DEFAULT: resolve through sequenceAssignments (job links) first — otherwise every
+         fresh job-link applicant is captured by the default flow on the next load. */
+      let dest=target;
+      try{
+        const bound=window.SeqBuilderV3.resolveSequenceFor(c,SETTINGS.sequenceAssignments||[],SETTINGS.sequences||[]);
+        if(bound&&Array.isArray(bound.steps)&&bound.steps.length&&!badSeq(bound))dest=bound;
+      }catch(e){}
       if(!dest.steps.some(s=>s.kind==='stage'&&s.stage&&s.stage.setStage===c.stage))continue; /* target has no stage step for their stage — leave alone */
       const wasAdopted=!!c.st.sequenceId;
       const ptr=_classicPointerFor(c,dest);
       if(!ptr)continue;
-      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧬 '+(wasAdopted?'Repaired onto':'Adopted')+' "'+dest.name+'" — pointer '+ptr});
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧬 '+(wasAdopted?'Sequence was deleted — moved onto':'Adopted')+' "'+dest.name+'" — pointer '+ptr});
       c.st.sequenceId=dest.id;c.st.sequenceStepId=ptr;
       c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
       c.st.sequenceCompletedAt=null;c.st.sequenceNudges=c.st.sequenceNudges||{};
-      try{await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);n++;}
+      try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);n++;}
       catch(e){console.warn('repair persist failed:',c.name,e.message);}
     }
     if(n){
@@ -10193,7 +10242,7 @@ async function _reconcileBookingStages(){
       try{
         c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stale booking cleared ('+new Date(t).toLocaleString()+') — already consumed'});
         delete c.st.booking;delete c.st.meetingUrl;delete c.st.calBooking;delete c.st.calBookingId;delete c.st.bookingKind;
-        await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+        await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
         swept++;
       }catch(e){console.warn('stale booking sweep failed:',c.name,e.message);}
       continue;
@@ -10220,7 +10269,7 @@ async function _reconcileBookingStages(){
           }
         }
         await patchRange('G'+c.excelRow,[[to]]);
-        await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+        await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
         n++;
       }catch(e){console.warn('kind-mismatch correction failed:',c.name,e.message);}
       continue;
@@ -10233,7 +10282,7 @@ async function _reconcileBookingStages(){
       c.stage=next;c.row[6]=next;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stage caught up to '+(kind||'screen')+' booking ('+new Date(t).toLocaleString()+') → '+next});
       await patchRange('G'+c.excelRow,[[next]]);
-      await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+      await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
       n++;
     }catch(e){console.warn('booking stage catch-up failed:',c.name,e.message);}
   }
@@ -10360,7 +10409,13 @@ const TRIGGERS={
   tpCheckClear:     c => (c.st&&c.st.tpCheck)==='clear',
   tpCheckFlag:      c => (c.st&&c.st.tpCheck)==='flag',
   tpCheckPending:   c => !(c.st&&c.st.tpCheck),
-  bgStarted:        c => !!(c.st&&(c.st.tpCheck||c.st.reqCheck||(c.st.sent&&c.st.sent.bg_request)||(c.st.yardstik&&c.st.yardstik.candidateId))),
+  /* BG-ONLY evidence. candidateId is deliberately excluded: Yardstik creates a candidate for
+     EMPLOYMENT-VERIFICATION orders too, so keying on it made "verification ordered" read as
+     "background check started" (BG-order steps were then silently walked through and the BG
+     check never actually ordered). orderedAt/packageId/applyUrl are written only by the BG
+     order path. */
+  bgStarted:        c => !!(c.st&&(c.st.tpCheck||c.st.reqCheck||(c.st.sent&&c.st.sent.bg_request)||(c.st.yardstik&&(c.st.yardstik.orderedAt||c.st.yardstik.packageId||c.st.yardstik.applyUrl)))),
+  verifyStarted:    c => !!(c.st&&c.st.yardstik&&(c.st.yardstik.verifyOrderedAt||c.st.yardstik.verifyReportId)),
 
   /* Yardstik integration readiness */
   yardstikReady:    c => !!(SETTINGS.config&&SETTINGS.config.yardstikAccountId&&SETTINGS.config.yardstikPackageId),
@@ -10683,6 +10738,11 @@ function _fmtBooking(b){
   return isNaN(d2)?'':d2.toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
 }
 function action(c){
+  /* Corrupted stored state outranks EVERYTHING: the row renders as a loud repair card and
+     no flow may act on (or save over) the default-shaped ghost the parse failure produced. */
+  if(c&&c.st&&c.st.__ajCorrupt){
+    return{bucket:'action',timing:{txt:'🛑 Stored data corrupted — restore this row from OneDrive version history',pill:'pr2',date:''},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'open',label:'🛑 Corrupted — details',cls:'red'}};
+  }
   /* Cert-gated interview choreography (Interview booked + upcoming booking):
        T-60, certs/BG form missing → send the cancellation WARNING (once, then Scheduled);
        T-30, still missing         → cancel is the action (tick auto-cancels when automation on);
@@ -10765,7 +10825,7 @@ function action(c){
 function scoreRow(c){let e=_srMemo.get(c);if(e&&e.g===_memGen)return e.v;const v=_scoreRowC(c);_srMemo.set(c,{g:_memGen,v});return v;}
 function _actionC(c){
   const s=c.stage,st=c.st,info=STAGEINFO[s]||STAGEINFO['Applied'];
-  if(s==='Declined')return{bucket:'closed',info};
+  if(s==='Declined'||s==='Withdrawn')return{bucket:'closed',info}; /* both terminal — a Withdrawn column-G value used to fall through as if active */
   /* declineHint set by recordCertAnswer when required minimums weren't met after a cert claim.
      Surfaces a red 'Send rejection' primary CTA — user confirms before it actually sends. */
   if(c.st.declineHint&&s!=='Declined'&&s!=='Hired'){
@@ -11431,7 +11491,7 @@ async function markAllRead(){
     let dirty=false;
     emails.forEach(e=>{if(!e.seen){e.seen=true;e.seenAt=stamp();dirty=true;count++;}});
     if(dirty){
-      try{await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);}catch(e){console.warn('mark-read save:',e.message);}
+      try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);}catch(e){console.warn('mark-read save:',e.message);}
     }
   }
   toast('✓ '+count+' email'+(count===1?'':'s')+' marked read');
@@ -11706,12 +11766,28 @@ async function markNoShow(stage){
   /* Below limit: clear booking, send rebook email, park in awaiting. The candidate's stage
      reverts to the "invite" stage so they need to rebook through the Cal.com link. */
   delete W.st.booking;delete W.st.meetingUrl;delete W.st.callPhone;
+  delete W.st.bookingKind;delete W.st.calBooking;delete W.st.calBookingId; /* the missed meeting is consumed in full — its id must not swallow a later cancel */
   if(stage==='Phone Screen'&&W.stage==='Screen booked'){W.stage='Screen invite';delete (W.st.sent||{}).screen_invite;}
   else if(stage==='Interview'&&W.stage==='Interview booked'){W.stage='Interview invite';delete (W.st.sent||{}).interview_invite;}
   else if(stage==='Onboarding'&&W.stage==='Onboarding booked'){W.stage='Onboarding';delete (W.st.sent||{}).onboarding;}
 
   W.st.manualAwaiting=true;
   W.st.awaitingReason='No-show #'+count+' — awaiting rebook';
+  /* Stamp the park time — without these, reviewedAt computes as epoch 0 and any old
+     lastAssignmentAt/booking event immediately re-surfaces the candidate as an action row
+     ("New document assigned") when the ball is squarely in THEIR court. */
+  W.st.awaitingSince=new Date().toISOString();
+  W.st.lastAwaitingReview=W.st.awaitingSince;
+  /* Re-place the sequence pointer stage-matched in THEIR OWN sequence: the stage just
+     reverted, and the forward-only snap can never move the pointer back off the orphaned
+     session step — it would otherwise show "booking time unknown" as an action forever. */
+  try{
+    const _sq=(SETTINGS.sequences||[]).find(q=>q.id===W.st.sequenceId);
+    if(_sq&&typeof _classicPointerFor==='function'){
+      const _p=_classicPointerFor(Object.assign({},pipeline.find(x=>x.excelRow===W.row)||{},{stage:W.stage,st:W.st}),_sq);
+      if(_p&&_p!==W.st.sequenceStepId){W.st.sequenceStepId=_p;W.st.sequenceHistory=(W.st.sequenceHistory||[]).concat({stepId:_p,at:new Date().toISOString()});}
+    }
+  }catch(e){console.warn('no-show pointer re-place:',e.message);}
   await saveW(true);
   toast('📵 No-show #'+count+' of '+limit+'. Opening rebook email…');
 
@@ -11952,7 +12028,7 @@ async function markPayoutEligible(row,idx){
   const r=c.st.customerReferrals[idx];
   r.payoutStatus='eligible';r.eligibleAt=new Date().toISOString();
   c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'💰 Customer referral eligible: '+(r.name||'unnamed')+' · $'+(r.amount||SETTINGS.config.customerReferralAmount)});
-  try{await patchRange('AJ'+row,[[JSON.stringify(sanitizeState(c.st))]]);await refreshRow(row);toast('✓ Marked eligible');renderReferralsView();}
+  try{await patchRange('AJ'+row,[[_stCell(c.st)]]);await refreshRow(row);toast('✓ Marked eligible');renderReferralsView();}
   catch(e){toast('Save failed: '+e.message);}
 }
 async function markPayoutPaid(row,idx){
@@ -11963,7 +12039,7 @@ async function markPayoutPaid(row,idx){
   }
   r.payoutStatus='paid';r.paidAt=new Date().toISOString();
   c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'💰 Customer referral PAID: '+(r.name||'unnamed')+' · $'+(r.amount||SETTINGS.config.customerReferralAmount)});
-  try{await patchRange('AJ'+row,[[JSON.stringify(sanitizeState(c.st))]]);await refreshRow(row);toast('✓ Marked paid');renderReferralsView();}
+  try{await patchRange('AJ'+row,[[_stCell(c.st)]]);await refreshRow(row);toast('✓ Marked paid');renderReferralsView();}
   catch(e){toast('Save failed: '+e.message);}
 }
 function render(){_memGen++;if(!tok)return;updateFilterCount();if(view==='calendar')return renderCalendar();if(view==='active')return renderActiveCaregivers();if(view==='referrals')return renderReferralsView();
@@ -12275,7 +12351,7 @@ async function _sendNudgeHeadless(c){
   c.st.emails.unshift({id:'local-'+Date.now()+'-'+c.excelRow,direction:'out',subject:(subj||'').slice(0,140),preview:(body||'').slice(0,200),from:'careers@solurahomecare.com',to:c.email,received:new Date().toISOString(),seen:true});
   if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
   c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'\ud83d\udd14 Nudge sent: '+tpl.replace(/_/g,' ')});
-  await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+  await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
 }
 /* Nudge ALL idle candidates — resilient batch (per-send timeout + guaranteed toast/re-render). */
 async function nudgeAll(){
@@ -12710,20 +12786,68 @@ function sanitizeState(st){
   }
   /* Notes: cap at 4000 chars (more than enough for interview notes) */
   if(typeof st.notes==='string'&&st.notes.length>4000)st.notes=st.notes.slice(0,4000);
+  /* Unbounded growers that the original sanitizer missed — each one has actually pushed a
+     candidate toward the 32k cell cap in production: */
+  if(Array.isArray(st.sequenceHistory)&&st.sequenceHistory.length>40)st.sequenceHistory=st.sequenceHistory.slice(-40);
+  if(Array.isArray(st.profileEdits)&&st.profileEdits.length>30)st.profileEdits=st.profileEdits.slice(-30);
+  if(Array.isArray(st.checkins)&&st.checkins.length>30)st.checkins=st.checkins.slice(-30);
+  if(st.aiScreen&&typeof st.aiScreen==='object'){
+    Object.keys(st.aiScreen).forEach(k=>{const v=st.aiScreen[k];if(typeof v==='string'&&v.length>1500)st.aiScreen[k]=v.slice(0,1500)+'…';});
+  }
+  delete st.__ajCorrupt; /* in-memory flag only — must never persist (writers refuse on it long before this) */
   return st;
+}
+
+/* THE ONLY way state may be serialized for an AJ cell write. Microsoft Graph SILENTLY
+   TRUNCATES any cell write past Excel's 32,767-char cap (verified live 2026-08-28: 33,010
+   chars in → no error → 32,767 stored → unparseable JSON → the candidate's profile reads
+   as empty and the next write makes the wipe permanent). So this chokepoint:
+     1. REFUSES to serialize state flagged corrupt (recover the cell first);
+     2. trims progressively (oldest log/history/emails first) on a DEEP COPY until it fits —
+        callers' in-memory state keeps full fidelity;
+     3. THROWS rather than let an oversized string reach Graph.
+   Every AJ writer goes through this. */
+function _stCell(st){
+  if(st&&st.__ajCorrupt)throw new Error('state corrupt — write refused (restore the row from Excel version history first)');
+  let s=sanitizeState(st);
+  let j=JSON.stringify(s||{});
+  if(j.length>32000){
+    s=JSON.parse(j); /* deep copy — trims below must not eat the live in-memory state */
+    const trims=[
+      o=>{if(Array.isArray(o.log))o.log=o.log.slice(-80);},
+      o=>{if(Array.isArray(o.sequenceHistory))o.sequenceHistory=o.sequenceHistory.slice(-15);},
+      o=>{if(Array.isArray(o.emails))o.emails=o.emails.slice(0,15);},
+      o=>{if(Array.isArray(o.profileEdits))o.profileEdits=o.profileEdits.slice(-10);},
+      o=>{if(Array.isArray(o.checkins))o.checkins=o.checkins.slice(-10);},
+      o=>{if(o.aiScreen&&typeof o.aiScreen==='object')Object.keys(o.aiScreen).forEach(k=>{if(typeof o.aiScreen[k]==='string'&&o.aiScreen[k].length>400)o.aiScreen[k]=o.aiScreen[k].slice(0,400)+'…';});},
+      o=>{Object.keys(o).forEach(k=>{if(typeof o[k]==='string'&&o[k].length>1500)o[k]=o[k].slice(0,1500)+'…';});},
+      o=>{if(Array.isArray(o.log))o.log=o.log.slice(-30);},
+      o=>{if(Array.isArray(o.emails))o.emails=o.emails.slice(0,5);}
+    ];
+    for(const t of trims){t(s);j=JSON.stringify(s);if(j.length<=32000)break;}
+  }
+  if(j.length>32700)throw new Error('state still too large after trim ('+j.length+' chars) — write refused to protect the cell');
+  return j;
 }
 
 async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
   try{
+    if(W.st&&W.st.__ajCorrupt){
+      /* The stored cell is corrupt (oversized write got truncated) — writing this default-
+         shaped copy would make the wipe PERMANENT. Restore the row from Excel's version
+         history (workbook → File → Info → Version History), then reload. */
+      toast('🛑 Save refused — this candidate\'s stored data is corrupted. Restore the spreadsheet row from OneDrive version history first.');
+      return;
+    }
     W.st=sanitizeState(W.st);
-    const stJson=JSON.stringify(W.st||{});
-    /* Defensive size check — Excel's cell limit is 32,767. Bail with a useful message if we'd
-       exceed it (something we didn't sanitize must be causing it). This ALWAYS toasts even when
-       silent, because a silent failure to save means the user clicks "advance" and the candidate
-       appears to move but actually didn't — symptom of the "candidates don't move forward" bug. */
-    if(stJson.length>32000){
-      toast('⚠ Save aborted — state too large ('+stJson.length+' chars). Open browser console and run: W.st=sanitizeState(W.st);saveW()');
-      console.error('State size exceeded 32k:',stJson.length,'chars for row',row);
+    /* _stCell trims a deep copy to fit Excel's 32,767 cap and THROWS rather than let Graph
+       silently truncate (which is what corrupted profiles). ALWAYS toasts on refuse, even
+       silent — an invisible failed save means "candidate appears to move but didn't". */
+    let stJson;
+    try{stJson=_stCell(W.st);}
+    catch(sErr){
+      toast('⚠ Save aborted — '+sErr.message);
+      console.error('saveW refused:',sErr.message,'row',row);
       return;
     }
     const _gl=[W.stage,bl(W.gates.wa),bl(W.gates.cr),bl(W.gates.bg),bl(W.gates.tr),bl(W.gates.av)];
@@ -13005,7 +13129,7 @@ async function _markReceivedCore(cand,idx,note){
   /* NOTE: deliberately NOT stamping lastAssignmentAt here — receiving an item is the OPPOSITE of
      a new assignment arriving; stamping it made the candidate re-surface as "New document
      assigned" right after you marked something received. */
-  await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
+  await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
   /* If the workspace is showing this candidate as a separate object, keep it in sync. */
   if(W&&W.row===cand.excelRow&&W.st!==cand.st)W.st=cand.st;
   /* Refresh the UI so the profile change is visible immediately (#4: "doesn't update the profile"). */
@@ -13129,7 +13253,7 @@ async function recordCertAnswer(row,idx){
     if(advancedTo){
       await patchRange('G'+cand.excelRow,[[advancedTo]]);
     }
-    await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
+    await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
     toast(advancedTo?'\u2713 Recorded \u2014 advanced to Screen invite':(missingRequired.length?'\u2713 Recorded \u2014 decline suggested':'\u2713 Recorded'));
     _renderEmailAwait(_currentEmailMsgId);
     if(W&&W.row===row)renderWorkspace();
@@ -13725,9 +13849,19 @@ function loadPresetIntoComposer(key,advanceTo){
   document.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
   const newActive=Array.from(document.querySelectorAll('.preset-btn')).find(b=>b.getAttribute('onclick')&&b.getAttribute('onclick').includes("'"+key+"'"));
   if(newActive)newActive.classList.add('active');
-  /* Update the send button to send via the new preset's tpl key */
+  /* Update the send button to send via the new preset's tpl key. advanceTo belongs to the
+     TEMPLATE, never to the modal that happened to be open: switching presets used to carry
+     the original modal's advanceTo along (rejection sent from a plain composer never wrote
+     Declined; conversely a preset switched AWAY from reject still declined the candidate). */
   const sendBtn=document.getElementById('sendbtn');
-  if(sendBtn)sendBtn.setAttribute('onclick',`reallySend('${key}','${advanceTo||''}')`);
+  if(sendBtn)sendBtn.setAttribute('onclick',`reallySend('${key}','${_tplAdvanceTo(key,'')||''}')`);
+}
+/* Stage a template send should advance to — terminal semantics live with the TEMPLATE (data),
+   not with whichever button opened the composer. Callers pass their own advanceTo as the
+   fallback for flow templates. */
+function _tplAdvanceTo(tpl,fallback){
+  if(tpl==='reject')return 'Declined';
+  return fallback||'';
 }
 
 /* Modal preview — shows what the email will look like AFTER all placeholders are substituted. */
@@ -13769,6 +13903,7 @@ function _renderAttachList(){
 function _fmtSize(n){if(n<1024)return n+' B';if(n<1024*1024)return Math.round(n/1024)+' KB';return (n/(1024*1024)).toFixed(1)+' MB';}
 async function reallySend(tpl,advanceTo){
   if(!W.email){toast('No email on file');return;}
+  advanceTo=_tplAdvanceTo(tpl,advanceTo); /* a rejection ALWAYS closes the candidate — regardless of which entry point opened the composer */
   /* Substitute any placeholders in subject/body BEFORE sending. This makes the placeholder
      buttons work even for free-typed text that includes tokens like {first} or {appLink}. */
   const subj=substituteLive(document.getElementById('e-sub').value);
@@ -13811,6 +13946,13 @@ async function reallySend(tpl,advanceTo){
        Backfill the corresponding *_invite sent flag so downstream triggers see a sent invite. */
     if(tpl==='missed_screen')W.st.sent.screen_invite=W.st.sent.screen_invite||today();
     if(tpl==='missed_interview')W.st.sent.interview_invite=W.st.sent.interview_invite||today();
+    /* Sending a missed-meeting rebook email CONSUMES the meeting they missed: a stale past
+       booking otherwise keeps the row in "Overdue — run it" action forever (and can even
+       re-advance the stage off the very meeting they skipped). Ball is in their court now. */
+    if(/^missed_/.test(tpl)&&W.st.booking&&isFinite(Date.parse(W.st.booking))&&Date.parse(W.st.booking)<Date.now()){
+      logW('📅 Missed booking consumed ('+W.st.booking+') — rebook email sent, awaiting their new time');
+      delete W.st.booking;delete W.st.meetingUrl;delete W.st.bookingKind;delete W.st.calBooking;delete W.st.calBookingId;
+    }
     /* Cert-gated interview: sending the invite parks the candidate AWAITING their application-
        claimed certs (only those without files). Existing machinery handles the rest: wake on
        reply, attachment→cert matching, auto-release when all are in. */
@@ -14039,7 +14181,7 @@ function openWorkspace(r,jump){wsRow=r;loadW(r);renderWorkspace(jump);
          same stale event re-surfaces this candidate forever. */
       if(W&&W.row===r&&W.st)W.st.lastAwaitingReview=c.st.lastAwaitingReview;
       /* Persist this stamp so refreshes don't re-surface them */
-      patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]).catch(err=>console.warn('Awaiting review stamp:',err.message));
+      patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(err=>console.warn('Awaiting review stamp:',err.message));
     }
     detectResumeInFolder(c).catch(e=>console.warn(e.message));
     ensureApplicationPdf(c).catch(e=>console.warn(e.message));
@@ -14090,7 +14232,7 @@ async function detectResumeInFolder(c){
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-released — résumé received'});
         }
       }
-      await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+      await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
       if(W&&W.row===c.excelRow){W.st=c.st;W.gates=W.gates||{};}
       render();
       if(W&&W.row===c.excelRow)renderWorkspace();
@@ -16618,8 +16760,12 @@ async function refreshYardstik(){
     if(!W.st.yardstik.reportId&&W.st.yardstik.candidateId){
       const rl=await fetch(ZI_WORKER_URL+'/yardstik/report-status?candidateId='+encodeURIComponent(W.st.yardstik.candidateId),{headers:{'X-Solura-Token':tok}});
       const jl=await rl.json().catch(()=>({}));
-      const reps=(jl&&Array.isArray(jl.reports))?jl.reports.filter(x=>x&&x.id):[];
-      if(!reps.length){toast((jl&&jl.error)?('Yardstik: '+jl.error):'Yardstik has no report yet for this candidate — they likely have not finished the intake form');return;}
+      /* Exclude the EMPLOYMENT-VERIFICATION report (and its package) — "newest report on the
+         candidate" used to grab it and fabricate a BG verdict from a verification result. */
+      const _vRid=W.st.yardstik.verifyReportId,_vPkg=W.st.yardstik.verifyPackageId;
+      const reps=((jl&&Array.isArray(jl.reports))?jl.reports.filter(x=>x&&x.id):[])
+        .filter(x=>x.id!==_vRid&&!(_vPkg&&(x.packageId===_vPkg||x.package_id===_vPkg)));
+      if(!reps.length){toast((jl&&jl.error)?('Yardstik: '+jl.error):'Yardstik has no background-check report yet for this candidate — they likely have not finished the intake form');return;}
       reps.sort((a,b)=>String(b.completedAt||b.createdAt||'').localeCompare(String(a.completedAt||a.createdAt||'')));
       W.st.yardstik.reportId=reps[0].id;
       logW('Yardstik report id resolved from the candidate: '+String(reps[0].id).slice(0,8)+'...');
@@ -16717,7 +16863,7 @@ async function maybeAdvanceReferrer(fromStage,toStage){
   }
   if(updated){
     try{
-      await patchRange('AJ'+referrer.excelRow,[[JSON.stringify(sanitizeState(referrer.st))]]);
+      await patchRange('AJ'+referrer.excelRow,[[_stCell(referrer.st)]]);
       await refreshRow(referrer.excelRow);
     }catch(e){console.warn('Referrer credit failed:',e.message);}
   }
@@ -16743,7 +16889,7 @@ async function markCurrentEmailUnread(){
       const e=(c.st.emails||[]).find(x=>x.id===id);
       if(e&&e.seen){
         delete e.seen;delete e.seenAt;
-        patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]).catch(err=>console.warn('unmark persist:',err.message));
+        patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(err=>console.warn('unmark persist:',err.message));
       }
     });
     toast('✓ Marked unread in Outlook');
@@ -16766,7 +16912,7 @@ async function openEmailDetail(messageId){
       e.seen=true;
       e.seenAt=stamp();
       anyMarked=true;
-      patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]).catch(err=>console.warn('seen persist:',err.message));
+      patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(err=>console.warn('seen persist:',err.message));
     }
   });
   if(anyMarked)setTimeout(()=>render(),200);
@@ -17314,7 +17460,7 @@ async function _doAssignment(messageId,attIdx,cand,item){
     cand.st.lastAssignmentAt=new Date().toISOString();
     cand.st.log=cand.st.log||[];
     cand.st.log.push({t:stamp(),x:'📎 Assigned attachment "'+att.name+'" as '+_awaitingItemLabel(item)+' — saved to '+finalName});
-    await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
+    await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
     const releasedNow=wasParked&&queueEmpty;
     const remainingMsg=cand.st.awaitingItems.length?cand.st.awaitingItems.length+' awaiting item'+(cand.st.awaitingItems.length===1?'':'s')+' remaining':(releasedNow?'released from awaiting — next step ready':'all requests fulfilled');
     toast('✓ Assigned as '+_awaitingItemLabel(item)+' — '+remainingMsg);
@@ -18131,7 +18277,7 @@ async function ensureApplicationPdf(c){
       await uploadPdfToOnboarding(c.name,'application-'+((c.st&&c.st.appliedDate)||today())+'.pdf',blob);
     }
     c.st.hasApplicationPdf=true;
-    await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+    await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
   }catch(e){console.warn('Application PDF gen failed:',e.message);}
 }
 function generateActivityLogPdf(c){
@@ -18493,7 +18639,7 @@ async function commitLinkBooking(candidateExcelRow){
     if(stageAdvancedTo){
       await patchRange('G'+cand.excelRow,[[stageAdvancedTo]]);
     }
-    await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
+    await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
     await saveAvailability();
     toast('\u2713 Booking linked to '+cand.name+(stageAdvancedTo?' \u2014 advanced to '+stageAdvancedTo:''));
     closeLinkBookingModal();
@@ -18692,7 +18838,7 @@ async function sendMassEmail(){
            the log tail. */
         c.st.log=c.st.log||[];
         c.st.log.push({t:stamp(),x:'✉ Mass email sent: '+(subj||'').slice(0,60)});
-        patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]).catch(e=>{});
+        patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(e=>{});
       }catch(e){
         failed++;recipientRecord.error=e.message;if(!firstError)firstError=e.message;
         console.warn('Mass send failed for '+c.email+':',e.message);
@@ -20990,7 +21136,7 @@ async function backfillRefCodes(){
     usedCodes.add(code);
     c.st=c.st||{};c.st.refCode=code;
     try{
-      await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+      await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
       done++;
     }catch(e){
       console.warn('refCode backfill failed for row '+c.excelRow+':',e.message);
@@ -21280,7 +21426,10 @@ async function _jobRequirementsPass(){
       if(W&&W.row===c.excelRow)continue;
       const jb=_jobFor(c);
       if(!jb||!jb.req||(jb.req.policy||'review')!=='generic')continue;
-      const miss=_jobMissingReqs(c,jb);
+      /* Only ANSWERED-AND-FAILING requirements auto-route. "(not answered)" means the data
+         simply isn't in yet — a fresh applicant who hasn't been screened must not be
+         silently shunted off the job's flow on first load. */
+      const miss=_jobMissingReqs(c,jb).filter(m=>String(m).indexOf('(not answered)')<0);
       if(!miss.length)continue;
       if(defSeq&&jb.sequenceId&&jb.sequenceId!==defSeq.id){
         const ptr=_classicPointerFor(c,defSeq); /* null for an empty default — keep their sequence rather than dangle */
@@ -21291,7 +21440,7 @@ async function _jobRequirementsPass(){
       }
       c.st.jobReqRouted=1;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧾 Missing for "'+jb.name+'": '+miss.join(', ')+' → routed to the generic pipeline (job policy)'});
-      try{await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);n++;}catch(e){console.warn('jobreq route:',c.name,e.message);}
+      try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);n++;}catch(e){console.warn('jobreq route:',c.name,e.message);}
     }
     if(n){toast('🧾 '+n+' candidate'+(n===1?'':'s')+' routed to the generic pipeline (job requirements)');if(typeof render==='function')render();}
   }catch(e){console.warn('job requirements pass:',e);}
@@ -21949,7 +22098,7 @@ async function unscrambleColRepair(excelRow){
     /* Activity log entry. */
     pipeline[_i].st=pipeline[_i].st||{};pipeline[_i].st.log=pipeline[_i].st.log||[];
     pipeline[_i].st.log.push({t:stamp(),x:'🩹 Column-scramble repair: rewrote '+Object.keys(p.proposed).join('/')+' to corrected cells'});
-    await patchRange('AJ'+excelRow,[[JSON.stringify(sanitizeState(pipeline[_i].st))]]);
+    await patchRange('AJ'+excelRow,[[_stCell(pipeline[_i].st)]]);
     toast('✓ Unscrambled '+esc(c.name));
     scanColScrambled();
     render();
@@ -22063,7 +22212,7 @@ async function restoreYardstikReportId(excelRow){
       /* Worker call failed — still persist the re-link so the user isn't stuck. */
       c.st.tpCheck=c.st.tpCheck||'pending';
     }
-    await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+    await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
     toast('✓ Re-linked '+esc(c.name)+' · status '+(data&&data.status||'pending'));
     scanRaceAffected();
     render();
@@ -22079,7 +22228,7 @@ async function markBgManuallyClear(excelRow){
   c.st=c.st||{};
   c.st.tpCheck='clear';
   c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'🩹 BG check manually marked clear via race repair'});
-  await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+  await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
   toast('✓ Marked BG clear for '+esc(c.name));
   scanRaceAffected();
   render();
@@ -22609,7 +22758,7 @@ async function _repairCorruptedStage(row,toStage){
   }
   c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🛠 Stage repaired: "'+fromStage+'" → '+target+(rebuilt.length?' · certs rebuilt: '+rebuilt.join(', '):'')});
   await patchRange('G'+row,[[target]]);
-  await patchRange('AJ'+row,[[JSON.stringify(sanitizeState(c.st))]]);
+  await patchRange('AJ'+row,[[_stCell(c.st)]]);
   /* Sync the open workspace so its next saveW doesn't re-write the corrupted stage. */
   if(W&&W.row===row){W.stage=target;if(W.st!==c.st)W.st=c.st;}
   toast('🛠 '+(c.name||'Row '+row)+' → '+target);
@@ -22728,7 +22877,7 @@ async function _recoverAutoReleased(){
         c.st.awaitingReason=inf.reason||'Restored from erroneous auto-release \u2014 please review original context';
       }
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'\u2705 Restored to awaiting after erroneous auto-release'+(inf.certs?' (cert clarification reconstructed)':'')});
-      await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+      await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
       done++;
     }catch(e){
       failed++;
@@ -22763,7 +22912,7 @@ function _seqTriggerList(){
 async function _seqCommitState(cand,patch){
   if(!cand||!patch)return;
   cand.st=Object.assign({},cand.st||{},patch);
-  await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
+  await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
   if(W&&W.row===cand.excelRow&&W.st!==cand.st)W.st=cand.st;
 }
 /* Resolve + assign a sequence for a candidate (tag-for-life; explicit action). */
@@ -22800,7 +22949,8 @@ async function _seqRunIntent(row,intentJson){
     try{
       const aseq=window.SeqBuilderV3.resolveSequenceFor(cand,SETTINGS.sequenceAssignments||[],SETTINGS.sequences||[]);
       if(aseq&&Array.isArray(aseq.steps)&&aseq.steps.length){
-        const ptr=_classicPointerFor(cand,aseq); /* stage-matched for ANY sequence; falls back to steps[0] */
+        const ptr=_classicPointerFor(cand,aseq); /* stage-matched for ANY sequence with a step for their stage */
+        if(!ptr){toast('This sequence has no step for stage "'+cand.stage+'" — not adopted');return;}
         cand.st=cand.st||{};
         cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Adopted '+aseq.name+' (first sequence action) — pointer '+ptr});
         await _seqCommitState(cand,{sequenceId:aseq.id,sequenceStepId:ptr,sequenceHistory:((cand.st.sequenceHistory)||[]).concat({stepId:ptr,at:new Date().toISOString()}),sequenceCompletedAt:null,sequenceNudges:cand.st.sequenceNudges||{}});
@@ -22976,7 +23126,7 @@ async function _claudeResumeScreen(row){
       console.error('Claude screen FAILED for',cand.name,'—',err,resumeSkipped?('(also failed without résumé; first error: '+resumeSkipped+')'):'');
       cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'⚠ Claude screen failed: '+String(err).slice(0,200)});
       cand.st=sanitizeState(cand.st);
-      patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]).catch(()=>{});
+      patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]).catch(()=>{});
       toast('⚠ Screen failed for '+(cand.name||'candidate')+': '+err);
       return false;
     }
@@ -22988,7 +23138,7 @@ async function _claudeResumeScreen(row){
     /* sanitizeState like every other save path — a heavily-logged candidate otherwise blows
        the 32k AJ cell cap and the screen fails for that one candidate only. */
     cand.st=sanitizeState(cand.st);
-    await patchRange('AJ'+cand.excelRow,[[JSON.stringify(sanitizeState(cand.st))]]);
+    await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
     if(W&&W.row===row){if(W.st!==cand.st)W.st=cand.st;renderWorkspace();}
     toast('🤖 '+(j.screen.verdict==='advance'?'✓ Advance':j.screen.verdict==='concern'?'⚠ Concern':'👁 Review')+' — score '+(j.screen.score!=null?j.screen.score:'—'));
     return true;
@@ -23073,7 +23223,7 @@ async function _seqAutomationTick(){
           if(await _autoSendTpl(c,'interview_cert_warning')){
             c.st.warnedForBooking=String(c.st.booking||'');
             c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-sent interview cert warning (cancel at T-30)'});
-            await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+            await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
             budget--;continue; /* one action per candidate per tick */
           }
         }catch(e){console.warn('auto warning failed:',c.name,e.message);}
@@ -23084,7 +23234,7 @@ async function _seqAutomationTick(){
           c.st.autoCancelledAt=new Date().toISOString();
           c.st.autoCancelledFor=String(c.st.booking||'');
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-cancelled interview (30-minute rule; warned at T-60) — '+reason});
-          await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+          await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
           budget--;continue; /* one action per candidate per tick */
         }
       }
@@ -23094,39 +23244,54 @@ async function _seqAutomationTick(){
     let ev;try{ev=window.SeqEngineV2.evaluate(seq,c,_seqTriggerEval);}catch(e){continue;}
     if(!ev||!ev.currentStep||ev.currentStep.automate!==true)continue; /* per-step opt-in only */
     const it=(ev.intents||[])[0];if(!it)continue;
+    /* A step whose last automated attempt FAILED is the operator's now (seqAutoFail makes
+       the remap surface it as an action row) — retrying it every 30s only re-fails and
+       bloats the state cell. The stamp clears when the step executes or the pointer moves. */
+    const _stepId=ev.currentStep.id;
+    if(c.st.seqAutoFail&&c.st.seqAutoFail.stepId===_stepId)continue;
+    const _stampFail=async(why)=>{
+      c.st.seqAutoFail={stepId:_stepId,at:new Date().toISOString(),why:String(why||'').slice(0,120)};
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚠ Automation could not run this step ('+(why||'failed')+') — surfaced for you'});
+      try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);}catch(e2){console.warn('autofail stamp:',e2.message);}
+    };
+    const _clearFail=()=>{if(c.st.seqAutoFail)delete c.st.seqAutoFail;};
     try{
       if(it.type==='send-email'&&it.templateKey){
         if(await _autoSendTpl(c,it.templateKey)){
+          _clearFail();
           const adv=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
           if(!adv.error)Object.assign(c.st,adv.partialState||{});
-          await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+          await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
           budget--;
-        }
+        }else await _stampFail('email not sent');
       }else if(it.type==='set-stage'){
         const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
         if(flow.includes(it.stage)){
+          _clearFail();
           c.stage=it.stage;c.row[6]=it.stage;
           await patchRange('G'+c.excelRow,[[it.stage]]);
           const adv=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
           if(!adv.error)Object.assign(c.st,adv.partialState||{});
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-advanced stage → '+it.stage});
-          await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+          await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
           budget--;
-        }
+        }else await _stampFail('stage "'+it.stage+'" is outside the flow order');
       }
       else if(it.type==='integration'&&it.provider==='claude'&&/resume[-_]screen/.test(it.action||'')){
         /* Advisory-only AI screen (~1¢) — safe to automate when the step opts in. Runs the
-           screen, advances on success; failures leave the card for a human. */
+           screen, advances on success; a failure hands the card to a human INSTEAD of
+           silently re-failing every 30 seconds. */
         if(await _claudeResumeScreen(c.excelRow)===true){
+          _clearFail();
           const adv=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
           if(!adv.error)Object.assign(c.st,adv.partialState||{});
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-ran Claude screen (sequence automation)'});
-          await patchRange('AJ'+c.excelRow,[[JSON.stringify(sanitizeState(c.st))]]);
+          await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
           budget--;
-        }
+        }else await _stampFail('Claude screen failed');
       }
       /* everything else (park, decline, yardstik/other integrations, manual) stays human-only by design */
-    }catch(e){console.warn('automation:',e.message);}
+    }catch(e){console.warn('automation:',e.message);try{await _stampFail(e.message);}catch(e3){}}
   }
 }
 /* Workspace parallel-run card — shows the v2 evaluation for the open candidate. */
@@ -23301,7 +23466,11 @@ function _classicPointerFor(c,seq){
   const byId={};seq.steps.forEach(s2=>byId[s2.id]=s2);
   const key='stage_'+String(c.stage||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
   const stageStep=seq.steps.find(s2=>s2.kind==='stage'&&s2.stage&&s2.stage.setStage===c.stage)||byId[key];
-  if(!stageStep)return seq.steps[0].id;
+  /* NO stage step for their column-G stage → NO pointer. The old steps[0] fallback dropped
+     mid-pipeline candidates onto "set stage Applied", which rendered "Automated: Applied"
+     and could literally DEMOTE them (live incident: Ask-references candidates knocked back
+     to Applied). Callers fall back to the legacy engine / skip adoption instead. */
+  if(!stageStep)return null;
   let ptr=stageStep.next?byId[stageStep.next]:null;
   if(!ptr)return stageStep.id;
   let hops=0;
@@ -23366,6 +23535,7 @@ async function _seqV3AdoptConfirm(){
   for(const c of list){
     try{
       const ptr=_classicPointerFor(c,seq);
+      if(!ptr){failed++;console.warn('adopt skipped — no stage step for',c.name,c.stage);continue;}
       const hist=((c.st&&c.st.sequenceHistory)||[]).concat({stepId:ptr,at:new Date().toISOString()});
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧬 Adopted Classic flow (bulk switchover) — pointer '+ptr});
       await _seqCommitState(c,{sequenceId:'classic-flow',sequenceStepId:ptr,sequenceHistory:hist,sequenceCompletedAt:null,sequenceNudges:{}});
@@ -23394,7 +23564,8 @@ function _seqV3Action(c,info){
          a log line (_seqRunIntent), and the bulk switchover button remains the batch path. */
       seq=window.SeqBuilderV3.resolveSequenceFor(c,SETTINGS.sequenceAssignments||[],SETTINGS.sequences||[]);
       if(!seq||!Array.isArray(seq.steps)||!seq.steps.length)return null;
-      const ptr=_classicPointerFor(c,seq); /* stage-matched for ANY sequence; falls back to steps[0] */
+      const ptr=_classicPointerFor(c,seq); /* stage-matched for ANY sequence with a step for their stage */
+      if(!ptr)return null; /* their stage isn't in the resolved sequence — the legacy engine handles them (never the steps[0] "Automated: Applied" demotion) */
       cand=Object.assign({},c,{st:Object.assign({},c.st||{},{sequenceId:seq.id,sequenceStepId:ptr})});
     }
     let ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
@@ -23452,7 +23623,11 @@ function _seqV3Action(c,info){
         if(its.length===2&&its[0].type==='set-stage'&&its[1].type==='advance'&&its[0].stage===cand.stage)return true;
         /* A yardstik-order step whose check ALREADY EXISTS (bgStarted) is done in reality —
            re-offering "Start Yardstik check" would order a duplicate. Walk through it. */
-        if(its[0]&&its[0].type==='integration'&&its[0].provider==='yardstik'&&/order/.test(its[0].action||'')&&_seqTriggerEval('bgStarted',cand))return true;
+        /* EXACT action match — the old bare /order/ matched order_check AND order_verification,
+           so a verification order swallowed the BG-order step (and vice versa). Each order
+           kind walks only on ITS OWN evidence. */
+        if(its[0]&&its[0].type==='integration'&&its[0].provider==='yardstik'&&/order[-_]?check/.test(its[0].action||'')&&!/verif/.test(its[0].action||'')&&_seqTriggerEval('bgStarted',cand))return true;
+        if(its[0]&&its[0].type==='integration'&&its[0].provider==='yardstik'&&/verif/.test(its[0].action||'')&&_seqTriggerEval('verifyStarted',cand))return true;
         return false;
       };
       let walked=0;
@@ -23483,9 +23658,18 @@ function _seqV3Action(c,info){
       const _autoOn=!!(SETTINGS.config&&SETTINGS.config.seqAutomation);
       /* What the tick can ACTUALLY execute — anything else marked automate would sit in
          Scheduled forever waiting for an executor that never comes (the "new candidates
-         land in scheduled" bug: an automate-flagged claude step with automation ON). */
-      const _tickCan=i2=>i2&&(i2.type==='send-email'||i2.type==='set-stage'||(i2.type==='integration'&&i2.provider==='claude'&&/resume[-_]screen/.test(i2.action||'')));
-      if(ev.bucket==='scheduled'&&(ev.intents||[]).some(i2=>i2&&i2.automatable===true)&&(!_autoOn||!(ev.intents||[]).some(_tickCan))){
+         land in scheduled" bug: an automate-flagged claude step with automation ON).
+         END-TO-END honesty: a set-stage outside the flow order is one the tick refuses to
+         write; a claude screen needs the worker token configured. */
+      const _flowArr=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
+      const _tickCan=i2=>i2&&(i2.type==='send-email'
+        ||(i2.type==='set-stage'&&_flowArr.includes(i2.stage))
+        ||(i2.type==='integration'&&i2.provider==='claude'&&/resume[-_]screen/.test(i2.action||'')&&!!(SETTINGS.config&&SETTINGS.config.ziToken)));
+      /* The tick also provably skips: unadopted rows (no sequenceId) and steps whose last
+         automated attempt FAILED (seqAutoFail stamp) — both must surface as operator
+         actions, not rot in Scheduled behind a robot that never comes. */
+      const _tickReaches=!!(c.st&&c.st.sequenceId)&&!(c.st&&c.st.seqAutoFail&&ev.currentStep&&c.st.seqAutoFail.stepId===ev.currentStep.id);
+      if(ev.bucket==='scheduled'&&(ev.intents||[]).some(i2=>i2&&i2.automatable===true)&&(!_autoOn||!_tickReaches||!(ev.intents||[]).some(_tickCan))){
         ev.bucket='action';
         ev.label=String(ev.label||'').replace(/^Automated: /,'');
       }
@@ -23561,7 +23745,7 @@ async function _seqAdvanceIfIntent(row,pred,logMsg){
     Object.assign(st,adv.partialState);
     if(st!==cand.st)cand.st=st;
     st.log=(st.log||[]).concat({t:stamp(),x:'🧬 Sequence advanced — '+(logMsg||'step complete')});
-    await patchRange('AJ'+row,[[JSON.stringify(sanitizeState(st))]]);
+    await patchRange('AJ'+row,[[_stCell(st)]]);
     if(typeof render==='function')render();
   }catch(e){console.warn('seq advance bridge:',e);}
 }
@@ -23973,8 +24157,18 @@ function _seqStatsCard(){
    export used to STACK another copy — v3, v4, v5… all listed — because upload appends. Dedup on
    mount and on every editor change, keeping the latest, so re-import behaves as replace. */
 function _dedupSequences(arr){
-  const out=[],seen={};
-  for(let i=(arr||[]).length-1;i>=0;i--){const q=arr[i];const id=q&&q.id;if(!id||!seen[id]){out.unshift(q);if(id)seen[id]=1;}}
+  /* Keep the copy with the NEWEST updatedAt (not just the last in array order): importing an
+     OLD export appends old copies, and position-based dedup let them silently replace newer
+     same-id sequences on the next mount. Position only breaks updatedAt ties. */
+  const out=[],best={};
+  (arr||[]).forEach((q,i)=>{
+    const id=q&&q.id;
+    if(!id){out.push(q);return;}
+    const t=(q.updatedAt&&isFinite(Date.parse(q.updatedAt)))?Date.parse(q.updatedAt):0;
+    const prev=best[id];
+    if(!prev){best[id]={q,t,pos:out.length};out.push(q);}
+    else if(t>prev.t||(t===prev.t&&i>=0)){out[prev.pos]=q;prev.q=q;prev.t=Math.max(t,prev.t);}
+  });
   return out;
 }
 function _mountSeqEditorV2(){
@@ -24572,6 +24766,20 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.sty
      reason to skip a poll. The Cal.com webhook + inbox poll were the most-affected by the
      previous skip (saves block them but the user expects them to be live). */
   setInterval(()=>{if(tok&&!document.hidden)backgroundRefresh();},30000);
+  /* Dirty settings closing with the tab used to just vanish (700ms debounce window + the
+     old diff-modal cancel). keepalive lets the POST outlive the page. Primary-load sessions
+     only — a degraded session must never flush a stale copy over the file. */
+  window.addEventListener('pagehide',()=>{
+    try{
+      if(!_settingsDirty)return;
+      if(((window._lastSettingsLoadStatus||{}).source)!=='workerFile')return;
+      const zt=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
+      if(!zt)return;
+      SETTINGS._savedAt=new Date().toISOString();SETTINGS._gen=(Number(SETTINGS._gen)||0)+1;
+      const persist=Object.assign({},SETTINGS);delete persist._undoHistory;
+      fetch(ZI_WORKER_URL+'/settings',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-Solura-Token':zt},body:JSON.stringify({settings:persist})});
+    }catch(e){}
+  });
   /* Initialize the change-request FAB badge on load. */
   setTimeout(updateFabBadge,500);
   })();
