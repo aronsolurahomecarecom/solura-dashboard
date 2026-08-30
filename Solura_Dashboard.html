@@ -1422,7 +1422,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0821-48';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0821-49';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3884,9 +3884,21 @@ function anMedian(arr){
 function buildAnalyticsModel(events){
   var emails=events.filter(function(e){return /email/i.test(e.channel);});
   var outbound=emails.filter(function(e){return e.dir!=='in'&&/sent/i.test(e.outcome||'sent');});
-  var inbound=emails.filter(function(e){return e.dir==='in';});
+  // Only HUMAN inbound counts for reply pairing — tracking rows (opened /
+  // doc-opened) and NDR rows (bounce / spam-block) share the lead's address
+  // and would otherwise register as false "replies".
+  var TRACKING_OUTCOMES=/^(opened|doc-opened|bounce|spam-block)$/;
+  var inbound=emails.filter(function(e){return e.dir==='in'&&!TRACKING_OUTCOMES.test(e.outcome||'');});
+  // Per-open history: opened/doc-opened rows grouped by their send id
+  var opensByMsg={};
+  emails.forEach(function(e){
+    if(e.dir==='in'&&/^(opened|doc-opened)$/.test(e.outcome||'')&&e.msgId){
+      (opensByMsg[e.msgId]=opensByMsg[e.msgId]||[]).push({ts:e.ts,doc:e.outcome==='doc-opened'});
+    }
+  });
   // Pair each outbound with the FIRST inbound from the same address after it
   outbound.forEach(function(o){
+    o.openLog=(o.msgId&&opensByMsg[o.msgId])?opensByMsg[o.msgId].slice().sort(function(a,b){return a.ts-b.ts;}):[];
     o.reply=null;o.replyMins=0;o.direct=false;
     var best=null;
     inbound.forEach(function(inn){
@@ -3899,9 +3911,10 @@ function buildAnalyticsModel(events){
       o.replyMins=Math.round((best.ts-o.ts)/60000);
       o.direct=/^re:/i.test(best.subj)&&anNormSubj(best.subj)===anNormSubj(o.subj);
     }
-    o.openMins=(o.openedAt&&o.openedAt>o.ts)?Math.round((o.openedAt-o.ts)/60000):0;
+    var firstOpen=o.openedAt||(o.openLog.length?o.openLog[0].ts:0);
+    o.openMins=(firstOpen&&firstOpen>o.ts)?Math.round((firstOpen-o.ts)/60000):0;
   });
-  var opened=outbound.filter(function(o){return o.opens>0||o.openedAt>0;});
+  var opened=outbound.filter(function(o){return o.opens>0||o.openedAt>0||o.openLog.length>0;});
   var replied=outbound.filter(function(o){return !!o.reply;});
   var kpi={
     sent:outbound.length,
@@ -3920,7 +3933,7 @@ function buildAnalyticsModel(events){
     var k=o.variant;
     if(!byVariant[k])byVariant[k]={variant:k,sent:0,opened:0,replied:0,docOpens:0,subjects:{}};
     var b=byVariant[k];
-    b.sent++;if(o.opens>0||o.openedAt>0)b.opened++;if(o.reply)b.replied++;b.docOpens+=(o.docOpens||0);
+    b.sent++;if(o.opens>0||o.openedAt>0||o.openLog.length>0)b.opened++;if(o.reply)b.replied++;b.docOpens+=(o.docOpens||0);
     b.subjects[anNormSubj(o.subj)]=1;
   });
   var variants=Object.keys(byVariant).sort().map(function(k){
@@ -4019,7 +4032,7 @@ async function logComms(entry){
       try{ctxEng=engineIdFor(entry.leadRi);}catch(_){}
     }
     var values=[
-      new Date().toISOString(),
+      entry.ts?new Date(entry.ts).toISOString():new Date().toISOString(),
       entry.direction||'',
       entry.channel||'',
       leadRow,
@@ -4293,17 +4306,46 @@ function renderAnalytics(model){
     +'<div>'+svgPie([{v:k.opened,color:'#C8870A'},{v:Math.max(0,k.sent-k.opened),color:'#E5E9F0'}],110)+'</div>'
     +'<div style="font-size:12px;color:#4a5468"><span style="display:inline-block;width:10px;height:10px;background:#C8870A;border-radius:3px;margin-right:6px"></span>Opened &nbsp; <span style="display:inline-block;width:10px;height:10px;background:#E5E9F0;border-radius:3px;margin-right:6px"></span>Not opened<br><span style="color:var(--soft)">Opens are a signal, not truth \u2014 Apple Mail pre-opens, some clients block pixels.</span></div>'
     +'</div>';
-  var rowsH=model.outbound.slice(0,200).map(function(o){
+  var rowsH=model.outbound.slice(0,200).map(function(o,oi){
+    // Lead cell: clickable when the comms row carries a valid lead row
+    var leadRi=(o.ri>0)?(o.ri-1):-1;
+    var leadOk=leadRi>=DATA_START&&rows[leadRi]&&String((rows[leadRi]||[])[C.NM]||(rows[leadRi]||[])[C.DM]||'').trim();
+    var leadCell=leadOk
+      ?('<span data-action="an-open-lead" data-ri="'+leadRi+'" style="cursor:pointer;font-weight:700;color:#1B2A4A;text-decoration:underline;text-decoration-style:dotted" title="Open this lead">'+escapeHtml(o.name||o.contact||'')+'</span>')
+      :escapeHtml(o.name||o.contact||'');
+    // Opened cell: expandable when there is ANY open signal
+    var anyOpen=o.opens>0||o.openedAt>0||o.openLog.length>0;
+    var firstTs=o.openedAt||(o.openLog.length?o.openLog[0].ts:0);
+    var openCount=Math.max(o.opens||0,o.openLog.length);
+    var openedCell='\u2014',detailRow='';
+    if(anyOpen){
+      openedCell='<span data-action="an-toggle-opens" data-key="'+oi+'" style="cursor:pointer" title="Show every open">\u2713 '
+        +anFmtWhen(firstTs)+(openCount>1?(' \u00d7'+openCount):'')+' <span style="color:#8B96AB">\u25be</span></span>';
+      var items;
+      if(o.openLog.length){
+        items=o.openLog.map(function(og){
+          return '<div style="padding:2px 0">'+(og.doc?'\ud83d\udcc4 Opened the document':'\ud83d\udc41 Opened the email')
+            +' \u00b7 <b>'+escapeHtml(new Date(og.ts).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))+'</b></div>';
+        }).join('');
+        if((o.opens||0)>o.openLog.length)items+='<div style="padding:2px 0;color:var(--soft)">+ '+((o.opens||0)-o.openLog.length)+' earlier open'+(((o.opens||0)-o.openLog.length)!==1?'s':'')+' counted before per-open history existed</div>';
+      }else{
+        items='<div style="padding:2px 0">\ud83d\udc41 First opened \u00b7 <b>'+escapeHtml(new Date(firstTs).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))+'</b>'
+          +(openCount>1?(' \u2014 opened '+openCount+' times total'):'')+'</div>'
+          +'<div style="padding:2px 0;color:var(--soft)">Per-open timestamps build from this upgrade forward \u2014 only the first open + count were recorded before.</div>';
+      }
+      detailRow='<tr id="an-opens-'+oi+'" style="display:none"><td></td><td colspan="7" style="padding:2px 0 9px">'
+        +'<div style="background:#F7F4EC;border:1px solid #E7E0CE;border-radius:8px;padding:8px 12px;font-size:12px;line-height:1.6">'+items+'</div></td></tr>';
+    }
     return '<tr style="border-top:1px solid #EEF1F6">'
       +'<td style="white-space:nowrap;padding:7px 8px 7px 0">'+anFmtWhen(o.ts)+'</td>'
-      +'<td style="padding:7px 8px 7px 0">'+escapeHtml(o.name||o.contact||'')+'</td>'
+      +'<td style="padding:7px 8px 7px 0">'+leadCell+'</td>'
       +'<td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:7px 8px 7px 0" title="'+escapeHtml(o.subj)+'">'+escapeHtml(o.subj||'(no subject)')+'</td>'
       +'<td style="padding:7px 8px 7px 0">'+(o.variant?('<span style="background:#F3E3C3;color:#8B6500;font-weight:700;border-radius:6px;padding:1px 7px;font-size:11px">'+escapeHtml(o.variant)+'</span>'):'')+'</td>'
-      +'<td style="white-space:nowrap;padding:7px 8px 7px 0">'+((o.opens>0||o.openedAt)?('\u2713 '+anFmtWhen(o.openedAt)+(o.opens>1?(' \u00d7'+o.opens):'')):'\u2014')+'</td>'
+      +'<td style="white-space:nowrap;padding:7px 8px 7px 0">'+openedCell+'</td>'
       +'<td style="white-space:nowrap;padding:7px 8px 7px 0">'+(o.reply?('\u21a9 '+anFmtMins(o.replyMins)+(o.direct?' \u00b7 direct':'')):'\u2014')+'</td>'
       +'<td style="padding:4px 0">'+anThreadGlyph(o)+'</td>'
       +'<td style="padding:7px 0">'+(o.docOpens?('\ud83d\udcc4\u00d7'+o.docOpens):'\u2014')+'</td>'
-      +'</tr>';
+      +'</tr>'+detailRow;
   }).join('');
   html+='<div style="overflow-x:auto;background:#fff;border:1px solid var(--border);border-radius:12px;padding:8px 14px;margin-bottom:26px"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="text-align:left;color:var(--soft);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em"><th>Sent</th><th>Lead</th><th>Subject</th><th>Var</th><th>Opened</th><th>Response</th><th>Send \u2192 open \u2192 reply</th><th>Docs</th></tr></thead><tbody>'+rowsH+'</tbody></table>'
     +(model.outbound.length>200?('<div style="font-size:11px;color:var(--soft);padding:6px">Showing newest 200 of '+model.outbound.length+'</div>'):'')
@@ -6127,8 +6169,17 @@ async function pollTrackerEvents(){
       var ev2=fresh[k2];
       var rec2=ev2.i?markEmailOpened(ev2.i,ev2.type==='doc_open'):null;
       if(rec2){
-        // Known send → stamp the ORIGINAL comms row; no new row
+        // Known send → stamp the ORIGINAL comms row (first-open + counts)…
         await stampCommsOpen(rec2);
+        // …AND append a per-open row carrying the EVENT's timestamp, so the
+        // stats page can show every individual open, not just the first.
+        await logComms(commsEntryForLead(rec2.ri,{
+          direction:'in',channel:'email',ts:ev2.ts,
+          contact:String(ev2.e||''),subject:String(ev2.s||''),
+          preview:ev2.type==='doc_open'?('Opened document: '+String(ev2.target||'').slice(0,160)):'Opened email',
+          outcome:ev2.type==='doc_open'?'doc-opened':'opened',
+          messageId:String(ev2.i||'')
+        }));
         if(drawerRi>=0&&drawerRi===rec2.ri){var kd=drawerRi;drawerRi=-1;openDrawer(kd);}
       }else{
         // Unknown send (other device / pre-upgrade email) → standalone row
@@ -9841,6 +9892,20 @@ function onClick(ev){
       document.querySelectorAll('.st-sec').forEach(function(sec){sec.hidden=(sec.id!=='st-sec-'+t.dataset.sec);});
       break;
     case 'st-save-config': stSaveConfig(); break;
+    case 'an-open-lead':
+      (function(){
+        var ri9=parseInt(t.dataset.ri,10);
+        if(isNaN(ri9)||ri9<DATA_START||!rows[ri9]){toast('Lead row not found — refresh the dashboard');return;}
+        closeModal('modal-analytics');
+        openDrawer(ri9);
+      })();
+      break;
+    case 'an-toggle-opens':
+      (function(){
+        var tr9=el('an-opens-'+t.dataset.key);
+        if(tr9)tr9.style.display=(tr9.style.display==='none')?'':'none';
+      })();
+      break;
     case 'va-test': vaTestConnection(); break;
     case 'va-sync':
       vaSyncMirror(true).then(function(){toast('🎙 '+_vaStatus);});
