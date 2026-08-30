@@ -217,7 +217,11 @@ td{padding:13px 16px;vertical-align:top;}
 .dval{font-size:13px;color:var(--dark);flex:1;line-height:1.5;word-break:break-word;}
 
 /* Modals — fade overlay + scale-in box, both directions */
-.modal{position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px);opacity:0;visibility:hidden;transition:opacity .22s ease,visibility 0s linear .22s;}
+.modal{position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:350;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px);opacity:0;visibility:hidden;transition:opacity .22s ease,visibility 0s linear .22s;}
+/* Drawer opened from a fullscreen section (stats): rides ABOVE it (fsov is
+   300) but below dialogs (350), so composing from that drawer stays visible */
+.doverlay.over-fsov{z-index:320;}
+.drawer.over-fsov{z-index:321;}
 .modal.open{opacity:1;visibility:visible;transition:opacity .22s ease,visibility 0s linear 0s;}
 .mbox{background:var(--warm);border-radius:var(--radius-xl);max-width:620px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:var(--shadow-xl);border:1px solid var(--border-soft);transform:scale(.94) translateY(12px);opacity:0;transition:opacity .25s ease,transform .28s cubic-bezier(.4,0,.2,1);}
 .modal.open .mbox{transform:scale(1) translateY(0);opacity:1;}
@@ -1422,7 +1426,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0821-49';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0821-50';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -8558,7 +8562,13 @@ async function refreshRowFromSheet(ri){
     }
   }catch(_){/* best-effort */}
 }
-function closeDrawer(){el('drawer').classList.remove('open');el('doverlay').classList.remove('open');drawerRi=-1;}
+function closeDrawer(){
+  var dr=el('drawer'),ov=el('doverlay');
+  dr.classList.remove('open');ov.classList.remove('open');
+  // Back to normal stacking once closed (stats page, if open, is revealed)
+  dr.classList.remove('over-fsov');ov.classList.remove('over-fsov');
+  drawerRi=-1;
+}
 function closeModal(id){var m=el(id);if(m)m.classList.remove('open');}
 
 /* ─── §10b Assessment form (additive, isolated) ──────────────────────────
@@ -9896,8 +9906,10 @@ function onClick(ev){
       (function(){
         var ri9=parseInt(t.dataset.ri,10);
         if(isNaN(ri9)||ri9<DATA_START||!rows[ri9]){toast('Lead row not found — refresh the dashboard');return;}
-        closeModal('modal-analytics');
+        // Stats stays open underneath — the drawer slides in ON TOP of it
         openDrawer(ri9);
+        el('drawer').classList.add('over-fsov');
+        el('doverlay').classList.add('over-fsov');
       })();
       break;
     case 'an-toggle-opens':
