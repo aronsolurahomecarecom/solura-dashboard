@@ -249,6 +249,12 @@ td{padding:13px 16px;vertical-align:top;}
 .la-foot .saving{display:none;align-items:center;gap:6px;font-size:11px;color:var(--soft);}
 .la-foot .saving.on{display:flex;}
 .la-conds{display:flex;gap:8px;align-items:center;background:var(--cream);padding:8px 12px;border-radius:8px;border:1px solid var(--border-soft);}
+/* Intake fields already filled (registration form / sheet) show locked;
+   editing is a deliberate act via the ✎ button */
+.ep-locked{display:flex;align-items:center;gap:8px;background:var(--cream);border:1.5px solid var(--border);border-radius:8px;padding:7px 10px;font-size:12.5px;min-height:34px;}
+.ep-locked-val{flex:1;color:var(--dark);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ep-editbtn{flex:0 0 auto;background:none;border:1px solid var(--border);border-radius:6px;padding:3px 9px;font-size:11px;color:var(--soft);cursor:pointer;font-family:inherit;transition:all .15s;}
+.ep-editbtn:hover{color:var(--sky-deep);border-color:var(--sky-mid);}
 .la-conds-text{flex:1;font-size:12px;color:var(--mid);}
 .la-conds button{padding:6px 14px;background:var(--asmt-indigo);color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;}
 
@@ -1426,7 +1432,7 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28      // AC mentioned_conditions  (NEW — comma-separated condition keys)
 };
-var BUILD='B-0821-50';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0821-51';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3301,34 +3307,58 @@ function openEp(ri,mode,opts){
   bodyEl.dataset.ri=ri;
   bodyEl.dataset.mode=mode;
 
+  // A field whose column ALREADY has a value (from the registration form,
+  // a previous intake, or edits in the Excel sheet itself) renders locked \u2014
+  // the value displayed read-only, editable only after a deliberate \u270e Edit.
+  // Empty columns render as normal inputs. All prefilled from the row.
+  var epLockField=function(label,existingVal,inputHtml){
+    var ev5=String(existingVal||'').trim();
+    if(ev5){
+      return '<div class="la-f"><label>'+label+'</label>'
+        +'<div class="ep-locked"><span class="ep-locked-val" title="'+escapeHtml(ev5)+'">'+escapeHtml(ev5)+'</span>'
+        +'<button type="button" class="ep-editbtn" data-action="ep-unlock">\u270e Edit</button></div>'
+        +'<div class="ep-editwrap" style="display:none">'+inputHtml+'</div></div>';
+    }
+    return '<div class="la-f"><label>'+label+'</label>'+inputHtml+'</div>';
+  };
   var html='';
   if(mode==='responded'){
     titleEl.textContent='\ud83e\udd1d First Contact \u2014 Log Conversation';
-    html='<div class="la-banner sky">First time you spoke with this lead. Capture what they shared so we can plan the next step.</div>'
+    var vDM=String(r[C.DM]||'').trim(),vREL=String(r[C.REL]||'').trim(),vMV=String(r[C.MV]||'').trim();
+    var vHR=String(r[C.HR]||'').trim(),vSV=String(r[C.SV]||'').trim(),vSAFE=String(r[C.SAFETY]||'').trim();
+    var vPT=String(r[C.PT]||'').trim(),vES=String(r[C.ES]||'').trim();
+    var esDate=pd(r[C.ES]);
+    var nfDate=pd(r[C.NF]);
+    // Care select mirrors the sheet's value as selected
+    var svOpts2='<option value="">\u2014 select \u2014</option>'+Object.keys(svSet).sort().map(function(s){return '<option'+(s===vSV?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('');
+    var payList=['Private Pay','Medicaid / PASSPORT','Long-Term Care Insurance','VA Benefits','Unknown'];
+    if(vPT&&payList.indexOf(vPT)===-1)payList.unshift(vPT);
+    var payOpts='<option value="">\u2014 select \u2014</option>'+payList.map(function(s){return '<option'+(s===vPT?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('');
+    html='<div class="la-banner sky">First time you spoke with this lead. Fields already on file (registration / sheet) are shown locked \u2014 hit \u270e Edit to change one deliberately.</div>'
       +'<div class="la-grid g4">'
       +'<div class="la-f"><label>Response Method</label><select class="ep-mt">'+moptsForDone+'</select></div>'
       +'<div class="la-f"><label>Update Status</label><select class="ep-st">'+statusOpts+'</select></div>'
       +'<div class="la-f"><label>Date & Time</label><input type="text" disabled value="'+escapeHtml(new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))+'"></div>'
-      +'<div class="la-f"><label>Decision Maker</label><input type="text" class="ep-dm" value="'+escapeHtml(r[C.DM]||'')+'" placeholder="Who did you speak with?"></div>'
+      +epLockField('Decision Maker',vDM,'<input type="text" class="ep-dm" value="'+escapeHtml(vDM)+'" placeholder="Who did you speak with?">')
       +'</div>'
       +'<div class="la-grid g4">'
-      +'<div class="la-f"><label>Relationship</label><input type="text" class="ep-rel" placeholder="Son, daughter, spouse\u2026"></div>'
-      +'<div class="la-f"><label>Monthly Budget</label><input type="text" class="ep-budget" placeholder="$1,500/mo\u2026"></div>'
-      +'<div class="la-f"><label>Hours / Week</label><input type="text" class="ep-hrs" placeholder="20 hrs\u2026"></div>'
+      +epLockField('Relationship',vREL,'<input type="text" class="ep-rel" value="'+escapeHtml(vREL)+'" placeholder="Son, daughter, spouse\u2026">')
+      +epLockField('Monthly Budget',vMV,'<input type="text" class="ep-budget" value="'+escapeHtml(vMV)+'" placeholder="$1,500/mo\u2026">')
+      +epLockField('Hours / Week',vHR,'<input type="text" class="ep-hrs" value="'+escapeHtml(vHR)+'" placeholder="20 hrs\u2026">')
       +'<div class="la-f"><label>Urgency</label><select class="ep-urgency"><option value="">\u2014 select \u2014</option><option>ASAP \u2014 within days</option><option>Within 2 weeks</option><option>Within a month</option><option>Just exploring</option></select></div>'
       +'</div>'
       +'<div class="la-grid g3">'
-      +'<div class="la-f"><label>Type of Care</label><select class="ep-care">'+svOpts+'</select></div>'
-      +'<div class="la-f"><label>Safety Concerns</label><input type="text" class="ep-safety" placeholder="Fall risk, alone\u2026"></div>'
-      +'<div class="la-f"><label>Est. Start Date</label><input type="date" class="ep-start"></div>'
+      +epLockField('Type of Care',vSV,'<select class="ep-care">'+svOpts2+'</select>')
+      +epLockField('Safety Concerns',vSAFE,'<input type="text" class="ep-safety" value="'+escapeHtml(vSAFE)+'" placeholder="Fall risk, alone\u2026">')
+      +epLockField('Est. Start Date',vES,'<input type="date" class="ep-start" value="'+escapeHtml(esDate?ds(esDate):'')+'">')
       +'</div>'
       +'<div class="la-grid g3">'
-      +'<div class="la-f"><label>Pay Type</label><select class="ep-pay"><option value="">\u2014 select \u2014</option><option>Private Pay</option><option>Medicaid / PASSPORT</option><option>Long-Term Care Insurance</option><option>VA Benefits</option><option>Unknown</option></select></div>'
-      +'<div class="la-f"><label>Next Follow-Up</label><input type="date" class="ep-fu" value="'+escapeHtml(ds(def3))+'"></div>'
-      +'<div class="la-f"><label>Next Method</label><select class="ep-nsm"><option value="">\u2014 select \u2014</option>'+MOPS.slice(1).map(function(s){return '<option>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
+      +epLockField('Pay Type',vPT,'<select class="ep-pay">'+payOpts+'</select>')
+      +'<div class="la-f"><label>Next Follow-Up</label><input type="date" class="ep-fu" value="'+escapeHtml(nfDate?ds(nfDate):ds(def3))+'"></div>'
+      +'<div class="la-f"><label>Next Method</label><select class="ep-nsm"><option value="">\u2014 select \u2014</option>'+MOPS.slice(1).map(function(s){return '<option'+(s===curNSM?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
       +'</div>'
       +'<div class="la-grid g1">'
-      +'<div class="la-f"><label>Conversation Notes</label><textarea class="ep-notes" placeholder="Key details, concerns, next steps\u2026"></textarea></div>'
+      +'<div class="la-f"><label>Conversation Notes <span style="font-weight:400;color:var(--soft)">(added to the top of the lead\u2019s notes \u2014 history is kept)</span></label><textarea class="ep-notes" placeholder="Key details, concerns, next steps\u2026"></textarea></div>'
       +'</div>'
       +(function(){
         var existingConds=parseConditionList(r[C.MC]);
@@ -3464,26 +3494,47 @@ async function saveEp(ri,mode){
       var adv=advanceLead(ri,mt);
       if(adv)Object.keys(adv).forEach(function(k){u[k]=adv[k];});
     }else if(mode==='responded'){
-      var mt2=q('.ep-mt'),fu=q('.ep-fu'),dm=q('.ep-dm'),rel=q('.ep-rel');
+      // Lock-aware read: a field still locked (its ✎ Edit was never hit)
+      // returns null and its sheet value is left completely untouched; an
+      // UNLOCKED field writes whatever it holds — including empty, since
+      // unlocking + clearing is a deliberate act. Plain (never-locked)
+      // fields keep the old semantics: written only when non-empty.
+      var readF=function(sel){
+        var e5=container.querySelector(sel);if(!e5)return null;
+        var wrap5=e5.closest('.ep-editwrap');
+        if(wrap5){
+          if(wrap5.style.display==='none')return null;      // locked → don't touch
+          return {v:e5.value,force:true};                    // deliberately unlocked
+        }
+        return {v:e5.value,force:false};
+      };
+      var setU=function(sel,col){
+        var f5=readF(sel);if(!f5)return null;
+        if(f5.force||String(f5.v||'').trim()!=='')u[col]=f5.v;
+        return f5.v;
+      };
+      var mt2=q('.ep-mt'),urg=q('.ep-urgency'),notes=q('.ep-notes'),respSt=q('.ep-st');
       _wasCall=(mt2==='Call');
-      var budget=q('.ep-budget'),hrs=q('.ep-hrs'),urg=q('.ep-urgency'),start=q('.ep-start');
-      var care=q('.ep-care'),safety=q('.ep-safety'),pay=q('.ep-pay'),nsm=q('.ep-nsm');
-      var notes=q('.ep-notes'),respSt=q('.ep-st');
       if(mt2)u[C.MT]=mt2;
-      if(fu)u[C.NF]=fu;
-      if(dm)u[C.DM]=dm;
-      if(hrs)u[C.HR]=hrs;
-      if(start)u[C.ES]=start;
-      if(pay)u[C.PT]=pay;
-      if(care)u[C.SV]=care;
-      if(safety)u[C.SAFETY]=safety;
-      if(rel)u[C.REL]=rel;
-      if(nsm)u[C.NSM]=nsm;
-      var np=[];
-      if(notes)np.push(notes);
-      if(budget)np.push('Budget: '+budget);
-      if(urg)np.push('Urgency: '+urg);
-      if(np.length)u[C.NT]=np.filter(Boolean).join(' | ');
+      var fu=q('.ep-fu');if(fu)u[C.NF]=fu;
+      setU('.ep-dm',C.DM);
+      setU('.ep-rel',C.REL);
+      setU('.ep-budget',C.MV);   // budget lives in Monthly Value — same column the registration form writes
+      setU('.ep-hrs',C.HR);
+      setU('.ep-start',C.ES);
+      setU('.ep-care',C.SV);
+      setU('.ep-safety',C.SAFETY);
+      setU('.ep-pay',C.PT);
+      var nsm=q('.ep-nsm');if(nsm)u[C.NSM]=nsm;
+      // Conversation note PREPENDS to the lead's notes — history preserved
+      var noteBits=[];
+      if(notes&&notes.trim())noteBits.push(notes.trim());
+      if(urg)noteBits.push('Urgency: '+urg);
+      if(noteBits.length){
+        var stamp='🤝 ['+new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+'] '+noteBits.join(' | ');
+        var exNotes=String(r[C.NT]||'').trim();
+        u[C.NT]=exNotes?(stamp+'\n\n'+exNotes):stamp;
+      }
       u[C.ST]=(respSt&&respSt.trim())||'Active Conversation';
       u[C.LC]=todayStr;
       u[C.STEP]=STEP_OFF_SEQUENCE;
@@ -9902,6 +9953,14 @@ function onClick(ev){
       document.querySelectorAll('.st-sec').forEach(function(sec){sec.hidden=(sec.id!=='st-sec-'+t.dataset.sec);});
       break;
     case 'st-save-config': stSaveConfig(); break;
+    case 'ep-unlock':
+      (function(){
+        var f9=t.closest('.la-f');if(!f9)return;
+        var lk9=f9.querySelector('.ep-locked'),wr9=f9.querySelector('.ep-editwrap');
+        if(lk9)lk9.style.display='none';
+        if(wr9){wr9.style.display='';var in9=wr9.querySelector('input,select,textarea');if(in9)in9.focus();}
+      })();
+      break;
     case 'an-open-lead':
       (function(){
         var ri9=parseInt(t.dataset.ri,10);
