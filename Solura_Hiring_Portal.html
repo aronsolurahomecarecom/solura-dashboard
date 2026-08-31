@@ -3642,24 +3642,18 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
    * Automation flags
    * ------------------------------------------------------------------ */
 
-  // Both parties consent: the step-level toggle AND (for anything that sends
-  // an email) the template author's own automate blessing. Some kinds are
-  // NEVER automatable: parking/declining a person, running a pack (the pack
-  // preview window is the point), opening hubs, manual work, sessions.
+  // ONE control: the step-level "Automate this step" toggle is the sole authority
+  // (P-7, 2026-08-31 — the old second per-email "blessing" flag meant a step could
+  // look automated in the editor and silently never run; the two controls also let
+  // the host and engine disagree about who sends). email.automate / requestItems
+  // .automate remain in stored data but are ignored. Some kinds are NEVER
+  // automatable: parking/declining a person, running a pack (the pack preview
+  // window is the point), opening hubs, manual work, sessions.
   var NEVER_AUTO = { park: 1, pack: 1, hub: 1, manual: 1, session: 1 };
 
   function isAutomated(step) {
     if (!step || step.automate !== true) return false;
     if (NEVER_AUTO[step.kind]) return false;
-    if (step.kind === 'email') {
-      return !!(step.email && step.email.automate === true);
-    }
-    if (step.kind === 'request-items') {
-      // request-items with an email template follows the email rule.
-      var ri = step.requestItems || {};
-      if (ri.templateKey) return ri.automate === true;
-      return true;
-    }
     return true;
   }
 
@@ -4838,8 +4832,8 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
 
   var CATALOG_ACTIONS = {
     'send-email':    { kind: 'email',          label: 'Send email',            icon: '✉️', group: 'comms',
-                       params: [{ key: 'templateKey', type: 'template', label: 'Template', required: true, path: 'email.templateKey' },
-                                { key: 'automate', type: 'boolean', label: 'Template blessed for auto-send', path: 'email.automate' }] },
+                       /* No per-email auto-send toggle: "Automate this step" is the ONE control (P-7). */
+                       params: [{ key: 'templateKey', type: 'template', label: 'Template', required: true, path: 'email.templateKey' }] },
     'wait':          { kind: 'wait',           label: 'Wait / awaiting',       icon: '⏳', group: 'flow',
                        params: [{ key: 'trigger', type: 'trigger', label: 'Wake on', required: true, path: 'wait.trigger' },
                                 { key: 'nudgeTemplate', type: 'template', label: 'Nudge template (optional)', path: 'wait.nudge.templateKey' },
@@ -4874,9 +4868,9 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
     'recalc-scores': { kind: 'station',        label: 'Scoring station',       icon: '⚖', group: 'data',
                        params: [{ key: 'station', type: 'station', label: 'Station configuration', required: true, path: 'station' }] },
     'request-items': { kind: 'request-items',  label: 'Request items',         icon: '📎', group: 'comms',
+                       /* No per-email auto-send toggle: "Automate this step" is the ONE control (P-7). */
                        params: [{ key: 'items', type: 'items', label: 'Items (certs / resume / docs…)', required: true, path: 'requestItems.items' },
-                                { key: 'templateKey', type: 'template', label: 'Request email (optional)', path: 'requestItems.templateKey' },
-                                { key: 'automate', type: 'boolean', label: 'Email blessed for auto-send', path: 'requestItems.automate' }] },
+                                { key: 'templateKey', type: 'template', label: 'Request email (optional)', path: 'requestItems.templateKey' }] },
     'cancel-booking': { kind: 'cancel-booking', label: 'Cancel booking',       icon: '🗓', group: 'comms', params: [] },
     'open-hub':      { kind: 'hub',            label: 'Open hub',              icon: '🏛', group: 'hubs',
                        params: [{ key: 'hubId', type: 'hub', label: 'Hub', required: true, path: 'hub.hubId' }] },
@@ -10075,7 +10069,7 @@ async function loadData(){
      lives in the Inbox under the ⚡ Blasts filter. Diagnostics remain available in console via
      window._blastDiag. */
   document.getElementById('sync-time').textContent='Synced '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
-  _reconcileBookingStages().then(()=>_seqV3RepairPass()).then(()=>_jobRequirementsPass()).catch(e=>console.warn('load heals:',e.message));
+  _reconcileBookingStages().then(()=>_seqV3RepairPass()).then(()=>_jobRequirementsPass()).then(()=>_stateCompactionPass()).catch(e=>console.warn('load heals:',e.message));
   render();
 }
 
@@ -10741,7 +10735,7 @@ function action(c){
   /* Corrupted stored state outranks EVERYTHING: the row renders as a loud repair card and
      no flow may act on (or save over) the default-shaped ghost the parse failure produced. */
   if(c&&c.st&&c.st.__ajCorrupt){
-    return{bucket:'action',timing:{txt:'🛑 Stored data corrupted — restore this row from OneDrive version history',pill:'pr2',date:''},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'open',label:'🛑 Corrupted — details',cls:'red'}};
+    return{bucket:'action',timing:{txt:'🛑 Stored data corrupted — recover it in one paste',pill:'pr2',date:''},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'corrupt-recover',label:'🛑 Recover data',cls:'red'}};
   }
   /* Cert-gated interview choreography (Interview booked + upcoming booking):
        T-60, certs/BG form missing → send the cancellation WARNING (once, then Scheduled);
@@ -10795,6 +10789,18 @@ function action(c){
            cross-check so \u2713 Done with checks (and then \ud83c\udfa5 Run interview) isn't skipped. */
         return{bucket:'action',timing:{txt:'\ud83d\udccb Cross-check certs \u2014 interview in '+Math.round(_mins)+'m',pill:'pnew',date:_when},info:_info,primary:{kind:'checks',label:'\ud83d\udccb Cross-check certs',cls:'gold'}};
       }
+    }
+  }
+  /* P-4 (VIDEO CALLS ONLY, per Meir): a video meeting whose start passed ≥15 minutes ago
+     with no completion, no missed-email sent, and no unread reply is very likely a no-show —
+     surface the rebook flow as the row's action. Suggests only: the click runs the normal
+     📵 flow (count, stage revert, park, composer opens — nothing sends itself). Phone
+     screens are excluded: a phone call carries no join signal, and calls often run long. */
+  if(c&&c.st&&c.st.booking&&c.st.meetingUrl&&c.stage!=='Hired'&&c.stage!=='Declined'&&c.stage!=='Withdrawn'){
+    const _msTpl={'Screen booked':'missed_screen','Interview booked':'missed_interview','Onboarding booked':'missed_onboarding'}[c.stage];
+    const _m4=minsUntil(c.st.booking);
+    if(_msTpl&&_m4!=null&&_m4<=-15&&!(c.st.sent&&c.st.sent[_msTpl])&&!(c.st.emails||[]).some(e2=>!e2.seen)){
+      return{bucket:'action',timing:{txt:'📵 Looks like a no-show — video call was '+Math.round(-_m4)+'m ago',pill:'pbad',date:_fmtBooking(c.st.booking)},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'noshow-rebook',stage:c.stage,label:'📵 No-show — send rebook email',cls:'red'}};
     }
   }
   /* All certs in → cross-check hub is the action, until ✓ Done with checks is pressed there. */
@@ -12541,7 +12547,9 @@ document.addEventListener('keydown',function(e){
   if((e.metaKey||e.ctrlKey)&&(e.key==='k'||e.key==='K')){e.preventDefault();openCmdK();}
 });
 /* ===================== primary action dispatch ===================== */
-function doPrimary(r){_memGen++;const c=pipeline.find(x=>x.excelRow===r);if(!c)return;const a=action(c),p=a.primary;loadW(r);
+function doPrimary(r){_memGen++;const c=pipeline.find(x=>x.excelRow===r);if(!c)return;const a=action(c),p=a.primary;
+  if(p.kind==='corrupt-recover')return _corruptRecoverModal(r); /* before loadW — the ghost state must not become W */
+  loadW(r);
   if(p.kind==='email-info')return doEmailMissing();
   if(p.kind==='email-tpl')return doEmail(p.tpl,p.advanceTo);
   if(p.kind==='seq3')return _seqRunIntent(r,encodeURIComponent(JSON.stringify(p.intent)));
@@ -12550,6 +12558,13 @@ function doPrimary(r){_memGen++;const c=pipeline.find(x=>x.excelRow===r);if(!c)r
        then call the existing orderYardstikCheck() handler (which has the confirm dialog + API call). */
     openWorkspace(r);
     setTimeout(()=>{orderYardstikCheck();},250);
+    return;
+  }
+  if(p.kind==='noshow-rebook'){
+    /* P-4: runs the standard 📵 flow — no-show count, stage revert, park, rebook composer. */
+    openWorkspace(r);
+    const _nsMap={'Screen booked':'Phone Screen','Interview booked':'Interview','Onboarding booked':'Onboarding'};
+    setTimeout(()=>markNoShow(_nsMap[p.stage]||'Interview'),300);
     return;
   }
   if(p.kind==='jobreq'){_jobReqModal(r);return;}
@@ -12835,6 +12850,84 @@ function _stCell(st){
   }
   if(j.length>32700)throw new Error('state still too large after trim ('+j.length+' chars) — write refused to protect the cell');
   return j;
+}
+
+/* P-3: one-click recovery for a corrupted state cell. The row's AJ cell holds truncated,
+   unparseable JSON; the real data still exists in the workbook's OneDrive version history.
+   This modal walks the operator to it and re-applies a pasted copy after validation. */
+function _corruptRecoverModal(r){
+  const c=pipeline.find(x=>x.excelRow===r);if(!c)return;
+  document.getElementById('m-title').textContent='🛑 Recover '+(c.name||'candidate')+'’s data';
+  document.getElementById('m-body').innerHTML=`
+    <div style="font-size:13px;color:var(--mid);line-height:1.6">
+      <p style="margin:0 0 10px">This candidate’s stored data (spreadsheet cell <b>AJ${r}</b>) is corrupted — an oversized write got cut off mid-JSON. The portal is refusing all writes to the row so nothing makes it worse. The real data still exists in the file’s version history:</p>
+      <ol style="margin:0 0 12px;padding-left:22px">
+        <li>Open the pipeline workbook in <b>Excel Online</b></li>
+        <li><b>File → Info → Version History</b> — open a version from <b>before</b> the corruption date (check the activity log)</li>
+        <li>Find row <b>${r}</b>, click cell <b>AJ${r}</b>, copy its full contents (Ctrl+C in the formula bar)</li>
+        <li>Paste it below and hit Restore</li>
+      </ol>
+      <textarea id="cr-paste" placeholder='{"log":[...],"certs":[...],...}' style="width:100%;min-height:140px;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:ui-monospace,Consolas,monospace;font-size:11px;box-sizing:border-box"></textarea>
+      <div id="cr-status" style="font-size:12px;margin-top:6px;color:var(--soft)"></div>
+    </div>
+    <div class="brow" style="margin-top:14px;gap:8px">
+      <button class="btn-primary bg-grn" onclick="_corruptRecoverApply(${r})">✓ Restore this data</button>
+      <button class="btn-sec bg-cream" onclick="closeModal()">Cancel</button>
+    </div>`;
+  document.getElementById('modal').classList.add('open');
+}
+async function _corruptRecoverApply(r){
+  const el=document.getElementById('cr-paste');const status=document.getElementById('cr-status');
+  const say=(m,bad)=>{if(status){status.textContent=m;status.style.color=bad?'var(--red)':'var(--grn-deep)';}};
+  const raw=(el&&el.value||'').trim();
+  if(!raw){say('Paste the cell contents first',true);return;}
+  let st;try{st=JSON.parse(raw);}catch(e){say('That doesn’t parse as JSON — make sure you copied the WHOLE cell (formula bar, Ctrl+A then Ctrl+C): '+e.message,true);return;}
+  if(!st||typeof st!=='object'||Array.isArray(st)){say('Parsed, but it isn’t a candidate state object',true);return;}
+  if(Object.keys(st).length<3){say('Parsed, but it looks too empty to be real candidate data ('+Object.keys(st).length+' fields) — wrong cell?',true);return;}
+  delete st.__ajCorrupt;
+  let j;try{j=_stCell(st);}catch(e){say('Refused: '+e.message,true);return;}
+  try{
+    await patchRange('AJ'+r,[[j]]);
+    await refreshRow(r);
+    const c=pipeline.find(x=>x.excelRow===r);
+    if(c&&c.st){c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🛑→✓ State restored from version history ('+j.length+' chars)'});await patchRange('AJ'+r,[[_stCell(c.st)]]);}
+    closeModal();toast('✓ Restored — profile is back');_memGen++;
+    if(typeof render==='function')render();
+  }catch(e){say('Write failed: '+e.message,true);}
+}
+
+/* P-2: proactive compaction — candidates drifting toward the 32,767 cell cap get their
+   OLDEST log/history/email entries trimmed long before the cliff, so no write ever has to
+   refuse. Runs at most once a day, only on rows comfortably above the high-water mark. */
+async function _stateCompactionPass(){
+  try{
+    const stampKey='solura_compact_at';
+    const last=Number(localStorage.getItem(stampKey)||0);
+    if(Date.now()-last<20*3600*1000)return;
+    localStorage.setItem(stampKey,String(Date.now()));
+    const _myPipe=pipeline;let n=0;
+    for(const c of pipeline){
+      if(pipeline!==_myPipe)return;
+      if(!c||!c.st||c.st.__ajCorrupt)continue;
+      if(W&&W.row===c.excelRow)continue;
+      const raw=(c.row&&c.row[35])?String(c.row[35]).length:0;
+      if(raw<=27000)continue;
+      const s=JSON.parse(JSON.stringify(c.st));
+      if(Array.isArray(s.log))s.log=s.log.slice(-100);
+      if(Array.isArray(s.sequenceHistory))s.sequenceHistory=s.sequenceHistory.slice(-25);
+      if(Array.isArray(s.emails))s.emails=s.emails.slice(0,25);
+      let j;try{j=_stCell(s);}catch(e){continue;}
+      if(raw-j.length<2000)continue; /* not worth a write */
+      s.log=(s.log||[]).concat({t:stamp(),x:'🗜 State compacted ('+raw+' → '+j.length+' chars) — oldest history trimmed'});
+      try{j=_stCell(s);}catch(e){continue;}
+      try{
+        await patchRange('AJ'+c.excelRow,[[j]]);
+        c.st=JSON.parse(j);
+        n++;
+      }catch(e){console.warn('compaction write failed:',c.name,e.message);}
+    }
+    if(n)console.info('🗜 Compacted '+n+' candidate state cell'+(n===1?'':'s'));
+  }catch(e){console.warn('state compaction:',e.message);}
 }
 
 async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
@@ -14366,9 +14459,16 @@ function renderWorkspace(){_memGen++;
   nameEl.textContent=W.name;
   /* Update floating docs overlay too */
   const fd=document.getElementById('ws-floating-docs');if(fd)fd.innerHTML=floatingDocsOverlay();
+  /* P-2: state-size health — Excel's 32,767 cell cap is where profile wipes lived. Quiet
+     under 60%; amber 60–85%; red above. Uses the same serializer as every real write. */
+  let _stPct=null;try{_stPct=Math.round(_stCell(W.st).length/32767*100);}catch(e){_stPct=101;}
+  const _stMeter=(_stPct!=null&&_stPct>=60)
+    ?'<span class="sbadge" style="background:'+(_stPct>=85?'#FDECEA':'#FEF7E8')+';color:'+(_stPct>=85?'#8B1A1A':'#8B6500')+';margin-right:8px" title="Stored state uses '+_stPct+'% of the 32,767-character spreadsheet cell. Old log/history entries trim automatically as it fills.">🗜 state '+_stPct+'%</span>'
+    :'';
   document.getElementById('ws-sub').innerHTML=
     '<span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-right:8px">'+esc(stageLabel(W.stage))+'</span>'
     +(W.st.manualAwaiting?'<span class="sbadge" style="background:#FAF6EE;color:#8B6500;border:1px solid var(--gold);margin-right:8px" title="'+esc(W.st.awaitingReason||'Manually parked')+'">⏸ AWAITING</span>':'')
+    +_stMeter
     +'<span class="bandpill" style="background:'+col[0]+';color:'+col[1]+';margin-right:10px">'+sc.dec.band+'</span>'
     +(W.phone?'<a href="tel:'+telify(W.phone)+'">📞 '+esc(W.phone)+'</a>  ':'')
     +(W.email?'<a href="mailto:'+esc(W.email)+'">✉ '+esc(W.email)+'</a>':'');
@@ -23203,6 +23303,53 @@ async function _cancelBookingHeadless(c,reason){
     const j=await r.json();return !!j.ok;
   }catch(e){return false;}
 }
+/* P-6: DRY RUN — what would the automation robot do on its very next pass? Mirrors
+   _seqAutomationTick's guards and gating exactly (workspace-open, terminal, unread-reply,
+   per-booking cert warn/cancel windows, engine automatable flag, seqAutoFail, sent-dedup,
+   flow-valid stages, 10-action budget) but EXECUTES NOTHING and writes nothing. */
+function _seqAutomationPreview(){
+  const rows=[];let budget=10;
+  const auto=!!(SETTINGS.config&&SETTINGS.config.seqAutomation);
+  for(const c of (typeof pipeline!=='undefined'?pipeline:[])){
+    if(budget<=0){rows.push({n:'…',what:'budget reached — remaining candidates wait for the following tick',cls:'soft'});break;}
+    if(!c.st||!c.st.sequenceId||_isTerminalStage(c.stage))continue;
+    if(c.st.__ajCorrupt)continue;
+    if(W&&W.row===c.excelRow)continue;
+    /* cert warn/cancel lane */
+    if(c.st.booking&&c.stage==='Interview booked'&&!_autoCancelDoneFor(c)&&c.st.calBookingId&&!(_certSignoffValid(c)&&!c.st.certsReadyReview)
+       &&!(c.st.emails||[]).some(e2=>!e2.seen)){
+      const m=minsUntil(c.st.booking),miss=_missingAppCerts(c);
+      const missingAny=(miss.length||_bgFormBlocks(c))&&!c.st.certsReadyReview;
+      if(m!=null&&m<=60&&m>30&&missingAny&&!_certWarnSentFor(c)){rows.push({n:c.name,what:'send the interview cancellation WARNING ('+(miss.join(', ')||'BG form')+' missing, T-'+Math.round(m)+'m)',cls:'warn'});budget--;continue;}
+      if(m!=null&&m<=30&&m>0&&missingAny){rows.push({n:c.name,what:'CANCEL the interview via Cal.com ('+(miss.join(', ')||'BG form')+' still missing at T-'+Math.round(m)+'m)',cls:'bad'});budget--;continue;}
+    }
+    const seq=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
+    if(!seq)continue;
+    let ev;try{ev=window.SeqEngineV2.evaluate(seq,c,_seqTriggerEval);}catch(e){continue;}
+    if(!ev||!ev.currentStep)continue;
+    const it=(ev.intents||[])[0];if(!it)continue;
+    if(it.automatable!==true)continue;
+    if(c.st.seqAutoFail&&c.st.seqAutoFail.stepId===ev.currentStep.id)continue;
+    if(it.type==='send-email'&&it.templateKey){
+      if(c.st.sent&&c.st.sent[it.templateKey])continue; /* _autoSendTpl's never-double-send rule */
+      rows.push({n:c.name,what:'send "'+String(it.templateKey).replace(/_/g,' ')+'" and advance the sequence',cls:'warn'});budget--;
+    }else if(it.type==='set-stage'){
+      const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
+      if(flow.includes(it.stage)){rows.push({n:c.name,what:'move stage '+c.stage+' → '+it.stage,cls:'ok'});budget--;}
+    }else if(it.type==='integration'&&it.provider==='claude'&&/resume[-_]screen/.test(it.action||'')){
+      rows.push({n:c.name,what:'run the Claude résumé screen (~1¢) and advance on success',cls:'ok'});budget--;
+    }
+  }
+  document.getElementById('m-title').textContent='🔍 Automation dry run — the next pass';
+  const CLS={warn:'#8B6500',bad:'#8B1A1A',ok:'var(--grn-deep)',soft:'var(--soft)'};
+  document.getElementById('m-body').innerHTML=
+    '<p style="font-size:12.5px;color:var(--soft);margin:0 0 10px">'+(auto?'Automation is <b>ON</b> — this is what the next 30-second tick will do.':'Automation is <b>OFF</b> — this is what the first tick would do if you turned it on right now.')+' Preview only; nothing below has been done.</p>'
+    +(rows.length
+      ?'<div style="max-height:50vh;overflow-y:auto">'+rows.map(r=>'<div style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:12.5px"><b>'+esc(r.n)+'</b> — <span style="color:'+CLS[r.cls]+'">'+esc(r.what)+'</span></div>').join('')+'</div>'
+      :'<div style="font-size:13px;color:var(--grn-deep);padding:8px 0">Nothing. The robot has no work: no automate-marked step is currently runnable.</div>')
+    +'<div class="brow" style="margin-top:14px"><button class="btn-sec bg-cream" onclick="closeModal()">Close</button></div>';
+  document.getElementById('modal').classList.add('open');
+}
 async function _seqAutomationTick(){
   if(!(SETTINGS.config&&SETTINGS.config.seqAutomation))return;
   if(!window.SeqEngineV2||!(SETTINGS.sequences||[]).length)return;
@@ -24144,6 +24291,7 @@ function renderSettingsSeqV2(){
         <input type="checkbox" ${SETTINGS.config&&SETTINGS.config.seqAutomation?'checked':''} onchange="SETTINGS.config.seqAutomation=this.checked;markSettingsDirty();renderSettings();toast(this.checked?'⚙ Automation ON — steps marked automate run on the 30s tick':'⏸ Automation OFF — everything is click-driven again')" style="accent-color:var(--grn-deep);width:16px;height:16px">
         ⚙ Sequence automation ${SETTINGS.config&&SETTINGS.config.seqAutomation?'<span style="color:var(--grn-deep)">— LIVE</span>':'— off (kill switch)'}
       </label>
+      <button class="btn-sm bg-cream" style="cursor:pointer;margin-left:auto" onclick="_seqAutomationPreview()" title="See exactly what the robot's next pass would do — who, and what action — without running anything">🔍 Preview next pass</button>
     </div>
     <p class="set-help" style="margin-top:6px;font-size:11px">When on: only steps marked <b>automate</b> act, max 1 action per candidate and 10 total per 30-second tick, never past an unmet gate, everything logged 🤖⚙. Includes the 1-hour interview auto-cancel. Park/decline/integration/manual steps always stay human-only. Uncheck to stop instantly.</p>
   </div>
