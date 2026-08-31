@@ -217,6 +217,13 @@ export default {
           b: { audience_id: rb.audienceId, from: rb.from || '', subject: rb.subject, html: rb.html, reply_to: rb.replyTo || undefined } };
       } else if (rb.op === 'sendBroadcast' && rb.broadcastId) {
         call = { m: 'POST', u: RA + '/broadcasts/' + encodeURIComponent(rb.broadcastId) + '/send', b: {} };
+      } else if (rb.op === 'sendEmail' && rb.to && rb.subject && rb.html) {
+        // Per-lead weekly-newsletter send (the same draft, routed through
+        // Resend instead of Graph). Still NOT unsubscribe infrastructure.
+        call = { m: 'POST', u: RA + '/emails', b: {
+          from: rb.from || '', to: [rb.to], subject: rb.subject, html: rb.html,
+          reply_to: rb.replyTo || undefined,
+          attachments: (rb.attachments && rb.attachments.length) ? rb.attachments : undefined } };
       }
       if (!call) return json({ error: 'unknown or incomplete op' }, 400);
       try {

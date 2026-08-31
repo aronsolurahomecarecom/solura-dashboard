@@ -54,6 +54,11 @@ let writeRowNoop = false;
 const writeRow = async (ri, u) => { writeRowCalls.push({ ri, u }); if (writeRowNoop) return; Object.keys(u).forEach(k => { rows[ri] = rows[ri] || []; rows[ri][parseInt(k, 10)] = u[k]; }); };
 const logComms = () => {}; const commsEntryForLead = (ri, e) => e; const traceOp = () => {};
 const toast = () => {}; const buildUI = async () => {}; const el = () => null;
+/* html helpers the converter leans on — same semantics as the dashboard's */
+const looksLikeHtml = s => /<[a-z][\s\S]*>/i.test(String(s || ''));
+const isFullDesignHtml = s => /<html[\s>]/i.test(String(s || '').slice(0, 600));
+const emailPlainToHtml = s => '<p>' + String(s || '').split(/\n\n+/).join('</p><p>') + '</p>';
+const injectBeforeClose = (html, frag) => { const i = String(html).toLowerCase().lastIndexOf('</body>'); return i > -1 ? html.slice(0, i) + frag + html.slice(i) : html + frag; };
 
 /* relay mock: programmable Resend responses + call recording */
 let audienceContacts = [];
@@ -69,9 +74,9 @@ globalThis.fetch = async (url, opts) => {
   return { ok: false, json: async () => ({ error: 'unknown op' }) };
 };
 
-const fn = new Function('C', 'DATA_START', 'STEP_OFF_SEQUENCE', 'rows', 'cfg', 'trackerCfg', 'normEmail', 'isExcluded', 'isUnsubscribed', 'pd', 'getNames', 'appendLogStr', 'writeRow', 'logComms', 'commsEntryForLead', 'traceOp', 'toast', 'buildUI', 'el',
-  src.slice(src.indexOf('*/') + 2) + '\nreturn {resendCfg,resendFetch,resendCandidates,resendListContacts,syncUnsubscribes,syncNewsletterContacts,buildNewsletterHtml,validateBroadcast,resendSendBroadcast,RESEND_UNSUB_TAG};');
-const M = fn(C, DATA_START, STEP_OFF_SEQUENCE, rows, cfg, trackerCfg, normEmail, isExcluded, isUnsubscribed, pd, getNames, appendLogStr, writeRow, logComms, commsEntryForLead, traceOp, toast, buildUI, el);
+const fn = new Function('C', 'DATA_START', 'STEP_OFF_SEQUENCE', 'rows', 'cfg', 'trackerCfg', 'normEmail', 'isExcluded', 'isUnsubscribed', 'pd', 'getNames', 'appendLogStr', 'writeRow', 'logComms', 'commsEntryForLead', 'traceOp', 'toast', 'buildUI', 'el', 'looksLikeHtml', 'isFullDesignHtml', 'emailPlainToHtml', 'injectBeforeClose',
+  src.slice(src.indexOf('*/') + 2) + '\nreturn {resendCfg,resendFetch,resendCandidates,resendListContacts,syncUnsubscribes,syncNewsletterContacts,buildNewsletterHtml,validateBroadcast,resendSendBroadcast,weeklyToBroadcastHtml,RESEND_UNSUB_TAG,RESEND_COMPLIANCE_FOOTER};');
+const M = fn(C, DATA_START, STEP_OFF_SEQUENCE, rows, cfg, trackerCfg, normEmail, isExcluded, isUnsubscribed, pd, getNames, appendLogStr, writeRow, logComms, commsEntryForLead, traceOp, toast, buildUI, el, looksLikeHtml, isFullDesignHtml, emailPlainToHtml, injectBeforeClose);
 
 const mkLead = (i, name, email, extra) => { rows[i] = []; rows[i][C.NM] = name; rows[i][C.EM] = email; rows[i][C.ST] = 'Contacted'; rows[i][C.LC] = '8/2' + (i % 9) + '/2026'; Object.assign(rows[i], extra || {}); };
 
@@ -137,6 +142,25 @@ await (async () => {
   ok(goodHtml.includes('Meir Schwimer'), 'signature present');
   ok(goodHtml.indexOf('—') === -1, 'no em dashes in the template copy');
   ok(/^<!DOCTYPE html>/.test(goodHtml) && /#f4f1ea/.test(goodHtml) && /#fdfaf3/.test(goodHtml) && /#c9a227/.test(goodHtml), 'complete HTML doc on the brand palette (full-design gate recognizes <html)');
+
+  /* ── weekly draft → broadcast conversion (the weekly draft IS the newsletter) ── */
+  const tagOnce = h => h.split(M.RESEND_UNSUB_TAG).length - 1 === 1;
+  // plain-text weekly draft
+  let cv = M.weeklyToBroadcastHtml('A note for {dm}', 'Hi {dm},\n\nThinking of {pt} this week.');
+  ok(cv.subject === 'A note for there', 'subject {dm} token becomes a plain fallback');
+  ok(cv.html.includes('{{{FIRST_NAME|there}}}') && cv.html.includes('your loved one'), 'body tokens become Resend merge tag + patient fallback');
+  ok(tagOnce(cv.html) && cv.html.includes('815 Superior Ave'), 'plain draft: wrapped with exactly one unsubscribe tag + address');
+  ok(M.validateBroadcast('aud_1', cv.subject, cv.html) === null, 'plain-draft conversion passes broadcast validation');
+  // HTML-fragment weekly draft
+  cv = M.weeklyToBroadcastHtml('Subj', '<p>Hello {dm}</p><p>News this week.</p>');
+  ok(tagOnce(cv.html) && /<html/i.test(cv.html), 'fragment draft: brand-wrapped into a full doc, one tag');
+  // full-design weekly draft WITHOUT a footer → compliance footer injected once
+  cv = M.weeklyToBroadcastHtml('Subj', '<html><body><div style="max-width:600px">Designed newsletter</div></body></html>');
+  ok(tagOnce(cv.html) && cv.html.indexOf(M.RESEND_UNSUB_TAG) < cv.html.toLowerCase().lastIndexOf('</body>'), 'full design: footer injected once, inside the body');
+  ok(M.validateBroadcast('aud_1', 'Subj', cv.html) === null, 'injected footer carries the address too');
+  // full-design draft that ALREADY has the tag → never doubled
+  cv = M.weeklyToBroadcastHtml('Subj', '<html><body><p>x</p><a href="' + M.RESEND_UNSUB_TAG + '">Unsubscribe</a> 815 Superior Ave</body></html>');
+  ok(tagOnce(cv.html), 'draft already carrying the tag is not double-injected');
 
   /* ── send path: create + send through the relay, refusal short-circuits ── */
   relayCalls.length = 0;

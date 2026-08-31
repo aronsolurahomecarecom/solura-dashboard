@@ -1275,7 +1275,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <input type="text" id="rs-subject" class="ee-inp" placeholder="A note from Solura Home Care">
         </div>
         <div class="st-field">
-          <label class="ee-lbl">HTML <button data-action="rs-load-tpl" class="st-btn-ghost" style="margin-left:8px;padding:4px 10px;font-size:11px">Load the Solura template</button></label>
+          <label class="ee-lbl">HTML <button data-action="rs-load-weekly" class="st-btn-gold" style="margin-left:8px;padding:4px 10px;font-size:11px">📰 Load this week's draft</button> <span style="font-weight:400;color:var(--soft);font-size:11px">— the same newsletter the nurture sends use all week</span></label>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">
             <textarea id="rs-html" class="ee-inp" rows="14" style="font-family:'SF Mono',Monaco,monospace;font-size:10.5px;line-height:1.45"></textarea>
             <iframe id="rs-preview" style="width:100%;height:300px;border:1.5px solid var(--border);border-radius:10px;background:#fff" sandbox=""></iframe>
@@ -1479,7 +1479,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0821-53';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0821-54';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -6805,6 +6805,24 @@ function buildNewsletterHtml(bodyInner){
     +'<a href="'+RESEND_UNSUB_TAG+'" style="color:#7c8899;">Unsubscribe</a></p>'
     +'</td></tr></table></td></tr></table></body></html>';
 }
+/* The weekly nurture draft IS the newsletter. This converter turns the
+ * draft loaded each week (plain text, HTML fragment, or full design) into
+ * a broadcast-ready document: name tokens become Resend merge tags, plain
+ * content gets the brand wrapper, and the compliance footer (unsubscribe
+ * tag + CAN-SPAM address) is injected exactly once when missing. */
+var RESEND_COMPLIANCE_FOOTER='<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding:16px 24px 22px;font-family:Georgia,serif">'
+  +'<p style="font-size:11px;color:#7c8899;line-height:1.7;margin:0">Solura Home Care · 815 Superior Ave E, Suite 1618, Cleveland, OH 44114 · (216) 770-4886<br>'
+  +'<a href="'+RESEND_UNSUB_TAG+'" style="color:#7c8899;">Unsubscribe</a></p></td></tr></table>';
+function weeklyToBroadcastHtml(subject,body){
+  var subj=String(subject||'').replace(/\{dm\}/g,'there').replace(/\{pt\}/g,'your loved one');
+  var b=String(body||'').replace(/\{dm\}/g,'{{{FIRST_NAME|there}}}').replace(/\{pt\}/g,'your loved one');
+  var html;
+  if(looksLikeHtml(b)&&isFullDesignHtml(b))html=b;                       // complete design → as-is
+  else if(looksLikeHtml(b))html=buildNewsletterHtml(b);                  // fragment → brand wrapper
+  else html=buildNewsletterHtml(emailPlainToHtml(b));                    // plain text → paragraphs + wrapper
+  if(html.indexOf(RESEND_UNSUB_TAG)===-1)html=injectBeforeClose(html,RESEND_COMPLIANCE_FOOTER);
+  return {subject:subj,html:html};
+}
 /* Guarded send: refuses without an Audience (an audience-less broadcast
  * renders the merge tag empty and ships WITHOUT working unsubscribe). */
 function validateBroadcast(audienceId,subject,html){
@@ -8547,8 +8565,52 @@ async function sendEmail(){
   var origAttachments=emailAttachments;
   emailAttachments=effectiveAttachments;
 
+  // The weekly nurture draft IS the newsletter: those sends route through
+  // Resend (hello. subdomain) instead of Graph — same composer, same comms
+  // log, same sequence advance, only the transport changes. Falls back to
+  // Outlook automatically if the relay/Resend errors, so nurture never
+  // breaks. Replies and inline-image emails stay on Graph (threading and
+  // cid: images need it).
+  var _viaResend=!!(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri&&!_emailReplyTo
+    &&resendCfg()&&!emailAttachments.some(function(a){return a.isInline;}));
+  if(_viaResend&&isUnsubscribed(ri)){
+    el('email-send-btn').disabled=false;spin.style.display='none';
+    emailAttachments=origAttachments;
+    showErr('This lead unsubscribed from the newsletter — the weekly draft cannot be sent to them. A personal note (not the weekly draft) is still your call.');
+    return;
+  }
+
   try{
-    if(!useUploadSession){
+    var _resendDone=false;
+    if(_viaResend){
+      try{
+        var rc9=resendCfg();
+        var rAtts=[];
+        for(var ra9=0;ra9<emailAttachments.length;ra9++){
+          var a9=emailAttachments[ra9];
+          var b64c=a9.dataBase64;
+          if(!b64c&&a9.file){
+            b64c=await new Promise(function(res,rej){
+              var fr=new FileReader();
+              fr.onload=function(){res(String(fr.result).split(',')[1]);};
+              fr.onerror=function(){rej(new Error('could not read '+a9.name));};
+              fr.readAsDataURL(a9.file);
+            });
+          }
+          if(b64c)rAtts.push({filename:a9.name,content:b64c});
+        }
+        await resendFetch('sendEmail',{from:rc9.from,replyTo:rc9.replyTo,
+          to:toAddr,subject:subj,html:bodyHtml,attachments:rAtts});
+        _resendDone=true;
+        traceOp({kind:'send-via-resend',to:toAddr,subj:String(subj||'').slice(0,60),atts:rAtts.length});
+      }catch(eRs){
+        toast('⚠ Resend send failed ('+String(eRs.message||'').slice(0,80)+') — sending via Outlook instead');
+        traceOp({kind:'send-resend-fallback',to:toAddr,err:String(eRs.message||'').slice(0,120)});
+      }
+    }
+    if(_resendDone){
+      // handled — the shared post-send code below runs as usual
+    }else if(!useUploadSession){
       // === Fast path: single sendMail call ===
       var message={
         subject:subj,
@@ -10255,11 +10317,19 @@ function onClick(ev){
         }).catch(function(e){if(out)out.textContent='✗ '+e.message;});
       })();
       break;
-    case 'rs-load-tpl':
+    case 'rs-load-weekly':
       (function(){
-        var ta=el('rs-html');if(ta)ta.value=buildNewsletterHtml();
-        var pv=el('rs-preview');if(pv)pv.srcdoc=(ta?ta.value:'').split(RESEND_UNSUB_TAG).join('#').split('{{{FIRST_NAME|there}}}').join('there');
-        toast('📰 Solura template loaded — edit the middle, keep the footer');
+        var vs11=weeklyLiveVariants();
+        var v11=vs11&&vs11[0];
+        if(!v11||!(String(v11.subject||'').trim()||String(v11.body||'').trim())){
+          toast('No weekly draft saved yet — open 📰 Weekly, write it, save, then load it here');
+          return;
+        }
+        var conv=weeklyToBroadcastHtml(v11.subject,v11.body);
+        var sj=el('rs-subject');if(sj)sj.value=conv.subject;
+        var ta=el('rs-html');if(ta)ta.value=conv.html;
+        var pv=el('rs-preview');if(pv)pv.srcdoc=conv.html.split(RESEND_UNSUB_TAG).join('#').split('{{{FIRST_NAME|there}}}').join('there');
+        toast('📰 This week\'s draft ('+(v11.label||'A')+') loaded — the same content the nurture sends use');
       })();
       break;
     case 'rs-send':
