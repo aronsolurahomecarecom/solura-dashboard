@@ -46,6 +46,10 @@ const trackerCfg = () => ({ url: 'https://trk.test', token: 'tok' });
 const normEmail = s => String(s || '').trim().toLowerCase();
 const isExcluded = st => /not interested|closed|lost|wrong number|deceased|duplicate/i.test(String(st || ''));
 const isUnsubscribed = ri => !!String(((rows[ri] || [])[C.UNSUB]) || '').trim();
+const lc = v => String(v || '').toLowerCase().trim();
+const nurtureFlags = {}, offFlags = {}; // per-row sequence position stubs
+const isNurtureStep = ri => nurtureFlags[ri] !== false && !offFlags[ri];
+const isOffSequence = ri => !!offFlags[ri];
 const pd = v => { const d = new Date(v); return isNaN(d.getTime()) ? null : d; };
 const getNames = ri => ({ dm: String((rows[ri] || [])[C.DM] || ''), pt: String((rows[ri] || [])[C.NM] || '') });
 const appendLogStr = (ex, txt) => (ex ? ex + ' | ' : '') + txt;
@@ -75,9 +79,9 @@ globalThis.fetch = async (url, opts) => {
   return { ok: false, json: async () => ({ error: 'unknown op' }) };
 };
 
-const fn = new Function('C', 'DATA_START', 'STEP_OFF_SEQUENCE', 'rows', 'cfg', 'trackerCfg', 'normEmail', 'isExcluded', 'isUnsubscribed', 'pd', 'getNames', 'appendLogStr', 'writeRow', 'logComms', 'commsEntryForLead', 'traceOp', 'toast', 'buildUI', 'el', 'looksLikeHtml', 'isFullDesignHtml', 'emailPlainToHtml', 'injectBeforeClose',
-  src.slice(src.indexOf('*/') + 2) + '\nreturn {resendCfg,resendFetch,resendCandidates,resendListContacts,syncUnsubscribes,syncNewsletterContacts,buildNewsletterHtml,validateBroadcast,resendSendBroadcast,weeklyToBroadcastHtml,RESEND_UNSUB_TAG,RESEND_COMPLIANCE_FOOTER};');
-const M = fn(C, DATA_START, STEP_OFF_SEQUENCE, rows, cfg, trackerCfg, normEmail, isExcluded, isUnsubscribed, pd, getNames, appendLogStr, writeRow, logComms, commsEntryForLead, traceOp, toast, buildUI, el, looksLikeHtml, isFullDesignHtml, emailPlainToHtml, injectBeforeClose);
+const fn = new Function('C', 'DATA_START', 'STEP_OFF_SEQUENCE', 'rows', 'cfg', 'trackerCfg', 'normEmail', 'isExcluded', 'isUnsubscribed', 'pd', 'getNames', 'appendLogStr', 'writeRow', 'logComms', 'commsEntryForLead', 'traceOp', 'toast', 'buildUI', 'el', 'looksLikeHtml', 'isFullDesignHtml', 'emailPlainToHtml', 'injectBeforeClose', 'lc', 'isNurtureStep', 'isOffSequence',
+  src.slice(src.indexOf('*/') + 2) + '\nreturn {resendCfg,resendFetch,resendCandidates,resendListContacts,syncUnsubscribes,syncNewsletterContacts,buildNewsletterHtml,validateBroadcast,resendSendBroadcast,weeklyToBroadcastHtml,nlEligible,nlSeqGroupFor,RESEND_UNSUB_TAG,RESEND_COMPLIANCE_FOOTER};');
+const M = fn(C, DATA_START, STEP_OFF_SEQUENCE, rows, cfg, trackerCfg, normEmail, isExcluded, isUnsubscribed, pd, getNames, appendLogStr, writeRow, logComms, commsEntryForLead, traceOp, toast, buildUI, el, looksLikeHtml, isFullDesignHtml, emailPlainToHtml, injectBeforeClose, lc, isNurtureStep, isOffSequence);
 
 const mkLead = (i, name, email, extra) => { rows[i] = []; rows[i][C.NM] = name; rows[i][C.EM] = email; rows[i][C.ST] = 'Contacted'; rows[i][C.LC] = '8/2' + (i % 9) + '/2026'; Object.assign(rows[i], extra || {}); };
 
@@ -127,8 +131,23 @@ await (async () => {
   /* ── candidates: invalid emails and excluded statuses never sync ── */
   mkLead(11, 'Bad Mail', 'not-an-email');
   mkLead(12, 'Gone', 'gone@x.com', (() => { const o = {}; o[C.ST] = 'Not Interested'; return o; })());
-  const cands = M.resendCandidates();
+  const cands = M.resendCandidates().list;
   ok(!cands.some(c => c.ri === 11) && !cands.some(c => c.ri === 12), 'invalid email + excluded status filtered out');
+
+  /* ── audience rules: only enabled sequence positions / stages sync ── */
+  mkLead(13, 'Early Eddie', 'eddie@x.com'); nurtureFlags[13] = false;      // sits in an early phase
+  mkLead(14, 'Off Ollie', 'ollie@x.com'); offFlags[14] = true;             // responded / off-sequence
+  let cr = M.resendCandidates();
+  ok(M.nlSeqGroupFor(13) === 'early' && M.nlSeqGroupFor(14) === 'off', 'sequence positions classified');
+  ok(!cr.list.some(c => c.ri === 13) && !cr.list.some(c => c.ri === 14) && cr.notEligible >= 2, 'default (nurture only): early-phase and off-sequence leads are NOT pushed');
+  cfgVals.nlSeqGroups = ['nurture', 'off'];
+  cr = M.resendCandidates();
+  ok(cr.list.some(c => c.ri === 14) && !cr.list.some(c => c.ri === 13), 'enabling off-sequence includes Ollie; Eddie still held out');
+  cfgVals.nlStatuses = ['Contacted'];
+  cr = M.resendCandidates();
+  ok(cr.list.some(c => c.ri === 13), 'stage override: an enabled status pulls a lead in regardless of phase');
+  delete cfgVals.nlSeqGroups; delete cfgVals.nlStatuses;
+  ok(M.resendCandidates().list.some(c => c.ri === 13) === false, 'clearing overrides restores the nurture-only default');
 
   /* ── broadcast validation ── */
   const goodHtml = M.buildNewsletterHtml();

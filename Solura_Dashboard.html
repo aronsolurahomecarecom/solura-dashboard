@@ -1273,8 +1273,19 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <button data-action="rs-toggle-list" class="st-btn-ghost">👥 Show everyone on the list</button>
           <div id="rs-list" style="display:none;margin-top:8px;max-height:320px;overflow-y:auto;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-size:12px;line-height:1.9"></div>
         </div>
+        <h4 class="st-h2">Who gets the newsletter</h4>
+        <p class="st-p">Only leads sitting on an enabled sequence position or stage are ever pushed to the list. Default: the <b>long-term nurture phase</b> — the same population the weekly draft has always gone to.</p>
+        <div class="st-field" id="nl-groups">
+          <label class="st-check"><input type="checkbox" data-nlgroup="nurture"> Long-term nurture phase (perpetual weekly)</label><br>
+          <label class="st-check"><input type="checkbox" data-nlgroup="early"> Earlier sequence phases (first contact, daily blitz, weekly check-ins)</label><br>
+          <label class="st-check"><input type="checkbox" data-nlgroup="off"> Responded / off-sequence leads</label>
+        </div>
+        <div class="st-field">
+          <label class="ee-lbl">Stages that ALSO get it (regardless of sequence position)</label>
+          <div id="nl-statuses" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:2px 14px"></div>
+        </div>
         <h4 class="st-h2">Contact sync — the warm-up ramp</h4>
-        <p class="st-p">The subdomain has no sending reputation yet: start at <b>50</b> of your most recently engaged leads, then roughly double the cap every few days over 3–4 weeks. Broadcasts go to the whole Audience, so the Audience size IS the send count. Free tier: 100/day, 3,000/month.</p>
+        <p class="st-p">The subdomain has no sending reputation yet: start at <b>50</b> of your most recently engaged leads, then roughly double the cap every few days over 3–4 weeks. Broadcasts go to the whole list, so the list size IS the send count. Free tier: 100/day, 3,000/month.</p>
         <div class="st-field" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <label class="ee-lbl" style="margin:0">Sync up to</label>
           <input type="number" id="rs-cap" class="ee-inp" style="max-width:90px" value="50" min="1">
@@ -1493,7 +1504,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0831-56';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0831-57';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1869,6 +1880,8 @@ var CONFIG_DEFAULTS={
   resendAudienceId:'',
   resendFrom:'Meir at Solura <newsletter@hello.solurahomecare.com>', // short display name — the long one truncates on mobile Gmail
   resendReplyTo:'care@solurahomecare.com',
+  nlSeqGroups:['nurture'], // sequence positions that get the newsletter
+  nlStatuses:[],           // stages that ALSO get it, regardless of position
   claudeModel:'claude-sonnet-4-6',
   claudeTraining:'',
   emailSignature:'',
@@ -4712,6 +4725,20 @@ function renderConfigInputs(){
   if(gk){try{gk.value=GHL_KEY();}catch(_){}}
   renderClaudeSections();
   renderShellPreview();
+  // Newsletter audience rules: group checkboxes + live status list
+  try{
+    var ac7=nlAudienceCfg();
+    document.querySelectorAll('[data-nlgroup]').forEach(function(cb){cb.checked=ac7.groups.indexOf(cb.dataset.nlgroup)>-1;});
+    var nlHost=el('nl-statuses');
+    if(nlHost){
+      var sts7={};
+      STATUS_OPTS.forEach(function(s){sts7[s]=1;});
+      for(var si7=DATA_START;si7<rows.length;si7++){var sv7=String((rows[si7]||[])[C.ST]||'').trim();if(sv7)sts7[sv7]=1;}
+      nlHost.innerHTML=Object.keys(sts7).sort().map(function(s){
+        return '<label class="st-check" style="font-size:12px"><input type="checkbox" data-nlstatus="'+escapeHtml(s)+'"'+(ac7.statuses.indexOf(lc(s))>-1?' checked':'')+'> '+escapeHtml(s)+'</label>';
+      }).join('');
+    }
+  }catch(_){}
   var vcnt=el('voice-count');
   if(vcnt){var n5=voiceCorpus().length;vcnt.textContent=n5?('\u00b7 '+n5+' sample'+(n5!==1?'s':'')+' captured'):'\u00b7 none yet';}
 }
@@ -5139,6 +5166,19 @@ document.addEventListener('input',function(ev){
 });
 document.addEventListener('change',function(ev){
   var t=ev.target;
+  // Newsletter audience rules → staged into config, saved via the Save bar
+  if(t&&t.dataset&&t.dataset.nlgroup!=null){
+    var gs7=[];
+    document.querySelectorAll('[data-nlgroup]').forEach(function(cb){if(cb.checked)gs7.push(cb.dataset.nlgroup);});
+    setCfg('nlSeqGroups',gs7);stMarkDirty();
+    return;
+  }
+  if(t&&t.dataset&&t.dataset.nlstatus!=null){
+    var ss7=[];
+    document.querySelectorAll('[data-nlstatus]').forEach(function(cb){if(cb.checked)ss7.push(cb.dataset.nlstatus);});
+    setCfg('nlStatuses',ss7);stMarkDirty();
+    return;
+  }
   if(t&&t.id==='weekly-pdf-input'&&t.files&&t.files[0]){
     (function(){
       var wf=t.files[0];t.value='';
@@ -6709,9 +6749,30 @@ async function resendFetch(op,params){
   return j.data;
 }
 function validEmail(s){return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(s||'').trim());}
+/* Who gets the newsletter: only leads sitting on an ENABLED sequence
+ * position or stage are ever pushed to the list. A lead qualifies when
+ * their current phase group is enabled OR their status is an enabled
+ * stage. Default: the long-term nurture phase — the exact population the
+ * weekly draft has always gone to. */
+function nlAudienceCfg(){
+  var g=cfg('nlSeqGroups');if(!Array.isArray(g))g=['nurture'];
+  var s=cfg('nlStatuses');if(!Array.isArray(s))s=[];
+  return {groups:g,statuses:s.map(function(x){return lc(x);})};
+}
+function nlSeqGroupFor(ri){
+  if(isOffSequence(ri))return 'off';
+  if(isNurtureStep(ri))return 'nurture';
+  return 'early';
+}
+function nlEligible(ri){
+  var ac=nlAudienceCfg();
+  if(ac.groups.indexOf(nlSeqGroupFor(ri))>-1)return true;
+  if(ac.statuses.indexOf(lc((rows[ri]||[])[C.ST]))>-1)return true;
+  return false;
+}
 // Engagement sort for the warm-up ramp: most recently touched leads first
 function resendCandidates(){
-  var out=[];
+  var out=[],notEligible=0;
   for(var i=DATA_START;i<rows.length;i++){
     var r=rows[i];if(!r)continue;
     if(!String(r[C.NM]||r[C.DM]||'').trim())continue;
@@ -6719,12 +6780,13 @@ function resendCandidates(){
     if(!validEmail(em))continue;
     if(isUnsubscribed(i))continue;
     if(isExcluded(r[C.ST]))continue;
-    var lc=pd(r[C.LC]),da=pd(r[C.DA]);
+    if(!nlEligible(i)){notEligible++;continue;} // not on a newsletter stage
+    var lcd=pd(r[C.LC]),da=pd(r[C.DA]);
     out.push({ri:i,email:em,firstName:(getNames(i).dm||getNames(i).pt||'').split(/\s+/)[0]||'',
-      engagedTs:(lc?lc.getTime():0)||(da?da.getTime():0)});
+      engagedTs:(lcd?lcd.getTime():0)||(da?da.getTime():0)});
   }
   out.sort(function(a,b){return b.engagedTs-a.engagedTs;});
-  return out;
+  return {list:out,notEligible:notEligible};
 }
 async function resendListContacts(){
   var rc=resendCfg();
@@ -6781,8 +6843,9 @@ async function syncNewsletterContacts(cap){
   (await resendListContacts()).forEach(function(c){
     if(c&&c.email)existing[normEmail(c.email)]={unsubscribed:c.unsubscribed===true};
   });
-  var res={added:0,alreadyPresent:0,skippedUnsub:0,capped:0};
-  var cands=resendCandidates();
+  var cres=resendCandidates();
+  var cands=cres.list;
+  var res={added:0,alreadyPresent:0,skippedUnsub:0,capped:0,notOnStage:cres.notEligible};
   var room=cap;
   for(var i=0;i<cands.length;i++){
     var cd=cands[i];
@@ -10363,8 +10426,9 @@ function onClick(ev){
         var out=el('rs-sync-out');if(out)out.textContent='Syncing…';
         var cap10=(el('rs-cap')||{}).value||50;
         syncNewsletterContacts(cap10).then(function(s){
-          if(out)out.textContent='Added '+s.added+' · already in Audience '+s.alreadyPresent
+          if(out)out.textContent='Added '+s.added+' · already on the list '+s.alreadyPresent
             +' · unsubscribed (never re-added) '+s.skippedUnsub
+            +(s.notOnStage?(' · not on a newsletter stage '+s.notOnStage):'')
             +(s.capped?(' · held back by the cap '+s.capped):'');
         }).catch(function(e){if(out)out.textContent='✗ '+e.message;});
       })();
