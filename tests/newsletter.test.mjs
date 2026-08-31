@@ -61,6 +61,15 @@ let writeRowNoop = false;
 const writeRow = async (ri, u) => { writeRowCalls.push({ ri, u }); if (writeRowNoop) return; Object.keys(u).forEach(k => { rows[ri] = rows[ri] || []; rows[ri][parseInt(k, 10)] = u[k]; }); };
 const logComms = () => {}; const commsEntryForLead = (ri, e) => e; const traceOp = () => {};
 const toast = () => {}; const buildUI = async () => {}; const el = () => null;
+/* weekly-draft + send-pipeline stubs for the A/B split sender */
+const weeklyVariantsLive = [];
+const weeklyLiveVariants = () => weeklyVariantsLive;
+const getWeeklyDraftFor = () => weeklyVariantsLive[0] || null;
+const fillNames = (s, names) => String(s || '').replace(/\{dm\}/g, (names && names.dm) || 'there').replace(/\{pt\}/g, (names && names.pt) || 'your loved one');
+const sanitizeDraftHtml = s => s;
+const trackingPixelHtml = () => '<img src="px">';
+const recordSentEmail = () => {};
+const advanceLead = () => null;
 /* html helpers the converter leans on — same semantics as the dashboard's */
 const looksLikeHtml = s => /<[a-z][\s\S]*>/i.test(String(s || ''));
 const isFullDesignHtml = s => /<html[\s>]/i.test(String(s || '').slice(0, 600));
@@ -74,6 +83,7 @@ globalThis.fetch = async (url, opts) => {
   const body = JSON.parse(opts.body);
   relayCalls.push(body);
   if (body.op === 'listContacts') return { ok: true, json: async () => ({ ok: true, status: 200, data: { data: audienceContacts } }) };
+  if (body.op === 'sendEmail') return { ok: true, json: async () => ({ ok: true, status: 200, data: { id: 'e_' + body.to } }) };
   if (body.op === 'addContact') { audienceContacts.push({ email: body.email, first_name: body.firstName, unsubscribed: false }); return { ok: true, json: async () => ({ ok: true, status: 200, data: { id: 'c_' + body.email } }) }; }
   if (body.op === 'broadcast') return { ok: true, json: async () => ({ ok: true, status: 200, data: { id: 'bc_1' } }) };
   if (body.op === 'listSegments') return { ok: true, json: async () => ({ ok: true, status: 200, data: { data: [{ id: 'aud_1', name: 'Newsletter' }] } }) };
@@ -82,9 +92,9 @@ globalThis.fetch = async (url, opts) => {
   return { ok: false, json: async () => ({ error: 'unknown op' }) };
 };
 
-const fn = new Function('C', 'DATA_START', 'STEP_OFF_SEQUENCE', 'rows', 'cfg', 'trackerCfg', 'normEmail', 'isExcluded', 'isUnsubscribed', 'pd', 'getNames', 'appendLogStr', 'writeRow', 'logComms', 'commsEntryForLead', 'traceOp', 'toast', 'buildUI', 'el', 'looksLikeHtml', 'isFullDesignHtml', 'emailPlainToHtml', 'injectBeforeClose', 'lc', 'isNurtureStep', 'isOffSequence', 'localToday', 'daysBetween', 'ds',
-  src.slice(src.indexOf('*/') + 2) + '\nreturn {resendCfg,resendFetch,resendCandidates,resendListContacts,syncUnsubscribes,syncNewsletterContacts,buildNewsletterHtml,validateBroadcast,resendSendBroadcast,weeklyToBroadcastHtml,nlEligible,nlSeqGroupFor,nlWarmupState,nlWarmupQuota,nlWarmupCum,nlWarmupProjectedDay,nlWarmupHolds,NL_WARMUP_DAYS,RESEND_UNSUB_TAG,RESEND_COMPLIANCE_FOOTER};');
-const M = fn(C, DATA_START, STEP_OFF_SEQUENCE, rows, cfg, trackerCfg, normEmail, isExcluded, isUnsubscribed, pd, getNames, appendLogStr, writeRow, logComms, commsEntryForLead, traceOp, toast, buildUI, el, looksLikeHtml, isFullDesignHtml, emailPlainToHtml, injectBeforeClose, lc, isNurtureStep, isOffSequence, localToday, daysBetween, ds);
+const fn = new Function('C', 'DATA_START', 'STEP_OFF_SEQUENCE', 'rows', 'cfg', 'trackerCfg', 'normEmail', 'isExcluded', 'isUnsubscribed', 'pd', 'getNames', 'appendLogStr', 'writeRow', 'logComms', 'commsEntryForLead', 'traceOp', 'toast', 'buildUI', 'el', 'looksLikeHtml', 'isFullDesignHtml', 'emailPlainToHtml', 'injectBeforeClose', 'lc', 'isNurtureStep', 'isOffSequence', 'localToday', 'daysBetween', 'ds', 'weeklyLiveVariants', 'getWeeklyDraftFor', 'fillNames', 'sanitizeDraftHtml', 'trackingPixelHtml', 'recordSentEmail', 'advanceLead',
+  src.slice(src.indexOf('*/') + 2) + '\nreturn {resendCfg,resendFetch,resendCandidates,resendListContacts,syncUnsubscribes,syncNewsletterContacts,buildNewsletterHtml,validateBroadcast,resendSendBroadcast,weeklyToBroadcastHtml,nlEligible,nlSeqGroupFor,nlWarmupState,nlWarmupQuota,nlWarmupCum,nlWarmupProjectedDay,nlWarmupHolds,nlWarmupEmailFor,nlSplitVariantFor,nlSendSplitTest,NL_WARMUP_DAYS,RESEND_UNSUB_TAG,RESEND_COMPLIANCE_FOOTER};');
+const M = fn(C, DATA_START, STEP_OFF_SEQUENCE, rows, cfg, trackerCfg, normEmail, isExcluded, isUnsubscribed, pd, getNames, appendLogStr, writeRow, logComms, commsEntryForLead, traceOp, toast, buildUI, el, looksLikeHtml, isFullDesignHtml, emailPlainToHtml, injectBeforeClose, lc, isNurtureStep, isOffSequence, localToday, daysBetween, ds, weeklyLiveVariants, getWeeklyDraftFor, fillNames, sanitizeDraftHtml, trackingPixelHtml, recordSentEmail, advanceLead);
 
 const mkLead = (i, name, email, extra) => { rows[i] = []; rows[i][C.NM] = name; rows[i][C.EM] = email; rows[i][C.ST] = 'Contacted'; rows[i][C.LC] = '8/2' + (i % 9) + '/2026'; Object.assign(rows[i], extra || {}); };
 
@@ -207,6 +217,46 @@ await (async () => {
   // per-lead wrapper: no unsubscribe merge tag on transactional sends
   const noUnsub = M.buildNewsletterHtml('<p>x</p>', { noUnsub: true });
   ok(noUnsub.indexOf(M.RESEND_UNSUB_TAG) === -1 && noUnsub.includes('815 Superior Ave'), 'per-lead wrapper drops the merge tag, keeps the address');
+
+  /* ── 🧪 A/B split send ── */
+  const hA = M.nlSplitVariantFor('a@x.com', 2);
+  ok(hA === M.nlSplitVariantFor('a@x.com', 2) && hA >= 0 && hA < 2, 'split hash deterministic and in range');
+  const g2 = [0, 0]; for (let i = 0; i < 100; i++) g2[M.nlSplitVariantFor('user' + i + '@mail.com', 2)]++;
+  ok(g2[0] >= 25 && g2[1] >= 25, 'hash splits roughly evenly (both groups ≥25 of 100)');
+  weeklyVariantsLive.length = 0; weeklyVariantsLive.push({ label: 'A', subject: 'SA {dm}', body: 'Body A for {dm}' });
+  let thr = ''; try { await M.nlSendSplitTest(); } catch (e) { thr = e.message; }
+  ok(/at least 2 live variants/.test(thr), 'refuses with only one variant');
+  weeklyVariantsLive.push({ label: 'B', subject: 'SB {dm}', body: 'Body B for {dm}' });
+  cfgVals.nlWarmupStart = ds(localToday());
+  thr = ''; try { await M.nlSendSplitTest(); } catch (e) { thr = e.message; }
+  ok(/Warm-up is running/.test(thr), 'refuses during an active warm-up');
+  cfgVals.nlWarmupStart = '';
+  audienceContacts = [];
+  thr = ''; try { await M.nlSendSplitTest(); } catch (e) { thr = e.message; }
+  ok(/list is empty/.test(thr), 'refuses on an empty list');
+  audienceContacts = Array.from({ length: 96 }, (_, i) => ({ email: 'm' + i + '@x.com', unsubscribed: false }));
+  thr = ''; try { await M.nlSendSplitTest(); } catch (e) { thr = e.message; }
+  ok(/100\/day/.test(thr), 'refuses past the free-tier daily cap');
+  // happy path: 4 known leads (one locally unsubscribed), 1 unknown, 1 Resend-unsubscribed
+  rows[4 + 7][C.UNSUB] = '2026-08-30T00:00:00Z';
+  audienceContacts = [
+    { email: 'l1@x.com', unsubscribed: false }, { email: 'l2@x.com', unsubscribed: false },
+    { email: 'l3@x.com', unsubscribed: false }, { email: 'l7@x.com', unsubscribed: false },
+    { email: 'ghost@x.com', unsubscribed: false }, { email: 'l9@x.com', unsubscribed: true }
+  ];
+  relayCalls.length = 0;
+  const ab = await M.nlSendSplitTest();
+  ok(ab.sent === 4 && ab.skippedUnsub === 1, 'sends to subscribers, skips the locally-unsubscribed; Resend opt-outs filtered upstream');
+  ok(Object.values(ab.counts).reduce((a, b) => a + b, 0) === 4, 'per-variant counts add up to the sends');
+  const abSends = relayCalls.filter(c => c.op === 'sendEmail');
+  ok(abSends.length === 4 && abSends.some(s => s.to === 'ghost@x.com'), 'a contact with no sheet row still gets their variant');
+  ok(abSends.every(s => /^S[AB] /.test(s.subject)), 'each send carries one of the live variants');
+  const grouping = abSends.map(s => s.to + ':' + s.subject.slice(0, 2)).sort().join('|');
+  relayCalls.length = 0;
+  await M.nlSendSplitTest();
+  const grouping2 = relayCalls.filter(c => c.op === 'sendEmail').map(s => s.to + ':' + s.subject.slice(0, 2)).sort().join('|');
+  ok(grouping === grouping2, 'the same contact always lands in the same variant group');
+  weeklyVariantsLive.length = 0;
 
   /* ── weekly draft → broadcast conversion (the weekly draft IS the newsletter) ── */
   const tagOnce = h => h.split(M.RESEND_UNSUB_TAG).length - 1 === 1;

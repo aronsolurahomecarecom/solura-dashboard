@@ -1263,7 +1263,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         </div>
         <div id="rs-test-out" style="font-size:12px;line-height:1.7;color:var(--mid);white-space:pre-line;margin-bottom:14px"></div>
         <h4 class="st-h2">The newsletter</h4>
-        <p class="st-p">Written in the same editor as always (variants, PDF, everything) — it just lives here now. When you're ready to start, one button sends it to <b>everyone on the list on the same day</b>, replacing the one-by-one weekly sends. Until the connection above is configured, nothing sends anywhere.</p>
+        <p class="st-p">Written in the same editor as always (variants, PDF, everything) — it just lives here now. When you're ready to start, one button sends it to <b>everyone on the list on the same day</b>, replacing the one-by-one weekly sends. <b>🧪 A/B testing is automatic:</b> keep 2–3 variants live in the editor and the send splits subscribers between them (stable, even groups), stamping each send's variant — open and reply rates per variant, and the winner, appear in 📊 Batches &amp; A/B. One live variant = a plain broadcast. Until the connection above is configured, nothing sends anywhere.</p>
         <div class="st-field" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <button data-action="rs-edit-weekly" class="st-btn-sky">✏ Open the newsletter editor</button>
           <button data-action="rs-send-weekly" class="st-btn-gold">📨 Send this week's newsletter to everyone</button>
@@ -1508,7 +1508,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0831-59';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0831-60';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -6972,14 +6972,15 @@ function nlWarmupHolds(ri){
   var proj=nlWarmupProjectedDay(ri);
   return proj>=0&&proj<=ws.day+6;
 }
-// Per-lead warm-up email: the lead's own weekly-draft variant, filled with
-// their real names — same content their composer send would carry.
-function nlWarmupEmailFor(ri){
-  var w=null;
-  try{w=getWeeklyDraftFor(ri);}catch(_){}
+// Per-lead newsletter email: the lead's own weekly-draft variant (or a
+// FORCED variant for A/B splits), filled with their real names — same
+// content their composer send would carry.
+function nlWarmupEmailFor(ri,forced){
+  var w=forced||null;
+  if(!w){try{w=getWeeklyDraftFor(ri);}catch(_){}}
   if(!w){var vs=weeklyLiveVariants();w=vs&&vs[0];}
   if(!w||!(String(w.subject||'').trim()||String(w.body||'').trim()))return null;
-  var names=getNames(ri);
+  var names=(ri>=0)?getNames(ri):{dm:'',pt:''}; // blanks → "there"/"your loved one" fallbacks
   var subj=fillNames(String(w.subject||''),names);
   var body=fillNames(String(w.body||''),names);
   var html;
@@ -7029,6 +7030,57 @@ async function nlWarmupSendBatch(progress){
   setCfg('nlWarmupSent',sent);
   try{await saveEnginesDoc();}catch(_){/* map re-syncs on next settings save */}
   traceOp({kind:'warmup-batch',day:ws.day+1,sent:res.sent,deferred:res.deferred,failed:res.failed});
+  return res;
+}
+/* ─── 🧪 Newsletter A/B split send ───────────────────────────────────────
+ * With 2+ live variants in the editor, the weekly send becomes a split
+ * test: subscribers are divided deterministically (stable email hash),
+ * each group gets its variant PER-LEAD with the tracking pixel and the
+ * variant label stamped into the Comms Log — so open/reply rates per
+ * variant and the winner call appear in the EXISTING 📊 Batches & A/B
+ * section, no new analytics needed. */
+function nlSplitVariantFor(email,n){
+  var s=normEmail(email),h=0;
+  for(var i8=0;i8<s.length;i8++){h=(h*31+s.charCodeAt(i8))|0;}
+  return Math.abs(h)%Math.max(1,n);
+}
+async function nlSendSplitTest(progress){
+  var rc=resendCfg();
+  if(!rc)throw new Error('Tracking worker not configured — Settings → Data');
+  if(nlWarmupState())throw new Error('Warm-up is running — finish or stop it before an A/B send.');
+  var vs=weeklyLiveVariants();
+  if(!vs||vs.length<2)throw new Error('An A/B send needs at least 2 live variants in the newsletter editor.');
+  var contacts=(await resendListContacts()).filter(function(c){return c&&c.email&&c.unsubscribed!==true;});
+  if(!contacts.length)throw new Error('The list is empty — sync contacts first.');
+  if(contacts.length>95)throw new Error('An A/B split goes out per-contact ('+contacts.length+' emails) — past the 100/day free tier. Trim the list, upgrade Resend, or send a single-variant broadcast.');
+  var emailToRi={};
+  for(var i9=DATA_START;i9<rows.length;i9++){
+    var e9=normEmail((rows[i9]||[])[C.EM]);
+    if(e9&&emailToRi[e9]==null)emailToRi[e9]=i9;
+  }
+  var res={sent:0,failed:0,skippedUnsub:0,counts:{},total:contacts.length};
+  for(var ci=0;ci<contacts.length;ci++){
+    var em=normEmail(contacts[ci].email);
+    var ri=(emailToRi[em]!=null)?emailToRi[em]:-1;
+    if(ri>=0&&isUnsubscribed(ri)){res.skippedUnsub++;continue;} // belt over Resend's own flag
+    var v=vs[nlSplitVariantFor(em,vs.length)];
+    var msg=nlWarmupEmailFor(ri,v);
+    if(!msg){res.failed++;continue;}
+    try{
+      var sendId='m'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+      var html=injectBeforeClose(msg.html,trackingPixelHtml(ri,em,msg.subj,sendId));
+      await resendFetch('sendEmail',{from:rc.from,replyTo:rc.replyTo,to:em,subject:msg.subj,html:html});
+      var commsRow=await logComms(commsEntryForLead(ri>=0?ri:-1,{direction:'out',channel:'email',
+        contact:em,subject:msg.subj,preview:'A/B newsletter (variant '+msg.label+')',
+        outcome:'sent',messageId:sendId,variant:msg.label}));
+      try{recordSentEmail(sendId,ri,em,msg.subj,commsRow,msg.label);}catch(_){}
+      if(ri>=0){try{var adv=advanceLead(ri,'Email');if(adv)await writeRow(ri,adv);}catch(_){}}
+      res.counts[msg.label]=(res.counts[msg.label]||0)+1;
+      res.sent++;
+      if(progress)progress(res);
+    }catch(eA){res.failed++;}
+  }
+  traceOp({kind:'newsletter-ab-send',sent:res.sent,failed:res.failed,counts:res.counts});
   return res;
 }
 function nlRenderWarmup(){
@@ -10667,13 +10719,36 @@ function onClick(ev){
         (async function(){
           try{
             var contacts=await resendListContacts();
-            var live=contacts.filter(function(c){return c.unsubscribed!==true;}).length;
+            var subs=contacts.filter(function(c){return c.unsubscribed!==true;});
+            var live=subs.length;
             if(!live){if(out)out.textContent='The list is empty — sync contacts below first.';return;}
+            // 🧪 2+ live variants → A/B split send (per-lead, tracked,
+            // variant-stamped → results in 📊 Batches & A/B). One variant →
+            // classic broadcast with Resend's unsubscribe handling.
+            if(vs12.length>=2&&!nlWarmupState()&&live<=95){
+              var pre={};
+              subs.forEach(function(c){var lb=vs12[nlSplitVariantFor(c.email,vs12.length)].label||'?';pre[lb]=(pre[lb]||0)+1;});
+              var splitDesc=Object.keys(pre).sort().map(function(k){return k+': '+pre[k];}).join(' · ');
+              if(!confirm('🧪 A/B TEST — '+vs12.length+' live variants found.\n\nSplit '+live+' subscribers ('+splitDesc+') and send each group its variant NOW?\n\nOpens and replies per variant land in 📊 Batches & A/B, with a winner called at 3+ sends.')){
+                if(out)out.textContent='Cancelled — nothing sent.';return;
+              }
+              if(out)out.textContent='A/B sending…';
+              var abr=await nlSendSplitTest(function(p){if(out)out.textContent='A/B sending… '+p.sent+' of '+p.total;});
+              var cdesc=Object.keys(abr.counts).sort().map(function(k){return k+': '+abr.counts[k];}).join(' · ');
+              if(out)out.textContent='✓ A/B newsletter sent to '+abr.sent+' ('+cdesc+')'
+                +(abr.failed?(' · failed '+abr.failed):'')
+                +(abr.skippedUnsub?(' · skipped unsubscribed '+abr.skippedUnsub):'')
+                +'. Watch 📊 Batches & A/B for the winner.';
+              toast('🧪 A/B sent to '+abr.sent);
+              try{buildUI();}catch(_){}
+              return;
+            }
             var conv=weeklyToBroadcastHtml(v12.subject,v12.body);
             var rc12=resendCfg();
             var bad12=validateBroadcast(rc12&&rc12.segmentId,conv.subject,conv.html);
             if(bad12){if(out)out.textContent='✗ '+bad12;return;}
-            if(!confirm('Send "'+conv.subject+'" to '+live+' subscriber'+(live!==1?'s':'')+' NOW?\n\nEveryone on the list gets it today — this replaces the one-by-one weekly sends.')){
+            var why=(vs12.length>=2)?(nlWarmupState()?' (A/B disabled during warm-up)':(live>95?' (A/B needs ≤95 subscribers on the free tier)':'')):'';
+            if(!confirm('Send "'+conv.subject+'" to '+live+' subscriber'+(live!==1?'s':'')+' NOW?'+(why?('\n\nSingle-variant broadcast'+why+'.'):'\n\nEveryone on the list gets it today — this replaces the one-by-one weekly sends.'))){
               if(out)out.textContent='Cancelled — nothing sent.';return;
             }
             if(out)out.textContent='Sending to '+live+'…';
