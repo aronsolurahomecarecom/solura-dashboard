@@ -10141,7 +10141,7 @@ async function _seqV3RepairPass(){
     for(const c of pipeline){
       if(pipeline!==_myPipe)return; /* loadData replaced the pipeline — this instance is stale */
       if(!c||!c.st)continue;
-      if(c.stage==='Hired'||c.stage==='Declined')continue;
+      if(_isTerminalStage(c.stage))continue;
       if(W&&W.row===c.excelRow)continue; /* workspace open — saveW would clobber; next load */
       if(c.st.__ajCorrupt)continue; /* corrupt cell — nothing may write over it */
       const cur=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
@@ -10232,7 +10232,7 @@ async function _reconcileBookingStages(){
   for(const c of pipeline){
     if(pipeline!==_myPipe)return; /* stale instance — a fresher load owns the board now */
     if(!c||!c.st||!c.st.booking)continue;
-    if(c.stage==='Hired'||c.stage==='Declined')continue;
+    if(_isTerminalStage(c.stage))continue;
     if(W&&W.row===c.excelRow)continue; /* workspace open on them — saveW would clobber the heal; next load catches it */
     const t=Date.parse(c.st.booking);
     /* Consumed-booking sweep: a booking >48h in the past at a NON-booked stage was already
@@ -10823,6 +10823,13 @@ function action(c){
     v={bucket:'action',timing:{txt:'⚠ Evaluation error — open candidate (see console)',pill:'pr2',date:''},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'open',label:'Open candidate',cls:'sky'}};}
   _actMemo.set(c,{g:_memGen,v});return v;}
 function scoreRow(c){let e=_srMemo.get(c);if(e&&e.g===_memGen)return e.v;const v=_scoreRowC(c);_srMemo.set(c,{g:_memGen,v});return v;}
+/* End-of-life column-G stages, for the passes that must STOP acting on a candidate:
+   the automation tick, the sequence repair pass, and the booking reconcile. Declined and
+   Hired were tested inline everywhere; Withdrawn was missing from all three even though
+   _actionC has bucketed it 'closed' since audit #3 — so an automate-marked step could
+   still send outward mail to, or re-advance the stage of, someone who had withdrawn.
+   (_actionC keeps its own narrower Declined/Withdrawn test: Hired renders a real card.) */
+function _isTerminalStage(s){s=String(s||'').trim();return s==='Declined'||s==='Hired'||s==='Withdrawn';}
 function _actionC(c){
   const s=c.stage,st=c.st,info=STAGEINFO[s]||STAGEINFO['Applied'];
   if(s==='Declined'||s==='Withdrawn')return{bucket:'closed',info}; /* both terminal — a Withdrawn column-G value used to fall through as if active */
@@ -23202,7 +23209,7 @@ async function _seqAutomationTick(){
   let budget=10; /* hard per-tick cap across all candidates */
   for(const c of pipeline){
     if(budget<=0)break;
-    if(!c.st||!c.st.sequenceId||c.stage==='Hired'||c.stage==='Declined')continue;
+    if(!c.st||!c.st.sequenceId||_isTerminalStage(c.stage))continue;
     /* Workspace open on this candidate → skip entirely. Every heal pass has this guard;
        the tick was the one place without it — loadW deep-copies state, so a tick action
        here gets erased by the operator's next saveW and then RE-FIRES (duplicate outward
@@ -23242,8 +23249,17 @@ async function _seqAutomationTick(){
     const seq=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
     if(!seq)continue;
     let ev;try{ev=window.SeqEngineV2.evaluate(seq,c,_seqTriggerEval);}catch(e){continue;}
-    if(!ev||!ev.currentStep||ev.currentStep.automate!==true)continue; /* per-step opt-in only */
+    if(!ev||!ev.currentStep)continue;
     const it=(ev.intents||[])[0];if(!it)continue;
+    /* THE ENGINE'S OWN FLAG IS THE AUTHORITY — not step.automate. isAutomated() is strictly
+       narrower than `step.automate===true`: it also refuses NEVER_AUTO kinds (park/pack/hub/
+       manual/session) and, for an email step, requires the SEPARATE step.email.automate flag.
+       Gating on step.automate alone let the tick act where the engine had said no — most
+       seriously, an email step with automate:true but email.automate unset evaluates to
+       bucket 'action' with automatable:false (the operator sees a normal manual "Send email"
+       row) and the tick sent it anyway, behind the operator's back. intent.automatable is the
+       one flag the engine sets for exactly this decision, so gate on it and nothing else. */
+    if(it.automatable!==true)continue; /* per-step opt-in, as the ENGINE computed it */
     /* A step whose last automated attempt FAILED is the operator's now (seqAutoFail makes
        the remap surface it as an action row) — retrying it every 30s only re-fails and
        bloats the state cell. The stamp clears when the step executes or the pointer moves. */
@@ -23518,7 +23534,7 @@ function _seqReachesDownstream(seq,fromId,targetId){
 }
 
 function _seqV3Unadopted(){
-  return (typeof pipeline!=='undefined'?pipeline:[]).filter(c=>c&&c.stage!=='Declined'&&c.stage!=='Hired'&&!(c.st&&c.st.sequenceId));
+  return (typeof pipeline!=='undefined'?pipeline:[]).filter(c=>c&&!_isTerminalStage(c.stage)&&!(c.st&&c.st.sequenceId));
 }
 
 /* Bulk switchover: preview + explicit confirm + per-candidate recovery log
@@ -23669,7 +23685,17 @@ function _seqV3Action(c,info){
          automated attempt FAILED (seqAutoFail stamp) — both must surface as operator
          actions, not rot in Scheduled behind a robot that never comes. */
       const _tickReaches=!!(c.st&&c.st.sequenceId)&&!(c.st&&c.st.seqAutoFail&&ev.currentStep&&c.st.seqAutoFail.stepId===ev.currentStep.id);
-      if(ev.bucket==='scheduled'&&(ev.intents||[]).some(i2=>i2&&i2.automatable===true)&&(!_autoOn||!_tickReaches||!(ev.intents||[]).some(_tickCan))){
+      /* The tick executes ONLY intents[0]. Testing executability with .some() across every
+         intent asserted "something will run this" even when the only runnable intent sat at
+         index 1+ — the tick then matched no branch, stamped no seqAutoFail (the if/else chain
+         simply falls through), and the row sat in Scheduled forever with nothing coming for
+         it. Mirror the tick exactly: the FIRST intent, carrying the engine's automatable flag
+         that the tick now demands. Rule: nothing buckets 'scheduled' unless something will
+         actually execute it. Genuine time-gates (session steps — a NEVER_AUTO kind, so never
+         automatable) are untouched by the outer some() test and stay scheduled. */
+      const _i0=(ev.intents||[])[0];
+      const _tickWillRun=!!_i0&&_i0.automatable===true&&_tickCan(_i0);
+      if(ev.bucket==='scheduled'&&(ev.intents||[]).some(i2=>i2&&i2.automatable===true)&&(!_autoOn||!_tickReaches||!_tickWillRun)){
         ev.bucket='action';
         ev.label=String(ev.label||'').replace(/^Automated: /,'');
       }
