@@ -22,7 +22,8 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = '6.2-owner'; // 6.1: paginated listing — v6.0 listed only the
+var VERSION = '6.3-owner'; // 6.3: /resend gains the sendEmail op (per-lead
+// weekly-newsletter sends routed through Resend). 6.1: paginated listing — v6.0 listed only the
 // OLDEST 100 keys (lexicographic = chronological), so once 100+ events
 // accumulated in the 7-day window, NEW events could never be returned.
 // 6.2: /resend relay — Resend's API sends no CORS headers, so the browser
