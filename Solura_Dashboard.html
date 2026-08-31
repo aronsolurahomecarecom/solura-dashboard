@@ -1508,7 +1508,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0831-58';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0831-59';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -4622,7 +4622,7 @@ function buildClaudeSystemPrompt(training){
     +'\n\nPRIORITY ORDER when anything conflicts: (1) Meir\'s specific instructions for THIS email — they override everything; (2) the message being replied to; (3) the NON-NEGOTIABLE STANDING RULES below — they outrank voice samples and any reference template\'s own text; (4) reference templates and voice samples; (5) all other context. Never let background context override a direct instruction or a standing rule.'
     +(parts.reference?('\n\nREFERENCE MATERIAL from Meir (style and structure source ONLY — imitate the look, never copy scaffolding verbatim, never let template text override the rules):\n'+parts.reference):'')
     +(parts.rules?('\n\n=== NON-NEGOTIABLE STANDING RULES — verify EACH rule is satisfied before finalizing; where voice samples or reference templates conflict with these, the rules win ===\n'+parts.rules+'\n=== END STANDING RULES ==='):'')
-    +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — and IF the instructions ask to attach, include, create, or send ANY document, plan, checklist, summary, letter, or one-pager, you MUST ALSO include "doc":{"name":"Descriptive_Name.pdf","html":"<the document body as inline-styled HTML>"} — name it .pdf (default) or .doc only when Word format is explicitly requested; omit "doc" entirely otherwise. PDF documents are RENDERED VISUALLY, so design them like a real branded document: styled headings, short paragraphs, tables, checklists (☐/☑), colored section accents using the brand palette (navy #1B2A4A, gold #C8870A, warm cream #F5F1E8 backgrounds, light rules #E4DCCB), generous white space. Inline styles only; fluid width (never fix widths above 700px); avoid page-unfriendly elements (no fixed positioning, no external images). The Solura letterhead and license footer are added automatically — never add your own. Target 1–3 pages of genuinely personalized content — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). NEVER return bare <tr> or <td> fragments copied from template scaffolding \u2014 return self-contained blocks (<p>, <div>; a complete nested <table> is fine). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it. If a block of specific instructions is provided at the end of the user message, every point in it is BINDING — re-read it before finalizing and verify each point is satisfied.';
+    +'\n\nRespond ONLY with a JSON object: {"subject":"...","format":"text","body":"..."} — and IF the instructions ask to attach, include, create, or send ANY document, plan, checklist, summary, letter, or one-pager, you MUST ALSO include "doc":{"name":"Descriptive_Name.pdf","html":"<the document body as inline-styled HTML>"} — name it .pdf (default) or .doc only when Word format is explicitly requested; omit "doc" entirely otherwise. PDF documents are RENDERED VISUALLY, so design them like a real branded document: styled headings, short paragraphs, tables, checklists (☐/☑), colored section accents using the brand palette (navy #1B2A4A, gold #C8870A, warm cream #F5F1E8 backgrounds, light rules #E4DCCB), generous white space. Inline styles only; fluid width (never fix widths above 700px); avoid page-unfriendly elements (no fixed positioning, no external images). The Solura letterhead and license footer are added automatically — never add your own. Target 1–3 pages of genuinely personalized content — no markdown fences, no commentary. Inside the JSON strings, escape every newline as \\n (never emit raw line breaks inside the quotes). ALWAYS generate a specific, compelling subject line — never leave it generic or empty. A branded design wrapper is applied automatically at send — return ONLY the inner message content, never a full page (no <html>, <head>, <body>, or outer background wrappers). NEVER return bare <tr> or <td> fragments copied from template scaffolding \u2014 return self-contained blocks (<p>, <div>; a complete nested <table> is fine). If the training templates are HTML, produce the inner content as HTML matching their inner style and set "format":"html"; otherwise plain text with blank lines between paragraphs and "format":"text". Personalize genuinely from the lead context; never invent facts not present in it. ATTACHED DOCUMENT blocks in the user message are per-email payload, NOT style-only reference: the lead receives those files with this email, so read them fully, weave their relevant content into the draft, and mention them naturally. If a block of specific instructions is provided at the end of the user message, every point in it is BINDING — re-read it before finalizing and verify each point is satisfied.';
 }
 function claudePromptPreview(){
   var ri=_claudeRi;if(ri<0)return;
@@ -4633,7 +4633,7 @@ function claudePromptPreview(){
     instructions+=(instructions?'\n\n':'')
       +'MANDATORY: include the "doc" field in your JSON — a PDF document. If the instructions above describe one, build exactly that; otherwise build a one-page, personalized summary of how Solura would help this specific family, drawn from the lead context. Design it properly (headings, color accents, tables or checklists where they help) and name the file descriptively, ending in .pdf.';
   }
-  var refList=_claudeRefFiles.map(function(x){return '[attached document block: '+x.name+']';}).join('\n');
+  var refList=_claudeRefFiles.map(function(x,i){return '[ATTACHED DOCUMENT '+(i+1)+' of '+_claudeRefFiles.length+' FOR THIS EMAIL: "'+x.name+'" — full contents ride as a document block with weave-into-the-draft framing]';}).join('\n');
   var txt='══════════ SYSTEM PROMPT ══════════\n'
     +buildClaudeSystemPrompt(buildClaudeSystemTraining())
     +'\n\n══════════ USER MESSAGE ══════════\n'
@@ -4648,6 +4648,12 @@ function claudePromptPreview(){
   setTimeout(function(){URL.revokeObjectURL(url);},60000);
 }
 function renderClaudeDocChip(){
+  // The context summary is built at modal open, BEFORE files are picked —
+  // keep it honest as the list changes so attachments are never invisible.
+  var cr=el('claude-ctx-refs');
+  if(cr)cr.innerHTML=_claudeRefFiles.length
+    ?(', plus <strong>'+_claudeRefFiles.length+' attached doc'+(_claudeRefFiles.length!==1?'s':'')+' ('+escapeHtml(_claudeRefFiles.map(function(f){return f.name;}).join(', '))+') — read in full, woven into the draft, and attached to the email</strong>')
+    :'';
   var host=el('claude-doc-list');if(!host)return;
   host.innerHTML=_claudeRefFiles.map(function(f,i){
     return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;background:var(--cream);border:1px solid var(--border);border-radius:8px;padding:6px 10px;margin-top:6px">'
@@ -7584,6 +7590,7 @@ function openClaudeWriter(ri){
   }catch(_){}
   el('claude-ctx-summary').innerHTML='Claude will draft for <strong>'+escapeHtml(name)+'</strong> using: lead details, position <strong>'+escapeHtml(posStr)+'</strong> on <strong>'+escapeHtml(engineFor(ri).name)+'</strong>'
     +(histBits.length?(', plus '+histBits.join(', ')):'')
+    +'<span id="claude-ctx-refs"></span>'
     +(buildClaudeSystemTraining()?'. Your training sections apply.':'. <em>Tip: add training sections in Settings → Claude AI to teach it your voice.</em>');
   var ins=el('claude-instructions');if(ins)ins.value='';
   _claudeRefFiles=[]; // fresh modal → empty reference list
@@ -7630,6 +7637,11 @@ async function claudeGenerate(){
       if(det2.kind==='office')throw new Error(f.name+': Word/Excel can\'t be read directly — export as PDF first');
       if(det2.kind==='pdf'&&f.size>CTS_MAX_PDF)throw new Error(f.name+': PDFs cap at 30MB (the API rejects requests past 32MB). Compress or split it.');
       if(det2.kind==='image'&&f.size>CTS_MAX_IMAGE)throw new Error(f.name+': images cap at 5MB — that\'s the API\'s own hard limit per image.');
+      // Loud framing, or the model files these next to the style-only
+      // training blocks and never uses their CONTENT (the exact bug this
+      // fixes): these are per-email payload, and the lead receives them.
+      var refFrame='=== ATTACHED DOCUMENT '+(rfi+1)+' of '+_claudeRefFiles.length+' FOR THIS EMAIL: "'+f.name+'" ===\n'
+        +'Meir attached this specifically for THIS email — it is NOT style-only training material. Read it fully and weave its relevant content into the draft. The lead receives this exact file attached to the email, so refer to it naturally ("attached is…", "as the plan shows…").';
       if(det2.kind==='pdf'||det2.kind==='image'){
         var b64=await new Promise(function(res,rej){
           var rd=new FileReader();
@@ -7637,12 +7649,12 @@ async function claudeGenerate(){
           rd.onerror=function(){rej(new Error('Could not read '+f.name));};
           rd.readAsDataURL(f);
         });
-        userContent.push({type:'text',text:'The next '+(det2.kind==='pdf'?'document':'image')+' block is reference file "'+f.name+'":'});
+        userContent.push({type:'text',text:refFrame+'\nThe '+(det2.kind==='pdf'?'document':'image')+' follows as the next block:'});
         if(det2.kind==='pdf')userContent.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}});
         else userContent.push({type:'image',source:{type:'base64',media_type:det2.media||'image/png',data:b64}});
       }else{
         var txt=await f.text();
-        userContent.push({type:'text',text:'Reference document "'+f.name+'":\n'+txt.slice(0,800000)});
+        userContent.push({type:'text',text:refFrame+'\nIts full text:\n'+txt.slice(0,800000)});
       }
     }
     userContent.push({type:'text',text:'Lead context:\n'+context});
@@ -7654,12 +7666,15 @@ async function claudeGenerate(){
       instrText+=(instrText?'\n\n':'')
         +'MANDATORY: include the "doc" field in your JSON — a PDF document. If the instructions above describe one, build exactly that; otherwise build a one-page, personalized summary of how Solura would help this specific family, drawn from the lead context. Design it properly (headings, color accents, tables or checklists where they help) and name the file descriptively, ending in .pdf.';
     }
+    var refNote=_claudeRefFiles.length
+      ?('\nThe draft MUST use the '+_claudeRefFiles.length+' ATTACHED DOCUMENT'+(_claudeRefFiles.length!==1?'S':'')+' above — weave in specifics and mention '+(_claudeRefFiles.length!==1?'them':'it')+' naturally, since the lead receives '+(_claudeRefFiles.length!==1?'them':'it')+' attached to this email.')
+      :'';
     if(instrText){
       userContent.push({type:'text',text:'=== MEIR\'S INSTRUCTIONS FOR THIS EMAIL — HIGHEST PRIORITY ===\n'
         +instrText
-        +'\n=== END INSTRUCTIONS ===\nWrite the email now. Satisfy every instruction above exactly; where they conflict with anything in the context, the instructions win.'});
+        +'\n=== END INSTRUCTIONS ===\nWrite the email now. Satisfy every instruction above exactly; where they conflict with anything in the context, the instructions win.'+refNote});
     }else{
-      userContent.push({type:'text',text:'Write the email now.'});
+      userContent.push({type:'text',text:'Write the email now.'+refNote});
     }
     var res=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
