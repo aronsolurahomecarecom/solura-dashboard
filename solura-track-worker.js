@@ -22,9 +22,14 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = '6.1-owner'; // 6.1: paginated listing — v6.0 listed only the
+var VERSION = '6.2-owner'; // 6.1: paginated listing — v6.0 listed only the
 // OLDEST 100 keys (lexicographic = chronological), so once 100+ events
 // accumulated in the 7-day window, NEW events could never be returned.
+// 6.2: /resend relay — Resend's API sends no CORS headers, so the browser
+// dashboard cannot call it directly. This is a NARROW allowlisted relay
+// (contacts sync, domain check, broadcast create/send), NOT unsubscribe
+// infrastructure — Resend hosts and owns the entire unsubscribe flow.
+// Requires a second secret: RESEND_API_KEY. Auth: same TRACK_TOKEN.
 var EV_TTL = 7 * 24 * 3600;
 var SELF_TTL = 3 * 24 * 3600;
 var OWNER_TTL_MS = 45 * 24 * 3600 * 1000; // forget an owner IP after 45 quiet days
@@ -57,6 +62,10 @@ function json(obj, status, cb) {
   return new Response(JSON.stringify(obj), {
     status: status || 200, headers: Object.assign({ 'Content-Type': 'application/json' }, CORS)
   });
+}
+
+async function readJson(req) {
+  try { return await req.json(); } catch (_) { return null; }
 }
 
 function decodeMeta(d) {
@@ -186,6 +195,41 @@ export default {
         try { selfOut = await freshEvents(kv, 'self:', since, 30); } catch (_) {}
       }
       return json({ ok: true, events: out, self: selfOut }, 200, cb);
+    }
+
+    /* ── Resend relay (dashboard-only, token-authed, op allowlist) ── */
+    if (path === '/resend' && req.method === 'POST') {
+      var rb = await readJson(req);
+      var rtok = url.searchParams.get('token') || (rb && rb.token) || '';
+      if (!env.TRACK_TOKEN || rtok !== env.TRACK_TOKEN) return json({ error: 'unauthorized' }, 401);
+      if (!env.RESEND_API_KEY) return json({ error: 'RESEND_API_KEY secret not set on the worker — add it in Cloudflare → Worker → Settings → Variables' }, 500);
+      if (!rb || !rb.op) return json({ error: 'op required' }, 400);
+      var RA = 'https://api.resend.com';
+      var call = null;
+      if (rb.op === 'domains') call = { m: 'GET', u: RA + '/domains' };
+      else if (rb.op === 'listContacts' && rb.audienceId) {
+        call = { m: 'GET', u: RA + '/audiences/' + encodeURIComponent(rb.audienceId) + '/contacts' };
+      } else if (rb.op === 'addContact' && rb.audienceId && rb.email) {
+        call = { m: 'POST', u: RA + '/audiences/' + encodeURIComponent(rb.audienceId) + '/contacts',
+          b: { email: rb.email, first_name: rb.firstName || '', unsubscribed: false } };
+      } else if (rb.op === 'createBroadcast' && rb.audienceId && rb.subject && rb.html) {
+        call = { m: 'POST', u: RA + '/broadcasts',
+          b: { audience_id: rb.audienceId, from: rb.from || '', subject: rb.subject, html: rb.html, reply_to: rb.replyTo || undefined } };
+      } else if (rb.op === 'sendBroadcast' && rb.broadcastId) {
+        call = { m: 'POST', u: RA + '/broadcasts/' + encodeURIComponent(rb.broadcastId) + '/send', b: {} };
+      }
+      if (!call) return json({ error: 'unknown or incomplete op' }, 400);
+      try {
+        var rr = await fetch(call.u, {
+          method: call.m,
+          headers: { 'Authorization': 'Bearer ' + env.RESEND_API_KEY, 'Content-Type': 'application/json' },
+          body: call.b ? JSON.stringify(call.b) : undefined
+        });
+        var rj = await rr.json().catch(function () { return {}; });
+        return json({ ok: rr.ok, status: rr.status, data: rj }, 200);
+      } catch (e) {
+        return json({ error: 'relay fetch failed: ' + (e && e.message || 'network') }, 502);
+      }
     }
 
     return json({ error: 'not found', v: VERSION }, 404);
