@@ -1284,8 +1284,12 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <label class="ee-lbl">Stages that ALSO get it (regardless of sequence position)</label>
           <div id="nl-statuses" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:2px 14px"></div>
         </div>
-        <h4 class="st-h2">Contact sync — the warm-up ramp</h4>
-        <p class="st-p">The subdomain has no sending reputation yet: start at <b>50</b> of your most recently engaged leads, then roughly double the cap every few days over 3–4 weeks. Broadcasts go to the whole list, so the list size IS the send count. Free tier: 100/day, 3,000/month.</p>
+        <h4 class="st-h2">🔥 Warm-up — 14 daily batches, most engaged first</h4>
+        <p class="st-p">Each day sends that day's batch through <code style="font-size:11px">hello.solurahomecare.com</code>, reaching further down the engagement ranking as the days pass (sizes roughly double every two days, capped at 90/day). Each send is that lead's weekly newsletter — personalized, tracked, logged, and their sequence stamped. Nobody gets a newsletter twice within 7 days, and leads due their warm-up email this schedule-week are held from the normal weekly send until it arrives.</p>
+        <div id="rs-warmup-box" class="st-field"></div>
+        <div id="rs-warmup-out" style="font-size:12px;color:var(--mid);white-space:pre-line;margin-bottom:10px"></div>
+        <h4 class="st-h2">Contact sync</h4>
+        <p class="st-p">Pushes eligible leads onto the Resend list (for broadcasts and unsubscribe handling). During warm-up you can sync everyone eligible — the warm-up scheduler controls who actually gets SENT to and when. Free tier: 100/day, 3,000/month.</p>
         <div class="st-field" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <label class="ee-lbl" style="margin:0">Sync up to</label>
           <input type="number" id="rs-cap" class="ee-inp" style="max-width:90px" value="50" min="1">
@@ -1504,7 +1508,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0831-57';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0831-58';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1882,6 +1886,8 @@ var CONFIG_DEFAULTS={
   resendReplyTo:'care@solurahomecare.com',
   nlSeqGroups:['nurture'], // sequence positions that get the newsletter
   nlStatuses:[],           // stages that ALSO get it, regardless of position
+  nlWarmupStart:'',        // YYYY-MM-DD the 14-day warm-up began ('' = not running)
+  nlWarmupSent:{},         // {email: ISO} — who already got their warm-up send
   claudeModel:'claude-sonnet-4-6',
   claudeTraining:'',
   emailSignature:'',
@@ -2723,6 +2729,9 @@ function whenToShow(ri){
   var r=rows[ri]||[];
   var st=String(r[C.ST]||'');
   if(isUnsubscribed(ri))return {bucket:'hidden'}; // opted out → no scheduled outreach, ever
+  // Warm-up hold: their newsletter arrives via this week's warm-up batch —
+  // the normal weekly send stands down so they never get two in a week
+  try{if(nlWarmupHolds(ri)&&isNurtureStep(ri))return {bucket:'hidden'};}catch(_){}
   if(isExcludedLead(ri))return {bucket:'hidden'}; // rule/override-claimed excluded statuses stay visible
   // Claimed excluded lead still carrying stale off-sequence state: surface it
   // in Due Now (it disappears onto its track after 🔄 Backfill or a restart)
@@ -4738,6 +4747,7 @@ function renderConfigInputs(){
         return '<label class="st-check" style="font-size:12px"><input type="checkbox" data-nlstatus="'+escapeHtml(s)+'"'+(ac7.statuses.indexOf(lc(s))>-1?' checked':'')+'> '+escapeHtml(s)+'</label>';
       }).join('');
     }
+    nlRenderWarmup();
   }catch(_){}
   var vcnt=el('voice-count');
   if(vcnt){var n5=voiceCorpus().length;vcnt.textContent=n5?('\u00b7 '+n5+' sample'+(n5!==1?'s':'')+' captured'):'\u00b7 none yet';}
@@ -6867,7 +6877,8 @@ async function syncNewsletterContacts(cap){
  * the full-design gate recognizes it, and it carries its OWN footer with
  * the Resend unsubscribe merge tag plus the CAN-SPAM physical address —
  * nothing else may inject a second footer. */
-function buildNewsletterHtml(bodyInner){
+function buildNewsletterHtml(bodyInner,opts){
+  opts=opts||{};
   var inner=bodyInner||(
     '<p style="font-size:15px;line-height:1.7;color:#2b3a4a;margin:0 0 16px">Hello {{{FIRST_NAME|there}}},</p>'
     +'<p style="font-size:15px;line-height:1.7;color:#2b3a4a;margin:0 0 16px">A short note from our team this month: write your update here. Share one useful idea for families caring for a loved one at home, one story, and one way we can help.</p>'
@@ -6884,10 +6895,166 @@ function buildNewsletterHtml(bodyInner){
     +'<tr><td style="padding:26px 34px;font-family:Georgia,serif">'+inner+'</td></tr>'
     +'<tr><td style="padding:18px 34px 26px;border-top:1px solid #e7e0ce;font-family:Georgia,serif">'
     +'<p style="font-size:11px;color:#7c8899;line-height:1.7;margin:0">Solura Home Care · 815 Superior Ave E, Suite 1618, Cleveland, OH 44114 · (216) 770-4886<br>'
-    +'You are receiving this because you connected with Solura about home care. '
-    +'<a href="'+RESEND_UNSUB_TAG+'" style="color:#7c8899;">Unsubscribe</a></p>'
+    +'You are receiving this because you connected with Solura about home care.'
+    // per-lead (transactional) sends have no broadcast merge tags — the
+    // unsubscribe link only renders for real broadcasts
+    +(opts.noUnsub?'':(' <a href="'+RESEND_UNSUB_TAG+'" style="color:#7c8899;">Unsubscribe</a>'))+'</p>'
     +'</td></tr></table></td></tr></table></body></html>';
 }
+/* ─── 🔥 Warm-up scheduler ───────────────────────────────────────────────
+ * 14 daily batches ramp the hello. subdomain: most-engaged contacts first,
+ * each day reaching further down the ranking (batch sizes double every two
+ * days, capped at 90/day under the free tier). Warm-up sends are PER-LEAD
+ * (real names via fillNames, tracking pixel, comms log, sequence advance)
+ * — they ARE that lead's weekly newsletter for the week. Guarantees:
+ *   · nobody gets a newsletter twice within 7 days (batch defers them)
+ *   · a lead whose projected warm-up date is within the CURRENT warm-up
+ *     week (≤6 days out) has their normal weekly send HELD — they wait
+ *     for the warm-up one. Projected next week → normal send proceeds. */
+var NL_WARMUP_DAYS=14;
+function nlWarmupState(){
+  var s=String(cfg('nlWarmupStart')||'').trim();
+  if(!s)return null;
+  var sd=pd(s);if(!sd)return null;
+  var d=daysBetween(localToday(),sd);
+  if(d<0||d>=NL_WARMUP_DAYS)return null;
+  return {day:d,start:sd};
+}
+function nlWarmupSentMap(){
+  var m=cfg('nlWarmupSent');
+  return (m&&typeof m==='object'&&!Array.isArray(m))?m:{};
+}
+// Batch size for a warm-up day: weights 1,1,2,2,4,4,… normalized to the
+// pool so the ramp lands on 100% by day 14; hard 90/day free-tier cap.
+function nlWarmupQuota(day,poolSize){
+  if(poolSize<=0||day<0||day>=NL_WARMUP_DAYS)return 0;
+  var sum=0,w=[];
+  for(var i2=0;i2<NL_WARMUP_DAYS;i2++){w.push(Math.pow(2,Math.floor(i2/2)));sum+=w[i2];}
+  return Math.min(Math.max(1,Math.ceil(poolSize*w[day]/sum)),90);
+}
+function nlWarmupCum(day,poolSize){
+  var c=0;
+  for(var i3=0;i3<=day&&i3<NL_WARMUP_DAYS;i3++)c+=nlWarmupQuota(i3,poolSize);
+  return Math.min(c,poolSize);
+}
+// The day (schedule index) a not-yet-sent lead is projected to receive
+// their warm-up send, given how many are already done. -1 = not in pool.
+function nlWarmupProjectedDay(ri){
+  var ws=nlWarmupState();if(!ws)return -1;
+  var pool=resendCandidates().list;
+  var sent=nlWarmupSentMap();
+  var rank=-1,unsentIdx=0;
+  for(var i4=0;i4<pool.length;i4++){
+    if(sent[pool[i4].email])continue;
+    if(pool[i4].ri===ri){rank=unsentIdx;break;}
+    unsentIdx++;
+  }
+  if(rank<0)return -1;
+  var done=Object.keys(sent).length;
+  for(var d4=ws.day;d4<NL_WARMUP_DAYS;d4++){
+    if(nlWarmupCum(d4,pool.length)-done>rank)return d4;
+  }
+  return NL_WARMUP_DAYS-1;
+}
+// HOLD the normal weekly send for leads whose warm-up send lands within
+// the current warm-up week; next-week leads keep their normal send.
+function nlWarmupHolds(ri){
+  var ws=nlWarmupState();if(!ws)return false;
+  var sent=nlWarmupSentMap();
+  var em=normEmail((rows[ri]||[])[C.EM]);
+  if(em&&sent[em])return true; // already got the warm-up one — held for the week
+  var proj=nlWarmupProjectedDay(ri);
+  return proj>=0&&proj<=ws.day+6;
+}
+// Per-lead warm-up email: the lead's own weekly-draft variant, filled with
+// their real names — same content their composer send would carry.
+function nlWarmupEmailFor(ri){
+  var w=null;
+  try{w=getWeeklyDraftFor(ri);}catch(_){}
+  if(!w){var vs=weeklyLiveVariants();w=vs&&vs[0];}
+  if(!w||!(String(w.subject||'').trim()||String(w.body||'').trim()))return null;
+  var names=getNames(ri);
+  var subj=fillNames(String(w.subject||''),names);
+  var body=fillNames(String(w.body||''),names);
+  var html;
+  if(looksLikeHtml(body)){
+    html=sanitizeDraftHtml(body);
+  }else{
+    var sig=String(cfg('emailSignature')||'').trim();
+    html=emailPlainToHtml(body+(sig?('\n\n'+sig):''));
+  }
+  if(!isFullDesignHtml(html))html=buildNewsletterHtml(html,{noUnsub:true});
+  return {subj:subj,html:html,label:String(w.label||'A')};
+}
+async function nlWarmupSendBatch(progress){
+  var ws=nlWarmupState();
+  if(!ws)throw new Error('Warm-up is not running.');
+  var rc=resendCfg();
+  if(!rc)throw new Error('Tracking worker not configured — Settings → Data');
+  var pool=resendCandidates().list;
+  var sent=nlWarmupSentMap();
+  var quota=nlWarmupQuota(ws.day,pool.length);
+  var todayISO=new Date().toISOString();
+  var weekAgo=Date.now()-7*24*3600*1000;
+  var res={sent:0,deferred:0,failed:0,doneBefore:Object.keys(sent).length,quota:quota};
+  for(var i5=0;i5<pool.length&&res.sent<quota;i5++){
+    var cd=pool[i5];
+    if(sent[cd.email])continue;
+    // once-per-week guard: recent newsletter (warm-up map OR a fresh
+    // nurture advance) defers them to a later batch automatically
+    var stepAt=Date.parse(String((rows[cd.ri]||[])[C.STEP_AT]||''))||0;
+    if(stepAt>weekAgo&&isNurtureStep(cd.ri)){res.deferred++;continue;}
+    var msg=nlWarmupEmailFor(cd.ri);
+    if(!msg){res.failed++;continue;}
+    try{
+      var sendId='m'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+      var html=injectBeforeClose(msg.html,trackingPixelHtml(cd.ri,cd.email,msg.subj,sendId));
+      await resendFetch('sendEmail',{from:rc.from,replyTo:rc.replyTo,to:cd.email,subject:msg.subj,html:html});
+      var commsRow=await logComms(commsEntryForLead(cd.ri,{direction:'out',channel:'email',
+        contact:cd.email,subject:msg.subj,preview:'Warm-up newsletter (day '+(ws.day+1)+')',
+        outcome:'sent',messageId:sendId,variant:msg.label}));
+      try{recordSentEmail(sendId,cd.ri,cd.email,msg.subj,commsRow,msg.label);}catch(_){}
+      try{var adv=advanceLead(cd.ri,'Email');if(adv)await writeRow(cd.ri,adv);}catch(_){}
+      sent[cd.email]=todayISO;
+      res.sent++;
+      if(progress)progress(res);
+    }catch(eS){res.failed++;}
+  }
+  setCfg('nlWarmupSent',sent);
+  try{await saveEnginesDoc();}catch(_){/* map re-syncs on next settings save */}
+  traceOp({kind:'warmup-batch',day:ws.day+1,sent:res.sent,deferred:res.deferred,failed:res.failed});
+  return res;
+}
+function nlRenderWarmup(){
+  var box=el('rs-warmup-box');if(!box)return;
+  var ws=nlWarmupState();
+  var pool=[];
+  try{pool=resendCandidates().list;}catch(_){}
+  if(!ws){
+    var started=String(cfg('nlWarmupStart')||'').trim();
+    var finished=started&&pd(started)&&daysBetween(localToday(),pd(started))>=NL_WARMUP_DAYS;
+    box.innerHTML='<div style="font-size:12.5px;color:var(--mid);margin-bottom:8px">'
+      +(finished?'✓ Warm-up finished — the list is ramped; use the one-button send above for normal weeks.'
+        :('Not started. '+pool.length+' eligible lead'+(pool.length!==1?'s':'')+' would ramp over '+NL_WARMUP_DAYS+' days, most engaged first.'))
+      +'</div>'
+      +'<button data-action="rs-warmup-start" class="st-btn-gold">🔥 Start the '+NL_WARMUP_DAYS+'-day warm-up</button>';
+    return;
+  }
+  var sentN=Object.keys(nlWarmupSentMap()).length;
+  var quota=nlWarmupQuota(ws.day,pool.length);
+  var plan='';
+  for(var d6=ws.day;d6<Math.min(ws.day+4,NL_WARMUP_DAYS);d6++){
+    plan+=(d6===ws.day?'today ':'day '+(d6+1)+' ')+ '≈'+nlWarmupQuota(d6,pool.length)+' · ';
+  }
+  box.innerHTML='<div style="font-size:12.5px;color:var(--mid);margin-bottom:8px"><b>Day '+(ws.day+1)+' of '+NL_WARMUP_DAYS+'</b> · pool '+pool.length
+    +' · sent so far '+sentN+' · today\'s batch ≈ '+quota
+    +'<br><span style="color:var(--soft)">Plan: '+plan.replace(/ · $/,'')+' — leads due their warm-up THIS schedule-week are held from the normal weekly send.</span></div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    +'<button data-action="rs-warmup-send" class="st-btn-gold">🔥 Send today\'s batch</button>'
+    +'<button data-action="rs-warmup-abort" class="st-btn-ghost">Stop warm-up</button>'
+    +'</div>';
+}
+
 /* The weekly nurture draft IS the newsletter. This converter turns the
  * draft loaded each week (plain text, HTML fragment, or full design) into
  * a broadcast-ready document: name tokens become Resend merge tags, plain
@@ -8096,7 +8263,10 @@ function openEmail(ri,opts){
       unsubBan.style.display='block';
     }else unsubBan.style.display='none';
   }
-  if(!isUnsubscribed(ri)&&isNurtureStep(ri)&&getWeeklyDraftFor(ri)){
+  var _wuHold=false;try{_wuHold=nlWarmupHolds(ri);}catch(_){}
+  if(_wuHold&&isNurtureStep(ri)){
+    toast('🔥 Held for warm-up — this lead gets the newsletter in this week\'s warm-up batch');
+  }else if(!isUnsubscribed(ri)&&isNurtureStep(ri)&&getWeeklyDraftFor(ri)){
     applyWeeklyDraft(ri,{silent:false});
   }
   // ↩ Reply mode: threaded reply to a specific inbound message
@@ -10396,6 +10566,42 @@ function onClick(ev){
           }catch(e2){lines.push('Contacts: ✗ '+e2.message);}
           if(out)out.textContent=lines.join('\n');
         })();
+      })();
+      break;
+    case 'rs-warmup-start':
+      (function(){
+        var pool=resendCandidates().list;
+        if(!pool.length){toast('No eligible leads — check "Who gets the newsletter" above');return;}
+        if(!confirm('Start the '+NL_WARMUP_DAYS+'-day warm-up now?\n\n'+pool.length+' eligible leads ramp most-engaged-first. You send each day\'s batch with one click; leads scheduled for warm-up this week are held from the normal weekly send.'))return;
+        setCfg('nlWarmupStart',ds(localToday()));
+        setCfg('nlWarmupSent',{});
+        saveEnginesDoc().then(function(){toast('🔥 Warm-up started — day 1 is ready');nlRenderWarmup();})
+          .catch(function(e){showErr(e.message);});
+      })();
+      break;
+    case 'rs-warmup-send':
+      (function(){
+        var out=el('rs-warmup-out');
+        if(out)out.textContent='Sending today\'s batch…';
+        nlWarmupSendBatch(function(p){if(out)out.textContent='Sending… '+p.sent+' of '+p.quota;})
+          .then(function(res){
+            if(out)out.textContent='✓ Day\'s batch done: sent '+res.sent
+              +(res.deferred?(' · deferred (got one <7 days ago) '+res.deferred):'')
+              +(res.failed?(' · failed '+res.failed):'')
+              +' · total warmed so far '+(res.doneBefore+res.sent)+'. Come back tomorrow for the next batch.';
+            toast('🔥 Warm-up: '+res.sent+' sent');
+            nlRenderWarmup();
+            try{buildUI();}catch(_){}
+          })
+          .catch(function(e){if(out)out.textContent='✗ '+e.message;});
+      })();
+      break;
+    case 'rs-warmup-abort':
+      (function(){
+        if(!confirm('Stop the warm-up? Progress is kept; normal weekly sends resume for everyone.'))return;
+        setCfg('nlWarmupStart','');
+        saveEnginesDoc().then(function(){toast('Warm-up stopped');nlRenderWarmup();try{buildUI();}catch(_){}})
+          .catch(function(e){showErr(e.message);});
       })();
       break;
     case 'rs-make-segment':

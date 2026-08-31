@@ -51,6 +51,9 @@ const nurtureFlags = {}, offFlags = {}; // per-row sequence position stubs
 const isNurtureStep = ri => nurtureFlags[ri] !== false && !offFlags[ri];
 const isOffSequence = ri => !!offFlags[ri];
 const pd = v => { const d = new Date(v); return isNaN(d.getTime()) ? null : d; };
+const localToday = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); };
+const daysBetween = (a, b) => Math.round((a.getTime() - b.getTime()) / 86400000);
+const ds = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const getNames = ri => ({ dm: String((rows[ri] || [])[C.DM] || ''), pt: String((rows[ri] || [])[C.NM] || '') });
 const appendLogStr = (ex, txt) => (ex ? ex + ' | ' : '') + txt;
 const writeRowCalls = [];
@@ -79,9 +82,9 @@ globalThis.fetch = async (url, opts) => {
   return { ok: false, json: async () => ({ error: 'unknown op' }) };
 };
 
-const fn = new Function('C', 'DATA_START', 'STEP_OFF_SEQUENCE', 'rows', 'cfg', 'trackerCfg', 'normEmail', 'isExcluded', 'isUnsubscribed', 'pd', 'getNames', 'appendLogStr', 'writeRow', 'logComms', 'commsEntryForLead', 'traceOp', 'toast', 'buildUI', 'el', 'looksLikeHtml', 'isFullDesignHtml', 'emailPlainToHtml', 'injectBeforeClose', 'lc', 'isNurtureStep', 'isOffSequence',
-  src.slice(src.indexOf('*/') + 2) + '\nreturn {resendCfg,resendFetch,resendCandidates,resendListContacts,syncUnsubscribes,syncNewsletterContacts,buildNewsletterHtml,validateBroadcast,resendSendBroadcast,weeklyToBroadcastHtml,nlEligible,nlSeqGroupFor,RESEND_UNSUB_TAG,RESEND_COMPLIANCE_FOOTER};');
-const M = fn(C, DATA_START, STEP_OFF_SEQUENCE, rows, cfg, trackerCfg, normEmail, isExcluded, isUnsubscribed, pd, getNames, appendLogStr, writeRow, logComms, commsEntryForLead, traceOp, toast, buildUI, el, looksLikeHtml, isFullDesignHtml, emailPlainToHtml, injectBeforeClose, lc, isNurtureStep, isOffSequence);
+const fn = new Function('C', 'DATA_START', 'STEP_OFF_SEQUENCE', 'rows', 'cfg', 'trackerCfg', 'normEmail', 'isExcluded', 'isUnsubscribed', 'pd', 'getNames', 'appendLogStr', 'writeRow', 'logComms', 'commsEntryForLead', 'traceOp', 'toast', 'buildUI', 'el', 'looksLikeHtml', 'isFullDesignHtml', 'emailPlainToHtml', 'injectBeforeClose', 'lc', 'isNurtureStep', 'isOffSequence', 'localToday', 'daysBetween', 'ds',
+  src.slice(src.indexOf('*/') + 2) + '\nreturn {resendCfg,resendFetch,resendCandidates,resendListContacts,syncUnsubscribes,syncNewsletterContacts,buildNewsletterHtml,validateBroadcast,resendSendBroadcast,weeklyToBroadcastHtml,nlEligible,nlSeqGroupFor,nlWarmupState,nlWarmupQuota,nlWarmupCum,nlWarmupProjectedDay,nlWarmupHolds,NL_WARMUP_DAYS,RESEND_UNSUB_TAG,RESEND_COMPLIANCE_FOOTER};');
+const M = fn(C, DATA_START, STEP_OFF_SEQUENCE, rows, cfg, trackerCfg, normEmail, isExcluded, isUnsubscribed, pd, getNames, appendLogStr, writeRow, logComms, commsEntryForLead, traceOp, toast, buildUI, el, looksLikeHtml, isFullDesignHtml, emailPlainToHtml, injectBeforeClose, lc, isNurtureStep, isOffSequence, localToday, daysBetween, ds);
 
 const mkLead = (i, name, email, extra) => { rows[i] = []; rows[i][C.NM] = name; rows[i][C.EM] = email; rows[i][C.ST] = 'Contacted'; rows[i][C.LC] = '8/2' + (i % 9) + '/2026'; Object.assign(rows[i], extra || {}); };
 
@@ -163,6 +166,47 @@ await (async () => {
   ok(goodHtml.includes('Meir Schwimer'), 'signature present');
   ok(goodHtml.indexOf('—') === -1, 'no em dashes in the template copy');
   ok(/^<!DOCTYPE html>/.test(goodHtml) && /#f4f1ea/.test(goodHtml) && /#fdfaf3/.test(goodHtml) && /#c9a227/.test(goodHtml), 'complete HTML doc on the brand palette (full-design gate recognizes <html)');
+
+  /* ── warm-up scheduler ── */
+  // quotas: 14 days cover the whole pool, ramp is monotone-ish, capped at 90
+  const POOL = 200;
+  let cum = 0, prevQ = 0, mono = true;
+  for (let d = 0; d < M.NL_WARMUP_DAYS; d++) { const q = M.nlWarmupQuota(d, POOL); if (q + 1 < prevQ) mono = false; prevQ = q; cum += q; }
+  ok(cum >= POOL, '14 daily quotas cover the entire pool');
+  ok(M.nlWarmupCum(M.NL_WARMUP_DAYS - 1, POOL) === POOL, 'cumulative caps at pool size');
+  ok(mono, 'batch sizes ramp (never shrink meaningfully)');
+  ok(M.nlWarmupQuota(0, POOL) < M.nlWarmupQuota(13, POOL), 'day 1 is much smaller than day 14');
+  ok(M.nlWarmupQuota(5, 100000) === 90, 'daily quota hard-capped at 90 (free tier)');
+  ok(M.nlWarmupState() === null, 'no start date → warm-up inactive');
+  // activate: start = 2 schedule-days ago → today is day 2 (index 2)
+  const startD = new Date(localToday().getTime() - 2 * 86400000);
+  cfgVals.nlWarmupStart = ds(startD);
+  cfgVals.nlWarmupSent = {};
+  const ws = M.nlWarmupState();
+  ok(ws && ws.day === 2, 'state reports the right schedule day');
+  // fresh pool for projection: 30 nurture leads, engagement-ordered
+  rows.length = 0; for (const k of Object.keys(nurtureFlags)) delete nurtureFlags[k]; for (const k of Object.keys(offFlags)) delete offFlags[k];
+  for (let i = 0; i < 30; i++) { mkLead(4 + i, 'L' + i, 'l' + i + '@x.com'); rows[4 + i][C.LC] = '8/' + Math.min(28, 28 - i) + '/2026'; }
+  const pool = M.resendCandidates().list;
+  ok(pool.length === 30 && pool[0].email === 'l0@x.com', 'pool engagement-sorted, most engaged first');
+  // most-engaged unsent lead projects to TODAY; deep-ranked projects later
+  const pFirst = M.nlWarmupProjectedDay(pool[0].ri);
+  const pLast = M.nlWarmupProjectedDay(pool[29].ri);
+  ok(pFirst === ws.day, 'top-ranked lead is projected into today\'s batch');
+  ok(pLast > pFirst, 'low-engagement lead projects to a later day');
+  // HOLD RULE: within current schedule-week (≤ day+6) holds; beyond does not
+  ok(M.nlWarmupHolds(pool[0].ri) === true, 'lead due warm-up this schedule-week: normal weekly send HELD');
+  ok((pLast <= ws.day + 6) === M.nlWarmupHolds(pool[29].ri), 'hold matches the schedule-week boundary exactly');
+  // already warm-up-sent → held for the rest of the week
+  cfgVals.nlWarmupSent = { 'l5@x.com': new Date().toISOString() };
+  ok(M.nlWarmupHolds(pool[5].ri) === true, 'already-sent lead stays held (once per week)');
+  // deactivate → nothing held
+  cfgVals.nlWarmupStart = '';
+  ok(M.nlWarmupHolds(pool[0].ri) === false, 'warm-up off → no holds anywhere');
+  cfgVals.nlWarmupSent = {};
+  // per-lead wrapper: no unsubscribe merge tag on transactional sends
+  const noUnsub = M.buildNewsletterHtml('<p>x</p>', { noUnsub: true });
+  ok(noUnsub.indexOf(M.RESEND_UNSUB_TAG) === -1 && noUnsub.includes('815 Superior Ave'), 'per-lead wrapper drops the merge tag, keeps the address');
 
   /* ── weekly draft → broadcast conversion (the weekly draft IS the newsletter) ── */
   const tagOnce = h => h.split(M.RESEND_UNSUB_TAG).length - 1 === 1;
