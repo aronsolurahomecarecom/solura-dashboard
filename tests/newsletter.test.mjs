@@ -68,8 +68,9 @@ globalThis.fetch = async (url, opts) => {
   relayCalls.push(body);
   if (body.op === 'listContacts') return { ok: true, json: async () => ({ ok: true, status: 200, data: { data: audienceContacts } }) };
   if (body.op === 'addContact') { audienceContacts.push({ email: body.email, first_name: body.firstName, unsubscribed: false }); return { ok: true, json: async () => ({ ok: true, status: 200, data: { id: 'c_' + body.email } }) }; }
-  if (body.op === 'createBroadcast') return { ok: true, json: async () => ({ ok: true, status: 200, data: { id: 'bc_1' } }) };
-  if (body.op === 'sendBroadcast') return { ok: true, json: async () => ({ ok: true, status: 200, data: { id: body.broadcastId } }) };
+  if (body.op === 'broadcast') return { ok: true, json: async () => ({ ok: true, status: 200, data: { id: 'bc_1' } }) };
+  if (body.op === 'listSegments') return { ok: true, json: async () => ({ ok: true, status: 200, data: { data: [{ id: 'aud_1', name: 'Newsletter' }] } }) };
+  if (body.op === 'createSegment') return { ok: true, json: async () => ({ ok: true, status: 200, data: { id: 'seg_new' } }) };
   if (body.op === 'domains') return { ok: true, json: async () => ({ ok: true, status: 200, data: { data: [{ name: 'hello.solurahomecare.com', status: 'verified' }] } }) };
   return { ok: false, json: async () => ({ error: 'unknown op' }) };
 };
@@ -103,6 +104,7 @@ await (async () => {
   r = await M.syncNewsletterContacts(50);
   ok(!relayCalls.some(c => c.op === 'addContact' && c.email === 'bob@x.com'), 'unsubscribed bob NEVER re-added (local AD guard)');
   ok(relayCalls.some(c => c.op === 'addContact' && c.email === 'carl@x.com'), 'new lead carl added');
+  ok(relayCalls.some(c => c.op === 'addContact' && c.email === 'carl@x.com' && c.segmentId === 'aud_1'), 'contacts are added INTO the broadcast segment (Audiences are Segments now)');
   ok(r.alreadyPresent === 1, 'ann counted as already present, not re-added');
 
   /* ── last line of defense: unsub in Resend but AD missing locally ── */
@@ -165,7 +167,7 @@ await (async () => {
   /* ── send path: create + send through the relay, refusal short-circuits ── */
   relayCalls.length = 0;
   const bid = await M.resendSendBroadcast('Hello from Solura', goodHtml);
-  ok(bid === 'bc_1' && relayCalls.some(c => c.op === 'createBroadcast' && c.audienceId === 'aud_1') && relayCalls.some(c => c.op === 'sendBroadcast'), 'broadcast created against the Audience then sent');
+  ok(bid === 'bc_1' && relayCalls.some(c => c.op === 'broadcast' && c.segmentId === 'aud_1'), 'broadcast created+sent against the Segment in one call');
   relayCalls.length = 0;
   let threw = false;
   try { await M.resendSendBroadcast('x', goodHtml.replace(M.RESEND_UNSUB_TAG, '')); } catch (_) { threw = true; }

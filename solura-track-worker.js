@@ -22,7 +22,10 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = '6.3-owner'; // 6.3: /resend gains the sendEmail op (per-lead
+var VERSION = '6.4-owner'; // 6.4: Resend's contacts API migration — one
+// audience per account, contacts live at /contacts (cursor-paginated),
+// Audiences became Segments, broadcasts take segment_id + send:true.
+// 6.3: /resend gains the sendEmail op (per-lead
 // weekly-newsletter sends routed through Resend). 6.1: paginated listing — v6.0 listed only the
 // OLDEST 100 keys (lexicographic = chronological), so once 100+ events
 // accumulated in the 7-day window, NEW events could never be returned.
@@ -206,18 +209,41 @@ export default {
       if (!env.RESEND_API_KEY) return json({ error: 'RESEND_API_KEY secret not set on the worker — add it in Cloudflare → Worker → Settings → Variables' }, 500);
       if (!rb || !rb.op) return json({ error: 'op required' }, 400);
       var RA = 'https://api.resend.com';
+      // One audience per account now: contacts are flat at /contacts with
+      // cursor pagination — walk ALL pages here so the dashboard gets the
+      // complete box in one relay round-trip.
+      if (rb.op === 'listContacts') {
+        try {
+          var all = [], after = null, guard = 0, lr, lj, page;
+          do {
+            lr = await fetch(RA + '/contacts?limit=100' + (after ? ('&after=' + encodeURIComponent(after)) : ''),
+              { headers: { 'Authorization': 'Bearer ' + env.RESEND_API_KEY } });
+            lj = await lr.json().catch(function () { return {}; });
+            if (!lr.ok) return json({ ok: false, status: lr.status, data: lj }, 200);
+            page = (lj && lj.data) || [];
+            all = all.concat(page);
+            after = (lj && lj.has_more && page.length) ? page[page.length - 1].id : null;
+            guard++;
+          } while (after && guard < 60);
+          return json({ ok: true, status: 200, data: { data: all } }, 200);
+        } catch (e2) {
+          return json({ error: 'relay fetch failed: ' + (e2 && e2.message || 'network') }, 502);
+        }
+      }
       var call = null;
       if (rb.op === 'domains') call = { m: 'GET', u: RA + '/domains' };
-      else if (rb.op === 'listContacts' && rb.audienceId) {
-        call = { m: 'GET', u: RA + '/audiences/' + encodeURIComponent(rb.audienceId) + '/contacts' };
-      } else if (rb.op === 'addContact' && rb.audienceId && rb.email) {
-        call = { m: 'POST', u: RA + '/audiences/' + encodeURIComponent(rb.audienceId) + '/contacts',
-          b: { email: rb.email, first_name: rb.firstName || '', unsubscribed: false } };
-      } else if (rb.op === 'createBroadcast' && rb.audienceId && rb.subject && rb.html) {
+      else if (rb.op === 'listSegments') call = { m: 'GET', u: RA + '/segments?limit=100' };
+      else if (rb.op === 'createSegment' && rb.name) {
+        call = { m: 'POST', u: RA + '/segments', b: { name: rb.name } };
+      } else if (rb.op === 'addContact' && rb.email) {
+        call = { m: 'POST', u: RA + '/contacts',
+          b: { email: rb.email, first_name: rb.firstName || '', unsubscribed: false,
+            segments: rb.segmentId ? [rb.segmentId] : undefined } };
+      } else if (rb.op === 'broadcast' && rb.segmentId && rb.subject && rb.html) {
+        // create + send in one call (send:true) — Audiences are Segments now
         call = { m: 'POST', u: RA + '/broadcasts',
-          b: { audience_id: rb.audienceId, from: rb.from || '', subject: rb.subject, html: rb.html, reply_to: rb.replyTo || undefined } };
-      } else if (rb.op === 'sendBroadcast' && rb.broadcastId) {
-        call = { m: 'POST', u: RA + '/broadcasts/' + encodeURIComponent(rb.broadcastId) + '/send', b: {} };
+          b: { segment_id: rb.segmentId, from: rb.from || '', subject: rb.subject, html: rb.html,
+            reply_to: rb.replyTo || undefined, send: true } };
       } else if (rb.op === 'sendEmail' && rb.to && rb.subject && rb.html) {
         // Per-lead weekly-newsletter send (the same draft, routed through
         // Resend instead of Graph). Still NOT unsubscribe infrastructure.

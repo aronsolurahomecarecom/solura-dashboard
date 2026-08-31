@@ -16,12 +16,16 @@ follow-up stays on Outlook / Microsoft Graph exactly as before.
    key scoped to `hello.solurahomecare.com`, type Secret, Deploy.
    The key never exists in the dashboard, its config, or this repo.
 
-3. **Create the Audience in Resend** (Audiences → Create, e.g. "Solura Newsletter")
-   and copy its ID.
+3. **Segment instead of Audience** — Resend moved to ONE audience per account;
+   broadcasts target a *Segment*. In the dashboard (⚙ Settings → 📰 Newsletter)
+   hit **➕ Create "Newsletter" segment** and it fills the Segment ID for you
+   (or create one under Resend → Audience → Segments and paste its id).
 
-4. **Dashboard** → ⚙ Settings → 📰 Newsletter: paste the Audience ID (From and
-   Reply-To are prefilled), Save, then **Test connection**. You want:
-   `Domain hello.solurahomecare.com: verified ✓` and the audience count line.
+4. **Dashboard** → ⚙ Settings → 📰 Newsletter: Save (From and Reply-To are
+   prefilled), then **Test connection**. You want:
+   `Domain hello.solurahomecare.com: verified ✓`, your segment listed, and the
+   contact count line. With exactly one segment on the account, Test connection
+   fills the ID automatically.
 
 ## Using it
 

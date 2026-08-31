@@ -1247,8 +1247,11 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <h3 class="st-h">📰 Newsletter (Resend Broadcasts)</h3>
         <p class="st-p">Only the newsletter sends through Resend from <code style="font-size:11px">hello.solurahomecare.com</code> — every sequence and one-to-one email stays on Outlook exactly as today. Resend hosts the entire unsubscribe flow (headers, page, suppression); opt-outs sync back into column AD and those leads exit ALL automated outreach. Calls relay through your tracking worker (v6.2+), so the Resend API key lives only as a Cloudflare secret named <code style="font-size:11px">RESEND_API_KEY</code> — add it in the worker's Settings → Variables. Never paste it here.</p>
         <div class="st-field">
-          <label class="ee-lbl">Audience ID (the newsletter Audience in Resend)</label>
-          <input type="text" class="ee-inp" placeholder="78261eea-…" data-cfg="resendAudienceId" data-cfgtype="str">
+          <label class="ee-lbl">Segment ID <span style="font-weight:400;color:var(--soft)">(Resend now has ONE audience per account; broadcasts target a Segment — Test connection finds yours, or creates one)</span></label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" class="ee-inp" placeholder="78261eea-…" data-cfg="resendAudienceId" data-cfgtype="str" style="flex:1">
+            <button data-action="rs-make-segment" class="st-btn-ghost" style="white-space:nowrap;padding:8px 12px;font-size:11.5px">➕ Create "Newsletter" segment</button>
+          </div>
         </div>
         <div class="st-field" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div><label class="ee-lbl">From</label><input type="text" class="ee-inp" data-cfg="resendFrom" data-cfgtype="str"></div>
@@ -1490,7 +1493,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0831-55';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0831-56';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -6685,9 +6688,12 @@ async function vaTestConnection(){
 var RESEND_UNSUB_TAG='{{{RESEND_UNSUBSCRIBE_URL}}}';
 function resendCfg(){
   var tc=trackerCfg();
-  var aud=String(cfg('resendAudienceId')||'').trim();
+  // Resend unified to ONE audience per account; broadcasts target a SEGMENT.
+  // The stored key keeps its old name (saved configs survive) but the value
+  // is a segment id now.
+  var seg=String(cfg('resendAudienceId')||'').trim();
   if(!tc)return null; // relay rides the tracking worker — needs its URL+token
-  return {url:tc.url,token:tc.token,audienceId:aud,
+  return {url:tc.url,token:tc.token,segmentId:seg,
     from:String(cfg('resendFrom')||'').trim(),
     replyTo:String(cfg('resendReplyTo')||'').trim()};
 }
@@ -6722,9 +6728,10 @@ function resendCandidates(){
 }
 async function resendListContacts(){
   var rc=resendCfg();
-  if(!rc||!rc.audienceId)throw new Error('No Audience ID saved — Settings → Newsletter');
-  var data=await resendFetch('listContacts',{audienceId:rc.audienceId});
-  // Resend returns {data:[...]}; tolerate both shapes and any pagination field
+  if(!rc)throw new Error('Tracking worker not configured — Settings → Data');
+  // One audience per account: the worker walks every /contacts page and
+  // returns the whole box flattened.
+  var data=await resendFetch('listContacts',{});
   var list=(data&&data.data)||[];
   if(data&&data.data&&data.data.data)list=data.data.data;
   return list;
@@ -6734,7 +6741,8 @@ async function resendListContacts(){
 async function syncUnsubscribes(opts){
   opts=opts||{};
   var rc=resendCfg();
-  if(!rc||!rc.audienceId)return {synced:0,skipped:true};
+  // Segment id saved = the newsletter is live; until then stay inert (warm-up)
+  if(!rc||!rc.segmentId)return {synced:0,skipped:true};
   var contacts=await resendListContacts();
   var unsubbed={};
   contacts.forEach(function(c){if(c&&c.unsubscribed===true&&c.email)unsubbed[normEmail(c.email)]=true;});
@@ -6766,7 +6774,7 @@ async function syncUnsubscribes(opts){
  * most damaging bug this feature can have. Idempotent. */
 async function syncNewsletterContacts(cap){
   var rc=resendCfg();
-  if(!rc||!rc.audienceId)throw new Error('No Audience ID saved — Settings → Newsletter');
+  if(!rc||!rc.segmentId)throw new Error('No Segment ID saved — Settings → Newsletter (Resend\'s Audiences became Segments; use Test connection to find or create one)');
   cap=Math.max(1,parseInt(cap,10)||50);
   await syncUnsubscribes({silent:true}); // opt-outs first, always
   var existing={};
@@ -6784,7 +6792,8 @@ async function syncNewsletterContacts(cap){
       res.alreadyPresent++;continue;
     }
     if(room<=0){res.capped++;continue;}
-    await resendFetch('addContact',{audienceId:rc.audienceId,email:cd.email,firstName:cd.firstName});
+    // segments:[segmentId] puts the contact where broadcasts can reach them
+    await resendFetch('addContact',{segmentId:rc.segmentId,email:cd.email,firstName:cd.firstName});
     res.added++;room--;
   }
   traceOp({kind:'newsletter-sync',added:res.added,already:res.alreadyPresent,
@@ -6836,8 +6845,8 @@ function weeklyToBroadcastHtml(subject,body){
 }
 /* Guarded send: refuses without an Audience (an audience-less broadcast
  * renders the merge tag empty and ships WITHOUT working unsubscribe). */
-function validateBroadcast(audienceId,subject,html){
-  if(!String(audienceId||'').trim())return 'No Audience ID — a broadcast without an Audience ships with a BROKEN unsubscribe link. Refusing.';
+function validateBroadcast(segmentId,subject,html){
+  if(!String(segmentId||'').trim())return 'No Segment ID — a broadcast without a Segment ships with a BROKEN unsubscribe link. Refusing.';
   if(!String(subject||'').trim())return 'Subject is required.';
   var v=String(html||'');
   var tagCount=v.split(RESEND_UNSUB_TAG).length-1;
@@ -6848,13 +6857,12 @@ function validateBroadcast(audienceId,subject,html){
 }
 async function resendSendBroadcast(subject,html){
   var rc=resendCfg();
-  var bad=validateBroadcast(rc&&rc.audienceId,subject,html);
+  var bad=validateBroadcast(rc&&rc.segmentId,subject,html);
   if(bad)throw new Error(bad);
-  var created=await resendFetch('createBroadcast',{audienceId:rc.audienceId,
+  // New API: one call creates AND sends (send:true) against the segment
+  var created=await resendFetch('broadcast',{segmentId:rc.segmentId,
     from:rc.from,replyTo:rc.replyTo,subject:subject,html:html});
-  var bid=created&&created.id;
-  if(!bid)throw new Error('Broadcast created but no id returned — not sending');
-  await resendFetch('sendBroadcast',{broadcastId:bid});
+  var bid=(created&&created.id)||'sent';
   traceOp({kind:'newsletter-broadcast-sent',id:bid,subject:String(subject).slice(0,60)});
   return bid;
 }
@@ -10301,19 +10309,52 @@ function onClick(ev){
             lines.push(hd?('Domain hello.solurahomecare.com: '+(hd.status==='verified'?'verified ✓':('⚠ status '+hd.status))):'✗ hello.solurahomecare.com not found on this Resend account');
           }catch(e){lines.push('✗ '+e.message);if(out)out.textContent=lines.join('\n');return;}
           try{
+            // Audiences became Segments — list them, auto-fill when unambiguous
+            var segs=await resendFetch('listSegments');
+            var sList=(segs&&segs.data)||[];
+            if(!sList.length){
+              lines.push('Segments: none yet — hit ➕ Create "Newsletter" segment, then Save.');
+            }else{
+              lines.push('Segments: '+sList.map(function(s){return s.name+' ('+s.id+')';}).join(' · '));
+              var savedSeg=String(cfg('resendAudienceId')||'').trim();
+              if(!savedSeg&&sList.length===1){
+                setCfg('resendAudienceId',sList[0].id);
+                renderConfigInputs();stMarkDirty();
+                lines.push('→ Auto-filled the Segment ID with "'+sList[0].name+'" — hit Save settings to keep it.');
+              }else if(savedSeg&&!sList.some(function(s){return s.id===savedSeg;})){
+                lines.push('⚠ The saved Segment ID does not match any segment on this account — pick one from the list above.');
+              }
+            }
+          }catch(eS){lines.push('Segments: ✗ '+eS.message);}
+          try{
             var contacts=await resendListContacts();
             var un=contacts.filter(function(c){return c.unsubscribed===true;}).length;
-            lines.push('Audience: '+contacts.length+' contact'+(contacts.length!==1?'s':'')+' ('+un+' unsubscribed) — a broadcast today reaches '+(contacts.length-un));
-          }catch(e2){lines.push('Audience: ✗ '+e2.message);}
+            lines.push('Contacts: '+contacts.length+' ('+un+' unsubscribed) — a broadcast today reaches up to '+(contacts.length-un));
+          }catch(e2){lines.push('Contacts: ✗ '+e2.message);}
           if(out)out.textContent=lines.join('\n');
         })();
+      })();
+      break;
+    case 'rs-make-segment':
+      (function(){
+        var out=el('rs-test-out');if(out)out.textContent='Creating the "Newsletter" segment…';
+        resendFetch('createSegment',{name:'Newsletter'}).then(function(seg){
+          var sid=seg&&seg.id;
+          if(!sid){if(out)out.textContent='✗ Segment created but no id came back — check Resend → Audience → Segments and paste the id manually.';return;}
+          setCfg('resendAudienceId',sid);
+          renderConfigInputs();stMarkDirty();
+          if(out)out.textContent='✓ Segment "Newsletter" created ('+sid+') and filled in — hit Save settings to keep it.';
+          toast('➕ Newsletter segment created');
+        }).catch(function(e){
+          if(out)out.textContent='✗ '+e.message+' — you can also create it in Resend → Audience → Segments and paste the id here.';
+        });
       })();
       break;
     case 'rs-unsub':
       (function(){
         var out=el('rs-test-out');if(out)out.textContent='Syncing unsubscribes…';
         syncUnsubscribes().then(function(r10){
-          if(out)out.textContent=r10.skipped?'No Audience ID saved yet.':('Synced '+r10.synced+' unsubscribe'+(r10.synced!==1?'s':'')+' into column AD.');
+          if(out)out.textContent=r10.skipped?'No Segment ID saved yet.':('Synced '+r10.synced+' unsubscribe'+(r10.synced!==1?'s':'')+' into column AD.');
         }).catch(function(e){if(out)out.textContent='✗ '+e.message;});
       })();
       break;
@@ -10345,7 +10386,7 @@ function onClick(ev){
             if(!live){if(out)out.textContent='The list is empty — sync contacts below first.';return;}
             var conv=weeklyToBroadcastHtml(v12.subject,v12.body);
             var rc12=resendCfg();
-            var bad12=validateBroadcast(rc12&&rc12.audienceId,conv.subject,conv.html);
+            var bad12=validateBroadcast(rc12&&rc12.segmentId,conv.subject,conv.html);
             if(bad12){if(out)out.textContent='✗ '+bad12;return;}
             if(!confirm('Send "'+conv.subject+'" to '+live+' subscriber'+(live!==1?'s':'')+' NOW?\n\nEveryone on the list gets it today — this replaces the one-by-one weekly sends.')){
               if(out)out.textContent='Cancelled — nothing sent.';return;
@@ -10413,7 +10454,7 @@ function onClick(ev){
         var subj10=(el('rs-subject')||{}).value||'';
         var html10=(el('rs-html')||{}).value||'';
         var rc10=resendCfg();
-        var bad10=validateBroadcast(rc10&&rc10.audienceId,subj10,html10);
+        var bad10=validateBroadcast(rc10&&rc10.segmentId,subj10,html10);
         if(bad10){if(out)out.textContent='✗ '+bad10;return;}
         if(!confirm('Send this broadcast to the ENTIRE Audience now? Check the audience count with Test connection first — that number is your send count for the warm-up ramp.'))return;
         if(out)out.textContent='Sending…';
