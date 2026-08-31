@@ -22,7 +22,8 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = '6.4-owner'; // 6.4: Resend's contacts API migration — one
+var VERSION = '6.5-owner'; // 6.5: contact segments as [{id}] objects (422 fix).
+// 6.4: Resend's contacts API migration — one
 // audience per account, contacts live at /contacts (cursor-paginated),
 // Audiences became Segments, broadcasts take segment_id + send:true.
 // 6.3: /resend gains the sendEmail op (per-lead
@@ -236,9 +237,11 @@ export default {
       else if (rb.op === 'createSegment' && rb.name) {
         call = { m: 'POST', u: RA + '/segments', b: { name: rb.name } };
       } else if (rb.op === 'addContact' && rb.email) {
+        // segments takes objects, NOT bare id strings — ["id"] is a 422:
+        // "Invalid input: expected object, received string"
         call = { m: 'POST', u: RA + '/contacts',
           b: { email: rb.email, first_name: rb.firstName || '', unsubscribed: false,
-            segments: rb.segmentId ? [rb.segmentId] : undefined } };
+            segments: rb.segmentId ? [{ id: rb.segmentId }] : undefined } };
       } else if (rb.op === 'broadcast' && rb.segmentId && rb.subject && rb.html) {
         // create + send in one call (send:true) — Audiences are Segments now
         call = { m: 'POST', u: RA + '/broadcasts',
