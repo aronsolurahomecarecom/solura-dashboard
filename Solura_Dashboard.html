@@ -615,7 +615,6 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
     <div class="sync-pill"><div class="sdot" id="sdot"></div><span id="slabel">Not connected</span></div>
     <button class="hbtn hbtn-ghost" id="btn-analytics" style="display:none" data-action="open-analytics" title="Analytics hub">📊</button>
     <button class="hbtn hbtn-ghost" id="btn-settings" style="display:none" data-action="open-settings" title="Settings">⚙</button>
-    <button class="hbtn hbtn-ghost" id="btn-weekly" style="display:none" data-action="open-weekly" title="This week's nurture email">📰 Weekly</button>
     <button class="hbtn hbtn-gold" id="btn-addlead" style="display:none" data-action="open-addlead">＋ Add Lead</button>
     <button class="hbtn hbtn-gold" id="btn-refresh" style="display:none" data-action="refresh">↺ Refresh</button>
     <button class="hbtn hbtn-ghost" id="btn-out" style="display:none" data-action="signout">Sign out</button>
@@ -1260,6 +1259,17 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <button data-action="rs-unsub" class="st-btn-ghost">🚫 Sync unsubscribes now</button>
         </div>
         <div id="rs-test-out" style="font-size:12px;line-height:1.7;color:var(--mid);white-space:pre-line;margin-bottom:14px"></div>
+        <h4 class="st-h2">The newsletter</h4>
+        <p class="st-p">Written in the same editor as always (variants, PDF, everything) — it just lives here now. When you're ready to start, one button sends it to <b>everyone on the list on the same day</b>, replacing the one-by-one weekly sends. Until the connection above is configured, nothing sends anywhere.</p>
+        <div class="st-field" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button data-action="rs-edit-weekly" class="st-btn-sky">✏ Open the newsletter editor</button>
+          <button data-action="rs-send-weekly" class="st-btn-gold">📨 Send this week's newsletter to everyone</button>
+        </div>
+        <div id="rs-oneclick-out" style="font-size:12px;color:var(--mid);white-space:pre-line;margin-bottom:10px"></div>
+        <div class="st-field">
+          <button data-action="rs-toggle-list" class="st-btn-ghost">👥 Show everyone on the list</button>
+          <div id="rs-list" style="display:none;margin-top:8px;max-height:320px;overflow-y:auto;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-size:12px;line-height:1.9"></div>
+        </div>
         <h4 class="st-h2">Contact sync — the warm-up ramp</h4>
         <p class="st-p">The subdomain has no sending reputation yet: start at <b>50</b> of your most recently engaged leads, then roughly double the cap every few days over 3–4 weeks. Broadcasts go to the whole Audience, so the Audience size IS the send count. Free tier: 100/day, 3,000/month.</p>
         <div class="st-field" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -1269,7 +1279,8 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <button data-action="rs-sync" class="st-btn-gold">📤 Sync contacts</button>
         </div>
         <div id="rs-sync-out" style="font-size:12px;line-height:1.7;color:var(--mid);white-space:pre-line;margin-bottom:14px"></div>
-        <h4 class="st-h2">Send a broadcast</h4>
+        <h4 class="st-h2">Advanced — hand-edit a send</h4>
+        <p class="st-p" style="font-size:12px">The one-button send above does all of this automatically. Use this only when a send needs manual surgery.</p>
         <div class="st-field">
           <label class="ee-lbl">Subject</label>
           <input type="text" id="rs-subject" class="ee-inp" placeholder="A note from Solura Home Care">
@@ -1479,7 +1490,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0821-54';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0831-55';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2129,7 +2140,7 @@ function onSignedIn(){
   el('ls').style.display='none';
   el('btn-refresh').style.display='inline-block';
   var bal=el('btn-addlead');if(bal)bal.style.display='inline-block';
-  var bwk=el('btn-weekly');if(bwk)bwk.style.display='inline-block';
+  // (📰 Weekly moved off the header — the newsletter lives in Settings → 📰 Newsletter)
   var bst=el('btn-settings');if(bst)bst.style.display='inline-block';
   var ban=el('btn-analytics');if(ban)ban.style.display='inline-block';
   el('btn-out').style.display='inline-block';
@@ -10315,6 +10326,70 @@ function onClick(ev){
             +' · unsubscribed (never re-added) '+s.skippedUnsub
             +(s.capped?(' · held back by the cap '+s.capped):'');
         }).catch(function(e){if(out)out.textContent='✗ '+e.message;});
+      })();
+      break;
+    case 'rs-edit-weekly': openWeekly(); break;
+    case 'rs-send-weekly':
+      (function(){
+        var out=el('rs-oneclick-out');
+        var vs12=weeklyLiveVariants();
+        var v12=vs12&&vs12[0];
+        if(!v12||!(String(v12.subject||'').trim()||String(v12.body||'').trim())){
+          if(out)out.textContent='No newsletter written yet — hit ✏ Open the newsletter editor first.';return;
+        }
+        if(out)out.textContent='Checking the list…';
+        (async function(){
+          try{
+            var contacts=await resendListContacts();
+            var live=contacts.filter(function(c){return c.unsubscribed!==true;}).length;
+            if(!live){if(out)out.textContent='The list is empty — sync contacts below first.';return;}
+            var conv=weeklyToBroadcastHtml(v12.subject,v12.body);
+            var rc12=resendCfg();
+            var bad12=validateBroadcast(rc12&&rc12.audienceId,conv.subject,conv.html);
+            if(bad12){if(out)out.textContent='✗ '+bad12;return;}
+            if(!confirm('Send "'+conv.subject+'" to '+live+' subscriber'+(live!==1?'s':'')+' NOW?\n\nEveryone on the list gets it today — this replaces the one-by-one weekly sends.')){
+              if(out)out.textContent='Cancelled — nothing sent.';return;
+            }
+            if(out)out.textContent='Sending to '+live+'…';
+            var bid12=await resendSendBroadcast(conv.subject,conv.html);
+            if(out)out.textContent='✓ Newsletter sent to '+live+' subscriber'+(live!==1?'s':'')+' — broadcast '+bid12+', variant '+(v12.label||'A')+'. Opens and unsubscribes show up in Resend; opt-outs flow back here automatically.';
+            toast('📨 Newsletter sent to '+live);
+          }catch(e){if(out)out.textContent='✗ '+e.message;}
+        })();
+      })();
+      break;
+    case 'rs-toggle-list':
+      (function(){
+        var box=el('rs-list');if(!box)return;
+        if(box.style.display!=='none'){box.style.display='none';t.textContent='👥 Show everyone on the list';return;}
+        box.style.display='block';box.innerHTML='Loading the list…';t.textContent='👥 Hide the list';
+        (async function(){
+          try{
+            var contacts=await resendListContacts();
+            if(!contacts.length){box.innerHTML='<i>Nobody on the list yet — sync contacts below.</i>';return;}
+            var emailToName={};
+            for(var i9=DATA_START;i9<rows.length;i9++){
+              var e9=normEmail((rows[i9]||[])[C.EM]);
+              if(e9&&!emailToName[e9])emailToName[e9]=String((rows[i9]||[])[C.NM]||(rows[i9]||[])[C.DM]||'').trim();
+            }
+            var subs=contacts.filter(function(c){return c.unsubscribed!==true;});
+            var unsubs=contacts.filter(function(c){return c.unsubscribed===true;});
+            var rowH=function(c,dead){
+              var em9=normEmail(c.email);
+              var nm9=emailToName[em9]||String(c.first_name||'').trim();
+              return '<div style="display:flex;gap:10px;align-items:baseline'+(dead?';opacity:.55':'')+'">'
+                +'<span style="flex:0 0 16px">'+(dead?'🚫':'✓')+'</span>'
+                +'<b style="flex:0 0 170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(nm9||'—')+'</b>'
+                +'<span style="color:var(--soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(c.email)+'</span>'
+                +(dead?'<span style="margin-left:auto;color:var(--red);font-size:11px;flex:0 0 auto">unsubscribed</span>':'')
+                +'</div>';
+            };
+            box.innerHTML='<div style="font-weight:700;margin-bottom:7px">'+subs.length+' will receive the next newsletter'
+              +(unsubs.length?(' · '+unsubs.length+' unsubscribed (never contacted again)'):'')+'</div>'
+              +subs.map(function(c){return rowH(c,false);}).join('')
+              +unsubs.map(function(c){return rowH(c,true);}).join('');
+          }catch(e){box.innerHTML='<span style="color:var(--red)">✗ '+escapeHtml(e.message)+'</span>';}
+        })();
       })();
       break;
     case 'rs-load-weekly':
