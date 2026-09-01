@@ -9210,16 +9210,33 @@ function _actionC(c){
          one more call the next day; after the second call it parks again for good (any
          fresh reply/booking/document still resurfaces them the normal way and resets the
          ladder). Timed parks (awaitingUntil) keep their own schedule and are excluded. */
+      /* THEIR last inbound email is what "silence" actually means, and it counts twice over:
+         (1) a reply RESTARTS the silence clock — a reply read in the Inbox pane, or cleared by
+             'mark all read', is marked seen WITHOUT stamping lastAwaitingReview, so without this
+             the card claimed "no reply in 65 days" about someone who had written back (live
+             2026-09-01: Catrinna white r59, replied Jul 1, card said 65 days);
+         (2) it — not the last time WE looked at them — is what the number should MEASURE:
+             lastAwaitingReview made the card read "no reply in 7 days" for a candidate whose
+             last actual word was 52 days earlier (Marceina Hancock r77).
+         A candidate who wrote back after our last call has also spent the old ladder: a fresh
+         silence earns fresh calls instead of being muted forever by "called ×2". */
+      const _lastIn=(st.emails||[]).reduce((m,e)=>{const d=(e&&e.direction==='in')?Date.parse(e.received||''):NaN;return (isFinite(d)&&d>m)?d:m;},0);
+      const _spcRaw=st.staleParkCalls||{count:0,lastAt:null};
+      const _spc=(_spcRaw.lastAt&&_lastIn>(Date.parse(_spcRaw.lastAt)||0))?{count:0,lastAt:null}:_spcRaw;
       if(!st.awaitingUntil&&c.phone){
         const _lastTouch=Math.max(
           st.awaitingSince?Date.parse(st.awaitingSince)||0:0,
           st.lastAwaitingReview?Date.parse(st.lastAwaitingReview)||0:0,
           st.lastAssignmentAt?Date.parse(st.lastAssignmentAt)||0:0,
-          st.bookingReceivedAt?Date.parse(st.bookingReceivedAt)||0:0);
+          st.bookingReceivedAt?Date.parse(st.bookingReceivedAt)||0:0,
+          _lastIn);
         const _silentDays=_lastTouch?Math.floor((Date.now()-_lastTouch)/86400000):0;
-        const _spc=st.staleParkCalls||{count:0,lastAt:null};
+        /* What the card CLAIMS: days since THEY last said anything (the park's start when they
+           never have). Always >= _silentDays, so the card can never undercut its own gate. */
+        const _quietSince=_lastIn||(st.awaitingSince?Date.parse(st.awaitingSince)||0:0);
+        const _noReplyDays=_quietSince?Math.floor((Date.now()-_quietSince)/86400000):_silentDays;
         if(_silentDays>=7&&_spc.count===0){
-          return{bucket:'action',timing:{txt:'📞 No reply in '+_silentDays+' days — call them',pill:'pa',date:st.awaitingReason||''},info,primary:{kind:'stale-call',label:'📞 Call '+(c.name||'').split(' ')[0],cls:'gold'},manuallyAwaiting:true};
+          return{bucket:'action',timing:{txt:'📞 No reply in '+_noReplyDays+' days — call them',pill:'pa',date:st.awaitingReason||''},info,primary:{kind:'stale-call',label:'📞 Call '+(c.name||'').split(' ')[0],cls:'gold'},manuallyAwaiting:true};
         }
         if(_spc.count===1&&_spc.lastAt&&Date.now()-Date.parse(_spc.lastAt)>=20*3600*1000){
           return{bucket:'action',timing:{txt:'📞 Second call — last try before re-parking',pill:'pa',date:st.awaitingReason||''},info,primary:{kind:'stale-call',label:'📞 Call again',cls:'gold'},manuallyAwaiting:true};
@@ -9227,7 +9244,7 @@ function _actionC(c){
       }
       /* No new activity — silently parked. */
       const awaitingItemsLabel=awaitingItems.length?(' ('+awaitingItems.length+' item'+(awaitingItems.length===1?'':'s')+')'):'';
-      const _calledNote=(st.staleParkCalls&&st.staleParkCalls.count>=2)?' · called ×2, no reply':'';
+      const _calledNote=(_spc.count>=2)?' · called ×2, no reply':'';
       return{bucket:'awaiting',timing:{txt:(st.awaitingReason||'Manually parked')+awaitingItemsLabel+_calledNote,pill:'psoft',date:st.awaitingUntil?('until '+fmtDay(st.awaitingUntil)):''},info,primary:{kind:'release-awaiting',label:'Move out of awaiting',cls:'sky'},manuallyAwaiting:true};
     }
   }
@@ -21705,10 +21722,30 @@ function _seqAutomationLog(){
     +'<div class="brow" style="margin-top:14px"><button class="btn-sec bg-cream" onclick="closeModal()">Close</button></div>';
   document.getElementById('modal').classList.add('open');
 }
+/* OUTWARD-CONTACT HOLD — the robot never writes to a candidate whose ball the operator is
+   holding. Two states say exactly that, and the board already acts on both: a MANUAL PARK
+   (st.manualAwaiting — _actionC buckets them 'awaiting'/'call them' and never shows a send
+   row) and an UNREAD INBOUND REPLY (_actionC's email override outranks every stage-driven
+   primary). The cert lane has honored the unread rule since it shipped — "the tick must not
+   cancel behind the very reply the operator is being told to open" — but the sequence lane
+   honored neither, so an automate-marked email step could fire a scripted message at someone
+   the operator had parked, or at someone whose "I'd like to withdraw" was sitting unread. It
+   holds OUTWARD CONTACT only: advisory/internal steps (the ~1¢ Claude résumé screen, stage
+   bookkeeping) still run for parked candidates, which is where all 10 of the tick's current
+   live targets sit. Latent-not-firing when written (2026-09-01: the one sequence carrying an
+   automate-marked email step, 'Streamlined hiring — fast lane', has 0 candidates on it) — it
+   arms itself the moment anyone is assigned to that lane. */
+function _tickOutwardHold(c){
+  if(!c||!c.st)return '';
+  if(c.st.manualAwaiting)return 'parked in awaiting by you';
+  if((c.st.emails||[]).some(e=>e&&e.direction==='in'&&!e.seen))return 'their reply is unread';
+  return '';
+}
 /* P-6: DRY RUN — what would the automation robot do on its very next pass? Mirrors
    _seqAutomationTick's guards and gating exactly (workspace-open, terminal, unread-reply,
-   per-booking cert warn/cancel windows, engine automatable flag, seqAutoFail, sent-dedup,
-   flow-valid stages, 10-action budget) but EXECUTES NOTHING and writes nothing. */
+   outward-contact hold, per-booking cert warn/cancel windows, engine automatable flag,
+   seqAutoFail, sent-dedup, flow-valid stages, 10-action budget) but EXECUTES NOTHING and
+   writes nothing. Held sends are listed for transparency and, like the tick, cost no budget. */
 function _seqAutomationPreview(){
   const rows=[];let budget=10;
   const auto=!!(SETTINGS.config&&SETTINGS.config.seqAutomation);
@@ -21734,6 +21771,8 @@ function _seqAutomationPreview(){
     if(c.st.seqAutoFail&&c.st.seqAutoFail.stepId===ev.currentStep.id)continue;
     if(it.type==='send-email'&&it.templateKey){
       if(c.st.sent&&c.st.sent[it.templateKey])continue; /* _autoSendTpl's never-double-send rule */
+      const _hold=_tickOutwardHold(c);
+      if(_hold){rows.push({n:c.name,what:'HELD — would send "'+String(it.templateKey).replace(/_/g,' ')+'", but '+_hold,cls:'soft'});continue;} /* no budget: the tick skips it too */
       rows.push({n:c.name,what:'send "'+String(it.templateKey).replace(/_/g,' ')+'" and advance the sequence',cls:'warn'});budget--;
     }else if(it.type==='set-stage'){
       const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
@@ -21822,6 +21861,9 @@ async function _seqAutomationTick(){
     const _clearFail=()=>{if(c.st.seqAutoFail)delete c.st.seqAutoFail;};
     try{
       if(it.type==='send-email'&&it.templateKey){
+        /* The operator has the ball — hold the send (not a failure, so no seqAutoFail stamp:
+           releasing the park or reading the reply lets the very next tick send it). */
+        if(_tickOutwardHold(c))continue;
         if(await _autoSendTpl(c,it.templateKey)){
           _clearFail();
           const adv=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
