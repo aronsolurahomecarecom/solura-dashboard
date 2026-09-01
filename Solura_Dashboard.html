@@ -1085,7 +1085,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <button data-action="es-export-all" class="st-btn-ghost">📤 Export all</button>
         </div>
         <h4 class="st-h2">Engine assignments by source</h4>
-        <p class="st-p">Leads whose Source matches a rule use that engine; everyone else uses the default. Match is case-insensitive partial text.</p>
+        <p class="st-p">Leads whose Source matches a rule use that engine; everyone else uses the default. Match is case-insensitive partial text. <b>🧪 To A/B test whole sequences:</b> hit <b>＋ A/B track</b> on a rule and pick a second (or third) engine — new leads from that source rotate evenly across the tracks, every touch is stamped with its engine, and 📊 → 🔀 Sequence tracks shows which approach wins after a few weeks.</p>
         <div id="es-assign-list" style="margin-bottom:8px"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button data-action="es-add-assign" class="st-btn-ghost">＋ Add rule</button>
@@ -1508,7 +1508,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0831-60';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0831-61';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1695,6 +1695,13 @@ function applyEnginesDoc(){
   }
   SEQ=ENGINES[enginesDoc.defaultEngineId].seq;
 }
+// A rule can carry SEVERAL engines (A/B testing of whole sequences): the
+// same source rotates its leads evenly across the listed tracks. Legacy
+// single-engine rules keep working via engineId.
+function ruleEngineIds(rule){
+  var ids=(rule&&Array.isArray(rule.engineIds)&&rule.engineIds.length)?rule.engineIds:[rule&&rule.engineId];
+  return ids.filter(function(id){return id&&ENGINES[id];});
+}
 function resolveEngineIdWithRules(ri,rules){
   var r=rows[ri]||[];
   var src=String(r[C.SO]||'').trim().toLowerCase();
@@ -1702,10 +1709,16 @@ function resolveEngineIdWithRules(ri,rules){
   rules=rules||[];
   for(var i=0;i<rules.length;i++){
     var m=String(rules[i].match||'').trim().toLowerCase();
-    if(!m||!ENGINES[rules[i].engineId])continue;
+    var ids=ruleEngineIds(rules[i]);
+    if(!m||!ids.length)continue;
     // Rule field: 'source' (default) or 'status' — case-insensitive contains
     var target=(rules[i].field==='status')?st:src;
-    if(target&&(target===m||target.indexOf(m)>-1))return rules[i].engineId;
+    if(target&&(target===m||target.indexOf(m)>-1)){
+      // Even, deterministic rotation: the lead's row index picks the track,
+      // so every device and every reload agrees, and alternating rows give
+      // an even split. One engine = no rotation (today's behavior).
+      return ids[ri%ids.length];
+    }
   }
   return enginesDoc.defaultEngineId;
 }
@@ -1730,7 +1743,7 @@ function statusRuleMatches(ri){
   for(var i=0;i<rules.length;i++){
     if(rules[i].field!=='status')continue;
     var m=String(rules[i].match||'').trim().toLowerCase();
-    if(m&&ENGINES[rules[i].engineId]&&(st===m||st.indexOf(m)>-1))return true;
+    if(m&&ruleEngineIds(rules[i]).length&&(st===m||st.indexOf(m)>-1))return true;
   }
   return false;
 }
@@ -3058,7 +3071,9 @@ async function buildUI(){
   // Run auto-expire before bucketing (writes to sheet; may take a moment)
   try{await autoExpirePhase2();}catch(e){console.warn('autoExpirePhase2:',e.message);}
   // Heal stale nurture follow-ups (memory now, sheet async — see above)
-  try{flushNurtureHeals(healNurtureFollowUps());}catch(e){console.warn('nurture heal:',e.message);}
+  // Nurture NF auto-heal retired (Meir, Aug 31 2026): the historical drift
+  // it repaired is fully cleaned up; the machinery stays available for a
+  // manual revival if drift ever reappears.
 
   var today=localToday();
   var buckets={overdue:[],now:[],later:[],week:[],active:[],future:[]};
@@ -4017,6 +4032,7 @@ async function analyticsFetchComms(){
       subj:String(v[6]||''),
       outcome:String(v[8]||''),
       msgId:String(v[9]||''),
+      engine:String(v[13]||'').trim(),
       openedAt:v[14]?(new Date(v[14]).getTime()||0):0,
       opens:parseInt(v[15],10)||0,
       docOpens:parseInt(v[16],10)||0,
@@ -4095,7 +4111,33 @@ function buildAnalyticsModel(events){
   });
   var winner=null;
   variants.forEach(function(b){if(b.sent>=3&&(!winner||b.openRate>winner.openRate))winner=b;});
-  return {outbound:outbound.sort(function(a,b){return b.ts-a.ts;}),inbound:inbound,kpi:kpi,variants:variants,winner:winner};
+  // 🔀 Sequence tracks: every comm is stamped with its engine, so whole
+  // SEQUENCES compare head-to-head — the A/B that matters when the same
+  // source rotates across multiple tracks.
+  var byEngine={};
+  events.forEach(function(e){
+    if(e.dir==='in'||!e.engine)return;
+    var b2=byEngine[e.engine]=byEngine[e.engine]||{engine:e.engine,touches:0,emailsSent:0,opened:0,replied:0,leads:{}};
+    b2.touches++;
+    if(e.ri)b2.leads[e.ri]=1;
+  });
+  outbound.forEach(function(o){
+    if(!o.engine)return;
+    var b3=byEngine[o.engine];if(!b3)return;
+    b3.emailsSent++;
+    if(o.opens>0||o.openedAt>0)b3.opened++;
+    if(o.reply)b3.replied++;
+  });
+  var engines2=Object.keys(byEngine).map(function(k){
+    var b4=byEngine[k];
+    b4.leadCount=Object.keys(b4.leads).length;
+    b4.openRate=b4.emailsSent?Math.round(100*b4.opened/b4.emailsSent):0;
+    b4.replyRate=b4.emailsSent?Math.round(100*b4.replied/b4.emailsSent):0;
+    return b4;
+  }).sort(function(a,b){return b.touches-a.touches;});
+  var engineWinner=null;
+  engines2.forEach(function(b){if(b.emailsSent>=3&&(!engineWinner||b.replyRate>engineWinner.replyRate||(b.replyRate===engineWinner.replyRate&&b.openRate>engineWinner.openRate)))engineWinner=b;});
+  return {outbound:outbound.sort(function(a,b){return b.ts-a.ts;}),inbound:inbound,kpi:kpi,variants:variants,winner:winner,engines:engines2,engineWinner:engineWinner};
 }
 var _commsLogNextRow=null; // null until initialized
 var _commsLogInFlight=null; // Promise for in-progress ensure() to avoid races
@@ -4512,6 +4554,22 @@ function renderAnalytics(model){
   }else{
     html+='<div style="font-size:12.5px;color:var(--soft);background:var(--cream);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px">No variant-stamped sends yet \u2014 rotate weekly variants (A/B/C) and their A/B results appear here automatically.</div>';
   }
+  html+='<div style="font-size:15px;font-weight:800;margin:6px 0 10px">\ud83d\udd00 Sequence tracks <span style="font-weight:500;color:var(--soft);font-size:12px">\u2014 whole outreach sequences head-to-head; feed one source into 2+ tracks (\u2699 Settings \u2192 engine assignments \u2192 \uff0b A/B track) and compare here</span></div>';
+  var engRows=(model.engines||[]).filter(function(b){return b.touches>0;});
+  if(engRows.length>=2){
+    var ecolors=['#1B2A4A','#C8870A','#2E7D32','#8E44AD','#C0392B','#16A085'];
+    html+='<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px">'
+      +svgBars(engRows.slice(0,6).map(function(b,i){
+        var nm=(ENGINES[b.engine]&&ENGINES[b.engine].name)||b.engine;
+        return {label:nm,v:b.replyRate,color:ecolors[i%ecolors.length],
+          sub:b.leadCount+' leads \u00b7 '+b.touches+' touches \u00b7 '+b.emailsSent+' emails \u00b7 '+b.openRate+'% opened'};
+      }),760)
+      +'<div style="font-size:11px;color:var(--soft);margin-top:6px">Bars show REPLY rate per track \u2014 the closest thing to "which outreach approach works": replies come from any touch (calls and texts included), not just emails.</div>'
+      +(model.engineWinner?('<div style="margin-top:8px;font-size:12.5px"><b>\ud83c\udfc6 '+escapeHtml((ENGINES[model.engineWinner.engine]&&ENGINES[model.engineWinner.engine].name)||model.engineWinner.engine)+'</b> leads on replies ('+model.engineWinner.replyRate+'% of '+model.engineWinner.emailsSent+' emails \u00b7 '+model.engineWinner.touches+' touches).</div>'):'<div style="margin-top:8px;font-size:12px;color:var(--soft)">A winner is called once a track has 3+ email sends.</div>')
+      +'</div>';
+  }else{
+    html+='<div style="font-size:12.5px;color:var(--soft);background:var(--cream);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px">Only one track has activity so far. Add an \uff0b A/B track to an assignment rule and new leads from that source will rotate evenly across the sequences \u2014 results land here as the comms accumulate.</div>';
+  }
   html+='<div style="font-size:11.5px;color:var(--soft);margin-top:18px">This hub grows \u2014 SMS, sequence, source, and conversion analytics will land here as new sections.</div>';
   el('an-body').innerHTML=html;
 }
@@ -4804,22 +4862,38 @@ function ruleMatchCount(rule){
 function renderAssignments(){
   var list=el('es-assign-list');if(!list)return;
   var opts=(enginesDoc.engines||[]).map(function(e){return '<option value="'+escapeHtml(e.id)+'">'+escapeHtml(e.name||e.id)+'</option>';}).join('');
+  // Normalize: every rule edits through engineIds; 1 entry = classic rule,
+  // 2+ entries = A/B rotation across those tracks.
+  asgnState.forEach(function(a){
+    if(!Array.isArray(a.engineIds)||!a.engineIds.length)a.engineIds=[a.engineId||enginesDoc.defaultEngineId];
+  });
   list.innerHTML=asgnState.map(function(a,i){
-    return '<div class="es-assign-row" style="grid-template-columns:130px 1fr 1fr auto auto">'
+    var engineSelects=a.engineIds.map(function(eid,k){
+      return '<span style="display:inline-flex;align-items:center;gap:3px">'
+        +'<select class="ee-inp" style="width:auto" data-asg="'+i+'.engineIds.'+k+'">'+opts+'</select>'
+        +(a.engineIds.length>1?('<b data-action="es-asg-deltrack" data-idx="'+i+'" data-k="'+k+'" style="cursor:pointer;color:var(--red)" title="Remove this track">×</b>'):'')
+        +'</span>';
+    }).join('<span style="font-size:10px;color:var(--soft);font-weight:700">↔</span>');
+    return '<div class="es-assign-row" style="grid-template-columns:130px 1fr 1.5fr auto auto">'
       +'<select class="ee-inp" data-asg="'+i+'.field">'
         +'<option value="source"'+((a.field||'source')==='source'?' selected':'')+'>Source</option>'
         +'<option value="status"'+(a.field==='status'?' selected':'')+'>Status</option>'
       +'</select>'
       +'<input type="text" class="ee-inp" placeholder="contains… e.g. Caring / Lost" value="'+escapeHtml(a.match||'')+'" data-asg="'+i+'.match">'
-      +'<select class="ee-inp" data-asg="'+i+'.engineId">'+opts+'</select>'
+      +'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'+engineSelects
+        +'<button class="ee-mini" data-action="es-asg-addtrack" data-idx="'+i+'" title="Rotate leads evenly across another sequence — A/B test whole tracks">＋ A/B track</button>'
+        +(a.engineIds.length>1?('<span style="font-size:10px;color:var(--gold-deep);font-weight:700">🧪 rotates evenly</span>'):'')
+      +'</div>'
       +'<span style="font-size:10.5px;font-weight:700;color:'+(ruleMatchCount(a)?'var(--grn)':'var(--red)')+';white-space:nowrap">'+ruleMatchCount(a)+' match</span>'
       +'<button class="ee-mini" style="color:var(--red)" data-action="es-del-assign" data-idx="'+i+'">✕</button>'
       +'</div>';
   }).join('')||'<div style="font-size:12px;color:var(--soft);font-style:italic;margin-bottom:6px">No rules — every lead uses the default engine.</div>';
   // Set selects to current values (options render before value assignment)
   asgnState.forEach(function(a,i){
-    var sel=list.querySelector('[data-asg="'+i+'.engineId"]');
-    if(sel&&a.engineId)sel.value=a.engineId;
+    a.engineIds.forEach(function(eid,k){
+      var esel=list.querySelector('[data-asg="'+i+'.engineIds.'+k+'"]');
+      if(esel&&eid)esel.value=eid;
+    });
     var fsel=list.querySelector('[data-asg="'+i+'.field"]');
     if(fsel)fsel.value=a.field||'source';
   });
@@ -5151,7 +5225,12 @@ document.addEventListener('input',function(ev){
   if(t&&t.dataset&&t.dataset.asg){
     var parts=t.dataset.asg.split('.');
     var i=parseInt(parts[0],10);
-    if(asgnState[i])asgnState[i][parts[1]]=t.value;
+    if(asgnState[i]){
+      if(parts[1]==='engineIds'){
+        asgnState[i].engineIds=asgnState[i].engineIds||[];
+        asgnState[i].engineIds[parseInt(parts[2],10)]=t.value;
+      }else asgnState[i][parts[1]]=t.value;
+    }
   }
   // Claude training-section fields → straight into config, dirty-bar saves
   if(t&&t.dataset&&t.dataset.cts){
@@ -10923,8 +11002,26 @@ function onClick(ev){
       })();
       break;
     case 'es-add-assign':
-      asgnState.push({match:'',engineId:enginesDoc.defaultEngineId});
+      asgnState.push({match:'',engineId:enginesDoc.defaultEngineId,engineIds:[enginesDoc.defaultEngineId]});
       renderAssignments();
+      break;
+    case 'es-asg-addtrack':
+      (function(){
+        var a9=asgnState[parseInt(t.dataset.idx,10)];
+        if(!a9)return;
+        a9.engineIds=a9.engineIds&&a9.engineIds.length?a9.engineIds:[a9.engineId||enginesDoc.defaultEngineId];
+        a9.engineIds.push(enginesDoc.defaultEngineId);
+        renderAssignments();
+      })();
+      break;
+    case 'es-asg-deltrack':
+      (function(){
+        var a8=asgnState[parseInt(t.dataset.idx,10)];
+        if(!a8||!a8.engineIds)return;
+        a8.engineIds.splice(parseInt(t.dataset.k,10),1);
+        if(!a8.engineIds.length)a8.engineIds=[enginesDoc.defaultEngineId];
+        renderAssignments();
+      })();
       break;
     case 'es-del-assign':
       asgnState.splice(parseInt(t.dataset.idx,10),1);
@@ -10934,6 +11031,14 @@ function onClick(ev){
       (function(){
         var oldRules=deepCopy(enginesDoc.assignments||[]);
         var newRules=deepCopy(asgnState.filter(function(a){return String(a.match||'').trim();}));
+        // Normalize rotation: engineId mirrors track 1 (legacy compat);
+        // engineIds persists only when there genuinely are 2+ tracks
+        newRules.forEach(function(a){
+          var ids=(a.engineIds||[]).filter(Boolean);
+          if(!ids.length)ids=[a.engineId||enginesDoc.defaultEngineId];
+          a.engineId=ids[0];
+          if(ids.length>1)a.engineIds=ids;else delete a.engineIds;
+        });
         var changed=computeAssignmentChanges(oldRules,newRules);
         enginesDoc.assignments=newRules;
         saveEnginesDoc().then(async function(){
