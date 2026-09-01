@@ -21936,7 +21936,8 @@ function _seqAutomationPreview(){
       const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
       if(flow.includes(it.stage)){rows.push({n:c.name,what:'move stage '+c.stage+' → '+it.stage,cls:'ok'});budget--;}
     }else if(it.type==='integration'&&it.provider==='claude'&&/resume[-_]screen/.test(it.action||'')){
-      rows.push({n:c.name,what:'run the Claude résumé screen (~1¢) and advance on success',cls:'ok'});budget--;
+      if(c.st.aiScreen){rows.push({n:c.name,what:'skip the Claude screen (already on file) and advance the pointer',cls:'soft'});budget--;}
+      else{rows.push({n:c.name,what:'run the Claude résumé screen (~1¢) and advance on success',cls:'ok'});budget--;}
     }
   }
   document.getElementById('m-title').textContent='🔍 Automation dry run — the next pass';
@@ -22043,6 +22044,19 @@ async function _seqAutomationTick(){
         }else await _stampFail('stage "'+it.stage+'" is outside the flow order');
       }
       else if(it.type==='integration'&&it.provider==='claude'&&/resume[-_]screen/.test(it.action||'')){
+        /* ALREADY SCREENED → never re-run (belt over the walk's done-in-reality rule): the
+           P-1 migration re-placed pointers onto this step for candidates screened weeks ago,
+           and the tick re-screened them. The work exists — just move the pointer past it. */
+        if(c.st.aiScreen){
+          const adv0=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
+          if(!adv0.error){
+            Object.assign(c.st,adv0.partialState||{});
+            c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Claude screen already on file — pointer advanced, no re-run'});
+            await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+            budget--;
+          }
+          continue;
+        }
         /* Advisory-only AI screen (~1¢) — safe to automate when the step opts in. Runs the
            screen, advances on success; a failure hands the card to a human INSTEAD of
            silently re-failing every 30 seconds. */
@@ -22382,17 +22396,23 @@ function _seqV3Action(c,info){
        never persisting (N-5). */
     {
       const _isBookkeeping=(e3)=>{
-        if(e3.bucket!=='action')return false;
         const its=e3.intents||[];
-        if(its.length===1&&its[0].type==='advance')return true;
-        if(its.length===2&&its[0].type==='set-stage'&&its[1].type==='advance'&&its[0].stage===cand.stage)return true;
+        /* DONE-IN-REALITY integrations are consumed REGARDLESS of bucket. These rules must sit
+           above the bucket check: an automate-marked step buckets 'scheduled', and leaving an
+           already-done step there hands it to the tick to RE-RUN — live incident 2026-09-02:
+           the P-1 migration re-placed pointers at int_claude_screen for candidates screened
+           weeks ago, and the tick re-screened them ("claude started randomly screening people"). */
+        if(its[0]&&its[0].type==='integration'&&its[0].provider==='claude'&&/resume[-_]screen/.test(its[0].action||'')&&cand.st&&cand.st.aiScreen)return true;
         /* A yardstik-order step whose check ALREADY EXISTS (bgStarted) is done in reality —
-           re-offering "Start Yardstik check" would order a duplicate. Walk through it. */
-        /* EXACT action match — the old bare /order/ matched order_check AND order_verification,
+           re-offering "Start Yardstik check" would order a duplicate. Walk through it.
+           EXACT action match — the old bare /order/ matched order_check AND order_verification,
            so a verification order swallowed the BG-order step (and vice versa). Each order
            kind walks only on ITS OWN evidence. */
         if(its[0]&&its[0].type==='integration'&&its[0].provider==='yardstik'&&/order[-_]?check/.test(its[0].action||'')&&!/verif/.test(its[0].action||'')&&_seqTriggerEval('bgStarted',cand))return true;
         if(its[0]&&its[0].type==='integration'&&its[0].provider==='yardstik'&&/verif/.test(its[0].action||'')&&_seqTriggerEval('verifyStarted',cand))return true;
+        if(e3.bucket!=='action')return false;
+        if(its.length===1&&its[0].type==='advance')return true;
+        if(its.length===2&&its[0].type==='set-stage'&&its[1].type==='advance'&&its[0].stage===cand.stage)return true;
         return false;
       };
       let walked=0;
