@@ -7380,11 +7380,20 @@ function watchForBounce(recipient,candidateRow){
         if(c){
           try{
             const row=c.excelRow;
+            if(c.st&&c.st.__ajCorrupt)return; /* never write over a corrupt cell */
             const st=Object.assign({},c.st);st.log=st.log||[];
-            st.log.push({t:stamp(),x:'⚠ BOUNCE: '+(bounce.subject||'Delivery failure')+' from '+(bounce.from&&bounce.from.emailAddress&&bounce.from.emailAddress.address||'postmaster')});
-            await patchRange('AJ'+row,[[JSON.stringify(st)]]);
+            const _bounceLine={t:stamp(),x:'⚠ BOUNCE: '+(bounce.subject||'Delivery failure')+' from '+(bounce.from&&bounce.from.emailAddress&&bounce.from.emailAddress.address||'postmaster')};
+            st.log.push(_bounceLine);
+            /* _stCell, not a raw stringify: this fires 60s after EVERY send and had no length
+               check at all, so it was the one writer that could hand Graph a >32,767-char cell
+               and have it silently truncated - the exact mechanism that wiped seven profiles. */
+            await patchRange('AJ'+row,[[_stCell(st)]]);
             await refreshRow(row);render();
-            if(wsRow===row){loadW(row);renderWorkspace();}
+            /* The workspace being open on this row is a reason to PROTECT it, not to reload it:
+               loadW replaces W wholesale, so notes, gates and answers typed in the 60 seconds
+               since the send were silently destroyed. Mirror the bounce line into the open
+               workspace instead - their edits survive, and so does the line. */
+            if(wsRow===row&&W&&W.st){W.st.log=(W.st.log||[]).concat(_bounceLine);renderWorkspace();}
           }catch(e){}
         }
       }
@@ -12725,8 +12734,19 @@ function renderFocusedHub(){_memGen++;
   const c=pipeline.find(x=>x.excelRow===W.row);const a=action(c);
   let block='';let title='';let layoutMode='single';
   if(kind==='questions'){
-    const stage=(W.stage==='Screen booked')?'Phone Screen':'Interview';
-    const next=_seqNextStageFor(c,stage,(stage==='Phone Screen')?'Ask references':'Offer'); /* the candidate's OWN sequence decides where the session lands */
+    /* Every questions primary already carries the session's OWN vocabulary - stage and
+       nextStage, set from the candidate's sequence step (or the legacy booking config). This
+       threw both away for a hardcoded two-way map, so any session that is neither a phone screen
+       nor an interview was mislabelled AND, worse, landed the wrong stage: an 'Onboarding
+       booked' candidate was treated as an interview, and _seqNextStageFor then matched the
+       INTERVIEW session step and moved column G BACKWARD to 'Offer'. Stage is truth and it only
+       moves forward, so the primary's nextStage wins outright. The question BANK still falls
+       back when it holds no rows for that stage - an empty hub has no way to complete the
+       session, and stranding the operator is the worse failure. */
+    const _qp=(a&&a.primary&&a.primary.kind==='questions')?a.primary:null;
+    const _sessStage=(_qp&&_qp.stage)||((W.stage==='Screen booked')?'Phone Screen':'Interview');
+    const stage=(typeof QBANK!=='undefined'&&QBANK.some(x=>x.st===_sessStage))?_sessStage:((W.stage==='Screen booked')?'Phone Screen':'Interview');
+    const next=(_qp&&_qp.nextStage)||_seqNextStageFor(c,_sessStage,(_sessStage==='Phone Screen')?'Ask references':'Offer'); /* the candidate's OWN sequence decides where the session lands */
     block=questionsBlock(stage,next);
     title=stage==='Interview'?'Interview':'Phone screen';
     /* The screening + interview hub has the most context-dependence — Meir wants every relevant
@@ -16232,18 +16252,25 @@ async function pollInboxForCandidateEmails(){
     let writeFailCount=0;
     for(const [row,c] of changedRows){
       try{
+        /* A corrupt cell must NEVER be written over. pState hands back a default-shaped ghost
+           for an unparseable cell, so this loop's merge-and-write would cement the wipe - and
+           it runs within 30s of load, unattended. Every other writer refuses on the flag; this
+           one could not even see it, because sanitizeState (next line, IN PLACE on c.st)
+           deletes __ajCorrupt before _stCell ever gets the chance to refuse. Guard first, the
+           way saveW does. */
+        if(c.st&&c.st.__ajCorrupt){writeFailCount++;console.warn('Poll: row',row,'- AJ corrupt, refusing to write over it');continue;}
         const sanitized=sanitizeState(c.st);
         /* Race protector: re-read AJ now, overlay only the fields the poll touched. */
         const merged=await _pollMergeFreshAJ(row, sanitized);
-        const json=JSON.stringify(merged);
-        if(json.length<=32000){
-          await patchRange('AJ'+row,[[json]]);
-          /* Adopt the merged state in memory so the next poll sees fresh server fields too. */
-          c.st=merged;
-        }else{
-          writeFailCount++;
-          console.warn('Poll: skipped row',row,'— state too large after merge:',json.length);
-        }
+        /* THE chokepoint (design rule 5). This was a raw JSON.stringify behind a hand-rolled
+           32,000 test that SKIPPED the write rather than trimming - so a candidate over the
+           line silently stopped recording inbound mail, and nothing here had _stCell's
+           progressive trim or its corrupt refusal. */
+        const json=_stCell(merged);
+        await patchRange('AJ'+row,[[json]]);
+        /* Adopt the merged state in memory so the next poll sees fresh server fields too. */
+        c.st=merged;
+        if(c.row)c.row[35]=json; /* row cache must not keep the pre-write length */
       }catch(e){writeFailCount++;console.warn('Poll write row',row,'failed:',e.message);}
       if((c.st.emails||[]).some(e=>e.direction==='in'&&!e.seen))inboundCount++;
     }
@@ -21571,6 +21598,11 @@ async function _seqRunIntent(row,intentJson){
    locked packs) gate their advance on it. */
 async function _claudeResumeScreen(row){
   const cand=pipeline.find(x=>x.excelRow===row);if(!cand){toast('Candidate not found');return false;}
+  /* Both save paths below run cand.st=sanitizeState(cand.st) BEFORE _stCell, and sanitizeState
+     deletes __ajCorrupt - so _stCell's refusal was disarmed and the screen would have written a
+     ghost state over a corrupt cell. Refuse up front instead: there is nothing worth screening
+     on a row whose profile has not been recovered yet. */
+  if(cand.st&&cand.st.__ajCorrupt){toast('⚠ '+(cand.name||'This candidate')+' - stored data is corrupt; recover the row before screening');return false;}
   const tok=(SETTINGS.config||{}).ziToken||'';
   if(!tok){toast('Set the internal worker token first (Settings → 🔌 Integrations, ZoomInfo card — shared across integrations)');return false;}
   toast('🤖 Claude is screening '+(cand.name||'candidate')+'…');
@@ -21660,9 +21692,16 @@ function aiScreenCard(){
    sequence step is marked automate:true. Waits are hard for automation — it can never advance
    past an unmet trigger (evaluate() simply doesn't emit the intent). Everything it does is
    logged with 🤖⚙ so the activity trail shows exactly what ran and why. */
-async function _autoSendTpl(c,tpl){
+async function _autoSendTpl(c,tpl,allowResend){
   if(!c.email)return false;
-  if(c.st.sent&&c.st.sent[tpl])return false; /* never double-send */
+  /* st.sent[tpl] is a per-LIFETIME stamp - the right dedup for a sequence email (send once,
+     ever) and the WRONG one for a template that is per booking. The cert warning is gated by
+     _certWarnSentFor (per booking) at the call site, but this lifetime test fired first and
+     returned false, so on a RESCHEDULE the T-60 warning was silently skipped - and because the
+     tick's warn branch never ran its body and has no else, control fell straight through to the
+     T-30 branch and CANCELLED the interview with no warning ever sent. allowResend lets a call
+     site say: my own per-booking gate owns this decision. */
+  if(!allowResend&&c.st.sent&&c.st.sent[tpl])return false; /* never double-send */
   const t=getEffectiveTemplate(tpl,c);
   const subj=substituteLive(t.s||'',c);
   const raw=substituteLive(t.b||'',c);
@@ -21688,9 +21727,17 @@ async function _cancelBookingHeadless(c,reason){
 function _staleCallCycleCount(c){
   /* Cycle-aware count: a completed round whose last touch has itself gone idleDays quiet
      counts as a NEW round (matches the re-arm in the action engine). */
-  const spc=c.st.staleParkCalls||{count:0,lastAt:null};
+  let spc=c.st.staleParkCalls||{count:0,lastAt:null};
   const seq=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
   const idleDays=Number(seq&&seq.silencePolicy&&seq.silencePolicy.idleDays)>0?Number(seq.silencePolicy.idleDays):30;
+  /* MIRROR _actionC's reply-reset, which this was missing: a reply newer than the last call
+     spends the old round there, so the CARD said "call them" (count 0, i.e. call #1) while this
+     counter still read 1 and made the click call #2 - which now sends the stage's nudge. One
+     call, and a scripted email goes out. The re-arm below only covers count>=2, so it did not
+     cover this. Concretely: count 1, called Jun 20, they replied Jun 25, today Sep 1 - the card
+     offers a fresh first call, this returned 1. */
+  const lastIn=(c.st.emails||[]).reduce((m,e)=>{const d=(e&&e.direction==='in')?Date.parse(e.received||''):NaN;return (isFinite(d)&&d>m)?d:m;},0);
+  if(spc.lastAt&&lastIn>(Date.parse(spc.lastAt)||0))spc={count:0,lastAt:null};
   if(spc.count>=2&&spc.lastAt&&Date.now()-(Date.parse(spc.lastAt)||0)>=idleDays*86400000)return 0;
   return spc.count||0;
 }
@@ -21862,7 +21909,7 @@ async function _seqAutomationTick(){
       /* T-60→T-30: auto-send the cancellation warning (once per booking). T-30→0: auto-cancel. */
       if(m!=null&&m<=60&&m>30&&missingAny&&!_certWarnSentFor(c)){
         try{
-          if(await _autoSendTpl(c,'interview_cert_warning')){
+          if(await _autoSendTpl(c,'interview_cert_warning',true)){ /* _certWarnSentFor above is the per-booking gate */
             c.st.warnedForBooking=String(c.st.booking||'');
             c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-sent interview cert warning (cancel at T-30)'});
             await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
@@ -22423,7 +22470,11 @@ async function _sendTplDirect(cand,tpl){
   if(!cand.email)throw new Error('no email on file');
   const t=getEffectiveTemplate(tpl,cand);
   const subj=substituteLive(t.s,cand),body=substituteLive(t.b,cand);
-  await sendMailViaGraph(cand.email,subj,body,false,[]);
+  /* Same defect already fixed in _sendNudgeHeadless and _autoSendTpl: isHtml was hardcoded
+     false, so an HTML template sent from a pack or hub button arrived at the candidate as
+     visible raw tags. Detect it the way the composer does. */
+  const isH=/<[a-z][\s\S]*?>/i.test(body);
+  await sendMailViaGraph(cand.email,subj,isH?_soluraShell(body):_soluraEmailHtml(body),true,[]);
   cand.st.sent=cand.st.sent||{};cand.st.sent[tpl]=today();
   if(tpl==='interview_cert_warning')cand.st.warnedForBooking=String(cand.st.booking||''); /* warning is per booking — a reschedule re-arms it */
   cand.st.emails=cand.st.emails||[];
