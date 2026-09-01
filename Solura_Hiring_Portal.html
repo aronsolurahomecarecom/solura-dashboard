@@ -10525,6 +10525,16 @@ function needsNudge(c){
   const ndays=(SETTINGS.config&&SETTINGS.config.nudgeDays)||3;
   const rdays=(SETTINGS.config&&SETTINGS.config.autoRejectDays)||14;
   if(!NUDGE_STAGES.includes(c.stage))return false;
+  /* ONE outward-contact rule, shared with the robot. _tickOutwardHold holds a send when
+     the operator has the ball — the candidate is parked in awaiting, or their reply is
+     sitting unread — and the nudge banner was the last outward path that ignored it, so
+     "⚡ nudge all" could bulk-mail people Meir had deliberately parked, or someone who had
+     just written back (an inbound reply writes no log line, so computeIdleDays never even
+     notices it and still calls them idle). Newly acute for parks since f917e00:
+     computeIdleDays measures the last LOG entry, so a silence-check call resets it to 0 and
+     the parked candidate re-enters the 3-day nudge window three days later, undercutting
+     the 30-day policy their own sequence just set. */
+  if(_tickOutwardHold(c))return false;
   /* At the References stage the nudge only makes sense while the candidate's form is missing —
      once refs are on file, the idle party is US (calling them), so never nudge the candidate. */
   if(c.stage==='References'&&Array.isArray(c.st&&c.st.refs)&&c.st.refs.length>0)return false;
@@ -21711,7 +21721,13 @@ function _staleCallModal(r){
 async function _staleCallDone(r,reached){
   const c=pipeline.find(x=>x.excelRow===r);if(!c)return;
   const n=_staleCallCycleCount(c)+1; /* a long-idle completed round restarts at call #1 */
-  c.st.staleParkCalls={count:n,lastAt:new Date().toISOString()};
+  /* REACHING them ends the round. The ladder exists to break THEIR silence, so a call that
+     connected is the outcome, not a rung: recording it as contact (lastAt) restarts the idle
+     clock, and count 0 means the next round opens at call #1 after another idleDays of
+     silence. Advancing the count here armed the "📞 Call again" card ~20h after a real
+     conversation, and — since f917e00 made the second unreached call SEND the stage's nudge —
+     escalated a successful contact into an automatic email. */
+  c.st.staleParkCalls=reached?{count:0,lastAt:new Date().toISOString()}:{count:n,lastAt:new Date().toISOString()};
   c.st.lastAwaitingReview=new Date().toISOString(); /* re-park cleanly — no stale event resurfaces them */
   /* Round complete and unreached → BACK TO EMAIL NUDGE (Meir's ladder): the stage's nudge
      goes out now, as the result of the logged call. If the stage has no nudge template,
