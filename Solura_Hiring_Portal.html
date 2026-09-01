@@ -17510,7 +17510,22 @@ function openBlastDetail(blastId){
 /* Background refresh path — fully silent. No toast, no spin, no visible signal at all.
    Refreshes data + availability + inbox so calendar stays in sync with Cal.com bookings landing
    via webhook (which writes to the candidate's AJ cell and may touch AK1 for slot consumption). */
-async function backgroundRefresh(){try{await loadData();await loadAvailability();await pollInboxForCandidateEmails().catch(e=>console.warn('Inbox poll:',e.message));if(view==='calendar')renderCalendar();else if(view==='inbox')renderInbox();else if(view==='pipeline'&&typeof render==='function')render(); /* #17: the poll updates unread/reply state on candidates — without this re-render the pipeline cards stayed stale until you visited the email tab */ updateInboxBadge();await _seqAutomationTick().catch(e=>console.warn('Automation tick:',e.message));}catch(e){console.warn('Background refresh:',e.message);}}
+async function backgroundRefresh(){
+  /* EVERY stage independently guarded (Meir, 2026-09-02: "emails didn't appear until I went
+     to the Inbox tab"): the email poll used to sit LAST in line behind loadData and
+     loadAvailability under ONE shared try/catch — any error upstream silently killed mail
+     ingestion for the rest of the session, while the Inbox tab's own on-open force-poll
+     still worked. That made mail look like it needed the Inbox visit to load. New emails
+     must land on the pipeline within one 30-second tick no matter what else is failing. */
+  try{await loadData();}catch(e){console.warn('BG loadData:',e.message);}
+  try{await loadAvailability();}catch(e){console.warn('BG availability:',e.message);}
+  try{await pollInboxForCandidateEmails();}catch(e){console.warn('Inbox poll:',e.message);}
+  try{
+    if(view==='calendar')renderCalendar();else if(view==='inbox')renderInbox();else if(view==='pipeline'&&typeof render==='function')render(); /* #17: the poll updates unread/reply state on candidates — without this re-render the pipeline cards stayed stale until you visited the email tab */
+    updateInboxBadge();
+  }catch(e){console.warn('BG render:',e.message);}
+  try{await _seqAutomationTick();}catch(e){console.warn('Automation tick:',e.message);}
+}
 async function manualBookingsSync(){return manualRefresh();} /* legacy name */
 function openAddFromBooking(name,email,startISO){
   openAdd();
