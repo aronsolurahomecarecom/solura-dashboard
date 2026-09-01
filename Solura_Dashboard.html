@@ -1509,7 +1509,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0901-62';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0901-63';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5306,19 +5306,43 @@ async function importEnginePackage(file){
     text=text.replace(/^﻿/,'').trim()
       .replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim();
     var j=JSON.parse(text);
-    var eng=(j&&j.format==='solura-engine')?j.engine:j; // wrapper or bare engine
-    if(!eng||!eng.phases)throw new Error('Not an engine package (missing phases)');
-    var errs=validateEngine(eng);
-    if(errs.length)throw new Error('Engine does not compile: '+errs.join('; '));
-    eng.id=slugify(eng.id||eng.name||'imported');
-    while(ENGINES[eng.id]||(enginesDoc.engines||[]).some(function(e){return e.id===eng.id;}))eng.id+='-2';
-    if(!eng.name)eng.name=eng.id;
-    (enginesDoc.engines=enginesDoc.engines||[]).push(eng);
+    // Accept EVERY shape engines travel in: a single package
+    // {format:'solura-engine',engine}, a bare engine {id,phases}, the
+    // Export-all bundle {format:'solura-engines-bundle',engines:[…]}, a
+    // bare {engines:[…]} (a whole engines doc), or a plain array.
+    var candidates=[];
+    if(Array.isArray(j))candidates=j;
+    else if(j&&Array.isArray(j.engines))candidates=j.engines;
+    else if(j&&j.engine&&typeof j.engine==='object')candidates=[j.engine];
+    else if(j)candidates=[j];
+    candidates=candidates.filter(function(c){return c&&typeof c==='object';});
+    var withPhases=candidates.filter(function(c){return Array.isArray(c.phases)&&c.phases.length;});
+    if(!withPhases.length){
+      var keys=candidates.length?Object.keys(candidates[0]).slice(0,8).join(', '):Object.keys(j||{}).slice(0,8).join(', ');
+      throw new Error('No engine with phases found in this file (top-level fields: '+(keys||'none')+'). An engine needs a "phases" array — export one from here to see the exact shape.');
+    }
+    var imported=[],failed=[];
+    for(var wi=0;wi<withPhases.length;wi++){
+      var eng=withPhases[wi];
+      var errs=validateEngine(eng);
+      if(errs.length){failed.push((eng.name||eng.id||'engine '+(wi+1))+': '+errs.join('; '));continue;}
+      eng.id=slugify(eng.id||eng.name||'imported');
+      while(ENGINES[eng.id]||(enginesDoc.engines||[]).some(function(e){return e.id===eng.id;}))eng.id+='-2';
+      if(!eng.name)eng.name=eng.id;
+      (enginesDoc.engines=enginesDoc.engines||[]).push(eng);
+      imported.push(eng.name);
+    }
+    if(!imported.length)throw new Error('Engine'+(failed.length!==1?'s':'')+' found but none compile — '+failed.join(' · '));
     applyEnginesDoc(); // register NOW — usable even before the save lands
     await saveEnginesDoc();
     renderSettingsEngines();renderAssignments();
-    if(out){out.style.color='var(--grn)';out.textContent='✓ Imported "'+eng.name+'" ('+eng.id+') — assign it a source or stage on its card below.';}
-    toast('✓ Imported "'+eng.name+'"');
+    if(out){
+      out.style.color='var(--grn)';
+      out.textContent='✓ Imported '+imported.length+' engine'+(imported.length!==1?'s':'')+': '+imported.join(', ')
+        +(failed.length?('\n⚠ Skipped (did not compile): '+failed.join(' · ')):'')
+        +'\nAssign a source or stage on the card'+(imported.length!==1?'s':'')+' below.';
+    }
+    toast('✓ Imported '+imported.join(', '));
   }catch(e){
     // showErr's bar sits UNDER the Settings overlay — the failure must be
     // visible right here, next to the button that was clicked.
