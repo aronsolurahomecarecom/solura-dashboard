@@ -9220,8 +9220,20 @@ function _actionC(c){
       delete st.awaitingItemsInitialCount;
       delete st.awaitingItemsReceived;
       delete st.lastAwaitingReview;delete st.staleParkCalls;
-      st.log=st.log||[];
-      st.log.push({t:stamp(),x:'✓ Auto-released from awaiting — booking arrived'});
+      /* Log ONCE per row per page session. Nothing here persists — and loadData rebuilds the
+         pipeline from the sheet every 30 seconds, restoring manualAwaiting — so the release
+         re-fired on every cycle and appended this same line ~120 times an hour. Whichever writer
+         next saved the row (the tick, _seqCommitState, compaction, saveW) baked the whole pile in;
+         sanitizeState caps log at 200 and _stCell trims to 80, so real history — cert records, the
+         call trail, interview notes — was evicted by duplicates, while the state grew toward the
+         32,767-char cap that wiped seven profiles. Same once-per-row discipline as
+         _snapOnce/_walkOnce, which exist for exactly this reason. */
+      window._awaitReleaseOnce=window._awaitReleaseOnce||{};
+      if(!window._awaitReleaseOnce[c.excelRow]){
+        window._awaitReleaseOnce[c.excelRow]=1;
+        st.log=st.log||[];
+        st.log.push({t:stamp(),x:'✓ Auto-released from awaiting — booking arrived'});
+      }
       _autoReleased=true;
       /* Fall through the rest of the manualAwaiting block; the _autoReleased flag will skip its
          remaining return paths so stage-driven evaluation runs. */
@@ -10543,8 +10555,15 @@ function computeIdleDays(c){
   const lastTs=(c.st.log&&c.st.log.length)?c.st.log[c.st.log.length-1].t:'';
   /* log timestamps are e.g. "Mar 15" — parse to current-year date */
   if(!lastTs)return 0;
-  try{const d=new Date(lastTs+' '+new Date().getFullYear());if(isNaN(d.getTime()))return 0;
-    const diff=Math.floor((Date.now()-d.getTime())/86400000);
+  try{const now=Date.now(),yr=new Date().getFullYear();
+    let d=new Date(lastTs+' '+yr);if(isNaN(d.getTime()))return 0;
+    /* stamp() writes "Nov 20" with no year, so assuming the CURRENT year turns every entry from
+       last year into a date ~10 months in the future — and the diff<0 clamp below then reported
+       idle 0. Every candidate whose last activity fell before New Year silently dropped out of
+       both the nudge ladder and the auto-reject list each January, and stayed out until the wall
+       clock came back around to their date. A stamp in the future can only be last year's. */
+    if(d.getTime()>now+86400000){d=new Date(lastTs+' '+(yr-1));if(isNaN(d.getTime()))return 0;}
+    const diff=Math.floor((now-d.getTime())/86400000);
     return diff<0?0:diff;}catch(e){return 0;}
 }
 /* Stages where the system has sent a form/email and the candidate is expected to respond.
@@ -10723,7 +10742,7 @@ function renderNudgeBanner(){
      scratch and loses the user's "review ▾" expansion — annoying when they're mid-batch. */
   const wasOpen=window._nudgeListOpen===true;
   banner.innerHTML=`<div class="nudge-box">
-    <div class="nudge-head"><span class="nudge-icon">🔔</span><span class="nudge-title">${nudges.length} candidate${nudges.length===1?'':'s'} ready to nudge — idle ${ndays}+ days</span><button class="nudge-toggle" onclick="nudgeOneByOne()" title="Review and nudge one at a time">one-by-one →</button><button class="nudge-toggle" onclick="nudgeAll()" title="Send a nudge to everyone idle" style="color:var(--grn-deep);font-weight:700">⚡ nudge all</button><button class="nudge-toggle" onclick="_toggleNudgeList()">${wasOpen?'collapse ▴':'review ▾'}</button></div>
+    <div class="nudge-head"><span class="nudge-icon">🔔</span><span class="nudge-title">${nudges.length} candidate${nudges.length===1?'':'s'} ready to nudge — idle ${ndays}+ days</span><button class="nudge-toggle" onclick="nudgeOneByOne()" title="Review and nudge one at a time">one-by-one →</button><button class="nudge-toggle" onclick="nudgeAll()" title="Send a nudge to everyone idle" style="color:var(--grn-deep);font-weight:700">⚡ nudge all</button><button class="nudge-toggle" id="nudge-toggle-btn" onclick="_toggleNudgeList()">${wasOpen?'collapse ▴':'review ▾'}</button></div>
     <div class="nudge-list${wasOpen?' open':''}" id="nudge-list">${items}${more}</div>
   </div>`;
 }
@@ -10732,8 +10751,12 @@ function _toggleNudgeList(){
   const willOpen=!list.classList.contains('open');
   list.classList.toggle('open',willOpen);
   window._nudgeListOpen=willOpen;
-  /* Update toggle button label */
-  const btn=document.querySelector('.nudge-toggle');if(btn)btn.textContent=willOpen?'collapse ▴':'review ▾';
+  /* Update toggle button label. Target it by id: the banner head emits THREE .nudge-toggle
+     buttons — 'one-by-one →', '⚡ nudge all', then this one — so the old unscoped
+     querySelector('.nudge-toggle') relabelled 'one-by-one →' to 'collapse ▴'. Clicking the
+     button that now read 'collapse ▴' fired nudgeOneByOne() and opened the bulk nudge stepper
+     over every idle candidate instead of tucking the list away. */
+  const btn=document.getElementById('nudge-toggle-btn');if(btn)btn.textContent=willOpen?'collapse ▴':'review ▾';
 }
 /* ===================== nudge: send-all + one-by-one ===================== */
 /* Headless nudge — composes the stage-appropriate nudge template and sends WITHOUT opening the
