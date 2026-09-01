@@ -141,6 +141,10 @@ td{padding:13px 16px;vertical-align:top;}
 /* Pills */
 .pill{font-size:10px;font-weight:700;padding:3px 9px;border-radius:10px;display:inline-block;letter-spacing:.02em;}
 .pr2{background:var(--red-pale);color:var(--red);border:1px solid #EFC4C0;}
+/* .pbad — the loudest pill. Referenced since the cert-cancel choreography shipped (imminent
+   interview cancel, cancellation warning) and now by the no-show row, but never defined: those
+   three rows, the most time-critical in the app, were rendering as bare unstyled text. */
+.pbad{background:var(--red);color:#fff;border:1px solid var(--red);}
 .pa{background:#FEF3DC;color:#9A6100;border:1px solid #F5D98A;}
 .pg{background:var(--grn-pale);color:var(--grn);border:1px solid #B0DCA8;}
 
@@ -10799,8 +10803,17 @@ function action(c){
   if(c&&c.st&&c.st.booking&&c.st.meetingUrl&&c.stage!=='Hired'&&c.stage!=='Declined'&&c.stage!=='Withdrawn'){
     const _msTpl={'Screen booked':'missed_screen','Interview booked':'missed_interview','Onboarding booked':'missed_onboarding'}[c.stage];
     const _m4=minsUntil(c.st.booking);
-    if(_msTpl&&_m4!=null&&_m4<=-15&&!(c.st.sent&&c.st.sent[_msTpl])&&!(c.st.emails||[]).some(e2=>!e2.seen)){
-      return{bucket:'action',timing:{txt:'📵 Looks like a no-show — video call was '+Math.round(-_m4)+'m ago',pill:'pbad',date:_fmtBooking(c.st.booking)},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'noshow-rebook',stage:c.stage,label:'📵 No-show — send rebook email',cls:'red'}};
+    /* The rebook email suppresses this card only when it belongs to THIS booking. st.sent is a
+       per-LIFETIME stamp ({tpl: 'YYYY-MM-DD'}), so a missed_* sent for an earlier booking would
+       otherwise mute the card forever — a candidate who rebooks and no-shows again would never
+       surface. Same per-booking discipline as _certWarnSentFor/_autoCancelDoneFor; a stamp dated
+       on or after the booking's own day is this booking's. */
+    const _msSent=(c.st.sent||{})[_msTpl];
+    const _bookDay=String(c.st.booking||'').slice(0,10);
+    const _sentThisBooking=!!(_msSent&&_bookDay&&String(_msSent)>=_bookDay);
+    if(_msTpl&&_m4!=null&&_m4<=-15&&!_sentThisBooking&&!(c.st.emails||[]).some(e2=>!e2.seen)){
+      const _ago=-_m4<60?Math.round(-_m4)+'m ago':-_m4<2880?Math.round(-_m4/60)+'h ago':Math.round(-_m4/1440)+'d ago';
+      return{bucket:'action',timing:{txt:'📵 Looks like a no-show — video call was '+_ago,pill:'pbad',date:_fmtBooking(c.st.booking)},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'noshow-rebook',stage:c.stage,label:'📵 No-show — send rebook email',cls:'red'}};
     }
   }
   /* All certs in → cross-check hub is the action, until ✓ Done with checks is pressed there. */
@@ -12913,16 +12926,41 @@ async function _stateCompactionPass(){
       const raw=(c.row&&c.row[35])?String(c.row[35]).length:0;
       if(raw<=27000)continue;
       const s=JSON.parse(JSON.stringify(c.st));
-      if(Array.isArray(s.log))s.log=s.log.slice(-100);
-      if(Array.isArray(s.sequenceHistory))s.sequenceHistory=s.sequenceHistory.slice(-25);
-      if(Array.isArray(s.emails))s.emails=s.emails.slice(0,25);
+      /* Trim to a SIZE TARGET, not to fixed counts. Fixed caps (log 100 / emails 25 /
+         history 25) were looser than what a 27k+ row actually holds — measured live
+         2026-08-31: Tyisha Stallings (31,887 chars; log 80, emails 22, history 15) and
+         Odayza Mayo (31,226; log 64, emails 19, history 15) both reclaimed ZERO bytes and
+         were then dropped by the "not worth a write" test, leaving them ~900 chars from the
+         truncation cliff this pass exists to keep them away from. Rungs run oldest-first in
+         _stCell's own order and stop the moment the row is under target, so a row gives up
+         no more history than it must. st.emails is a cached PREVIEW of Graph mail (subject +
+         200-char snippet, already capped at 40 by every writer) — the mail itself lives in
+         Outlook and the Inbox re-fetches it. */
+      const _rungs=[
+        o=>{if(Array.isArray(o.log)&&o.log.length>60)o.log=o.log.slice(-60);},
+        o=>{if(Array.isArray(o.emails)&&o.emails.length>20)o.emails=o.emails.slice(0,20);},
+        o=>{if(Array.isArray(o.sequenceHistory)&&o.sequenceHistory.length>15)o.sequenceHistory=o.sequenceHistory.slice(-15);},
+        o=>{if(Array.isArray(o.log)&&o.log.length>40)o.log=o.log.slice(-40);},
+        o=>{if(Array.isArray(o.emails)&&o.emails.length>12)o.emails=o.emails.slice(0,12);},
+        o=>{if(Array.isArray(o.profileEdits)&&o.profileEdits.length>10)o.profileEdits=o.profileEdits.slice(-10);},
+        o=>{if(Array.isArray(o.checkins)&&o.checkins.length>10)o.checkins=o.checkins.slice(-10);},
+        o=>{if(Array.isArray(o.log)&&o.log.length>25)o.log=o.log.slice(-25);},
+        o=>{if(Array.isArray(o.emails)&&o.emails.length>8)o.emails=o.emails.slice(0,8);}
+      ];
       let j;try{j=_stCell(s);}catch(e){continue;}
-      if(raw-j.length<2000)continue; /* not worth a write */
+      for(const rung of _rungs){
+        if(j.length<=24000)break; /* comfortably under the 27k trigger — no daily re-trim of the same row */
+        rung(s);
+        try{j=_stCell(s);}catch(e){j=null;break;}
+      }
+      if(j===null)continue;
+      if(raw-j.length<2000)continue; /* genuinely nothing left to reclaim */
       s.log=(s.log||[]).concat({t:stamp(),x:'🗜 State compacted ('+raw+' → '+j.length+' chars) — oldest history trimmed'});
       try{j=_stCell(s);}catch(e){continue;}
       try{
         await patchRange('AJ'+c.excelRow,[[j]]);
         c.st=JSON.parse(j);
+        c.row[35]=j; /* the row cache IS the cell — leaving it stale makes every later size check read the pre-trim length */
         n++;
       }catch(e){console.warn('compaction write failed:',c.name,e.message);}
     }
