@@ -838,7 +838,8 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         </div>
         <div>
           <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Relationship</label>
-          <input type="text" id="al-rel" placeholder="Daughter, Son…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+          <input type="text" id="al-rel" list="al-rel-list" placeholder="Daughter, Son…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
+          <datalist id="al-rel-list"></datalist>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
@@ -1509,7 +1510,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0901-66';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0901-67';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1707,13 +1708,15 @@ function resolveEngineIdWithRules(ri,rules){
   var r=rows[ri]||[];
   var src=String(r[C.SO]||'').trim().toLowerCase();
   var st=String(r[C.ST]||'').trim().toLowerCase();
+  var rel=String(r[C.REL]||'').trim().toLowerCase();
   rules=rules||[];
   for(var i=0;i<rules.length;i++){
     var m=String(rules[i].match||'').trim().toLowerCase();
     var ids=ruleEngineIds(rules[i]);
     if(!m||!ids.length)continue;
-    // Rule field: 'source' (default) or 'status' — case-insensitive contains
-    var target=(rules[i].field==='status')?st:src;
+    // Rule field: 'source' (default), 'status', or 'relationship' —
+    // case-insensitive contains
+    var target=(rules[i].field==='status')?st:(rules[i].field==='relationship')?rel:src;
     if(target&&(target===m||target.indexOf(m)>-1)){
       // Even, deterministic rotation: the lead's row index picks the track,
       // so every device and every reload agrees, and alternating rows give
@@ -1900,6 +1903,7 @@ var CONFIG_DEFAULTS={
   resendReplyTo:'care@solurahomecare.com',
   customStatuses:[],       // stages added via "➕ New stage…" — reflected everywhere
   customSources:[],        // lead sources added via "➕ New source…"
+  customRelationships:[],  // relationships added via "➕ New relationship…"
   nlSeqGroups:['nurture'], // sequence positions that get the newsletter
   nlStatuses:[],           // stages that ALSO get it, regardless of position
   nlWarmupStart:'',        // YYYY-MM-DD the 14-day warm-up began ('' = not running)
@@ -3376,9 +3380,18 @@ function allSources(){
   for(var i=DATA_START;i<rows.length;i++)push((rows[i]||[])[C.SO]);
   return out.sort(function(a,b){return a.localeCompare(b);});
 }
-function addCustomValue(kind,name){ // kind: 'status'|'source' → registry + sync
+var REL_OPTS=['Self','Spouse','Daughter','Son','Daughter-in-law','Son-in-law','Grandchild','Sibling','Niece / Nephew','Friend / Neighbor','Other'];
+function allRelationships(){
+  var seen={},out=[];
+  var push=function(s){s=String(s||'').trim();if(!s)return;var k=s.toLowerCase();if(seen[k])return;seen[k]=1;out.push(s);};
+  REL_OPTS.forEach(push);
+  customValues('customRelationships').forEach(push);
+  for(var i=DATA_START;i<rows.length;i++)push((rows[i]||[])[C.REL]);
+  return out.sort(function(a,b){return a.localeCompare(b);});
+}
+function addCustomValue(kind,name){ // kind: 'status'|'source'|'relationship' → registry + sync
   name=String(name||'').trim();if(!name)return '';
-  var key=kind==='status'?'customStatuses':'customSources';
+  var key=kind==='status'?'customStatuses':kind==='relationship'?'customRelationships':'customSources';
   var cl=customValues(key).slice();
   if(!cl.some(function(x){return x.toLowerCase()===name.toLowerCase();})){
     cl.push(name);setCfg(key,cl);
@@ -3488,7 +3501,7 @@ function openEp(ri,mode,opts){
       +epLockField('Decision Maker',vDM,'<input type="text" class="ep-dm" value="'+escapeHtml(vDM)+'" placeholder="Who did you speak with?">')
       +'</div>'
       +'<div class="la-grid g4">'
-      +epLockField('Relationship',vREL,'<input type="text" class="ep-rel" value="'+escapeHtml(vREL)+'" placeholder="Son, daughter, spouse\u2026">')
+      +epLockField('Relationship',vREL,'<input type="text" class="ep-rel" list="ep-rel-list" value="'+escapeHtml(vREL)+'" placeholder="Son, daughter, spouse\u2026"><datalist id="ep-rel-list">'+allRelationships().map(function(x){return '<option value="'+escapeHtml(x)+'">';}).join('')+'</datalist>')
       +epLockField('Monthly Budget',vMV,'<input type="text" class="ep-budget" value="'+escapeHtml(vMV)+'" placeholder="$1,500/mo\u2026">')
       +epLockField('Hours / Week',vHR,'<input type="text" class="ep-hrs" value="'+escapeHtml(vHR)+'" placeholder="20 hrs\u2026">')
       +'<div class="la-f"><label>Urgency</label><select class="ep-urgency"><option value="">\u2014 select \u2014</option><option>ASAP \u2014 within days</option><option>Within 2 weeks</option><option>Within a month</option><option>Just exploring</option></select></div>'
@@ -4886,6 +4899,7 @@ function renderSettingsEngines(){
   var list=el('es-engine-list');if(!list)return;
   var srcOpts=allSources().map(function(s){return '<option value="'+escapeHtml(s)+'">'+escapeHtml(s)+'</option>';}).join('');
   var stOpts=allStatuses().map(function(s){return '<option value="'+escapeHtml(s)+'">'+escapeHtml(s)+'</option>';}).join('');
+  var relOpts=allRelationships().map(function(s){return '<option value="'+escapeHtml(s)+'">'+escapeHtml(s)+'</option>';}).join('');
   list.innerHTML=(enginesDoc.engines||[]).map(function(e){
     var comp=ENGINES[e.id];
     var meta=comp?(e.phases.length+' phases · '+comp.seq.length+' steps'):'⚠ does not compile';
@@ -4899,7 +4913,7 @@ function renderSettingsEngines(){
       .map(function(x){
         var ids=ruleEngineIds(x.a);
         return '<span style="display:inline-flex;align-items:center;gap:5px;background:var(--cream);border:1px solid var(--border);border-radius:999px;padding:2px 9px;font-size:11px">'
-          +(x.a.field==='status'?'🎯':'🏷')+' '+escapeHtml(x.a.match)
+          +(x.a.field==='status'?'🎯':x.a.field==='relationship'?'👪':'🏷')+' '+escapeHtml(x.a.match)
           +(ids.length>1?'<i style="color:var(--gold-deep);font-style:normal;font-weight:700" title="This value rotates evenly across '+ids.length+' engines — sequence A/B">↔'+ids.length+'</i>':'')
           +'<b data-action="es-eng-unassign" data-eid="'+escapeHtml(e.id)+'" data-ridx="'+x.idx+'" style="cursor:pointer;color:var(--red)" title="Stop routing this to the engine">×</b></span>';
       }).join(' ');
@@ -4917,6 +4931,7 @@ function renderSettingsEngines(){
         +(chips||'<i style="font-size:11px;color:var(--soft)">'+(isDef?'everyone unmatched (default)':'nothing routed here yet')+'</i>')
         +'<select class="ee-inp" style="width:auto;font-size:11px;padding:4px 7px" data-engassign="'+escapeHtml(e.id)+'|source"><option value="">＋ source…</option>'+srcOpts+'<option value="__new__">➕ New source…</option></select>'
         +'<select class="ee-inp" style="width:auto;font-size:11px;padding:4px 7px" data-engassign="'+escapeHtml(e.id)+'|status"><option value="">＋ stage…</option>'+stOpts+'<option value="__new__">➕ New stage…</option></select>'
+        +'<select class="ee-inp" style="width:auto;font-size:11px;padding:4px 7px" data-engassign="'+escapeHtml(e.id)+'|relationship"><option value="">＋ relationship…</option>'+relOpts+'<option value="__new__">➕ New relationship…</option></select>'
       +'</div>'
       +'</div>';
   }).join('')||'<div style="font-size:12px;color:var(--soft);font-style:italic">No engines.</div>';
@@ -4977,7 +4992,9 @@ function ruleMatchCount(rule){
     var r=rows[i];if(!r)continue;
     if(!String(r[C.NM]||r[C.DM]||'').trim())continue;
     var m=String(rule.match||'').trim().toLowerCase();if(!m)continue;
-    var target=(rule.field==='status')?String(r[C.ST]||'').trim().toLowerCase():String(r[C.SO]||'').trim().toLowerCase();
+    var target=(rule.field==='status')?String(r[C.ST]||'').trim().toLowerCase()
+      :(rule.field==='relationship')?String(r[C.REL]||'').trim().toLowerCase()
+      :String(r[C.SO]||'').trim().toLowerCase();
     if(target&&(target===m||target.indexOf(m)>-1))n++;
   }
   return n;
@@ -5001,6 +5018,7 @@ function renderAssignments(){
       +'<select class="ee-inp" data-asg="'+i+'.field">'
         +'<option value="source"'+((a.field||'source')==='source'?' selected':'')+'>Source</option>'
         +'<option value="status"'+(a.field==='status'?' selected':'')+'>Status</option>'
+        +'<option value="relationship"'+(a.field==='relationship'?' selected':'')+'>Relationship</option>'
       +'</select>'
       +'<input type="text" class="ee-inp" placeholder="contains… e.g. Caring / Lost" value="'+escapeHtml(a.match||'')+'" data-asg="'+i+'.match">'
       +'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'+engineSelects
@@ -5489,11 +5507,12 @@ document.addEventListener('change',function(ev){
     var val9=t.value;t.value='';
     if(!val9)return;
     if(val9==='__new__'){
-      var nv9=prompt('Name the new '+(field9==='status'?'stage':'lead source')+':');
+      var kind9=field9==='status'?'stage':field9==='relationship'?'relationship':'lead source';
+      var nv9=prompt('Name the new '+kind9+':');
       nv9=String(nv9||'').trim();
       if(!nv9)return;
-      val9=addCustomValue(field9==='status'?'status':'source',nv9);
-      toast('➕ "'+val9+'" added — it now appears in every '+(field9==='status'?'stage':'source')+' list');
+      val9=addCustomValue(field9==='status'?'status':field9==='relationship'?'relationship':'source',nv9);
+      toast('➕ "'+val9+'" added — it now appears in every '+kind9+' list');
     }
     assignValueToEngine(eid9,field9,val9);
     return;
@@ -5862,6 +5881,7 @@ function openAddLead(){
   // Central registries: built-ins + custom additions + everything on the sheet
   var dl1=el('al-source-list');if(dl1)dl1.innerHTML=allSources().map(function(x){return '<option value="'+escapeHtml(x)+'">';}).join('');
   var dl2=el('al-status-list');if(dl2)dl2.innerHTML=allStatuses().map(function(x){return '<option value="'+escapeHtml(x)+'">';}).join('');
+  var dl3=el('al-rel-list');if(dl3)dl3.innerHTML=allRelationships().map(function(x){return '<option value="'+escapeHtml(x)+'">';}).join('');
   el('modal-addlead').classList.add('open');
   setTimeout(function(){var n=el('al-name');if(n)n.focus();},60);
 }
