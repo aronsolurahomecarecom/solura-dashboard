@@ -1755,1728 +1755,7 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
   </div>
 </div>
 
-<script>
-/* ═══════════════════════════════════════════════════════════════════════════
-   SEQUENCE ENGINE V2 (r2) — embedded from sequence_engine_v2.js (Claude Code
-   build, 55/55 tests green) with ONE documented host extension: the editor's
-   integration provider list now includes 'claude' and 'zoominfo' (canonical
-   copy: sequence_engine_v2_r2.js in outputs — replace this block with THAT
-   file's contents when upgrading). DO NOT edit inline: to upgrade, replace this
-   entire script block with the new module file contents. Compute-only module;
-   exposes window.SeqEngineV2; never writes columns/state/network — see
-   INTEGRATION_NOTES.md. Host bridge lives in the main app script (search
-   "_seqTriggerEval").
-   ═══════════════════════════════════════════════════════════════════════════ */
-/*
- * ============================================================================
- * Solura Sequence Engine v2 — standalone module
- * ============================================================================
- *
- * WHAT THIS IS
- *   A pure compute module for candidate hiring sequences. It reads candidate
- *   state (`c.st`) and a sequence definition, and answers three questions:
- *     1. Where is this candidate in the sequence?      -> evaluate()
- *     2. What should happen next?                      -> intents[]
- *     3. Whose move is it?                             -> bucket
- *
- * WHAT THIS IS NOT (hard invariants — learned from real data-loss incidents)
- *   - The engine NEVER writes to the spreadsheet, the DOM (outside the editor
- *     container it is handed), the network, or `c.st` in place. Every state
- *     change it wants is returned as a *partial state object* or an *intent*
- *     that the HOST portal commits. The engine COMPUTES; the host COMMITS.
- *   - No silent auto-advance / auto-release. Even "obvious" advances (a gate
- *     whose trigger is met) come back as an {type:'advance'} intent that the
- *     host — and ultimately the operator, or the host's automation layer for
- *     steps explicitly marked automate — must trigger.
- *   - Column G is stage strings only; the engine only ever *suggests* a stage
- *     via {type:'set-stage', stage} intents. It never touches columns.
- *   - Trigger logic lives in the HOST. The engine receives trigger names as
- *     opaque string keys and resolves them through the injected
- *     `triggerEval(name, candidate)` callback. If the callback is missing or
- *     throws, the trigger is treated as UNMET (fail closed — never advance a
- *     candidate because of an error).
- *
- * STATE CONTRACT (all engine-owned keys inside c.st; host merges patches
- * shallowly — each key in a returned partialState REPLACES that key in st):
- *   st.sequenceId          string   — which sequence this candidate runs
- *   st.sequenceStepId      string|null — current (NOT yet completed) step
- *   st.sequenceHistory     [{stepId, at}] — append-only trail of every step
- *                          entered (ISO timestamps); funnels rebuild from this
- *   st.sequenceCompletedAt string|null — ISO, set when the last step finishes
- *   st.sequenceDroppedAt   string|null — ISO, set BY THE HOST when it executes
- *                          a park/decline intent (engine only reads it)
- *   st.sequenceNudges      { [stepId]: {count, lastAt} } — nudge bookkeeping;
- *                          the engine hands the host a ready-made statePatch
- *                          inside each nudge intent; host commits it AFTER the
- *                          nudge email actually goes out.
- *
- * A step being "current" means its action has NOT happened yet. The moment the
- * host performs the step's action it calls advanceStep() and commits the
- * returned partialState. That is the only way the pointer moves.
- * ============================================================================
- */
-(function (root) {
-  'use strict';
-
-  var MS_PER_DAY = 86400000;
-
-  /* ------------------------------------------------------------------ *
-   * Small utilities
-   * ------------------------------------------------------------------ */
-
-  // Deep clone via JSON — sequences and state are plain JSON by contract
-  // (they live in SETTINGS / column AJ), so this is safe and dependency-free.
-  function clone(obj) {
-    return obj == null ? obj : JSON.parse(JSON.stringify(obj));
-  }
-
-  // Normalize a "now" argument (Date | epoch-ms | ISO string | undefined)
-  // to epoch milliseconds. Every time-sensitive function takes an optional
-  // `now` so tests are deterministic and the host can pin a clock.
-  function toMs(now) {
-    if (now == null) return Date.now();
-    if (now instanceof Date) return now.getTime();
-    if (typeof now === 'number') return now;
-    var p = Date.parse(now);
-    return isNaN(p) ? Date.now() : p;
-  }
-
-  function iso(ms) {
-    return new Date(ms).toISOString();
-  }
-
-  // FNV-1a 32-bit hash — used for the import/export checksum. Not crypto;
-  // its job is catching accidental corruption / hand-editing of uploaded
-  // sequence files, not defeating an adversary.
-  function fnv1a(str) {
-    var h = 0x811c9dc5;
-    for (var i = 0; i < str.length; i++) {
-      h ^= str.charCodeAt(i);
-      // 32-bit FNV prime multiply, kept in uint32 space via shifts.
-      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
-    }
-    return ('00000000' + h.toString(16)).slice(-8);
-  }
-
-  // Look up a sequence by id in either an array (SETTINGS.sequences is an
-  // array in the portal) or an {id: seq} map — we accept both so the host
-  // never has to reshape its settings for us.
-  function findSequence(sequences, id) {
-    if (!sequences || id == null) return null;
-    if (Array.isArray(sequences)) {
-      for (var i = 0; i < sequences.length; i++) {
-        if (sequences[i] && sequences[i].id === id) return sequences[i];
-      }
-      return null;
-    }
-    return sequences[id] || null;
-  }
-
-  function findStep(sequence, stepId) {
-    if (!sequence || !Array.isArray(sequence.steps)) return null;
-    for (var i = 0; i < sequence.steps.length; i++) {
-      if (sequence.steps[i] && sequence.steps[i].id === stepId) return sequence.steps[i];
-    }
-    return null;
-  }
-
-  /* ------------------------------------------------------------------ *
-   * Trigger + condition evaluation
-   * ------------------------------------------------------------------ */
-
-  // Fail-closed trigger resolution: any error, missing callback, or
-  // non-boolean weirdness counts as UNMET. Rationale: an unmet trigger can
-  // only ever *hold a candidate in place*; a falsely-met trigger could
-  // advance someone past a hard gate. Holding is always the safe failure.
-  function safeTrigger(triggerEval, name, candidate) {
-    if (typeof triggerEval !== 'function' || typeof name !== 'string' || !name) return false;
-    try {
-      return !!triggerEval(name, candidate);
-    } catch (e) {
-      return false;
-    }
-  }
-
-  // Condition := {trigger} leaf, or {op:'and'|'or'|'not', children:[...]}.
-  // Malformed conditions evaluate to false (fail closed, same rationale).
-  function evalCondition(cond, candidate, triggerEval) {
-    if (!cond || typeof cond !== 'object') return false;
-    var kids = Array.isArray(cond.children) ? cond.children : [];
-    if (cond.op === 'and') {
-      if (!kids.length) return false;
-      for (var i = 0; i < kids.length; i++) {
-        if (!evalCondition(kids[i], candidate, triggerEval)) return false;
-      }
-      return true;
-    }
-    if (cond.op === 'or') {
-      for (var j = 0; j < kids.length; j++) {
-        if (evalCondition(kids[j], candidate, triggerEval)) return true;
-      }
-      return false;
-    }
-    if (cond.op === 'not') {
-      // 'not' takes exactly one child; anything else is malformed -> false.
-      if (kids.length !== 1) return false;
-      return !evalCondition(kids[0], candidate, triggerEval);
-    }
-    return safeTrigger(triggerEval, cond.trigger, candidate);
-  }
-
-  /* ------------------------------------------------------------------ *
-   * Automation flags
-   * ------------------------------------------------------------------ */
-
-  // A step only runs without a human click when BOTH parties consent:
-  //   - the operator flipped the step-level toggle (step.automate === true), and
-  //   - for email steps, the author additionally marked the template safe to
-  //     auto-send (step.email.automate === true). An email template that was
-  //     never blessed for automation can never be auto-sent no matter what
-  //     the step toggle says — belt and suspenders against accidental sends.
-  // Even "automated" work is still returned as intents: the host's automation
-  // layer executes them; the ENGINE never sends anything.
-  function isAutomated(step) {
-    if (!step || step.automate !== true) return false;
-    if (step.kind === 'email') {
-      return !!(step.email && step.email.automate === true);
-    }
-    return true;
-  }
-
-  /* ------------------------------------------------------------------ *
-   * Branch traversal
-   * ------------------------------------------------------------------ */
-
-  // Branches are pure routing — they carry no candidate-facing action — so
-  // both evaluate() and advanceStep() flow through them transparently until
-  // a concrete step (or the end) is reached. `visited` guards against branch
-  // loops in a corrupt sequence: on a loop we STOP and report, we never spin.
-  //
-  // Returns {step, path, error}: `step` is the first non-branch step (null =
-  // sequence end), `path` is every step id traversed INCLUDING branches (so
-  // callers can write history entries), `error` set if routing broke.
-  function resolveThroughBranches(sequence, startStep, candidate, triggerEval) {
-    var path = [];
-    var visited = {};
-    var step = startStep;
-    while (step && step.kind === 'branch') {
-      if (visited[step.id]) {
-        return { step: null, path: path, error: 'Branch loop detected at step "' + step.id + '"' };
-      }
-      visited[step.id] = true;
-      path.push(step.id);
-      var br = step.branch || {};
-      var targetId = evalCondition(br.if, candidate, triggerEval) ? br.then : br.else;
-      if (targetId == null) {
-        // A branch arm may legitimately point at "end of sequence".
-        return { step: null, path: path, error: null };
-      }
-      var target = findStep(sequence, targetId);
-      if (!target) {
-        return { step: null, path: path, error: 'Branch at "' + step.id + '" targets missing step "' + targetId + '"' };
-      }
-      step = target;
-    }
-    if (step) path.push(step.id);
-    return { step: step, path: path, error: null };
-  }
-
-  /* ------------------------------------------------------------------ *
-   * evaluate — the read-only heart of the engine
-   * ------------------------------------------------------------------ */
-
-  // evaluate(sequence, candidate, triggerEval, now?) ->
-  //   { currentStep, bucket, label, intents[] }
-  //
-  // bucket semantics (drives the worklist):
-  //   'action'    — the ball is with the OPERATOR (send this, decide this,
-  //                 confirm this advance)
-  //   'awaiting'  — the ball is with the CANDIDATE (we acted; their trigger
-  //                 is still unmet)
-  //   'scheduled' — the host's automation layer will act without a click
-  //                 (step is automated); nothing for the operator to do yet
-  //   'done'      — sequence complete (or no sequence to run)
-  //
-  // evaluate NEVER returns state changes. It is safe to call any number of
-  // times; calling it twice with the same inputs yields the same answer.
-  function evaluate(sequence, candidate, triggerEval, now) {
-    var nowMs = toMs(now);
-    var out = { currentStep: null, bucket: 'done', label: '', intents: [] };
-
-    if (!sequence || !Array.isArray(sequence.steps) || sequence.steps.length === 0) {
-      out.label = 'No sequence assigned';
-      return out;
-    }
-
-    var st = (candidate && candidate.st) || {};
-
-    if (st.sequenceCompletedAt) {
-      out.label = 'Sequence complete';
-      return out;
-    }
-
-    // Missing pointer means the candidate was just assigned (or predates the
-    // engine): start at the first step. A pointer to a DELETED step is a
-    // sequence-edit hazard — we surface it loudly instead of guessing.
-    var step;
-    if (st.sequenceStepId == null) {
-      step = sequence.steps[0];
-    } else {
-      step = findStep(sequence, st.sequenceStepId);
-      if (!step) {
-        out.bucket = 'action';
-        out.label = 'Sequence error — step not found';
-        out.intents.push({
-          type: 'flag',
-          stepId: st.sequenceStepId,
-          reason: 'Candidate points at step "' + st.sequenceStepId + '" which no longer exists in sequence "' + sequence.id + '". Reassign or repair.'
-        });
-        return out;
-      }
-    }
-
-    // Flow through routing branches to the concrete step we should report on.
-    // NOTE: this does NOT move the stored pointer — advanceStep does that.
-    var res = resolveThroughBranches(sequence, step, candidate, triggerEval);
-    if (res.error) {
-      out.bucket = 'action';
-      out.label = 'Sequence error — ' + res.error;
-      out.intents.push({ type: 'flag', stepId: step.id, reason: res.error });
-      return out;
-    }
-    if (!res.step) {
-      // Branch routed straight to "end": the candidate is effectively done,
-      // but per the no-silent-mutation rule we tell the host to commit it
-      // rather than pretending st already says so.
-      out.bucket = 'action';
-      out.label = 'Ready to complete sequence';
-      out.intents.push({ type: 'advance', fromStepId: step.id, toStepId: null });
-      return out;
-    }
-
-    step = res.step;
-    out.currentStep = step;
-    var automated = isAutomated(step);
-
-    switch (step.kind) {
-      case 'email': {
-        // Current == not yet sent. Automated emails land in 'scheduled'
-        // (host automation will fire them); manual ones are operator work.
-        out.bucket = automated ? 'scheduled' : 'action';
-        out.label = (automated ? 'Automated: ' : '') + (step.label || 'Send email');
-        out.intents.push({
-          type: 'send-email',
-          stepId: step.id,
-          templateKey: step.email && step.email.templateKey,
-          automatable: automated
-        });
-        break;
-      }
-
-      case 'wait': {
-        var w = step.wait || {};
-        var met = safeTrigger(triggerEval, w.trigger, candidate);
-        if (met) {
-          // The candidate did their part — ball is back with the operator,
-          // whose "action" is confirming the advance. Never advanced silently.
-          out.bucket = 'action';
-          out.label = (step.label || 'Wait') + ' — condition met, ready to advance';
-          out.intents.push({ type: 'advance', fromStepId: step.id, toStepId: step.next || null });
-        } else {
-          out.bucket = 'awaiting';
-          out.label = 'Waiting on candidate — ' + (step.label || w.trigger || 'wait');
-          appendNudgeIntent(out.intents, step, st, nowMs, automated);
-        }
-        break;
-      }
-
-      case 'gate': {
-        var g = step.gate || {};
-        var pass = safeTrigger(triggerEval, g.trigger, candidate);
-        out.bucket = 'action';
-        if (pass) {
-          out.label = (step.label || 'Gate') + ' — passed, ready to advance';
-          out.intents.push({ type: 'advance', fromStepId: step.id, toStepId: step.next || null });
-        } else {
-          // Hard requirement unmet. The FAIL ACTION is still only an intent:
-          // parking/declining a human being is always a host/operator commit.
-          var fail = g.failAction === 'decline' || g.failAction === 'flag' ? g.failAction : 'park';
-          out.label = (step.label || 'Gate') + ' — requirement not met';
-          out.intents.push({
-            type: fail,
-            stepId: step.id,
-            reason: 'Gate "' + (step.label || step.id) + '" unmet (trigger: ' + (g.trigger || '?') + ')'
-          });
-        }
-        break;
-      }
-
-      case 'stage': {
-        // Suggests a pipeline stage for column G. The host writes the stage
-        // string; the engine only names it. Advance rides along so the host
-        // commits both in one operator-visible action.
-        out.bucket = automated ? 'scheduled' : 'action';
-        out.label = (automated ? 'Automated: ' : '') + (step.label || ('Set stage: ' + ((step.stage && step.stage.setStage) || '?')));
-        out.intents.push({
-          type: 'set-stage',
-          stepId: step.id,
-          stage: step.stage && step.stage.setStage,
-          automatable: automated
-        });
-        out.intents.push({ type: 'advance', fromStepId: step.id, toStepId: step.next || null });
-        break;
-      }
-
-      case 'integration': {
-        var ig = step.integration || {};
-        out.bucket = automated ? 'scheduled' : 'action';
-        out.label = (automated ? 'Automated: ' : '') + (step.label || ('Run ' + (ig.provider || 'integration')));
-        out.intents.push({
-          type: 'integration',
-          stepId: step.id,
-          provider: ig.provider,
-          action: ig.action,
-          params: ig.params || {},
-          automatable: automated
-        });
-        break;
-      }
-
-      case 'manual': {
-        out.bucket = 'action';
-        out.label = step.label || 'Manual step';
-        out.intents.push({
-          type: 'manual',
-          stepId: step.id,
-          instructions: (step.manual && step.manual.instructions) || ''
-        });
-        break;
-      }
-
-      default: {
-        // Unknown kind (future schema version?) — surface, never guess.
-        out.bucket = 'action';
-        out.label = 'Sequence error — unknown step kind "' + step.kind + '"';
-        out.intents.push({ type: 'flag', stepId: step.id, reason: 'Unknown step kind "' + step.kind + '"' });
-      }
-    }
-
-    return out;
-  }
-
-  // Nudge bookkeeping for wait steps. Emits a {type:'nudge'} intent when one
-  // is due, INCLUDING the exact statePatch the host must merge into st AFTER
-  // the nudge email actually sends (so a failed send never burns a nudge).
-  function appendNudgeIntent(intents, step, st, nowMs, automated) {
-    var n = step.wait && step.wait.nudge;
-    if (!n || !n.templateKey) return;
-
-    var rec = (st.sequenceNudges && st.sequenceNudges[step.id]) || { count: 0, lastAt: null };
-    var max = typeof n.maxNudges === 'number' ? n.maxNudges : 0;
-    if (rec.count >= max) return; // budget spent — humans take over from here
-
-    var due;
-    if (rec.count === 0) {
-      // First nudge: afterDays measured from when the candidate ENTERED this
-      // step (last matching history entry). No history (legacy data) => now,
-      // which means the afterDays clock starts today rather than firing
-      // immediately — the conservative reading.
-      var enteredMs = nowMs;
-      var hist = Array.isArray(st.sequenceHistory) ? st.sequenceHistory : [];
-      for (var i = hist.length - 1; i >= 0; i--) {
-        if (hist[i] && hist[i].stepId === step.id) {
-          var t = Date.parse(hist[i].at);
-          if (!isNaN(t)) enteredMs = t;
-          break;
-        }
-      }
-      due = enteredMs + (n.afterDays || 0) * MS_PER_DAY;
-    } else {
-      // Repeat nudges only if the author configured a cadence.
-      if (typeof n.repeatEveryDays !== 'number' || n.repeatEveryDays <= 0) return;
-      var lastMs = Date.parse(rec.lastAt);
-      if (isNaN(lastMs)) lastMs = nowMs;
-      due = lastMs + n.repeatEveryDays * MS_PER_DAY;
-    }
-    if (nowMs < due) return;
-
-    // Build the full replacement map for st.sequenceNudges (host patches are
-    // whole-key replacements — see state contract at top of file).
-    var nextNudges = clone(st.sequenceNudges) || {};
-    nextNudges[step.id] = { count: rec.count + 1, lastAt: iso(nowMs) };
-
-    intents.push({
-      type: 'nudge',
-      stepId: step.id,
-      templateKey: n.templateKey,
-      nudgeNumber: rec.count + 1,
-      automatable: automated,
-      statePatch: { sequenceNudges: nextNudges }
-    });
-  }
-
-  /* ------------------------------------------------------------------ *
-   * assignSequence / advanceStep — the only two producers of partialState
-   * ------------------------------------------------------------------ */
-
-  // assignSequence(candidate, sequence, now?) -> partialState
-  //
-  // `sequence` is preferably the full sequence object (so we can point at its
-  // first step); a bare id string is tolerated — the pointer stays null and
-  // evaluate() treats null as "first step".
-  //
-  // Assignment is also REassignment: nudge counters and completion reset,
-  // but sequenceHistory is preserved and appended to — the trail of what
-  // actually happened to this person is never erased.
-  function assignSequence(candidate, sequence, now) {
-    var nowMs = toMs(now);
-    var st = (candidate && candidate.st) || {};
-    var seqObj = (sequence && typeof sequence === 'object') ? sequence : null;
-    var seqId = seqObj ? seqObj.id : sequence;
-    if (seqId == null) return null; // nothing to assign — host bug, refuse quietly
-
-    var firstStep = seqObj && Array.isArray(seqObj.steps) && seqObj.steps.length ? seqObj.steps[0] : null;
-    var history = clone(st.sequenceHistory) || [];
-    if (firstStep) history.push({ stepId: firstStep.id, at: iso(nowMs) });
-
-    return {
-      sequenceId: seqId,
-      sequenceStepId: firstStep ? firstStep.id : null,
-      sequenceHistory: history,
-      sequenceCompletedAt: null,
-      sequenceNudges: {}
-    };
-  }
-
-  // advanceStep(sequence, candidate, triggerEval, now?) ->
-  //   { partialState, intents, bucket, completed, error }
-  //
-  // Called by the host AFTER it has performed the current step's action
-  // (email sent, stage written, gate confirmed…). Moves the pointer to the
-  // next concrete step, flowing through branches and recording a history
-  // entry for every step entered (branches included — funnels want them).
-  //
-  // Never mutates `candidate`. The returned intents describe the NEWLY
-  // arrived-at step, so a host doing several automated steps in a row can
-  // chain commit->advance->commit without re-deriving anything.
-  function advanceStep(sequence, candidate, triggerEval, now) {
-    var nowMs = toMs(now);
-    var fail = function (msg) {
-      return { partialState: null, intents: [], bucket: 'action', completed: false, error: msg };
-    };
-
-    if (!sequence || !Array.isArray(sequence.steps) || sequence.steps.length === 0) {
-      return fail('No sequence to advance');
-    }
-    var st = (candidate && candidate.st) || {};
-    if (st.sequenceCompletedAt) return fail('Sequence already complete');
-
-    var current = st.sequenceStepId == null ? sequence.steps[0] : findStep(sequence, st.sequenceStepId);
-    if (!current) return fail('Current step "' + st.sequenceStepId + '" not found in sequence');
-
-    // If the stored pointer is itself a branch (shouldn't normally persist,
-    // but sequence edits can create it), resolve it first — its landing step
-    // is what we are actually advancing FROM.
-    if (current.kind === 'branch') {
-      var pre = resolveThroughBranches(sequence, current, candidate, triggerEval);
-      if (pre.error) return fail(pre.error);
-      current = pre.step; // may be null => branch routed to end
-    }
-
-    var history = clone(st.sequenceHistory) || [];
-    var landed = null;
-
-    if (current) {
-      var nextId = current.next || null;
-      if (nextId != null) {
-        var nextStep = findStep(sequence, nextId);
-        if (!nextStep) return fail('Step "' + current.id + '" points at missing step "' + nextId + '"');
-        var res = resolveThroughBranches(sequence, nextStep, candidate, triggerEval);
-        if (res.error) return fail(res.error);
-        // History gets one entry per step ENTERED, branches included, so
-        // sequenceStats can count branch traffic and rebuild exact paths.
-        for (var i = 0; i < res.path.length; i++) {
-          history.push({ stepId: res.path[i], at: iso(nowMs) });
-        }
-        landed = res.step;
-      }
-    }
-
-    if (!landed) {
-      // Ran off the end: the sequence is complete. Completion itself is a
-      // partialState the HOST commits — evaluate() will report 'done' only
-      // after the host has actually written it.
-      return {
-        partialState: {
-          sequenceStepId: null,
-          sequenceHistory: history,
-          sequenceCompletedAt: iso(nowMs)
-        },
-        intents: [],
-        bucket: 'done',
-        completed: true,
-        error: null
-      };
-    }
-
-    var partialState = {
-      sequenceStepId: landed.id,
-      sequenceHistory: history
-    };
-
-    // Report the new position AS IF the patch were committed, so the host
-    // learns the next intents in the same call. We build a merged view for
-    // the computation — the real candidate object is untouched.
-    var merged = { st: {} };
-    var k;
-    for (k in st) merged.st[k] = st[k];
-    for (k in partialState) merged.st[k] = partialState[k];
-    var ev = evaluate(sequence, merged, triggerEval, nowMs);
-
-    return {
-      partialState: partialState,
-      intents: ev.intents,
-      bucket: ev.bucket,
-      completed: false,
-      error: null
-    };
-  }
-
-  /* ------------------------------------------------------------------ *
-   * validateSequence
-   * ------------------------------------------------------------------ */
-
-  var VALID_KINDS = { email: 1, wait: 1, gate: 1, stage: 1, branch: 1, integration: 1, manual: 1 };
-  var VALID_FAIL = { park: 1, decline: 1, flag: 1 };
-
-  function validateCondition(cond, where, errors) {
-    if (!cond || typeof cond !== 'object') {
-      errors.push(where + ': branch condition missing or not an object');
-      return;
-    }
-    if (cond.op != null) {
-      if (cond.op !== 'and' && cond.op !== 'or' && cond.op !== 'not') {
-        errors.push(where + ': unknown condition op "' + cond.op + '"');
-        return;
-      }
-      var kids = Array.isArray(cond.children) ? cond.children : [];
-      if (cond.op === 'not' && kids.length !== 1) {
-        errors.push(where + ": 'not' must have exactly one child");
-      } else if (cond.op !== 'not' && kids.length === 0) {
-        errors.push(where + ": '" + cond.op + "' needs at least one child");
-      }
-      for (var i = 0; i < kids.length; i++) validateCondition(kids[i], where, errors);
-    } else if (typeof cond.trigger !== 'string' || !cond.trigger) {
-      errors.push(where + ': condition leaf needs a trigger key');
-    }
-  }
-
-  // validateSequence(sequence) -> {ok, errors[]}
-  // Catches everything that could strand a candidate: broken targets,
-  // unreachable steps, inescapable cycles, missing templates, bad configs.
-  // Run before every save and every import — a sequence that fails here must
-  // never be stored.
-  function validateSequence(sequence) {
-    var errors = [];
-    if (!sequence || typeof sequence !== 'object') {
-      return { ok: false, errors: ['Sequence is not an object'] };
-    }
-    if (!sequence.id) errors.push('Sequence has no id');
-    if (!sequence.name) errors.push('Sequence has no name');
-    if (!Array.isArray(sequence.steps) || sequence.steps.length === 0) {
-      errors.push('Sequence has no steps');
-      return { ok: false, errors: errors };
-    }
-
-    var steps = sequence.steps;
-    var byId = {};
-    var i, s, where;
-
-    for (i = 0; i < steps.length; i++) {
-      s = steps[i];
-      where = 'Step ' + (i + 1) + (s && s.id ? ' ("' + s.id + '")' : '');
-      if (!s || typeof s !== 'object') { errors.push(where + ': not an object'); continue; }
-      if (!s.id) { errors.push(where + ': missing id'); continue; }
-      if (byId[s.id]) errors.push(where + ': duplicate step id');
-      byId[s.id] = s;
-    }
-
-    for (i = 0; i < steps.length; i++) {
-      s = steps[i];
-      if (!s || !s.id) continue;
-      where = 'Step "' + s.id + '"';
-
-      if (!VALID_KINDS[s.kind]) {
-        errors.push(where + ': invalid kind "' + s.kind + '"');
-        continue;
-      }
-      if (s.next != null && !byId[s.next]) {
-        errors.push(where + ': next targets missing step "' + s.next + '"');
-      }
-      switch (s.kind) {
-        case 'email':
-          if (!s.email || !s.email.templateKey) errors.push(where + ': email step missing templateKey');
-          break;
-        case 'wait':
-          if (!s.wait || !s.wait.trigger) errors.push(where + ': wait step missing trigger');
-          if (s.wait && s.wait.nudge && !s.wait.nudge.templateKey) {
-            errors.push(where + ': nudge configured without templateKey');
-          }
-          break;
-        case 'gate':
-          if (!s.gate || !s.gate.trigger) errors.push(where + ': gate step missing trigger');
-          if (s.gate && s.gate.failAction != null && !VALID_FAIL[s.gate.failAction]) {
-            errors.push(where + ': invalid failAction "' + s.gate.failAction + '"');
-          }
-          break;
-        case 'stage':
-          if (!s.stage || !s.stage.setStage) errors.push(where + ': stage step missing setStage');
-          break;
-        case 'branch':
-          if (!s.branch) {
-            errors.push(where + ': branch step missing branch config');
-          } else {
-            validateCondition(s.branch.if, where, errors);
-            // Branch arms may be null (= end of sequence) but if named they
-            // must exist. Forward AND backward targets are both legal.
-            if (s.branch.then != null && !byId[s.branch.then]) {
-              errors.push(where + ': branch "then" targets missing step "' + s.branch.then + '"');
-            }
-            if (s.branch.else != null && !byId[s.branch.else]) {
-              errors.push(where + ': branch "else" targets missing step "' + s.branch.else + '"');
-            }
-          }
-          break;
-        case 'integration':
-          if (!s.integration || !s.integration.provider) errors.push(where + ': integration step missing provider');
-          break;
-        case 'manual':
-          break; // instructions are recommended but not structurally required
-      }
-    }
-
-    // Reachability: every step must be reachable from the entry step, else
-    // it is dead weight the editor should surface. Successors = next + both
-    // branch arms.
-    function successors(step) {
-      var out = [];
-      if (!step) return out;
-      if (step.kind === 'branch' && step.branch) {
-        if (step.branch.then != null && byId[step.branch.then]) out.push(step.branch.then);
-        if (step.branch.else != null && byId[step.branch.else]) out.push(step.branch.else);
-      }
-      if (step.next != null && byId[step.next]) out.push(step.next);
-      return out;
-    }
-
-    var entry = steps[0];
-    if (entry && entry.id) {
-      var reachable = {};
-      var stack = [entry.id];
-      while (stack.length) {
-        var id = stack.pop();
-        if (reachable[id]) continue;
-        reachable[id] = true;
-        var succ = successors(byId[id]);
-        for (i = 0; i < succ.length; i++) stack.push(succ[i]);
-      }
-      for (i = 0; i < steps.length; i++) {
-        s = steps[i];
-        if (s && s.id && !reachable[s.id]) {
-          errors.push('Step "' + s.id + '" is unreachable from the entry step');
-        }
-      }
-
-      // Termination: from every reachable step there must exist SOME path to
-      // the end (a null next / null branch arm). A cycle with no exit would
-      // trap candidates forever. Backward branches are fine as long as an
-      // escape route exists — that is exactly what this check verifies.
-      var canExit = {}; // stepId -> true/false, memoized
-      var inStack = {};
-      function exits(id) {
-        if (canExit[id] != null) return canExit[id];
-        if (inStack[id]) return false; // hit a cycle along this path — this
-                                       // path doesn't exit; another might.
-        inStack[id] = true;
-        var step = byId[id];
-        var ok = false;
-        if (step) {
-          if (step.kind === 'branch' && step.branch) {
-            // A null arm IS an exit.
-            if (step.branch.then == null || step.branch.else == null) ok = true;
-          } else if (step.next == null) {
-            ok = true;
-          }
-          if (!ok) {
-            var succ = successors(step);
-            for (var j = 0; j < succ.length; j++) {
-              if (exits(succ[j])) { ok = true; break; }
-            }
-          }
-        }
-        inStack[id] = false;
-        canExit[id] = ok;
-        return ok;
-      }
-      for (i = 0; i < steps.length; i++) {
-        s = steps[i];
-        if (s && s.id && reachable[s.id] && !exits(s.id)) {
-          errors.push('Step "' + s.id + '" is inside a cycle with no exit — candidates would be trapped');
-        }
-      }
-    }
-
-    return { ok: errors.length === 0, errors: errors };
-  }
-
-  /* ------------------------------------------------------------------ *
-   * Import / export
-   * ------------------------------------------------------------------ */
-
-  var EXPORT_FORMAT = 'solura-sequence';
-  var EXPORT_VERSION = 1;
-
-  // exportSequence(sequence) -> string
-  // Versioned JSON payload + a trailing checksum line, so sequences can be
-  // authored/reviewed outside the portal and uploaded. The checksum catches
-  // truncated pastes and accidental hand-edits, which with real users is the
-  // failure mode that actually happens.
-  function exportSequence(sequence) {
-    var payload = JSON.stringify(
-      { format: EXPORT_FORMAT, version: EXPORT_VERSION, exportedAt: iso(Date.now()), sequence: sequence },
-      null, 2
-    );
-    return payload + '\n#checksum:fnv1a:' + fnv1a(payload) + '\n';
-  }
-
-  // importSequence(string) -> {ok, sequence?, errors[]}
-  // Rejects: missing/bad checksum, wrong format/version, JSON errors, and —
-  // critically — anything validateSequence rejects. A bad import must never
-  // reach SETTINGS.
-  function importSequence(text) {
-    var errors = [];
-    if (typeof text !== 'string' || !text.trim()) {
-      return { ok: false, errors: ['Import is empty'] };
-    }
-    // Normalize CRLF (Windows exports) before checksum comparison — the hash
-    // is computed over the LF form on both ends.
-    var normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    var m = normalized.match(/\n#checksum:fnv1a:([0-9a-f]{8})\s*$/);
-    if (!m) {
-      return { ok: false, errors: ['Missing checksum line — not a Solura sequence export'] };
-    }
-    var payload = normalized.slice(0, m.index);
-    if (fnv1a(payload) !== m[1]) {
-      return { ok: false, errors: ['Checksum mismatch — the file was modified or corrupted in transit'] };
-    }
-    var parsed;
-    try {
-      parsed = JSON.parse(payload);
-    } catch (e) {
-      return { ok: false, errors: ['Invalid JSON: ' + e.message] };
-    }
-    if (!parsed || parsed.format !== EXPORT_FORMAT) {
-      return { ok: false, errors: ['Unrecognized format "' + (parsed && parsed.format) + '"'] };
-    }
-    if (parsed.version !== EXPORT_VERSION) {
-      return { ok: false, errors: ['Unsupported export version ' + parsed.version + ' (this engine reads version ' + EXPORT_VERSION + ')'] };
-    }
-    var v = validateSequence(parsed.sequence);
-    if (!v.ok) {
-      return { ok: false, errors: ['Sequence failed validation:'].concat(v.errors) };
-    }
-    return { ok: true, sequence: parsed.sequence, errors: [] };
-  }
-
-  /* ------------------------------------------------------------------ *
-   * Assignment resolution
-   * ------------------------------------------------------------------ */
-
-  // resolveSequenceFor(candidate, assignments, sequences) -> sequence | null
-  //
-  // Precedence (most specific wins):
-  //   1. STICKY: candidate already carries st.sequenceId and that sequence
-  //      still exists — candidates keep their sequence for life; changing it
-  //      is an explicit host action (assignSequence), never a side effect of
-  //      an assignment-rule edit.
-  //   2. Source-link match: assignment whose match.sourceCode equals the
-  //      candidate's st.sourceCode.
-  //   3. Default assignment ({match:{default:true}}).
-  //   4. null — the host shows "no sequence" rather than inventing one.
-  function resolveSequenceFor(candidate, assignments, sequences) {
-    var st = (candidate && candidate.st) || {};
-
-    if (st.sequenceId != null) {
-      var sticky = findSequence(sequences, st.sequenceId);
-      if (sticky) return sticky;
-      // Sticky id points at a deleted sequence: fall through to the rules so
-      // the candidate is not stranded, host sees the mismatch via evaluate.
-    }
-
-    if (!Array.isArray(assignments)) return null;
-
-    var i, a;
-    if (st.sourceCode != null) {
-      for (i = 0; i < assignments.length; i++) {
-        a = assignments[i];
-        if (a && a.match && a.match.sourceCode != null && a.match.sourceCode === st.sourceCode) {
-          var seq = findSequence(sequences, a.sequenceId);
-          if (seq) return seq;
-        }
-      }
-    }
-    for (i = 0; i < assignments.length; i++) {
-      a = assignments[i];
-      if (a && a.match && a.match.default === true) {
-        var dseq = findSequence(sequences, a.sequenceId);
-        if (dseq) return dseq;
-      }
-    }
-    return null;
-  }
-
-  /* ------------------------------------------------------------------ *
-   * Analytics — pure aggregation, host renders
-   * ------------------------------------------------------------------ */
-
-  // sequenceStats(pipeline, sequences) ->
-  //   { [sequenceId]: {assigned, reachedStep:{stepId:count}, completed,
-  //                    dropped, avgDaysToComplete} }
-  //
-  // reachedStep counts CANDIDATES (each candidate once per step, however many
-  // times they looped through it) — that is what a funnel wants. dropped is
-  // read from st.sequenceDroppedAt, which the HOST stamps when it executes a
-  // park/decline intent; the engine never infers dropping from stage strings
-  // because stage semantics belong to the portal.
-  function sequenceStats(pipeline, sequences) {
-    var out = {};
-    var seqList = Array.isArray(sequences) ? sequences : (sequences ? Object.keys(sequences).map(function (k) { return sequences[k]; }) : []);
-    var i;
-
-    // Pre-seed every known sequence so the dashboard shows zeros, not holes.
-    for (i = 0; i < seqList.length; i++) {
-      if (seqList[i] && seqList[i].id != null) {
-        out[seqList[i].id] = { assigned: 0, reachedStep: {}, completed: 0, dropped: 0, avgDaysToComplete: null };
-      }
-    }
-
-    if (!Array.isArray(pipeline)) return out;
-
-    var completeDaysSum = {};
-    var completeDaysCount = {};
-
-    for (i = 0; i < pipeline.length; i++) {
-      var c = pipeline[i];
-      var st = (c && c.st) || {};
-      var sid = st.sequenceId;
-      if (sid == null) continue;
-      // Unknown sequence ids (deleted sequences) still get a bucket — losing
-      // them would make totals silently wrong.
-      if (!out[sid]) out[sid] = { assigned: 0, reachedStep: {}, completed: 0, dropped: 0, avgDaysToComplete: null };
-      var rec = out[sid];
-      rec.assigned++;
-
-      var hist = Array.isArray(st.sequenceHistory) ? st.sequenceHistory : [];
-      var seen = {};
-      var firstAt = null;
-      for (var j = 0; j < hist.length; j++) {
-        var h = hist[j];
-        if (!h || h.stepId == null) continue;
-        if (firstAt == null) {
-          var t = Date.parse(h.at);
-          if (!isNaN(t)) firstAt = t;
-        }
-        if (!seen[h.stepId]) {
-          seen[h.stepId] = true;
-          rec.reachedStep[h.stepId] = (rec.reachedStep[h.stepId] || 0) + 1;
-        }
-      }
-
-      if (st.sequenceCompletedAt) {
-        rec.completed++;
-        var doneAt = Date.parse(st.sequenceCompletedAt);
-        if (firstAt != null && !isNaN(doneAt) && doneAt >= firstAt) {
-          completeDaysSum[sid] = (completeDaysSum[sid] || 0) + (doneAt - firstAt) / MS_PER_DAY;
-          completeDaysCount[sid] = (completeDaysCount[sid] || 0) + 1;
-        }
-      }
-      if (st.sequenceDroppedAt) rec.dropped++;
-    }
-
-    for (var sid2 in completeDaysCount) {
-      if (completeDaysCount[sid2] > 0) {
-        // Round to 0.1 day — enough precision for a dashboard, stable in tests.
-        out[sid2].avgDaysToComplete = Math.round((completeDaysSum[sid2] / completeDaysCount[sid2]) * 10) / 10;
-      }
-    }
-    return out;
-  }
-
-  /* ------------------------------------------------------------------ *
-   * DEFAULT_SEQUENCE — parity with the portal's current 12-stage flow
-   * ------------------------------------------------------------------ */
-
-  // Reproduces today's pipeline as sequence data so migration starts from
-  // parity: Applied → Screen invite → Screen booked → Ask references →
-  // Verify employers → References → Interview invite → Interview booked →
-  // Offer → Onboarding → Onboarding booked → Hired.
-  //
-  // Structure per hop: (email/manual that causes the stage) → stage step →
-  // (wait/gate that the stage waits on). Stage strings below are EXACTLY the
-  // column-G strings the portal uses today — do not "fix" their spelling.
-  //
-  // Template keys are engine-side names; the host maps them to real portal
-  // templates in templatesList (see INTEGRATION_NOTES.md).
-  //
-  // Gates are locked: fast-track must never skip employer verification or
-  // background check.
-  function linear(steps) {
-    // Convenience: wire steps into a linear chain (next = following step)
-    // unless a step already set an explicit next. Keeps the literal below
-    // readable and impossible to mis-wire by hand.
-    for (var i = 0; i < steps.length; i++) {
-      if (steps[i].next === undefined) {
-        steps[i].next = i + 1 < steps.length ? steps[i + 1].id : null;
-      }
-    }
-    return steps;
-  }
-
-  var DEFAULT_SEQUENCE = {
-    id: 'default-hiring-v1',
-    name: 'Standard hiring flow',
-    description: "Parity port of the portal's 12-stage pipeline. Edit copies, not this one.",
-    createdAt: '2026-07-20T00:00:00.000Z',
-    updatedAt: '2026-07-20T00:00:00.000Z',
-    version: 1,
-    steps: linear([
-      { id: 'stage_applied', key: 'applied', label: 'Applied', icon: '📥', kind: 'stage',
-        stage: { setStage: 'Applied' }, locked: false, automate: false },
-
-      { id: 'email_screen_invite', key: 'screen_invite_email', label: 'Send screening invite', icon: '✉️', kind: 'email',
-        email: { templateKey: 'screen_invite', automate: true }, locked: false, automate: false },
-      { id: 'stage_screen_invite', key: 'screen_invite', label: 'Screen invite', icon: '📞', kind: 'stage',
-        stage: { setStage: 'Screen invite' }, locked: false, automate: false },
-      { id: 'wait_screen_booked', key: 'screen_wait', label: 'Candidate books screening call', icon: '⏳', kind: 'wait',
-        wait: { trigger: 'hasBooking', nudge: { templateKey: 'screen_nudge', afterDays: 2, repeatEveryDays: 3, maxNudges: 3 } },
-        locked: false, automate: false },
-      { id: 'stage_screen_booked', key: 'screen_booked', label: 'Screen booked', icon: '📅', kind: 'stage',
-        stage: { setStage: 'Screen booked' }, locked: false, automate: false },
-
-      { id: 'email_ask_refs', key: 'ask_refs_email', label: 'Ask for references', icon: '✉️', kind: 'email',
-        email: { templateKey: 'ask_references', automate: true }, locked: false, automate: false },
-      { id: 'stage_ask_refs', key: 'ask_references', label: 'Ask references', icon: '🗒️', kind: 'stage',
-        stage: { setStage: 'Ask references' }, locked: false, automate: false },
-      { id: 'wait_refs', key: 'refs_wait', label: 'Candidate submits references', icon: '⏳', kind: 'wait',
-        wait: { trigger: 'hasRefs', nudge: { templateKey: 'refs_nudge', afterDays: 3, repeatEveryDays: 4, maxNudges: 2 } },
-        locked: false, automate: false },
-
-      { id: 'manual_verify_employers', key: 'verify_employers_task', label: 'Call and verify listed employers', icon: '☎️', kind: 'manual',
-        manual: { instructions: 'Call each listed employer, confirm dates and role, record notes on the candidate card.' },
-        locked: true, automate: false },
-      { id: 'stage_verify_employers', key: 'verify_employers', label: 'Verify employers', icon: '🔍', kind: 'stage',
-        stage: { setStage: 'Verify employers' }, locked: false, automate: false },
-      { id: 'gate_employers_verified', key: 'employers_gate', label: 'Employers verified', icon: '🚧', kind: 'gate',
-        gate: { trigger: 'employersVerified', failAction: 'park' }, locked: true, automate: false },
-      { id: 'stage_references', key: 'references', label: 'References', icon: '✅', kind: 'stage',
-        stage: { setStage: 'References' }, locked: false, automate: false },
-
-      { id: 'email_interview_invite', key: 'interview_invite_email', label: 'Send interview invite', icon: '✉️', kind: 'email',
-        email: { templateKey: 'interview_invite', automate: true }, locked: false, automate: false },
-      { id: 'stage_interview_invite', key: 'interview_invite', label: 'Interview invite', icon: '🤝', kind: 'stage',
-        stage: { setStage: 'Interview invite' }, locked: false, automate: false },
-      { id: 'wait_interview_booked', key: 'interview_wait', label: 'Candidate books interview', icon: '⏳', kind: 'wait',
-        wait: { trigger: 'hasBooking', nudge: { templateKey: 'interview_nudge', afterDays: 2, repeatEveryDays: 3, maxNudges: 3 } },
-        locked: false, automate: false },
-      { id: 'stage_interview_booked', key: 'interview_booked', label: 'Interview booked', icon: '📅', kind: 'stage',
-        stage: { setStage: 'Interview booked' }, locked: false, automate: false },
-
-      { id: 'manual_offer', key: 'offer_task', label: 'Extend offer', icon: '📄', kind: 'manual',
-        manual: { instructions: 'Discuss wage and schedule, extend the offer, record acceptance on the candidate card.' },
-        locked: true, automate: false },
-      { id: 'stage_offer', key: 'offer', label: 'Offer', icon: '💼', kind: 'stage',
-        stage: { setStage: 'Offer' }, locked: false, automate: false },
-
-      { id: 'email_onboarding_invite', key: 'onboarding_email', label: 'Send onboarding invite', icon: '✉️', kind: 'email',
-        email: { templateKey: 'onboarding_invite', automate: true }, locked: false, automate: false },
-      { id: 'stage_onboarding', key: 'onboarding', label: 'Onboarding', icon: '🧭', kind: 'stage',
-        stage: { setStage: 'Onboarding' }, locked: false, automate: false },
-      { id: 'wait_onboarding_booked', key: 'onboarding_wait', label: 'Candidate books onboarding', icon: '⏳', kind: 'wait',
-        wait: { trigger: 'hasBooking', nudge: { templateKey: 'onboarding_nudge', afterDays: 2, repeatEveryDays: 3, maxNudges: 3 } },
-        locked: false, automate: false },
-      { id: 'stage_onboarding_booked', key: 'onboarding_booked', label: 'Onboarding booked', icon: '📅', kind: 'stage',
-        stage: { setStage: 'Onboarding booked' }, locked: false, automate: false },
-
-      { id: 'gate_bg_clear', key: 'bg_gate', label: 'Background check clear', icon: '🚧', kind: 'gate',
-        gate: { trigger: 'bgClear', failAction: 'park' }, locked: true, automate: false },
-      { id: 'stage_hired', key: 'hired', label: 'Hired', icon: '🎉', kind: 'stage',
-        stage: { setStage: 'Hired' }, locked: true, automate: false, next: null }
-    ])
-  };
-
-  /* ================================================================== *
-   * Editor UI — renderSequenceEditor(container, opts)
-   * ================================================================== *
-   *
-   * Vanilla DOM, zero dependencies, scoped styles injected once. The editor
-   * works on a DEEP CLONE of the data it is handed and only reports back via
-   * opts.onChange({sequences, assignments}) after validation passes on Save.
-   * It never touches storage, network, or any global except reading
-   * document/window for DOM work inside `container`.
-   *
-   * Everything an operator might want to change about a sequence is editable
-   * here — that is the point. No behavior hides in code.
-   */
-
-  var EDITOR_CSS = [
-    // Warm Solura palette: gold accents on cream, 13px base, generous targets.
-    '.sqe2{font:13px/1.45 "Segoe UI",system-ui,sans-serif;color:#3b3427;background:#faf6ee;border:1px solid #e6dcc8;border-radius:10px;display:flex;min-height:420px;overflow:hidden}',
-    '.sqe2 *{box-sizing:border-box}',
-    '.sqe2 button{font:inherit;cursor:pointer;border:1px solid #d8c9a6;background:#fffdf7;color:#3b3427;border-radius:7px;padding:7px 12px;min-height:32px}',
-    '.sqe2 button:hover{background:#f5edda}',
-    '.sqe2 button.sqe2-primary{background:#C59B4E;border-color:#b08a3f;color:#fff;font-weight:600}',
-    '.sqe2 button.sqe2-primary:hover{background:#b08a3f}',
-    '.sqe2 button.sqe2-danger{color:#a03d2e;border-color:#dcb9ae}',
-    '.sqe2 input[type=text],.sqe2 input[type=number],.sqe2 select,.sqe2 textarea{font:inherit;border:1px solid #d8c9a6;border-radius:6px;padding:6px 8px;background:#fff;color:#3b3427;min-height:30px;max-width:100%}',
-    '.sqe2 input:focus,.sqe2 select:focus,.sqe2 textarea:focus{outline:2px solid #C59B4E;outline-offset:0}',
-    '.sqe2 label{display:inline-flex;align-items:center;gap:5px}',
-    '.sqe2-side{width:230px;flex:none;background:#f3ecdc;border-right:1px solid #e6dcc8;padding:12px;display:flex;flex-direction:column;gap:8px;overflow-y:auto}',
-    '.sqe2-side h3{margin:4px 0 2px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#8a7a55}',
-    '.sqe2-seqbtn{text-align:left;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-    '.sqe2-seqbtn.sqe2-active{background:#C59B4E;border-color:#b08a3f;color:#fff}',
-    '.sqe2-main{flex:1;padding:14px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}',
-    '.sqe2-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}',
-    '.sqe2-step{background:#fffdf7;border:1px solid #e6dcc8;border-left:4px solid #C59B4E;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}',
-    '.sqe2-step.sqe2-dragover{outline:2px dashed #C59B4E;outline-offset:2px}',
-    '.sqe2-step.sqe2-invalid{border-left-color:#a03d2e}',
-    '.sqe2-grip{cursor:grab;user-select:none;color:#b3a37c;padding:2px 6px}',
-    '.sqe2-kindtag{font-size:11px;background:#f0e6cf;border-radius:5px;padding:2px 7px;color:#8a7a55;text-transform:uppercase;letter-spacing:.04em}',
-    '.sqe2-errors{background:#fbeae5;border:1px solid #dcb9ae;color:#a03d2e;border-radius:8px;padding:10px 12px;white-space:pre-wrap}',
-    '.sqe2-ok{background:#eef5e7;border:1px solid #c4d6ae;color:#4a6b2f;border-radius:8px;padding:10px 12px}',
-    '.sqe2-cond{border:1px dashed #d8c9a6;border-radius:7px;padding:8px;margin:4px 0;background:#fdfaf2;display:flex;flex-direction:column;gap:6px}',
-    '.sqe2-muted{color:#8a7a55;font-size:12px}',
-    '.sqe2-assign{background:#fffdf7;border:1px solid #e6dcc8;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px}',
-    '.sqe2 textarea.sqe2-import{width:100%;min-height:110px;font-family:Consolas,monospace;font-size:12px}'
-  ].join('\n');
-
-  function el(tag, attrs, children) {
-    var node = document.createElement(tag);
-    if (attrs) {
-      for (var k in attrs) {
-        if (k === 'text') node.textContent = attrs[k];
-        else if (k === 'onclick' || k === 'oninput' || k === 'onchange') node[k] = attrs[k];
-        else if (k === 'checked') node.checked = !!attrs[k];
-        else if (k === 'value') node.value = attrs[k];
-        else if (k === 'disabled') node.disabled = !!attrs[k];
-        else node.setAttribute(k, attrs[k]);
-      }
-    }
-    if (children) {
-      for (var i = 0; i < children.length; i++) {
-        if (children[i]) node.appendChild(children[i]);
-      }
-    }
-    return node;
-  }
-
-  function renderSequenceEditor(container, opts) {
-    if (!container || typeof document === 'undefined') return;
-    opts = opts || {};
-
-    // Working copies — the caller's arrays are never mutated. Only a
-    // successful Save hands data back, and it hands back fresh clones.
-    var sequences = clone(opts.sequences) || [];
-    var assignments = clone(opts.assignments) || [];
-    var templatesList = opts.templatesList || [];   // [{key,label}] or ['key',...]
-    var triggerList = opts.triggerList || [];       // ['hasResume', ...]
-    var onChange = typeof opts.onChange === 'function' ? opts.onChange : function () {};
-
-    var selectedId = sequences.length ? sequences[0].id : null;
-    var lastValidation = null; // {seqId: errors[]} from the latest Save attempt
-    var savedFlash = false;
-
-    // Scoped stylesheet, injected once per document.
-    if (!document.getElementById('sqe2-style')) {
-      var styleTag = document.createElement('style');
-      styleTag.id = 'sqe2-style';
-      styleTag.textContent = EDITOR_CSS;
-      document.head.appendChild(styleTag);
-    }
-
-    function tKey(t) { return typeof t === 'string' ? t : t.key; }
-    function tLabel(t) { return typeof t === 'string' ? t : (t.label || t.key); }
-
-    function selected() {
-      for (var i = 0; i < sequences.length; i++) {
-        if (sequences[i].id === selectedId) return sequences[i];
-      }
-      return null;
-    }
-
-    function uid(prefix) {
-      return prefix + '_' + Math.random().toString(36).slice(2, 8);
-    }
-
-    /* ---- option builders ------------------------------------------- */
-
-    function templateSelect(current, onPick) {
-      var sel = el('select', { onchange: function () { onPick(sel.value || null); } });
-      sel.appendChild(el('option', { value: '', text: '— pick template —' }));
-      for (var i = 0; i < templatesList.length; i++) {
-        var o = el('option', { value: tKey(templatesList[i]), text: tLabel(templatesList[i]) });
-        if (tKey(templatesList[i]) === current) o.selected = true;
-        sel.appendChild(o);
-      }
-      // Preserve a key that isn't in templatesList (template renamed/removed)
-      // rather than silently dropping it — the operator must see it.
-      if (current && !templatesList.some(function (t) { return tKey(t) === current; })) {
-        var ghost = el('option', { value: current, text: current + ' (missing!)' });
-        ghost.selected = true;
-        sel.appendChild(ghost);
-      }
-      return sel;
-    }
-
-    function triggerSelect(current, onPick) {
-      var sel = el('select', { onchange: function () { onPick(sel.value || null); } });
-      sel.appendChild(el('option', { value: '', text: '— pick trigger —' }));
-      for (var i = 0; i < triggerList.length; i++) {
-        var o = el('option', { value: triggerList[i], text: triggerList[i] });
-        if (triggerList[i] === current) o.selected = true;
-        sel.appendChild(o);
-      }
-      if (current && triggerList.indexOf(current) === -1) {
-        var ghost = el('option', { value: current, text: current + ' (unknown!)' });
-        ghost.selected = true;
-        sel.appendChild(ghost);
-      }
-      return sel;
-    }
-
-    function stepTargetSelect(seq, current, allowEnd, onPick) {
-      var sel = el('select', { onchange: function () { onPick(sel.value === '' ? null : sel.value); } });
-      if (allowEnd) sel.appendChild(el('option', { value: '', text: '(end of sequence)' }));
-      for (var i = 0; i < seq.steps.length; i++) {
-        var s = seq.steps[i];
-        var o = el('option', { value: s.id, text: (i + 1) + '. ' + (s.label || s.id) });
-        if (s.id === current) o.selected = true;
-        sel.appendChild(o);
-      }
-      return sel;
-    }
-
-    /* ---- condition builder (recursive) ------------------------------ */
-
-    // Renders a Condition tree with trigger picker + and/or/not group
-    // controls. `replaceSelf(newCond)` lets any node rewrite itself in its
-    // parent — that's how "wrap in NOT" / "make group" work without the
-    // builder knowing its position in the tree.
-    function renderCondition(cond, replaceSelf) {
-      var box = el('div', { class: 'sqe2-cond' });
-
-      if (cond && cond.op) {
-        var head = el('div', { class: 'sqe2-row' });
-        var opSel = el('select', {
-          onchange: function () {
-            cond.op = opSel.value;
-            if (cond.op === 'not' && cond.children.length > 1) cond.children = [cond.children[0]];
-            rerender();
-          }
-        });
-        ['and', 'or', 'not'].forEach(function (op) {
-          var o = el('option', { value: op, text: op.toUpperCase() });
-          if (cond.op === op) o.selected = true;
-          opSel.appendChild(o);
-        });
-        head.appendChild(opSel);
-        if (cond.op !== 'not') {
-          head.appendChild(el('button', {
-            text: '+ condition',
-            onclick: function () { cond.children.push({ trigger: triggerList[0] || '' }); rerender(); }
-          }));
-        }
-        head.appendChild(el('button', {
-          class: 'sqe2-danger', text: 'ungroup',
-          onclick: function () { replaceSelf(cond.children[0] || { trigger: triggerList[0] || '' }); rerender(); }
-        }));
-        box.appendChild(head);
-
-        cond.children = cond.children || [];
-        cond.children.forEach(function (child, idx) {
-          box.appendChild(renderCondition(child, function (newChild) { cond.children[idx] = newChild; }));
-        });
-      } else {
-        var row = el('div', { class: 'sqe2-row' });
-        row.appendChild(triggerSelect(cond && cond.trigger, function (v) { cond.trigger = v; }));
-        row.appendChild(el('button', {
-          text: 'AND/OR…',
-          onclick: function () { replaceSelf({ op: 'and', children: [clone(cond)] }); rerender(); }
-        }));
-        row.appendChild(el('button', {
-          text: 'NOT',
-          onclick: function () { replaceSelf({ op: 'not', children: [clone(cond)] }); rerender(); }
-        }));
-        box.appendChild(row);
-      }
-      return box;
-    }
-
-    /* ---- per-kind config panels ------------------------------------- */
-
-    function kindConfigPanel(seq, step) {
-      var wrap = el('div', {});
-      switch (step.kind) {
-        case 'email': {
-          step.email = step.email || { templateKey: null, automate: false };
-          var row = el('div', { class: 'sqe2-row' });
-          row.appendChild(el('span', { class: 'sqe2-muted', text: 'Template:' }));
-          row.appendChild(templateSelect(step.email.templateKey, function (v) { step.email.templateKey = v; }));
-          var auto = el('input', { type: 'checkbox', checked: step.email.automate === true });
-          auto.onchange = function () { step.email.automate = auto.checked; };
-          row.appendChild(el('label', {}, [auto, el('span', { text: 'template safe to auto-send' })]));
-          wrap.appendChild(row);
-          break;
-        }
-        case 'wait': {
-          step.wait = step.wait || { trigger: null, nudge: null };
-          var r1 = el('div', { class: 'sqe2-row' });
-          r1.appendChild(el('span', { class: 'sqe2-muted', text: 'Wait until:' }));
-          r1.appendChild(triggerSelect(step.wait.trigger, function (v) { step.wait.trigger = v; }));
-          wrap.appendChild(r1);
-
-          var hasNudge = !!step.wait.nudge;
-          var nToggle = el('input', { type: 'checkbox', checked: hasNudge });
-          nToggle.onchange = function () {
-            step.wait.nudge = nToggle.checked
-              ? { templateKey: null, afterDays: 2, repeatEveryDays: 3, maxNudges: 3 }
-              : null;
-            rerender();
-          };
-          wrap.appendChild(el('label', {}, [nToggle, el('span', { text: 'nudge candidate' })]));
-
-          if (step.wait.nudge) {
-            var n = step.wait.nudge;
-            var r2 = el('div', { class: 'sqe2-row' });
-            r2.appendChild(el('span', { class: 'sqe2-muted', text: 'Nudge template:' }));
-            r2.appendChild(templateSelect(n.templateKey, function (v) { n.templateKey = v; }));
-            function numBox(label, prop) {
-              var inp = el('input', { type: 'number', min: '0', value: n[prop] });
-              inp.style.width = '58px';
-              inp.oninput = function () { n[prop] = parseInt(inp.value, 10) || 0; };
-              return el('label', {}, [el('span', { class: 'sqe2-muted', text: label }), inp]);
-            }
-            r2.appendChild(numBox('after days', 'afterDays'));
-            r2.appendChild(numBox('repeat every', 'repeatEveryDays'));
-            r2.appendChild(numBox('max', 'maxNudges'));
-            wrap.appendChild(r2);
-          }
-          break;
-        }
-        case 'gate': {
-          step.gate = step.gate || { trigger: null, failAction: 'park' };
-          var gr = el('div', { class: 'sqe2-row' });
-          gr.appendChild(el('span', { class: 'sqe2-muted', text: 'Require:' }));
-          gr.appendChild(triggerSelect(step.gate.trigger, function (v) { step.gate.trigger = v; }));
-          gr.appendChild(el('span', { class: 'sqe2-muted', text: 'if unmet:' }));
-          var fSel = el('select', { onchange: function () { step.gate.failAction = fSel.value; } });
-          ['park', 'decline', 'flag'].forEach(function (fa) {
-            var o = el('option', { value: fa, text: fa });
-            if (step.gate.failAction === fa) o.selected = true;
-            fSel.appendChild(o);
-          });
-          gr.appendChild(fSel);
-          wrap.appendChild(gr);
-          break;
-        }
-        case 'stage': {
-          step.stage = step.stage || { setStage: '' };
-          var sr = el('div', { class: 'sqe2-row' });
-          sr.appendChild(el('span', { class: 'sqe2-muted', text: 'Set stage to:' }));
-          var sInp = el('input', { type: 'text', value: step.stage.setStage || '' });
-          sInp.oninput = function () { step.stage.setStage = sInp.value; };
-          sr.appendChild(sInp);
-          sr.appendChild(el('span', { class: 'sqe2-muted', text: '(exact column-G stage string)' }));
-          wrap.appendChild(sr);
-          break;
-        }
-        case 'branch': {
-          step.branch = step.branch || { if: { trigger: triggerList[0] || '' }, then: null, else: null };
-          wrap.appendChild(el('div', { class: 'sqe2-muted', text: 'If…' }));
-          wrap.appendChild(renderCondition(step.branch.if, function (newCond) { step.branch.if = newCond; }));
-          var br = el('div', { class: 'sqe2-row' });
-          br.appendChild(el('span', { class: 'sqe2-muted', text: 'then go to:' }));
-          br.appendChild(stepTargetSelect(seq, step.branch.then, true, function (v) { step.branch.then = v; }));
-          br.appendChild(el('span', { class: 'sqe2-muted', text: 'else go to:' }));
-          br.appendChild(stepTargetSelect(seq, step.branch.else, true, function (v) { step.branch.else = v; }));
-          wrap.appendChild(br);
-          wrap.appendChild(el('div', { class: 'sqe2-muted', text: 'Targets may be earlier steps (loop back) or later ones (skip ahead).' }));
-          break;
-        }
-        case 'integration': {
-          step.integration = step.integration || { provider: 'custom', action: '', params: {} };
-          var ir = el('div', { class: 'sqe2-row' });
-          ir.appendChild(el('span', { class: 'sqe2-muted', text: 'Provider:' }));
-          var pSel = el('select', { onchange: function () { step.integration.provider = pSel.value; } });
-          ['yardstik', 'calcom', 'claude', 'zoominfo', 'custom'].forEach(function (p) { /* r2: +claude (AI screening), +zoominfo (employer phone lookup) — host executor handles both */
-            var o = el('option', { value: p, text: p });
-            if (step.integration.provider === p) o.selected = true;
-            pSel.appendChild(o);
-          });
-          ir.appendChild(pSel);
-          var aInp = el('input', { type: 'text', value: step.integration.action || '', placeholder: 'action' });
-          aInp.oninput = function () { step.integration.action = aInp.value; };
-          ir.appendChild(aInp);
-          wrap.appendChild(ir);
-          // Params as JSON — power-user field, but visible: no hidden config.
-          var pTa = el('textarea', { class: 'sqe2-import', text: JSON.stringify(step.integration.params || {}, null, 2) });
-          pTa.style.minHeight = '48px';
-          pTa.oninput = function () {
-            try { step.integration.params = JSON.parse(pTa.value); pTa.style.borderColor = ''; }
-            catch (e) { pTa.style.borderColor = '#a03d2e'; } // keep last good value until JSON parses
-          };
-          wrap.appendChild(el('label', {}, [el('span', { class: 'sqe2-muted', text: 'params (JSON):' })]));
-          wrap.appendChild(pTa);
-          break;
-        }
-        case 'manual': {
-          step.manual = step.manual || { instructions: '' };
-          var mTa = el('textarea', { text: step.manual.instructions || '', placeholder: 'Instructions for the operator…' });
-          mTa.style.width = '100%';
-          mTa.oninput = function () { step.manual.instructions = mTa.value; };
-          wrap.appendChild(mTa);
-          break;
-        }
-      }
-      return wrap;
-    }
-
-    /* ---- step card --------------------------------------------------- */
-
-    var dragIndex = null;
-
-    function stepCard(seq, step, idx) {
-      var invalid = lastValidation && lastValidation[seq.id] &&
-        lastValidation[seq.id].some(function (e) { return e.indexOf('"' + step.id + '"') !== -1; });
-      var card = el('div', { class: 'sqe2-step' + (invalid ? ' sqe2-invalid' : '') });
-
-      // Drag-reorder. On drop we reorder the array AND keep previously-linear
-      // `next` pointers linear (a step whose next was its old array successor
-      // follows the step to its new position); explicit non-linear jumps are
-      // preserved untouched — reordering must never silently rewire a branch
-      // or a deliberate skip.
-      card.draggable = true;
-      card.ondragstart = function (e) { dragIndex = idx; if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'; };
-      card.ondragover = function (e) { e.preventDefault(); card.classList.add('sqe2-dragover'); };
-      card.ondragleave = function () { card.classList.remove('sqe2-dragover'); };
-      card.ondrop = function (e) {
-        e.preventDefault();
-        card.classList.remove('sqe2-dragover');
-        if (dragIndex == null || dragIndex === idx) return;
-        var wasLinear = seq.steps.map(function (s, i) {
-          return s.next != null && i + 1 < seq.steps.length && s.next === seq.steps[i + 1].id;
-        });
-        var moved = seq.steps.splice(dragIndex, 1)[0];
-        var movedWasLinear = wasLinear.splice(dragIndex, 1)[0];
-        seq.steps.splice(idx, 0, moved);
-        wasLinear.splice(idx, 0, movedWasLinear);
-        for (var i = 0; i < seq.steps.length; i++) {
-          if (wasLinear[i]) {
-            seq.steps[i].next = i + 1 < seq.steps.length ? seq.steps[i + 1].id : null;
-          }
-        }
-        dragIndex = null;
-        rerender();
-      };
-
-      var head = el('div', { class: 'sqe2-row' });
-      head.appendChild(el('span', { class: 'sqe2-grip', text: '⠿', title: 'Drag to reorder' }));
-      head.appendChild(el('span', { text: String(idx + 1) + '.' }));
-
-      var iconInp = el('input', { type: 'text', value: step.icon || '' , title: 'Icon'});
-      iconInp.style.width = '40px';
-      iconInp.oninput = function () { step.icon = iconInp.value; };
-      head.appendChild(iconInp);
-
-      var labelInp = el('input', { type: 'text', value: step.label || '', placeholder: 'Step label' });
-      labelInp.style.width = '200px';
-      labelInp.oninput = function () { step.label = labelInp.value; };
-      head.appendChild(labelInp);
-
-      var kindSel = el('select', {
-        onchange: function () { step.kind = kindSel.value; rerender(); }
-      });
-      Object.keys(VALID_KINDS).forEach(function (k) {
-        var o = el('option', { value: k, text: k });
-        if (step.kind === k) o.selected = true;
-        kindSel.appendChild(o);
-      });
-      head.appendChild(el('span', { class: 'sqe2-kindtag', text: step.kind }));
-      head.appendChild(kindSel);
-
-      var autoChk = el('input', { type: 'checkbox', checked: step.automate === true });
-      autoChk.onchange = function () { step.automate = autoChk.checked; };
-      head.appendChild(el('label', { title: 'Host may execute this step without a click (emails also need the template marked auto-sendable)' },
-        [autoChk, el('span', { text: 'automate' })]));
-
-      var lockChk = el('input', { type: 'checkbox', checked: step.locked === true });
-      lockChk.onchange = function () { step.locked = lockChk.checked; };
-      head.appendChild(el('label', { title: 'Locked steps cannot be skipped by fast-track' },
-        [lockChk, el('span', { text: '🔒 lock' })]));
-
-      head.appendChild(el('button', {
-        class: 'sqe2-danger', text: 'Delete',
-        onclick: function () { seq.steps.splice(idx, 1); rerender(); }
-      }));
-      card.appendChild(head);
-
-      card.appendChild(kindConfigPanel(seq, step));
-
-      if (step.kind !== 'branch') {
-        var nextRow = el('div', { class: 'sqe2-row' });
-        nextRow.appendChild(el('span', { class: 'sqe2-muted', text: 'Next step:' }));
-        nextRow.appendChild(stepTargetSelect(seq, step.next, true, function (v) { step.next = v; }));
-        card.appendChild(nextRow);
-      }
-      return card;
-    }
-
-    /* ---- assignments panel ------------------------------------------ */
-
-    function assignmentsPanel() {
-      var box = el('div', { class: 'sqe2-assign' });
-      box.appendChild(el('h3', { text: 'Assignment rules' }));
-      box.appendChild(el('div', { class: 'sqe2-muted', text: 'Source-code match beats default. Candidates keep their sequence for life.' }));
-      assignments.forEach(function (a, idx) {
-        a.match = a.match || {};
-        var row = el('div', { class: 'sqe2-row' });
-        var isDefault = a.match.default === true;
-        var codeInp = el('input', { type: 'text', value: isDefault ? '' : (a.match.sourceCode || ''), placeholder: '6-char code', disabled: isDefault });
-        codeInp.style.width = '90px';
-        codeInp.oninput = function () { a.match = { sourceCode: codeInp.value }; };
-        var defChk = el('input', { type: 'checkbox', checked: isDefault });
-        defChk.onchange = function () {
-          a.match = defChk.checked ? { default: true } : { sourceCode: '' };
-          rerender();
-        };
-        var seqSel = el('select', { onchange: function () { a.sequenceId = seqSel.value; } });
-        sequences.forEach(function (sq) {
-          var o = el('option', { value: sq.id, text: sq.name || sq.id });
-          if (sq.id === a.sequenceId) o.selected = true;
-          seqSel.appendChild(o);
-        });
-        row.appendChild(el('label', {}, [defChk, el('span', { text: 'default' })]));
-        row.appendChild(codeInp);
-        row.appendChild(el('span', { class: 'sqe2-muted', text: '→' }));
-        row.appendChild(seqSel);
-        row.appendChild(el('button', { class: 'sqe2-danger', text: '✕', onclick: function () { assignments.splice(idx, 1); rerender(); } }));
-        box.appendChild(row);
-      });
-      box.appendChild(el('button', {
-        text: '+ rule',
-        onclick: function () {
-          assignments.push({ match: { sourceCode: '' }, sequenceId: sequences.length ? sequences[0].id : null });
-          rerender();
-        }
-      }));
-      return box;
-    }
-
-    /* ---- import / export -------------------------------------------- */
-
-    var importOpen = false;
-    function importPanel(root) {
-      var ta = el('textarea', { class: 'sqe2-import', placeholder: 'Paste a Solura sequence export here…' });
-      var msg = el('div', { class: 'sqe2-muted' });
-      var btn = el('button', {
-        class: 'sqe2-primary', text: 'Upload sequence',
-        onclick: function () {
-          var res = importSequence(ta.value);
-          if (!res.ok) {
-            msg.className = 'sqe2-errors';
-            msg.textContent = res.errors.join('\n');
-            return;
-          }
-          // Imported id colliding with an existing sequence would silently
-          // overwrite someone's work — suffix it instead and say so.
-          var seq = res.sequence;
-          if (sequences.some(function (sq) { return sq.id === seq.id; })) {
-            seq.id = seq.id + '_imported_' + Math.random().toString(36).slice(2, 6);
-            seq.name = (seq.name || seq.id) + ' (imported copy)';
-          }
-          sequences.push(seq);
-          selectedId = seq.id;
-          importOpen = false;
-          rerender();
-        }
-      });
-      root.appendChild(ta);
-      root.appendChild(el('div', { class: 'sqe2-row' }, [btn, el('button', { text: 'Cancel', onclick: function () { importOpen = false; rerender(); } })]));
-      root.appendChild(msg);
-    }
-
-    /* ---- top-level render ------------------------------------------- */
-
-    function rerender() {
-      container.textContent = '';
-      var rootEl = el('div', { class: 'sqe2' });
-
-      // Sidebar: sequence list + create/import + assignment rules
-      var side = el('div', { class: 'sqe2-side' });
-      side.appendChild(el('h3', { text: 'Sequences' }));
-      sequences.forEach(function (sq) {
-        side.appendChild(el('button', {
-          class: 'sqe2-seqbtn' + (sq.id === selectedId ? ' sqe2-active' : ''),
-          text: sq.name || sq.id,
-          onclick: function () { selectedId = sq.id; lastValidation = null; rerender(); }
-        }));
-      });
-      side.appendChild(el('button', {
-        text: '+ New sequence',
-        onclick: function () {
-          var id = uid('seq');
-          var now = iso(Date.now());
-          sequences.push({
-            id: id, name: 'New sequence', description: '',
-            createdAt: now, updatedAt: now, version: 1,
-            steps: [{ id: uid('step'), key: 'start', label: 'First step', icon: '✉️', kind: 'email',
-                      email: { templateKey: null, automate: false }, locked: false, automate: false, next: null }]
-          });
-          selectedId = id;
-          rerender();
-        }
-      }));
-      side.appendChild(el('button', { text: '⬆ Upload sequence', onclick: function () { importOpen = !importOpen; rerender(); } }));
-      side.appendChild(assignmentsPanel());
-      rootEl.appendChild(side);
-
-      // Main panel
-      var main = el('div', { class: 'sqe2-main' });
-
-      if (importOpen) importPanel(main);
-
-      var seq = selected();
-      if (!seq) {
-        main.appendChild(el('div', { class: 'sqe2-muted', text: 'No sequence selected. Create or upload one.' }));
-      } else {
-        var meta = el('div', { class: 'sqe2-row' });
-        var nameInp = el('input', { type: 'text', value: seq.name || '' });
-        nameInp.style.width = '220px';
-        nameInp.oninput = function () { seq.name = nameInp.value; };
-        meta.appendChild(nameInp);
-        var descInp = el('input', { type: 'text', value: seq.description || '', placeholder: 'Description' });
-        descInp.style.flex = '1';
-        descInp.oninput = function () { seq.description = descInp.value; };
-        meta.appendChild(descInp);
-        meta.appendChild(el('button', {
-          text: '⬇ Export',
-          onclick: function () {
-            // Download as a .txt the operator can store or email around.
-            var blob = new Blob([exportSequence(seq)], { type: 'text/plain' });
-            var a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = (seq.id || 'sequence') + '.solura-seq.txt';
-            a.click();
-            URL.revokeObjectURL(a.href);
-          }
-        }));
-        meta.appendChild(el('button', {
-          class: 'sqe2-danger', text: 'Delete sequence',
-          onclick: function () {
-            // Deleting a sequence candidates may be running is consequential;
-            // one confirm is the least we owe the operator.
-            if (typeof window !== 'undefined' && window.confirm &&
-                !window.confirm('Delete sequence "' + (seq.name || seq.id) + '"? Candidates on it will need reassignment.')) return;
-            sequences = sequences.filter(function (sq) { return sq.id !== seq.id; });
-            selectedId = sequences.length ? sequences[0].id : null;
-            rerender();
-          }
-        }));
-        main.appendChild(meta);
-
-        // Validation feedback from the last Save attempt, surfaced inline
-        // BEFORE anything is persisted.
-        if (lastValidation && lastValidation[seq.id] && lastValidation[seq.id].length) {
-          main.appendChild(el('div', { class: 'sqe2-errors', text: lastValidation[seq.id].join('\n') }));
-        } else if (savedFlash) {
-          main.appendChild(el('div', { class: 'sqe2-ok', text: 'Saved.' }));
-        }
-
-        seq.steps.forEach(function (step, idx) {
-          main.appendChild(stepCard(seq, step, idx));
-        });
-
-        main.appendChild(el('div', { class: 'sqe2-row' }, [
-          el('button', {
-            text: '+ Add step',
-            onclick: function () {
-              var prev = seq.steps[seq.steps.length - 1];
-              var ns = { id: uid('step'), key: '', label: 'New step', icon: '▫️', kind: 'manual',
-                         manual: { instructions: '' }, locked: false, automate: false, next: null };
-              if (prev && prev.kind !== 'branch' && prev.next == null) prev.next = ns.id;
-              seq.steps.push(ns);
-              rerender();
-            }
-          }),
-          el('button', {
-            class: 'sqe2-primary', text: 'Save changes',
-            onclick: function () {
-              // Validate EVERY sequence, not just the visible one — a branch
-              // edit here can strand a step there if ids were shared by copy.
-              lastValidation = {};
-              var allOk = true;
-              sequences.forEach(function (sq) {
-                var v = validateSequence(sq);
-                lastValidation[sq.id] = v.errors;
-                if (!v.ok) allOk = false;
-              });
-              savedFlash = false;
-              if (allOk) {
-                var now = iso(Date.now());
-                sequences.forEach(function (sq) { sq.updatedAt = now; sq.version = (sq.version || 0) + 1; });
-                savedFlash = true;
-                // Hand back clones: the host stores them; our working copy
-                // stays independent so further edits don't leak pre-save.
-                onChange({ sequences: clone(sequences), assignments: clone(assignments) });
-              }
-              rerender();
-            }
-          })
-        ]));
-      }
-
-      rootEl.appendChild(main);
-      container.appendChild(rootEl);
-    }
-
-    rerender();
-  }
-
-  /* ------------------------------------------------------------------ *
-   * Export surface — the ONLY global this module creates
-   * ------------------------------------------------------------------ */
-
-  var api = {
-    evaluate: evaluate,
-    assignSequence: assignSequence,
-    advanceStep: advanceStep,
-    validateSequence: validateSequence,
-    exportSequence: exportSequence,
-    importSequence: importSequence,
-    resolveSequenceFor: resolveSequenceFor,
-    sequenceStats: sequenceStats,
-    renderSequenceEditor: renderSequenceEditor,
-    DEFAULT_SEQUENCE: DEFAULT_SEQUENCE
-  };
-
-  // Browser: window.SeqEngineV2. Node (tests): module.exports. Same object.
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = api;
-  }
-  root.SeqEngineV2 = api;
-
-})(typeof window !== 'undefined' ? window : globalThis);
-
-</script>
+<!-- P-8 (2026-09-01): the legacy Sequence Engine v2 block (1,722 lines) that lived here was DELETED. It had been dead code since the v3 alias landed — window.SeqEngineV2 is rewired to window.SeqBuilderV3 (an API superset) in the main script, so nothing ever reached this copy, and its editor still showed controls the live engine no longer has. History: git show 55134a8:Solura_Hiring_Portal.html -->
 <script>
 /* ==========================================================================
    SEQUENCE BUILDER V3 — embedded verbatim from sequence_builder_v3.js
@@ -9912,7 +8191,7 @@ async function loadData(){
       delete c.st.awaitingSince;
       delete c.st.awaitingItemsInitialCount;
       delete c.st.awaitingItemsReceived;
-      delete c.st.lastAwaitingReview;
+      delete c.st.lastAwaitingReview;delete c.st.staleParkCalls;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-healed — references received, released from awaiting'});
       touched=true;
       healed++;
@@ -9928,7 +8207,7 @@ async function loadData(){
       delete c.st.awaitingSince;
       delete c.st.awaitingItemsInitialCount;
       delete c.st.awaitingItemsReceived;
-      delete c.st.lastAwaitingReview;
+      delete c.st.lastAwaitingReview;delete c.st.staleParkCalls;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-healed — résumé on file, released from awaiting'});
       touched=true;
       healed++;
@@ -10905,7 +9184,7 @@ function _actionC(c){
       delete st.awaitingSince;
       delete st.awaitingItemsInitialCount;
       delete st.awaitingItemsReceived;
-      delete st.lastAwaitingReview;
+      delete st.lastAwaitingReview;delete st.staleParkCalls;
       st.log=st.log||[];
       st.log.push({t:stamp(),x:'✓ Auto-released from awaiting — booking arrived'});
       _autoReleased=true;
@@ -10927,9 +9206,29 @@ function _actionC(c){
       if(st.awaitingUntil&&isFinite(Date.parse(st.awaitingUntil))&&Date.parse(st.awaitingUntil)<=Date.now()){
         return{bucket:'action',timing:{txt:'⏰ Awaiting period ended ('+fmtDay(st.awaitingUntil)+')',pill:'pa',date:st.awaitingReason||''},info,primary:{kind:'release-awaiting',label:'⏰ Review — awaiting expired',cls:'gold'},manuallyAwaiting:true,awaitingReSurfaceReason:'timer'};
       }
+      /* P-10 (Meir's rule): a park gone silent for a week surfaces as a PHONE CALL action;
+         one more call the next day; after the second call it parks again for good (any
+         fresh reply/booking/document still resurfaces them the normal way and resets the
+         ladder). Timed parks (awaitingUntil) keep their own schedule and are excluded. */
+      if(!st.awaitingUntil&&c.phone){
+        const _lastTouch=Math.max(
+          st.awaitingSince?Date.parse(st.awaitingSince)||0:0,
+          st.lastAwaitingReview?Date.parse(st.lastAwaitingReview)||0:0,
+          st.lastAssignmentAt?Date.parse(st.lastAssignmentAt)||0:0,
+          st.bookingReceivedAt?Date.parse(st.bookingReceivedAt)||0:0);
+        const _silentDays=_lastTouch?Math.floor((Date.now()-_lastTouch)/86400000):0;
+        const _spc=st.staleParkCalls||{count:0,lastAt:null};
+        if(_silentDays>=7&&_spc.count===0){
+          return{bucket:'action',timing:{txt:'📞 No reply in '+_silentDays+' days — call them',pill:'pa',date:st.awaitingReason||''},info,primary:{kind:'stale-call',label:'📞 Call '+(c.name||'').split(' ')[0],cls:'gold'},manuallyAwaiting:true};
+        }
+        if(_spc.count===1&&_spc.lastAt&&Date.now()-Date.parse(_spc.lastAt)>=20*3600*1000){
+          return{bucket:'action',timing:{txt:'📞 Second call — last try before re-parking',pill:'pa',date:st.awaitingReason||''},info,primary:{kind:'stale-call',label:'📞 Call again',cls:'gold'},manuallyAwaiting:true};
+        }
+      }
       /* No new activity — silently parked. */
       const awaitingItemsLabel=awaitingItems.length?(' ('+awaitingItems.length+' item'+(awaitingItems.length===1?'':'s')+')'):'';
-      return{bucket:'awaiting',timing:{txt:(st.awaitingReason||'Manually parked')+awaitingItemsLabel,pill:'psoft',date:st.awaitingUntil?('until '+fmtDay(st.awaitingUntil)):''},info,primary:{kind:'release-awaiting',label:'Move out of awaiting',cls:'sky'},manuallyAwaiting:true};
+      const _calledNote=(st.staleParkCalls&&st.staleParkCalls.count>=2)?' · called ×2, no reply':'';
+      return{bucket:'awaiting',timing:{txt:(st.awaitingReason||'Manually parked')+awaitingItemsLabel+_calledNote,pill:'psoft',date:st.awaitingUntil?('until '+fmtDay(st.awaitingUntil)):''},info,primary:{kind:'release-awaiting',label:'Move out of awaiting',cls:'sky'},manuallyAwaiting:true};
     }
   }
   /* Email-as-action: unread email overrides whatever stage-driven primary would apply. */
@@ -11724,7 +10023,7 @@ async function releaseAwaiting(){
   delete W.st.awaitingSince;
   delete W.st.awaitingItemsInitialCount;
   delete W.st.awaitingItemsReceived;
-  delete W.st.lastAwaitingReview;
+  delete W.st.lastAwaitingReview;delete W.st.staleParkCalls;
   logW('Resumed from awaiting');
   await saveW(true);
   toast('▶ Resumed — next step now available');
@@ -12573,6 +10872,7 @@ function doPrimary(r){_memGen++;const c=pipeline.find(x=>x.excelRow===r);if(!c)r
     setTimeout(()=>{orderYardstikCheck();},250);
     return;
   }
+  if(p.kind==='stale-call'){_staleCallModal(r);return;} /* P-10: silent park → phone-call ladder */
   if(p.kind==='noshow-rebook'){
     /* P-4: runs the standard 📵 flow — no-show count, stage revert, park, rebook composer. */
     openWorkspace(r);
@@ -13260,7 +11560,7 @@ async function _markReceivedCore(cand,idx,note){
     delete cand.st.awaitingSince;
     delete cand.st.awaitingItemsInitialCount;
     delete cand.st.awaitingItemsReceived;
-    delete cand.st.lastAwaitingReview;
+    delete cand.st.lastAwaitingReview;delete cand.st.staleParkCalls;
     cand.st.log.push({t:stamp(),x:'\u2705 Auto-released from awaiting \u2014 all requested items received'});
     if(item.kind==='cert')cand.st.certsReadyReview=true; /* next action: cross-check in the hub */
   }
@@ -13369,7 +11669,7 @@ async function recordCertAnswer(row,idx){
     delete cand.st.awaitingSince;
     delete cand.st.awaitingItemsInitialCount;
     delete cand.st.awaitingItemsReceived;
-    delete cand.st.lastAwaitingReview;
+    delete cand.st.lastAwaitingReview;delete cand.st.staleParkCalls;
     cand.st.log.push({t:stamp(),x:'\u2713 Released from awaiting \u2014 cert claim recorded'});
   }
   /* Auto-advance to Screen invite when all required minimums are met. The Decline path doesn't
@@ -14366,7 +12666,7 @@ async function detectResumeInFolder(c){
           delete c.st.awaitingSince;
           delete c.st.awaitingItemsInitialCount;
           delete c.st.awaitingItemsReceived;
-          delete c.st.lastAwaitingReview;
+          delete c.st.lastAwaitingReview;delete c.st.staleParkCalls;
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-released — résumé received'});
         }
       }
@@ -15129,7 +13429,7 @@ async function markResumeReceived(){
     delete W.st.awaitingSince;
     delete W.st.awaitingItemsInitialCount;
     delete W.st.awaitingItemsReceived;
-    delete W.st.lastAwaitingReview;
+    delete W.st.lastAwaitingReview;delete W.st.staleParkCalls;
   }
   /* st.hasResume (set via W.gates + saveW below) is the source of truth. DO NOT write 'Y' to
      column G — G is the STAGE column; writing 'Y' here destroyed candidates' stages. */
@@ -15155,7 +13455,7 @@ async function skipResumeRequirement(){
     delete W.st.awaitingSince;
     delete W.st.awaitingItemsInitialCount;
     delete W.st.awaitingItemsReceived;
-    delete W.st.lastAwaitingReview;
+    delete W.st.lastAwaitingReview;delete W.st.staleParkCalls;
   }
   logW('→ Résumé requirement skipped — released from awaiting');
   await saveW(true);
@@ -17596,7 +15896,7 @@ async function _doAssignment(messageId,attIdx,cand,item){
       delete cand.st.awaitingSince;
       delete cand.st.awaitingItemsInitialCount;
       delete cand.st.awaitingItemsReceived;
-      delete cand.st.lastAwaitingReview;
+      delete cand.st.lastAwaitingReview;delete cand.st.staleParkCalls;
       cand.st.log=cand.st.log||[];
       cand.st.log.push({t:stamp(),x:'✓ Auto-released from awaiting — all requested items received'});
     }
@@ -17754,7 +16054,7 @@ async function _pollMergeFreshAJ(excelRow, mutated){
     /* Awaiting fields: only carry over the *deletions* the poll did (e.g. resume detected →
        cleared manualAwaiting). If mutated has them missing and fresh has them present, honor the
        deletion intent. If mutated has them present, take fresh's (poll didn't touch them). */
-    ['manualAwaiting','awaitingReason','awaitingUntil','awaitingSince','awaitingItemsInitialCount','awaitingItemsReceived','lastAwaitingReview'].forEach(k=>{
+    ['manualAwaiting','awaitingReason','awaitingUntil','awaitingSince','awaitingItemsInitialCount','awaitingItemsReceived','lastAwaitingReview','staleParkCalls'].forEach(k=>{
       if(mutated[k]===undefined&&fresh[k]!==undefined&&mutated.hasResume===true&&fresh.hasResume!==true){
         /* The poll specifically deletes these when it auto-detects a resume arrival. Preserve that
            deletion intent (drop the field) instead of restoring fresh's value. */
@@ -23341,6 +21641,70 @@ async function _cancelBookingHeadless(c,reason){
     const j=await r.json();return !!j.ok;
   }catch(e){return false;}
 }
+/* P-10: the silent-park phone-call ladder (Meir's rule): a week of silence → call; one
+   more the next day; then park again for good. The modal dials, the buttons log. */
+function _staleCallModal(r){
+  const c=pipeline.find(x=>x.excelRow===r);if(!c)return;
+  const spc=c.st.staleParkCalls||{count:0};
+  const nth=spc.count+1;
+  const digits=String(c.phone||'').replace(/[^\d]/g,'');
+  const e164='+1'+digits.replace(/^1/,'');
+  const gvUrl='https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164);
+  document.getElementById('m-title').textContent='📞 Call '+(c.name||'candidate')+(nth>1?' — call #'+nth+' (last try)':'');
+  document.getElementById('m-body').innerHTML=`
+    <div style="font-size:13px;color:var(--mid);line-height:1.6">
+      <p style="margin:0 0 8px">${esc(c.st.awaitingReason||'Parked in awaiting')} — and nothing back from them since. ${nth===1?'Per your rule: one call now, one more tomorrow if needed, then they re-park.':'This is the second and final call — after this they re-park quietly.'}</p>
+      <div style="background:var(--cream);padding:12px 14px;border-radius:8px;font-size:18px;font-weight:700;text-align:center;margin:10px 0">
+        <a href="tel:${esc(telify(c.phone||''))}" style="text-decoration:none">${esc(c.phone||'(no phone)')}</a>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button class="btn-sm bg-cream" style="cursor:pointer" onclick="openLinkPopup('${gvUrl}','gvoice',420,640)">📱 Dial in Google Voice</button>
+      </div>
+    </div>
+    <div class="brow" style="margin-top:16px;gap:8px">
+      <button class="btn-primary bg-grn" onclick="_staleCallDone(${r},false)">✓ Called — no answer</button>
+      <button class="btn-primary bg-gold" onclick="_staleCallDone(${r},true)">✓ Reached them — open candidate</button>
+      <button class="btn-sec bg-cream" onclick="closeModal()">Later</button>
+    </div>`;
+  document.getElementById('modal').classList.add('open');
+}
+async function _staleCallDone(r,reached){
+  const c=pipeline.find(x=>x.excelRow===r);if(!c)return;
+  const n=((c.st.staleParkCalls&&c.st.staleParkCalls.count)||0)+1;
+  c.st.staleParkCalls={count:n,lastAt:new Date().toISOString()};
+  c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📞 Silence-check call #'+n+' — '+(reached?'REACHED them':'no answer')+(!reached&&n>=2?' · re-parked for good':!reached&&n===1?' · one more call tomorrow':'')});
+  c.st.lastAwaitingReview=new Date().toISOString(); /* re-park cleanly — no stale event resurfaces them */
+  try{await patchRange('AJ'+r,[[_stCell(c.st)]]);}catch(e){toast('⚠ '+e.message);return;}
+  closeModal();_memGen++;
+  if(reached){openWorkspace(r);toast('📞 Logged — over to you');}
+  else{toast(n>=2?'📞 Logged — re-parked. A reply or booking still wakes them.':'📞 Logged — they resurface tomorrow for the second call.');}
+  if(typeof render==='function')render();
+}
+/* P-9: what the robot actually DID — every 🤖-marked log entry from today and yesterday,
+   across all candidates, in one list. Read straight out of the logs the tick already
+   writes; failures (🤖⚠) float to the top. No new stored data. */
+function _seqAutomationLog(){
+  const today_=stamp();
+  const y=new Date();y.setDate(y.getDate()-1);
+  const yesterday_=y.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  const acts=[];
+  (typeof pipeline!=='undefined'?pipeline:[]).forEach(c=>{
+    (c.st&&c.st.log||[]).forEach(l=>{
+      if(!l||!l.x||!/^🤖/.test(l.x))return;
+      if(l.t!==today_&&l.t!==yesterday_)return;
+      acts.push({n:c.name,t:l.t,x:l.x,fail:/^🤖⚠/.test(l.x)});
+    });
+  });
+  acts.sort((a,b)=>(b.fail?1:0)-(a.fail?1:0)||(b.t===today_?1:0)-(a.t===today_?1:0));
+  document.getElementById('m-title').textContent='🤖 What automation did — last two days';
+  document.getElementById('m-body').innerHTML=
+    '<p style="font-size:12.5px;color:var(--soft);margin:0 0 10px">Every automated action logged today and yesterday ('+esc(yesterday_)+'–'+esc(today_)+'). Failures the robot handed back to you are listed first.</p>'
+    +(acts.length
+      ?'<div style="max-height:55vh;overflow-y:auto">'+acts.map(a=>'<div style="padding:8px 12px;border:1px solid '+(a.fail?'var(--red)':'var(--border)')+';border-radius:8px;margin-bottom:6px;font-size:12.5px;'+(a.fail?'background:#FDECEA;':'')+'"><b>'+esc(a.n)+'</b> <span style="color:var(--soft);font-size:11px">'+esc(a.t)+'</span><br>'+esc(a.x)+'</div>').join('')+'</div>'
+      :'<div style="font-size:13px;color:var(--soft);padding:8px 0">Nothing — the robot took no actions in the last two days.</div>')
+    +'<div class="brow" style="margin-top:14px"><button class="btn-sec bg-cream" onclick="closeModal()">Close</button></div>';
+  document.getElementById('modal').classList.add('open');
+}
 /* P-6: DRY RUN — what would the automation robot do on its very next pass? Mirrors
    _seqAutomationTick's guards and gating exactly (workspace-open, terminal, unread-reply,
    per-booking cert warn/cancel windows, engine automatable flag, seqAutoFail, sent-dedup,
@@ -24330,6 +22694,7 @@ function renderSettingsSeqV2(){
         ⚙ Sequence automation ${SETTINGS.config&&SETTINGS.config.seqAutomation?'<span style="color:var(--grn-deep)">— LIVE</span>':'— off (kill switch)'}
       </label>
       <button class="btn-sm bg-cream" style="cursor:pointer;margin-left:auto" onclick="_seqAutomationPreview()" title="See exactly what the robot's next pass would do — who, and what action — without running anything">🔍 Preview next pass</button>
+      <button class="btn-sm bg-cream" style="cursor:pointer" onclick="_seqAutomationLog()" title="Every automated action from today and yesterday, across all candidates — failures first">🤖 Last 24h</button>
     </div>
     <p class="set-help" style="margin-top:6px;font-size:11px">When on: only steps marked <b>automate</b> act, max 1 action per candidate and 10 total per 30-second tick, never past an unmet gate, everything logged 🤖⚙. Includes the 1-hour interview auto-cancel. Park/decline/integration/manual steps always stay human-only. Uncheck to stop instantly.</p>
   </div>
