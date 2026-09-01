@@ -9852,7 +9852,9 @@ async function markAllRead(){
   for(const c of pipeline){
     const emails=c.st.emails||[];
     let dirty=false;
-    emails.forEach(e=>{if(!e.seen){e.seen=true;e.seenAt=stamp();dirty=true;count++;}});
+    /* Mirror into the open workspace's deep copy too — see _mirrorSeenToW. Without it, the very
+       next saveW writes the stale seen:false back and un-reads what was just marked read. */
+    emails.forEach(e=>{if(!e.seen){e.seen=true;e.seenAt=stamp();_mirrorSeenToW(c.excelRow,e.id,e.seenAt);dirty=true;count++;}});
     if(dirty){
       try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);}catch(e){console.warn('mark-read save:',e.message);}
     }
@@ -15430,6 +15432,22 @@ async function markCurrentEmailUnread(){
   }catch(e){toast('Failed: '+e.message);}
 }
 
+/* loadW takes a DEEP COPY of the candidate's state (`st:JSON.parse(JSON.stringify(p.st))`), so
+   marking an email seen on `c.st` leaves the OPEN workspace holding the stale `seen:false`. The
+   next saveW writes W.st over AJ *and* rebuilds the pipeline card from it — resurrecting the
+   unread flag on the sheet and in memory. That matters because unread inbound mail outranks every
+   stage-driven primary in _actionC, and _tickOutwardHold blocks the robot from mailing anyone
+   with an unread reply: read the reply, take one action in the workspace, and the candidate is
+   pinned to "✉ Open new email" and unreachable by automation forever. Mirror the flag across.
+   (Same deep-copy clobber class as the lastAwaitingReview mirror in openWorkspace.) */
+function _mirrorSeenToW(excelRow,messageId,seenAt){
+  try{
+    if(!W||W.row!==excelRow||!W.st||!Array.isArray(W.st.emails))return;
+    const we=W.st.emails.find(x=>x&&x.id===messageId);
+    if(we&&!we.seen){we.seen=true;we.seenAt=seenAt;}
+  }catch(e){console.warn('seen mirror:',e.message);}
+}
+
 async function openEmailDetail(messageId){
   /* A locally-logged send carries a synthetic id ('local-'/'mass-') — it isn't a real Graph message,
      so fetching it returns 400. Detect it up front: show the stored copy, skip the Graph calls. The
@@ -15443,6 +15461,7 @@ async function openEmailDetail(messageId){
     if(e&&!e.seen){
       e.seen=true;
       e.seenAt=stamp();
+      _mirrorSeenToW(c.excelRow,messageId,e.seenAt);
       anyMarked=true;
       patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(err=>console.warn('seen persist:',err.message));
     }
