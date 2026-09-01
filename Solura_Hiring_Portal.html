@@ -10824,9 +10824,30 @@ async function autoRejectOne(row){
   loadW(row);doEmail('reject','Declined');
 }
 function fillBucket(i,list){
-  document.getElementById('c'+i).textContent=list.length;
-  document.getElementById('t'+i).innerHTML=list.length?list.map(rowHtml).join(''):
+  /* Silence-ladder phone calls live in ONE collapsed group at the bottom of Action needed
+     (Meir's rule): they're a work-the-pile chore, not individual emergencies, and as loose
+     rows they buried the genuinely time-critical cards. Expand to work through them; the
+     open/closed state survives re-renders. */
+  let calls=[];
+  if(i===0){
+    calls=list.filter(c=>{const p=action(c).primary;return p&&p.kind==='stale-call';});
+    if(calls.length)list=list.filter(c=>{const p=action(c).primary;return !(p&&p.kind==='stale-call');});
+  }
+  document.getElementById('c'+i).textContent=list.length+calls.length;
+  let groupHtml='';
+  if(calls.length){
+    let open=false;try{open=localStorage.getItem('solura_callgroup_open')==='1';}catch(e){}
+    groupHtml='<tr onclick="_toggleCallGroup()" style="cursor:pointer;background:#FAF6EE;border-top:2px solid var(--gold-mid)"><td colspan="6" style="padding:11px 14px;font-weight:700;font-size:12.5px;color:#8B6500">'
+      +(open?'▾':'▸')+' 📞 '+calls.length+' candidate'+(calls.length===1?'':'s')+' to nudge by phone'
+      +' <span style="font-weight:400;color:var(--soft);font-size:11.5px">— quiet 30+ days · two calls, then back to email · click to '+(open?'tuck away':'work the list')+'</span></td></tr>'
+      +(open?calls.map(rowHtml).join(''):'');
+  }
+  document.getElementById('t'+i).innerHTML=(list.length||calls.length)?(list.map(rowHtml).join('')+groupHtml):
     '<tr><td colspan="6" class="empty" style="padding:22px;text-align:center;color:var(--soft);font-size:12px">Nothing here.</td></tr>';
+}
+function _toggleCallGroup(){
+  try{localStorage.setItem('solura_callgroup_open',localStorage.getItem('solura_callgroup_open')==='1'?'0':'1');}catch(e){}
+  if(typeof render==='function')render();
 }
 function toggleBucket(i){collapsed[i]=!collapsed[i];document.getElementById('sw-'+i).classList.toggle('collapsed',collapsed[i]);}
 function rowHtml(c){
