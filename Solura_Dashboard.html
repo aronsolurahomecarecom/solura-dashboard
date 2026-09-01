@@ -1084,6 +1084,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <label class="st-btn-ghost" style="cursor:pointer"><input type="file" id="eng-import-input" accept=".json,application/json" style="display:none">📥 Import package</label>
           <button data-action="es-export-all" class="st-btn-ghost">📤 Export all</button>
         </div>
+        <div id="es-import-out" style="font-size:12px;line-height:1.6;margin:-16px 0 20px;white-space:pre-line"></div>
         <h4 class="st-h2">Engine assignments by source</h4>
         <p class="st-p">Leads whose Source matches a rule use that engine; everyone else uses the default. Match is case-insensitive partial text. <b>🧪 To A/B test whole sequences:</b> hit <b>＋ A/B track</b> on a rule and pick a second (or third) engine — new leads from that source rotate evenly across the tracks, every touch is stamped with its engine, and 📊 → 🔀 Sequence tracks shows which approach wins after a few weeks.</p>
         <div id="es-assign-list" style="margin-bottom:8px"></div>
@@ -1508,7 +1509,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0831-61';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0901-62';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1897,6 +1898,8 @@ var CONFIG_DEFAULTS={
   resendAudienceId:'',
   resendFrom:'Meir at Solura <newsletter@hello.solurahomecare.com>', // short display name — the long one truncates on mobile Gmail
   resendReplyTo:'care@solurahomecare.com',
+  customStatuses:[],       // stages added via "➕ New stage…" — reflected everywhere
+  customSources:[],        // lead sources added via "➕ New source…"
   nlSeqGroups:['nurture'], // sequence positions that get the newsletter
   nlStatuses:[],           // stages that ALSO get it, regardless of position
   nlWarmupStart:'',        // YYYY-MM-DD the 14-day warm-up began ('' = not running)
@@ -3351,6 +3354,38 @@ function buildButtons(l){
 // MOPS = method-of-contact options (col M)
 var MOPS=['','Phone call','SMS','Email','In person','Left voicemail','No answer'];
 var STATUS_OPTS=['New','No answer','Contacted','Active Conversation','Assessment Scheduled','Assessment Completed','Proposal Sent','Signed','On Service','Hold','Closed','Not Interested','Lost','Wrong Number','Deceased','Duplicate'];
+/* ─── Central stage/source registries ────────────────────────────────────
+ * ONE list each, fed by three springs: the built-ins, custom additions
+ * (config-synced, added via any "➕ New…" affordance), and whatever the
+ * sheet actually contains. Every dropdown, datalist, and checklist in the
+ * app draws from these, so a stage or source added ANYWHERE appears
+ * EVERYWHERE. */
+function customValues(key){var v=cfg(key);return Array.isArray(v)?v:[];}
+function allStatuses(){
+  var seen={},out=[];
+  var push=function(s){s=String(s||'').trim();if(!s)return;var k=s.toLowerCase();if(seen[k])return;seen[k]=1;out.push(s);};
+  STATUS_OPTS.forEach(push);
+  customValues('customStatuses').forEach(push);
+  for(var i=DATA_START;i<rows.length;i++)push((rows[i]||[])[C.ST]);
+  return out.sort(function(a,b){return a.localeCompare(b);});
+}
+function allSources(){
+  var seen={},out=[];
+  var push=function(s){s=String(s||'').trim();if(!s)return;var k=s.toLowerCase();if(seen[k])return;seen[k]=1;out.push(s);};
+  customValues('customSources').forEach(push);
+  for(var i=DATA_START;i<rows.length;i++)push((rows[i]||[])[C.SO]);
+  return out.sort(function(a,b){return a.localeCompare(b);});
+}
+function addCustomValue(kind,name){ // kind: 'status'|'source' → registry + sync
+  name=String(name||'').trim();if(!name)return '';
+  var key=kind==='status'?'customStatuses':'customSources';
+  var cl=customValues(key).slice();
+  if(!cl.some(function(x){return x.toLowerCase()===name.toLowerCase();})){
+    cl.push(name);setCfg(key,cl);
+    saveEnginesDoc().catch(function(){/* re-syncs on next settings save */});
+  }
+  return name;
+}
 
 function recommendedMethod(action){
   if(!action)return '';
@@ -3379,7 +3414,7 @@ function openEp(ri,mode,opts){
     var sel=(s&&s===recMethod)?'selected':'';
     return '<option value="'+escapeHtml(s)+'" '+sel+'>'+escapeHtml(s||'\u2014 select \u2014')+'</option>';
   }).join('');
-  var statusOpts=STATUS_OPTS.map(function(s){
+  var statusOpts=allStatuses().map(function(s){
     return '<option value="'+escapeHtml(s)+'"'+(s===(r[C.ST]||'')?' selected':'')+'>'+escapeHtml(s)+'</option>';
   }).join('');
 
@@ -4804,10 +4839,7 @@ function renderConfigInputs(){
     document.querySelectorAll('[data-nlgroup]').forEach(function(cb){cb.checked=ac7.groups.indexOf(cb.dataset.nlgroup)>-1;});
     var nlHost=el('nl-statuses');
     if(nlHost){
-      var sts7={};
-      STATUS_OPTS.forEach(function(s){sts7[s]=1;});
-      for(var si7=DATA_START;si7<rows.length;si7++){var sv7=String((rows[si7]||[])[C.ST]||'').trim();if(sv7)sts7[sv7]=1;}
-      nlHost.innerHTML=Object.keys(sts7).sort().map(function(s){
+      nlHost.innerHTML=allStatuses().map(function(s){
         return '<label class="st-check" style="font-size:12px"><input type="checkbox" data-nlstatus="'+escapeHtml(s)+'"'+(ac7.statuses.indexOf(lc(s))>-1?' checked':'')+'> '+escapeHtml(s)+'</label>';
       }).join('');
     }
@@ -4831,12 +4863,26 @@ async function stSaveConfig(){
 }
 function renderSettingsEngines(){
   var list=el('es-engine-list');if(!list)return;
+  var srcOpts=allSources().map(function(s){return '<option value="'+escapeHtml(s)+'">'+escapeHtml(s)+'</option>';}).join('');
+  var stOpts=allStatuses().map(function(s){return '<option value="'+escapeHtml(s)+'">'+escapeHtml(s)+'</option>';}).join('');
   list.innerHTML=(enginesDoc.engines||[]).map(function(e){
     var comp=ENGINES[e.id];
     var meta=comp?(e.phases.length+' phases · '+comp.seq.length+' steps'):'⚠ does not compile';
     var isDef=e.id===enginesDoc.defaultEngineId;
     var nLeads=comp?leadsOnEngine(e.id):0;
-    return '<div class="es-eng-row">'
+    // Assignment lives ON the engine: chips for every source/stage routing
+    // here, dropdowns (fed by the central registries) to add more, and a
+    // "➕ New…" entry that grows the registry app-wide.
+    var chips=(enginesDoc.assignments||[]).map(function(a,idx){return {a:a,idx:idx};})
+      .filter(function(x){return ruleEngineIds(x.a).indexOf(e.id)>-1;})
+      .map(function(x){
+        var ids=ruleEngineIds(x.a);
+        return '<span style="display:inline-flex;align-items:center;gap:5px;background:var(--cream);border:1px solid var(--border);border-radius:999px;padding:2px 9px;font-size:11px">'
+          +(x.a.field==='status'?'🎯':'🏷')+' '+escapeHtml(x.a.match)
+          +(ids.length>1?'<i style="color:var(--gold-deep);font-style:normal;font-weight:700" title="This value rotates evenly across '+ids.length+' engines — sequence A/B">↔'+ids.length+'</i>':'')
+          +'<b data-action="es-eng-unassign" data-eid="'+escapeHtml(e.id)+'" data-ridx="'+x.idx+'" style="cursor:pointer;color:var(--red)" title="Stop routing this to the engine">×</b></span>';
+      }).join(' ');
+    return '<div class="es-eng-row" style="flex-wrap:wrap">'
       +'<div style="flex:1;min-width:180px"><span class="es-eng-name">'+escapeHtml(e.name||e.id)+'</span>'
       +(isDef?' <span class="es-badge">default</span>':'')
       +'<div class="es-eng-meta">'+escapeHtml(e.id)+' · '+meta+(nLeads?(' · '+nLeads+' lead'+(nLeads!==1?'s':'')):'')+'</div></div>'
@@ -4845,8 +4891,64 @@ function renderSettingsEngines(){
       +'<button class="ee-mini" data-action="es-export-engine" data-eid="'+escapeHtml(e.id)+'">📤 Export</button>'
       +(!isDef?'<button class="ee-mini" data-action="es-set-default" data-eid="'+escapeHtml(e.id)+'">★ Set default</button>':'')
       +(!isDef?'<button class="ee-mini" style="color:var(--red)" data-action="es-delete-engine" data-eid="'+escapeHtml(e.id)+'">🗑</button>':'')
+      +'<div style="flex-basis:100%;display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:7px 0 2px;border-top:1px dashed var(--border-soft);margin-top:6px">'
+        +'<span style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--soft)">Gets:</span>'
+        +(chips||'<i style="font-size:11px;color:var(--soft)">'+(isDef?'everyone unmatched (default)':'nothing routed here yet')+'</i>')
+        +'<select class="ee-inp" style="width:auto;font-size:11px;padding:4px 7px" data-engassign="'+escapeHtml(e.id)+'|source"><option value="">＋ source…</option>'+srcOpts+'<option value="__new__">➕ New source…</option></select>'
+        +'<select class="ee-inp" style="width:auto;font-size:11px;padding:4px 7px" data-engassign="'+escapeHtml(e.id)+'|status"><option value="">＋ stage…</option>'+stOpts+'<option value="__new__">➕ New stage…</option></select>'
+      +'</div>'
       +'</div>';
   }).join('')||'<div style="font-size:12px;color:var(--soft);font-style:italic">No engines.</div>';
+}
+/* Shared save-with-backfill for assignment edits from ANY surface (the
+ * rules table below or the on-engine controls above). */
+function saveAssignmentRules(newRules){
+  var oldRules=deepCopy(enginesDoc.assignments||[]);
+  newRules.forEach(function(a){
+    var ids=(a.engineIds||[]).filter(Boolean);
+    if(!ids.length)ids=[a.engineId||enginesDoc.defaultEngineId];
+    a.engineId=ids[0];
+    if(ids.length>1)a.engineIds=ids;else delete a.engineIds;
+  });
+  var changed=computeAssignmentChanges(oldRules,newRules);
+  enginesDoc.assignments=newRules;
+  return saveEnginesDoc().then(async function(){
+    toast('✓ Assignments saved');
+    if(changed.length){
+      var names2=changed.slice(0,4).map(function(c4){return String((rows[c4.ri]||[])[C.NM]||'').trim();}).filter(Boolean).join(', ');
+      if(confirm(changed.length+' existing lead'+(changed.length!==1?'s':'')+' ('+names2+(changed.length>4?'…':'')+') now fall under a different engine.\n\nRestart them at step 1 of their new engine? (Responded/active leads are never touched.)\n\nCancel = keep their current positions.')){
+        await backfillAssignments(changed);
+        toast('✓ Backfilled '+changed.length+' lead'+(changed.length!==1?'s':''));
+      }
+    }
+    asgnState=deepCopy(enginesDoc.assignments||[]);
+    renderAssignments();renderSettingsEngines();
+    buildUI();
+  }).catch(function(e){showErr(e.message);toast('⚠ Save failed: '+String(e.message||'').slice(0,70));});
+}
+function assignValueToEngine(eid,field,value){
+  if(!ENGINES[eid]){toast('That engine does not compile — fix it first');return;}
+  var rules=deepCopy(enginesDoc.assignments||[]);
+  var vLc=String(value).trim().toLowerCase();
+  var rule=rules.find(function(a){return (a.field||'source')===field&&String(a.match||'').trim().toLowerCase()===vLc;});
+  if(rule){
+    var ids=(rule.engineIds&&rule.engineIds.length?rule.engineIds:[rule.engineId]).filter(Boolean);
+    if(ids.indexOf(eid)>-1){toast('“'+value+'” already routes to this engine');return;}
+    ids.push(eid);
+    rule.engineIds=ids;rule.engineId=ids[0];
+    toast('🧪 “'+value+'” now rotates evenly across '+ids.length+' engines — sequence A/B');
+  }else{
+    rules.push({field:field,match:String(value).trim(),engineId:eid});
+  }
+  saveAssignmentRules(rules);
+}
+function unassignEngineFromRule(eid,ridx){
+  var rules=deepCopy(enginesDoc.assignments||[]);
+  var rule=rules[ridx];if(!rule)return;
+  var ids=(rule.engineIds&&rule.engineIds.length?rule.engineIds:[rule.engineId]).filter(function(id){return id&&id!==eid;});
+  if(!ids.length)rules.splice(ridx,1);
+  else{rule.engineId=ids[0];if(ids.length>1)rule.engineIds=ids;else delete rule.engineIds;}
+  saveAssignmentRules(rules);
 }
 function ruleMatchCount(rule){
   var n=0;
@@ -5195,8 +5297,14 @@ function exportEngine(id){
   toast('📤 Package downloaded — share it or hand it to Claude');
 }
 async function importEnginePackage(file){
+  var out=el('es-import-out');
+  if(out){out.style.color='var(--mid)';out.textContent='Importing '+file.name+'…';}
   try{
     var text=await file.text();
+    // Robust parse: strip BOM and markdown fences (Claude-authored packages
+    // often arrive wrapped in ```json … ```), then find the JSON body.
+    text=text.replace(/^﻿/,'').trim()
+      .replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim();
     var j=JSON.parse(text);
     var eng=(j&&j.format==='solura-engine')?j.engine:j; // wrapper or bare engine
     if(!eng||!eng.phases)throw new Error('Not an engine package (missing phases)');
@@ -5206,10 +5314,18 @@ async function importEnginePackage(file){
     while(ENGINES[eng.id]||(enginesDoc.engines||[]).some(function(e){return e.id===eng.id;}))eng.id+='-2';
     if(!eng.name)eng.name=eng.id;
     (enginesDoc.engines=enginesDoc.engines||[]).push(eng);
+    applyEnginesDoc(); // register NOW — usable even before the save lands
     await saveEnginesDoc();
     renderSettingsEngines();renderAssignments();
+    if(out){out.style.color='var(--grn)';out.textContent='✓ Imported "'+eng.name+'" ('+eng.id+') — assign it a source or stage on its card below.';}
     toast('✓ Imported "'+eng.name+'"');
-  }catch(e){showErr('Import failed: '+e.message);}
+  }catch(e){
+    // showErr's bar sits UNDER the Settings overlay — the failure must be
+    // visible right here, next to the button that was clicked.
+    if(out){out.style.color='var(--red)';out.textContent='✗ Import failed: '+e.message;}
+    toast('⚠ Import failed — see the note under the Import button');
+    showErr('Import failed: '+e.message);
+  }
 }
 // Editor + assignments input delegation
 document.addEventListener('input',function(ev){
@@ -5311,6 +5427,21 @@ document.addEventListener('change',function(ev){
         showErr(e6.message);
       });
     })();
+    return;
+  }
+  // On-engine assignment dropdowns (source/stage → this engine)
+  if(t&&t.dataset&&t.dataset.engassign){
+    var pa9=t.dataset.engassign.split('|'),eid9=pa9[0],field9=pa9[1];
+    var val9=t.value;t.value='';
+    if(!val9)return;
+    if(val9==='__new__'){
+      var nv9=prompt('Name the new '+(field9==='status'?'stage':'lead source')+':');
+      nv9=String(nv9||'').trim();
+      if(!nv9)return;
+      val9=addCustomValue(field9==='status'?'status':'source',nv9);
+      toast('➕ "'+val9+'" added — it now appears in every '+(field9==='status'?'stage':'source')+' list');
+    }
+    assignValueToEngine(eid9,field9,val9);
     return;
   }
   if(t&&(t.id==='eng-import-input'||t.id==='eng-import-input2')&&t.files&&t.files[0]){
@@ -5674,14 +5805,9 @@ function openAddLead(){
   var stt=el('al-status');if(stt)stt.value='Cold';
   // Datalists from the sheet's own distinct values — guarantees new leads use
   // the exact source/status strings the rest of the system already keys on
-  var srcs={},stats={};
-  for(var i=DATA_START;i<rows.length;i++){
-    var r0=rows[i];if(!r0)continue;
-    var sv=String(r0[C.SO]||'').trim();if(sv)srcs[sv]=1;
-    var tv=String(r0[C.ST]||'').trim();if(tv)stats[tv]=1;
-  }
-  var dl1=el('al-source-list');if(dl1)dl1.innerHTML=Object.keys(srcs).sort().map(function(x){return '<option value="'+escapeHtml(x)+'">';}).join('');
-  var dl2=el('al-status-list');if(dl2)dl2.innerHTML=Object.keys(stats).sort().map(function(x){return '<option value="'+escapeHtml(x)+'">';}).join('');
+  // Central registries: built-ins + custom additions + everything on the sheet
+  var dl1=el('al-source-list');if(dl1)dl1.innerHTML=allSources().map(function(x){return '<option value="'+escapeHtml(x)+'">';}).join('');
+  var dl2=el('al-status-list');if(dl2)dl2.innerHTML=allStatuses().map(function(x){return '<option value="'+escapeHtml(x)+'">';}).join('');
   el('modal-addlead').classList.add('open');
   setTimeout(function(){var n=el('al-name');if(n)n.focus();},60);
 }
@@ -11028,33 +11154,10 @@ function onClick(ev){
       renderAssignments();
       break;
     case 'es-save-assign':
-      (function(){
-        var oldRules=deepCopy(enginesDoc.assignments||[]);
-        var newRules=deepCopy(asgnState.filter(function(a){return String(a.match||'').trim();}));
-        // Normalize rotation: engineId mirrors track 1 (legacy compat);
-        // engineIds persists only when there genuinely are 2+ tracks
-        newRules.forEach(function(a){
-          var ids=(a.engineIds||[]).filter(Boolean);
-          if(!ids.length)ids=[a.engineId||enginesDoc.defaultEngineId];
-          a.engineId=ids[0];
-          if(ids.length>1)a.engineIds=ids;else delete a.engineIds;
-        });
-        var changed=computeAssignmentChanges(oldRules,newRules);
-        enginesDoc.assignments=newRules;
-        saveEnginesDoc().then(async function(){
-          toast('✓ Assignments saved');
-          if(changed.length){
-            // Backfill existing leads onto their new engine — DEFAULT YES,
-            // Cancel = rules apply but positions stay where they are.
-            var names2=changed.slice(0,4).map(function(c4){return String((rows[c4.ri]||[])[C.NM]||'').trim();}).filter(Boolean).join(', ');
-            if(confirm(changed.length+' existing lead'+(changed.length!==1?'s':'')+' ('+names2+(changed.length>4?'…':'')+') now fall under a different engine.\n\nRestart them at step 1 of their new engine? (Responded/active leads are never touched.)\n\nCancel = keep their current positions.')){
-              await backfillAssignments(changed);
-              toast('✓ Backfilled '+changed.length+' lead'+(changed.length!==1?'s':''));
-            }
-          }
-          buildUI();
-        }).catch(function(e){showErr(e.message);});
-      })();
+      saveAssignmentRules(deepCopy(asgnState.filter(function(a){return String(a.match||'').trim();})));
+      break;
+    case 'es-eng-unassign':
+      unassignEngineFromRule(t.dataset.eid,parseInt(t.dataset.ridx,10));
       break;
     case 'trk-test': testTrackerConnection(); break;
     case 'es-reset-emailcap':
