@@ -7041,6 +7041,32 @@ let F={
   gatesPass:false,hasResume:false,noDenied:false
 };
 let view='pipeline',calOffset=0,wsRow=null;
+/* "Is this candidate's workspace OPEN right now?" — the test every background writer uses before
+   touching a row, because the operator's next saveW would clobber whatever we wrote.
+   It must be wsRow, not W. W is just the last snapshot loadW left behind: closeWorkspace clears
+   wsRow and NOT W, and doPrimary calls loadW(r) on EVERY board-button click (as do quickDecline,
+   quickEmailCaregiver, sendNudge, autoRejectOne) without ever opening the workspace. So one click
+   on "📞 Call Maria" or "Decline" pinned W.row to that candidate for the rest of the session, and
+   from then on she was silently skipped by the automation tick, the sequence repair pass, the
+   booking-stage reconcile, the job-requirements pass, the booking auto-link, and the state
+   compaction pass — the last of which is the guard that keeps her AJ cell off the 32,767-char
+   truncation cliff. Nothing logged it; the row simply stopped being maintained.
+   Sync/render sites (W.st=c.st, renderWorkspace()) deliberately keep testing W.row: refreshing a
+   stale snapshot is harmless, and they must still run for a workspace that IS open. */
+function _wsOpenOn(row){
+  if(!W||W.row!==row)return false;
+  if(wsRow!=null&&wsRow===row)return true;   /* the workspace really is open on them */
+  /* No workspace, but a dialog may still be holding this same snapshot and end in a write that
+     uses it — the email composer lives in #modal, the reader in #email-modal. Both are bounded by
+     the operator closing them, unlike the old permanent W.row pin. */
+  try{
+    const m=document.getElementById('modal');
+    if(m&&m.classList&&m.classList.contains('open'))return true;
+    const em=document.getElementById('email-modal');
+    if(em&&em.classList&&em.classList.contains('open'))return true;
+  }catch(e){}
+  return false;
+}
 let AVAIL={pattern:{},slots:[],offs:[]}; /* pattern={Mon:["Morning","Afternoon"]}; slots=specific ISO datetimes; offs=specific dates removed from pattern */
 let SETTINGS={customExpertise:[],customCerts:[],customSources:[],templates:{},scripts:{},config:{payFloor:14,payCeil:18,payCnaPremium:1.25,payQualityNudge:1,autoRejectDays:14,nudgeDays:3,serviceZips:'44118,44106,44120,44121,44122,44104,44112',admins:[],calScreenUrl:'',calInterviewUrl:'',calOnboardingUrl:'https://cal.com/meir-schwimer-juktct/caregiver-onboarding',
   /* Referral program — caregiver side: priority points per funnel step. Customer side: cash payout
@@ -7437,7 +7463,7 @@ async function _backfillCalBookings(){
       if(byEmail.length===1)cand=byEmail[0];
       else if(byName.length===1)cand=byName[0];
       if(!cand||cand.stage==='Hired'||cand.stage==='Declined')continue;
-      if(W&&W.row===cand.excelRow)continue; /* workspace open — saveW would clobber; next pull */
+      if(_wsOpenOn(cand.excelRow))continue; /* workspace open — saveW would clobber; next pull */
       cand.st=cand.st||{};
       if(cand.st.calBookingId===b.uid)continue; /* already on file */
       const hasOtherUpcoming=cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
@@ -7487,7 +7513,7 @@ async function _autoLinkUnmatchedBookings(){
     if(byEmail.length===1)cand=byEmail[0];
     else if(byName.length===1)cand=byName[0];
     const hasUpcoming=cand&&cand.st&&cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
-    if(!cand||cand.stage==='Hired'||cand.stage==='Declined'||hasUpcoming||(W&&W.row===cand.excelRow)){keep.push(u);continue;}
+    if(!cand||cand.stage==='Hired'||cand.stage==='Declined'||hasUpcoming||_wsOpenOn(cand.excelRow)){keep.push(u);continue;}
     try{
       cand.st=cand.st||{};
       cand.st.booking=u.start;
@@ -8428,7 +8454,7 @@ async function _seqV3RepairPass(){
       if(pipeline!==_myPipe)return; /* loadData replaced the pipeline — this instance is stale */
       if(!c||!c.st)continue;
       if(_isTerminalStage(c.stage))continue;
-      if(W&&W.row===c.excelRow)continue; /* workspace open — saveW would clobber; next load */
+      if(_wsOpenOn(c.excelRow))continue; /* workspace open — saveW would clobber; next load */
       if(c.st.__ajCorrupt)continue; /* corrupt cell — nothing may write over it */
       const cur=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
       const ptrOk=!!(cur&&(cur.steps||[]).some(s=>s.id===c.st.sequenceStepId));
@@ -8519,7 +8545,7 @@ async function _reconcileBookingStages(){
     if(pipeline!==_myPipe)return; /* stale instance — a fresher load owns the board now */
     if(!c||!c.st||!c.st.booking)continue;
     if(_isTerminalStage(c.stage))continue;
-    if(W&&W.row===c.excelRow)continue; /* workspace open on them — saveW would clobber the heal; next load catches it */
+    if(_wsOpenOn(c.excelRow))continue; /* workspace open on them — saveW would clobber the heal; next load catches it */
     const t=Date.parse(c.st.booking);
     /* Consumed-booking sweep: a booking >48h in the past at a NON-booked stage was already
        run (or died) — clear it so it can never satisfy a later hasBooking wait or pose as
@@ -11300,7 +11326,7 @@ async function _stateCompactionPass(){
     for(const c of pipeline){
       if(pipeline!==_myPipe)return;
       if(!c||!c.st||c.st.__ajCorrupt)continue;
-      if(W&&W.row===c.excelRow)continue;
+      if(_wsOpenOn(c.excelRow))continue;
       const raw=(c.row&&c.row[35])?String(c.row[35]).length:0;
       if(raw<=27000)continue;
       const s=JSON.parse(JSON.stringify(c.st));
@@ -14022,7 +14048,7 @@ function vrSupReached(i){const e=W.st.employers[i];if(!e)return;e.t2status='reac
 function vrSupReset(i){const e=W.st.employers[i];if(!e)return;e.t2status='';e.t2n=0;saveW(true);renderWorkspace();}
 function vrSetRehire(i,val){const e=W.st.employers[i];if(!e)return;e.rehire=val;saveW(true);renderWorkspace();}
 function vrT2Advance(){advanceWS('References','Independent references complete');}
-function vrDisqualify(){if(confirm('Disqualify — employment could not be verified?'))quickDecline(W.excelRow);}
+function vrDisqualify(){if(confirm('Disqualify — employment could not be verified?'))quickDecline(W.row);} /* W.row, not W.excelRow — the latter is undefined and only worked because loadW(undefined) returns early */
 
 /* Three-tier verification + reference hub (replaces the old flat verify list). */
 /* Operator skip: waives employer verification (logged), satisfies the employersVerified
@@ -17204,7 +17230,16 @@ async function commitLinkBooking(candidateExcelRow){
     toast('\u2713 Booking linked to '+cand.name+(stageAdvancedTo?' \u2014 advanced to '+stageAdvancedTo:''));
     closeLinkBookingModal();
     if(view==='calendar')renderCalendar();
-    if(W&&W.excelRow===cand.excelRow)renderWorkspace();
+    /* W has .row, never .excelRow — this guard was dead, and the dead guard hid a data loss:
+       linking wrote st.booking + column G but left the OPEN workspace on its pre-link snapshot,
+       so the operator's next save put the old state back over AJ and wrote W.stage back into
+       column G, erasing both the booking and its stage advance. The unmatched entry has already
+       been removed from AVAIL and saved by this point, so the booking was unrecoverable. */
+    if(W&&W.row===cand.excelRow){
+      if(W.st!==cand.st)W.st=cand.st;
+      if(stageAdvancedTo)W.stage=stageAdvancedTo;
+      renderWorkspace();
+    }
     render();
   }catch(e){
     toast('\u2717 Could not link booking: '+e.message);
@@ -19998,7 +20033,7 @@ async function _jobRequirementsPass(){
       if(!c||!c.st)continue;
       if(c.stage!=='Applied'&&c.stage!=='Screen invite')continue;
       if(c.st.jobReqRouted||c.st.jobReqDecision)continue;
-      if(W&&W.row===c.excelRow)continue;
+      if(_wsOpenOn(c.excelRow))continue;
       const jb=_jobFor(c);
       if(!jb||!jb.req||(jb.req.policy||'review')!=='generic')continue;
       /* Only ANSWERED-AND-FAILING requirements auto-route. "(not answered)" means the data
@@ -21911,7 +21946,7 @@ function _seqAutomationPreview(){
     if(budget<=0){rows.push({n:'…',what:'budget reached — remaining candidates wait for the following tick',cls:'soft'});break;}
     if(!c.st||!c.st.sequenceId||_isTerminalStage(c.stage))continue;
     if(c.st.__ajCorrupt)continue;
-    if(W&&W.row===c.excelRow)continue;
+    if(_wsOpenOn(c.excelRow))continue;
     /* cert warn/cancel lane */
     if(c.st.booking&&c.stage==='Interview booked'&&!_autoCancelDoneFor(c)&&c.st.calBookingId&&!(_certSignoffValid(c)&&!c.st.certsReadyReview)
        &&!(c.st.emails||[]).some(e2=>!e2.seen)){
@@ -21961,7 +21996,7 @@ async function _seqAutomationTick(){
        the tick was the one place without it — loadW deep-copies state, so a tick action
        here gets erased by the operator's next saveW and then RE-FIRES (duplicate outward
        sends / double cancels). */
-    if(W&&W.row===c.excelRow)continue;
+    if(_wsOpenOn(c.excelRow))continue;
     /* 1-hour auto-cancel: automation ON makes the warned rule real. Once per booking. */
     if(c.st.booking&&c.stage==='Interview booked'&&!_autoCancelDoneFor(c)&&c.st.calBookingId&&!(_certSignoffValid(c)&&!c.st.certsReadyReview)
        &&!(c.st.emails||[]).some(e2=>!e2.seen)){
@@ -22364,7 +22399,7 @@ function _seqV3Action(c,info){
         const ptr=_classicPointerFor(cand,seq);
         if(ptr&&ptr!==cand.st.sequenceStepId){
           cand.st.sequenceStepId=ptr;
-          if(cand===c&&c.st.sequenceId&&!(W&&W.row===c.excelRow)){
+          if(cand===c&&c.st.sequenceId&&!_wsOpenOn(c.excelRow)){
             /* Once per row+pointer per page session — belt over the chain test: nothing
                may re-commit/re-log the same snap every render (32k AJ cap protection).
                History is appended HERE, inside the guard, for the same reason. */
@@ -22423,7 +22458,7 @@ function _seqV3Action(c,info){
         walked++;
         ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
       }
-      if(walked&&cand===c&&c.st&&c.st.sequenceId&&!(W&&W.row===c.excelRow)){
+      if(walked&&cand===c&&c.st&&c.st.sequenceId&&!_wsOpenOn(c.excelRow)){
         /* Log once per row+landing — a pathological loop must bloat neither st.log nor
            sequenceHistory toward the 32k AJ cap. The commit itself is idempotent. */
         window._walkOnce=window._walkOnce||{};
