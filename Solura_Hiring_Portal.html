@@ -9206,10 +9206,18 @@ function _actionC(c){
       if(st.awaitingUntil&&isFinite(Date.parse(st.awaitingUntil))&&Date.parse(st.awaitingUntil)<=Date.now()){
         return{bucket:'action',timing:{txt:'⏰ Awaiting period ended ('+fmtDay(st.awaitingUntil)+')',pill:'pa',date:st.awaitingReason||''},info,primary:{kind:'release-awaiting',label:'⏰ Review — awaiting expired',cls:'gold'},manuallyAwaiting:true,awaitingReSurfaceReason:'timer'};
       }
-      /* P-10 (Meir's rule): a park gone silent for a week surfaces as a PHONE CALL action;
-         one more call the next day; after the second call it parks again for good (any
-         fresh reply/booking/document still resurfaces them the normal way and resets the
-         ladder). Timed parks (awaitingUntil) keep their own schedule and are excluded. */
+      /* P-10, revised per Meir 2026-09-02: the silence ladder is SEQUENCE POLICY, not host
+         constants — seq.silencePolicy {idleDays, secondCallDays} with defaults 30 and 1.
+         The cycle: 30 days of THEIR silence → a call; a day later → a second call; then
+         BACK TO THE EMAIL NUDGE (the stage's nudge goes out when the second call logs
+         unreached) — and the ladder re-arms for the next 30-day window, so it loops:
+         call, call, nudge, wait, call, call, nudge… Any reply/booking/document still
+         resurfaces them normally and resets the ladder. Timed parks (awaitingUntil) keep
+         their own schedule and are excluded. */
+      const _silSeq=(SETTINGS.sequences||[]).find(q=>q.id===st.sequenceId);
+      const _silPol=(_silSeq&&_silSeq.silencePolicy)||{};
+      const _idleDays=Number(_silPol.idleDays)>0?Number(_silPol.idleDays):30;
+      const _secondCallMs=Math.max(1,Number(_silPol.secondCallDays)>0?Number(_silPol.secondCallDays):1)*86400000-4*3600000; /* "a day later" lands next morning, not to the minute */
       /* THEIR last inbound email is what "silence" actually means, and it counts twice over:
          (1) a reply RESTARTS the silence clock — a reply read in the Inbox pane, or cleared by
              'mark all read', is marked seen WITHOUT stamping lastAwaitingReview, so without this
@@ -9222,29 +9230,33 @@ function _actionC(c){
          silence earns fresh calls instead of being muted forever by "called ×2". */
       const _lastIn=(st.emails||[]).reduce((m,e)=>{const d=(e&&e.direction==='in')?Date.parse(e.received||''):NaN;return (isFinite(d)&&d>m)?d:m;},0);
       const _spcRaw=st.staleParkCalls||{count:0,lastAt:null};
-      const _spc=(_spcRaw.lastAt&&_lastIn>(Date.parse(_spcRaw.lastAt)||0))?{count:0,lastAt:null}:_spcRaw;
+      let _spc=(_spcRaw.lastAt&&_lastIn>(Date.parse(_spcRaw.lastAt)||0))?{count:0,lastAt:null}:_spcRaw;
+      /* Cycle re-arm: a completed round (two calls + nudge) that has ITSELF gone idleDays
+         quiet starts a fresh round — the loop Meir specified, not a one-time mute. */
+      if(_spc.count>=2&&_spc.lastAt&&Date.now()-(Date.parse(_spc.lastAt)||0)>=_idleDays*86400000){_spc={count:0,lastAt:null};}
       if(!st.awaitingUntil&&c.phone){
         const _lastTouch=Math.max(
           st.awaitingSince?Date.parse(st.awaitingSince)||0:0,
           st.lastAwaitingReview?Date.parse(st.lastAwaitingReview)||0:0,
           st.lastAssignmentAt?Date.parse(st.lastAssignmentAt)||0:0,
           st.bookingReceivedAt?Date.parse(st.bookingReceivedAt)||0:0,
+          _spcRaw.lastAt?Date.parse(_spcRaw.lastAt)||0:0, /* the previous round's calls/nudge count as contact */
           _lastIn);
         const _silentDays=_lastTouch?Math.floor((Date.now()-_lastTouch)/86400000):0;
         /* What the card CLAIMS: days since THEY last said anything (the park's start when they
            never have). Always >= _silentDays, so the card can never undercut its own gate. */
         const _quietSince=_lastIn||(st.awaitingSince?Date.parse(st.awaitingSince)||0:0);
         const _noReplyDays=_quietSince?Math.floor((Date.now()-_quietSince)/86400000):_silentDays;
-        if(_silentDays>=7&&_spc.count===0){
+        if(_silentDays>=_idleDays&&_spc.count===0){
           return{bucket:'action',timing:{txt:'📞 No reply in '+_noReplyDays+' days — call them',pill:'pa',date:st.awaitingReason||''},info,primary:{kind:'stale-call',label:'📞 Call '+(c.name||'').split(' ')[0],cls:'gold'},manuallyAwaiting:true};
         }
-        if(_spc.count===1&&_spc.lastAt&&Date.now()-Date.parse(_spc.lastAt)>=20*3600*1000){
-          return{bucket:'action',timing:{txt:'📞 Second call — last try before re-parking',pill:'pa',date:st.awaitingReason||''},info,primary:{kind:'stale-call',label:'📞 Call again',cls:'gold'},manuallyAwaiting:true};
+        if(_spc.count===1&&_spc.lastAt&&Date.now()-Date.parse(_spc.lastAt)>=_secondCallMs){
+          return{bucket:'action',timing:{txt:'📞 Second call — then back to email nudges',pill:'pa',date:st.awaitingReason||''},info,primary:{kind:'stale-call',label:'📞 Call again',cls:'gold'},manuallyAwaiting:true};
         }
       }
       /* No new activity — silently parked. */
       const awaitingItemsLabel=awaitingItems.length?(' ('+awaitingItems.length+' item'+(awaitingItems.length===1?'':'s')+')'):'';
-      const _calledNote=(_spc.count>=2)?' · called ×2, no reply':'';
+      const _calledNote=(_spc.count>=2)?' · called ×2 — on the nudge cycle':'';
       return{bucket:'awaiting',timing:{txt:(st.awaitingReason||'Manually parked')+awaitingItemsLabel+_calledNote,pill:'psoft',date:st.awaitingUntil?('until '+fmtDay(st.awaitingUntil)):''},info,primary:{kind:'release-awaiting',label:'Move out of awaiting',cls:'sky'},manuallyAwaiting:true};
     }
   }
@@ -21659,18 +21671,29 @@ async function _cancelBookingHeadless(c,reason){
   }catch(e){return false;}
 }
 /* P-10: the silent-park phone-call ladder (Meir's rule): a week of silence → call; one
-   more the next day; then park again for good. The modal dials, the buttons log. */
+   more the next day; then BACK TO THE EMAIL NUDGE cycle (per Meir 2026-09-02) — and the
+   round repeats after the next stretch of silence. Thresholds are sequence policy
+   (seq.silencePolicy.idleDays/secondCallDays, defaults 30/1). The modal dials, the
+   buttons log; logging the second call unreached sends the stage's nudge email. */
+function _staleCallCycleCount(c){
+  /* Cycle-aware count: a completed round whose last touch has itself gone idleDays quiet
+     counts as a NEW round (matches the re-arm in the action engine). */
+  const spc=c.st.staleParkCalls||{count:0,lastAt:null};
+  const seq=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
+  const idleDays=Number(seq&&seq.silencePolicy&&seq.silencePolicy.idleDays)>0?Number(seq.silencePolicy.idleDays):30;
+  if(spc.count>=2&&spc.lastAt&&Date.now()-(Date.parse(spc.lastAt)||0)>=idleDays*86400000)return 0;
+  return spc.count||0;
+}
 function _staleCallModal(r){
   const c=pipeline.find(x=>x.excelRow===r);if(!c)return;
-  const spc=c.st.staleParkCalls||{count:0};
-  const nth=spc.count+1;
+  const nth=_staleCallCycleCount(c)+1;
   const digits=String(c.phone||'').replace(/[^\d]/g,'');
   const e164='+1'+digits.replace(/^1/,'');
   const gvUrl='https://voice.google.com/u/0/calls?a=nc,'+encodeURIComponent(e164);
-  document.getElementById('m-title').textContent='📞 Call '+(c.name||'candidate')+(nth>1?' — call #'+nth+' (last try)':'');
+  document.getElementById('m-title').textContent='📞 Call '+(c.name||'candidate')+(nth>1?' — call #'+nth+' of this round':'');
   document.getElementById('m-body').innerHTML=`
     <div style="font-size:13px;color:var(--mid);line-height:1.6">
-      <p style="margin:0 0 8px">${esc(c.st.awaitingReason||'Parked in awaiting')} — and nothing back from them since. ${nth===1?'Per your rule: one call now, one more tomorrow if needed, then they re-park.':'This is the second and final call — after this they re-park quietly.'}</p>
+      <p style="margin:0 0 8px">${esc(c.st.awaitingReason||'Parked in awaiting')} — and nothing back from them since. ${nth===1?'Per your rule: one call now, one more tomorrow if needed, then they go back on the email nudge cycle.':'Second call of this round — if they don’t pick up, the stage’s nudge email goes out and they re-park on the nudge cycle.'}</p>
       <div style="background:var(--cream);padding:12px 14px;border-radius:8px;font-size:18px;font-weight:700;text-align:center;margin:10px 0">
         <a href="tel:${esc(telify(c.phone||''))}" style="text-decoration:none">${esc(c.phone||'(no phone)')}</a>
       </div>
@@ -21687,14 +21710,22 @@ function _staleCallModal(r){
 }
 async function _staleCallDone(r,reached){
   const c=pipeline.find(x=>x.excelRow===r);if(!c)return;
-  const n=((c.st.staleParkCalls&&c.st.staleParkCalls.count)||0)+1;
+  const n=_staleCallCycleCount(c)+1; /* a long-idle completed round restarts at call #1 */
   c.st.staleParkCalls={count:n,lastAt:new Date().toISOString()};
-  c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📞 Silence-check call #'+n+' — '+(reached?'REACHED them':'no answer')+(!reached&&n>=2?' · re-parked for good':!reached&&n===1?' · one more call tomorrow':'')});
   c.st.lastAwaitingReview=new Date().toISOString(); /* re-park cleanly — no stale event resurfaces them */
+  /* Round complete and unreached → BACK TO EMAIL NUDGE (Meir's ladder): the stage's nudge
+     goes out now, as the result of the logged call. If the stage has no nudge template,
+     the round still closes — the log says why no email went. */
+  let nudged=false,nudgeNote='';
+  if(!reached&&n>=2){
+    try{await _sendNudgeHeadless(c);nudged=true;}
+    catch(e){nudgeNote=' (nudge email skipped: '+e.message+')';}
+  }
+  c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📞 Silence-check call #'+n+' — '+(reached?'REACHED them':'no answer')+(!reached&&n>=2?(nudged?' · nudge email sent — back on the email cycle':' · round closed'+nudgeNote):!reached&&n===1?' · one more call tomorrow':'')});
   try{await patchRange('AJ'+r,[[_stCell(c.st)]]);}catch(e){toast('⚠ '+e.message);return;}
   closeModal();_memGen++;
   if(reached){openWorkspace(r);toast('📞 Logged — over to you');}
-  else{toast(n>=2?'📞 Logged — re-parked. A reply or booking still wakes them.':'📞 Logged — they resurface tomorrow for the second call.');}
+  else{toast(n>=2?(nudged?'📞 Logged — nudge email sent; they re-park on the email cycle.':'📞 Logged — re-parked'+nudgeNote+'.'):'📞 Logged — they resurface tomorrow for the second call.');}
   if(typeof render==='function')render();
 }
 /* P-9: what the robot actually DID — every 🤖-marked log entry from today and yesterday,
