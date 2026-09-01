@@ -10437,7 +10437,6 @@ function render(){_memGen++;if(!tok)return;updateFilterCount();if(view==='calend
   renderAutoRejectBanner();
   renderNudgeBanner();
   renderFastTrackBanner();
-  renderMailBanner(); /* created last → sits on top: mail first, then fast-track/nudge/auto-reject */
   const ord=c=>{const i=flowOrder().indexOf(c.stage);return i<0?999:i;};
   /* Referral priority points — only used as tiebreaker within same-urgency bucket.
      Stage urgency dominates (overdue calls beat new applications regardless of points). */
@@ -10679,46 +10678,6 @@ function renderBlastDiagBanner(){
   </div>`;
 }
 
-/* ✉ MAIL SURFACES ON THE BOARD (Meir's rule, 2026-09-02): unread candidate emails show in a
-   banner at the top of the pipeline view — no trip to the Inbox tab needed. Newest first;
-   one click opens the candidate with the email already open. Expanded by default because
-   mail is why he's looking; collapse state sticks for the session. */
-function renderMailBanner(){
-  let banner=document.getElementById('mail-banner');
-  if(!banner){banner=document.createElement('div');banner.id='mail-banner';banner.style.cssText='margin:8px 0 10px 0';
-    const pipe=document.getElementById('pipeline-view');if(pipe)pipe.insertBefore(banner,pipe.firstChild);}
-  const unread=[];
-  (typeof pipeline!=='undefined'?pipeline:[]).forEach(c=>{
-    (c.st&&c.st.emails||[]).forEach(e=>{
-      if(!e||e.seen||e.direction==='out')return;
-      unread.push({row:c.excelRow,name:c.name,stage:c.stage,id:e.id,subject:e.subject||'(no subject)',received:e.received||''});
-    });
-  });
-  if(!unread.length){banner.innerHTML='';return;}
-  unread.sort((a,b)=>(b.received||'').localeCompare(a.received||''));
-  const isOpen=window._mailListOpen!==false; /* default OPEN — mail should be in your face */
-  const items=unread.slice(0,8).map(m=>{
-    const when=m.received?relativeWhen(new Date(m.received)):'';
-    return `<div class="nudge-row"><span class="nudge-name">✉ ${esc(m.name)}</span><span class="nudge-stage">${esc(String(m.subject).slice(0,70))}${when?' · '+esc(when):''}</span><button class="nudge-btn" onclick="_mailBannerOpen(${m.row},'${encodeURIComponent(String(m.id))}')">Read →</button></div>`;
-  }).join('');
-  const more=unread.length>8?`<div style="font-size:11px;color:var(--soft);margin-top:6px">+ ${unread.length-8} more — <a href="#" onclick="setView('inbox');return false">open the Inbox</a></div>`:'';
-  banner.innerHTML=`<div class="nudge-box" style="border-color:var(--sky)">
-    <div class="nudge-head"><span class="nudge-icon">✉</span><span class="nudge-title">${unread.length} unread email${unread.length===1?'':'s'} from candidates</span><button class="nudge-toggle" onclick="_toggleMailList()">${isOpen?'collapse ▴':'review ▾'}</button></div>
-    <div class="nudge-list${isOpen?' open':''}" id="mail-list">${items}${more}</div>
-  </div>`;
-}
-function _toggleMailList(){
-  const list=document.getElementById('mail-list');if(!list)return;
-  const willOpen=!list.classList.contains('open');
-  list.classList.toggle('open',willOpen);
-  window._mailListOpen=willOpen;
-  const btn=document.querySelector('#mail-banner .nudge-toggle');if(btn)btn.textContent=willOpen?'collapse ▴':'review ▾';
-}
-function _mailBannerOpen(row,encId){
-  openWorkspace(row);
-  const id=decodeURIComponent(encId||'');
-  if(id)setTimeout(()=>{try{openEmailDetail(id);}catch(e){console.warn('mail banner open:',e.message);}},300);
-}
 function renderNudgeBanner(){
   let banner=document.getElementById('nudge-banner');
   if(!banner){banner=document.createElement('div');banner.id='nudge-banner';banner.style.cssText='margin:8px 0 10px 0';
