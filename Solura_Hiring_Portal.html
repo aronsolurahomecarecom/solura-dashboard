@@ -8544,6 +8544,7 @@ async function _reconcileBookingStages(){
     if(_down&&kind&&_down[kind]&&isFinite(t)&&t>=Date.now()-48*3600*1000){
       const to=_down[kind];
       try{
+        await patchRange('G'+c.excelRow,[[to]]);
         c.stage=to;c.row[6]=to;
         c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stage corrected — current booking is a '+kind+' → '+to+' (was mis-advanced by the kind-blind catch-up)'});
         const sq=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
@@ -8554,7 +8555,6 @@ async function _reconcileBookingStages(){
             c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
           }
         }
-        await patchRange('G'+c.excelRow,[[to]]);
         await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
         n++;
       }catch(e){console.warn('kind-mismatch correction failed:',c.name,e.message);}
@@ -8565,9 +8565,9 @@ async function _reconcileBookingStages(){
     if(!(kind===rule[0]||(kind==null&&(c.stage==='Screen invite'||c.stage==='Applied'))))continue;
     const next=rule[1];
     try{
+      await patchRange('G'+c.excelRow,[[next]]);
       c.stage=next;c.row[6]=next;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stage caught up to '+(kind||'screen')+' booking ('+new Date(t).toLocaleString()+') → '+next});
-      await patchRange('G'+c.excelRow,[[next]]);
       await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
       n++;
     }catch(e){console.warn('booking stage catch-up failed:',c.name,e.message);}
@@ -9999,7 +9999,14 @@ async function commitMoveToStage(){
   if(toStage===fromStage){toast('Already at '+toStage);return;}
   W.stage=toStage;
   logW('⇄ Manually moved to '+toStage+' (from '+fromStage+')');
-  await saveW(true);
+  if(!(await saveW(true))){
+    /* saveW refused (corrupt cell / oversized state) or failed — it has already toasted why.
+       Undo the optimistic stage + log so memory keeps agreeing with column G. */
+    W.stage=fromStage;
+    if(W.st&&Array.isArray(W.st.log))W.st.log.pop();
+    renderWorkspace();
+    return;
+  }
   const c=pipeline.find(x=>x.excelRow===W.row);
   if(c){c.stage=toStage;c.row[6]=toStage;}
   toast('⇄ '+toStage);
@@ -11385,7 +11392,7 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
          shaped copy would make the wipe PERMANENT. Restore the row from Excel's version
          history (workbook → File → Info → Version History), then reload. */
       toast('🛑 Save refused — this candidate\'s stored data is corrupted. Restore the spreadsheet row from OneDrive version history first.');
-      return;
+      return false;
     }
     W.st=sanitizeState(W.st);
     /* _stCell trims a deep copy to fit Excel's 32,767 cap and THROWS rather than let Graph
@@ -11396,7 +11403,7 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
     catch(sErr){
       toast('⚠ Save aborted — '+sErr.message);
       console.error('saveW refused:',sErr.message,'row',row);
-      return;
+      return false;
     }
     const _gl=[W.stage,bl(W.gates.wa),bl(W.gates.cr),bl(W.gates.bg),bl(W.gates.tr),bl(W.gates.av)];
     const _ny=[bl(W.q.rel),bl(W.q.com),bl(W.q.jud),bl(W.q.doc),bl(W.q.ref),bl(W.q.cmp),bl(W.q.phn),'',bl(W.r.ten),bl(W.r.prx),bl(W.r.ava),bl(W.r.exp)];
@@ -11426,7 +11433,8 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
     const wsOpen=wsEl&&wsEl.classList&&wsEl.classList.contains('open');
     if(!wsOpen)render();
     if(!silent)toast('Saved');
-  }catch(e){toast('Save failed: '+e.message);console.error('saveW error:',e);}}
+    return true;
+  }catch(e){toast('Save failed: '+e.message);console.error('saveW error:',e);return false;}}
 
 /* ===================== email ===================== */
 /* BOOK_LINK is the public Cal.com URL — replace with your actual Cal.com event URL after setup.
@@ -11786,8 +11794,6 @@ async function recordCertAnswer(row,idx){
      auto-fire \u2014 it surfaces as a red primary action in the workspace (the user confirms it). */
   let advancedTo=null;
   if(missingRequired.length===0&&cand.stage==='Applied'){
-    cand.stage='Screen invite';
-    cand.row[6]='Screen invite';  /* keep row in sync for cardOf */
     cand.st.log.push({t:stamp(),x:'\u2192 Auto-advanced to Screen invite \u2014 all required certs accounted for'});
     advancedTo='Screen invite';
   }else if(missingRequired.length){
@@ -11800,6 +11806,7 @@ async function recordCertAnswer(row,idx){
   try{
     if(advancedTo){
       await patchRange('G'+cand.excelRow,[[advancedTo]]);
+      cand.stage=advancedTo;cand.row[6]=advancedTo;  /* memory only once column G took it */
     }
     await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
     toast(advancedTo?'\u2713 Recorded \u2014 advanced to Screen invite':(missingRequired.length?'\u2713 Recorded \u2014 decline suggested':'\u2713 Recorded'));
@@ -17199,8 +17206,6 @@ async function commitLinkBooking(candidateExcelRow){
   let stageAdvancedTo=null;
   if(advanceMap[cand.stage]){
     stageAdvancedTo=advanceMap[cand.stage];
-    cand.stage=stageAdvancedTo;
-    cand.row[6]=stageAdvancedTo;
   }
   /* Log the link for the activity trail. */
   cand.st.log=cand.st.log||[];
@@ -17211,6 +17216,7 @@ async function commitLinkBooking(candidateExcelRow){
   try{
     if(stageAdvancedTo){
       await patchRange('G'+cand.excelRow,[[stageAdvancedTo]]);
+      cand.stage=stageAdvancedTo;cand.row[6]=stageAdvancedTo;  /* memory only once column G took it */
     }
     await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
     await saveAvailability();
@@ -21324,13 +21330,13 @@ async function _repairCorruptedStage(row,toStage){
   if(!c){toast('Candidate not found');return;}
   const target=toStage||_inferFurthestStage(c)||'Applied';
   const fromStage=c.stage;
+  await patchRange('G'+row,[[target]]);
   c.stage=target;c.row[6]=target;
   const rebuilt=_rebuildCertsFromTrail(c);
   if(rebuilt.length&&(!Array.isArray(c.st.certs)||!c.st.certs.length)){
     c.st.certs=rebuilt;
   }
   c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🛠 Stage repaired: "'+fromStage+'" → '+target+(rebuilt.length?' · certs rebuilt: '+rebuilt.join(', '):'')});
-  await patchRange('G'+row,[[target]]);
   await patchRange('AJ'+row,[[_stCell(c.st)]]);
   /* Sync the open workspace so its next saveW doesn't re-write the corrupted stage. */
   if(W&&W.row===row){W.stage=target;if(W.st!==c.st)W.st=c.st;}
@@ -21562,8 +21568,8 @@ async function _seqRunIntent(row,intentJson){
     const stage=String(intent.stage||'');
     const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
     if(!flow.includes(stage)&&stage!=='Declined'){toast('⚠ refusing to write unknown stage "'+stage+'"');return;} /* stage strings only — column-G invariant */
-    cand.stage=stage;cand.row[6]=stage;
     await patchRange('G'+cand.excelRow,[[stage]]);
+    cand.stage=stage;cand.row[6]=stage;
     cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Sequence set stage → '+stage});
     await _seqCommitState(cand,{});
     if(W&&W.row===row)W.stage=stage;
@@ -22031,8 +22037,8 @@ async function _seqAutomationTick(){
         const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
         if(flow.includes(it.stage)){
           _clearFail();
-          c.stage=it.stage;c.row[6]=it.stage;
           await patchRange('G'+c.excelRow,[[it.stage]]);
+          c.stage=it.stage;c.row[6]=it.stage;
           const adv=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
           if(!adv.error)Object.assign(c.st,adv.partialState||{});
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-advanced stage → '+it.stage});
@@ -22619,8 +22625,8 @@ async function _execCatalogAction(cand,a){
       const stage=String(p.setStage||'');
       const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
       if(!flow.includes(stage)&&stage!=='Declined')throw new Error('unknown stage "'+stage+'"'); /* column-G invariant */
-      cand.stage=stage;cand.row[6]=stage;
       await patchRange('G'+cand.excelRow,[[stage]]);
+      cand.stage=stage;cand.row[6]=stage;
       cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'⚑ Set stage → '+stage});
       await _seqCommitState(cand,{});
       if(W&&W.row===cand.excelRow)W.stage=stage;
