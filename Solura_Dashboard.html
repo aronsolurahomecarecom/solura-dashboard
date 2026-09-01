@@ -1509,7 +1509,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0901-63';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0901-64';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -11135,13 +11135,36 @@ function onClick(ev){
       saveEnginesDoc().then(function(){renderSettingsEngines();toast('✓ Default engine changed');buildUI();}).catch(function(e){showErr(e.message);});
       break;
     case 'es-delete-engine':
-      var did=t.dataset.eid;
-      if(did===enginesDoc.defaultEngineId){alert('Set another engine as default first.');break;}
-      var nOn=leadsOnEngine(did);
-      if(!confirm('Delete this engine'+(nOn?(' ('+nOn+' lead'+(nOn!==1?'s':'')+' currently resolve to it — they will fall back to the default engine)'):'')+'? This cannot be undone.'))break;
-      enginesDoc.engines=(enginesDoc.engines||[]).filter(function(x){return x.id!==did;});
-      enginesDoc.assignments=(enginesDoc.assignments||[]).filter(function(a){return a.engineId!==did;});
-      saveEnginesDoc().then(function(){renderSettingsEngines();asgnState=deepCopy(enginesDoc.assignments||[]);renderAssignments();toast('Engine deleted');buildUI();}).catch(function(e){showErr(e.message);});
+      (function(){
+        var did=t.dataset.eid;
+        if(did===enginesDoc.defaultEngineId){alert('Set another engine as default first.');return;}
+        var nOn=leadsOnEngine(did);
+        if(!confirm('Delete this engine'+(nOn?(' ('+nOn+' lead'+(nOn!==1?'s':'')+' currently resolve to it — they will fall back to the default engine)'):'')+'? This cannot be undone.'))return;
+        enginesDoc.engines=(enginesDoc.engines||[]).filter(function(x){return x.id!==did;});
+        // Rotation-aware rule cleanup: strip this engine from every rule's
+        // track list; a rule only dies when NO tracks remain (the old code
+        // killed the whole rule whenever the deleted engine was track 1).
+        enginesDoc.assignments=(enginesDoc.assignments||[]).map(function(a){
+          var ids=(a.engineIds&&a.engineIds.length?a.engineIds:[a.engineId]).filter(function(id){return id&&id!==did;});
+          if(!ids.length)return null;
+          a.engineId=ids[0];
+          if(ids.length>1)a.engineIds=ids;else delete a.engineIds;
+          return a;
+        }).filter(Boolean);
+        // Update the UI + registry NOW — never leave a ghost card while the
+        // save is in flight (or worse, silently failed behind the overlay)
+        applyEnginesDoc();
+        renderSettingsEngines();
+        asgnState=deepCopy(enginesDoc.assignments||[]);renderAssignments();
+        buildUI();
+        saveEnginesDoc().then(function(){toast('✓ Engine deleted');})
+          .catch(function(e){
+            var out9=el('es-import-out');
+            if(out9){out9.style.color='var(--red)';out9.textContent='✗ Delete did not reach OneDrive ('+e.message+') — the engine WILL REAPPEAR on reload. Usually the sign-in expired: sign out, sign back in, delete again.';}
+            toast('⚠ Delete not saved — see the note above the engine list');
+            showErr(e.message);
+          });
+      })();
       break;
     case 'es-backfill-all':
       (function(){
