@@ -130,13 +130,16 @@ Step templates are the LIVE message source — the dashboard pre-fills the SMS a
 email composers from the current step's `template` (there is no separate
 templates editor). So a good engine ships with its messages:
 
-- `action` steps: `template` per step.
+- `action` steps: `template` per step; email-type steps ALSO take a `subject`
+  field (`{"type":"email","subject":"Care for {pt}","template":"Hi {dm}, …"}`).
 - `daily` phases: one phase-level `"template"` inside `daily` — it rides every
-  step of the blitz.
-- `weekly` entries and the `forever` nurture: `template` per entry / phase.
-- **Email templates**: start the first line with `Subject: …` — that line
-  becomes the subject, the rest the body. Without it, the whole template is the
-  body.
+  step of the blitz; add a `"subject"` alongside it when the pattern includes
+  email.
+- `weekly` entries and the `forever` nurture: `template` per entry / phase, plus
+  `subject` when the type is email.
+- Always use the dedicated `subject` field for email content. (A legacy
+  `Subject: …` first line inside the template still parses, but don't write new
+  engines that way.)
 - Templates may use `{dm}` (decision-maker first name) and `{pt}` (patient first
   name) — filled per lead with safe fallbacks ("there" / "your loved one").
 - Calls don't send anything, but a template on a call step is shown as the

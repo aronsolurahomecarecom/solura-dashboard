@@ -1077,7 +1077,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
 
       <section class="st-sec" id="st-sec-engines">
         <h3 class="st-h">Sequence engines</h3>
-        <p class="st-p">Engines define the outreach sequence. Build from a starting point or an empty canvas, run several side by side, assign each lead source its own engine, and share engines as packages — Claude can author one offline and you import it here. <b>Message templates live on the sequence steps:</b> ✏ edit an engine and every manual step, daily blitz, and weekly entry has its own template box ({dm}/{pt} fill per lead; email templates start the first line with <code style="font-size:11px">Subject: …</code>). The old Templates tab is legacy fallback only.</p>
+        <p class="st-p">Engines define the outreach sequence. Build from a starting point or an empty canvas, run several side by side, assign each lead source its own engine, and share engines as packages — Claude can author one offline and you import it here. <b>Message templates live on the sequence steps:</b> ✏ edit an engine and every manual step, daily blitz, and weekly entry has its own template box ({dm}/{pt} fill per lead) — email steps get a dedicated <b>subject</b> field too. The old Templates tab is legacy fallback only.</p>
         <div id="es-engine-list" style="margin-bottom:12px"></div>
         <div style="display:flex;gap:8px;margin-bottom:26px;flex-wrap:wrap">
           <button data-action="es-new-engine" class="st-btn-gold">➕ New engine</button>
@@ -1509,7 +1509,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0901-65';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0901-66';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1600,7 +1600,7 @@ function compileEngine(e){
       steps.forEach(function(s){
         seq.push({ph:ph,icon:s.icon||(s.type==='call'?'📞':s.type==='email'?'📧':'💬'),
           text:s.text||'(untitled)',type:s.type||'sms',trigger:'action',
-          lbl:'Phase '+ph,cadence:'action',phName:phName,template:s.template||''});
+          lbl:'Phase '+ph,cadence:'action',phName:phName,template:s.template||'',subject:s.subject||''});
       });
     }else if(p.cadence==='daily'){
       var d0=p.daily||{};
@@ -1620,7 +1620,7 @@ function compileEngine(e){
             seq.push({ph:ph,icon:typeIcon(ty),
               text:SLOT_LABEL[sl]+' '+typeWord(ty)+' — Day '+dd,type:ty,trigger:'time',
               day:dd,slot:sl,lbl:'Phase '+ph+' · Day '+dd,
-              cadence:'daily',phName:phName,template:d0.template||'',
+              cadence:'daily',phName:phName,template:d0.template||'',subject:d0.subject||'',
               window:(SLOT_WINDOWS[sl]||{})[ty]||[8,17],
               maxDay:days,lastSlot:sli===slotOrder.length-1});
           });
@@ -1657,7 +1657,7 @@ function compileEngine(e){
         seq.push({ph:ph,icon:typeIcon(w0.type||'sms'),
           text:w0.text||'Weekly nurture',type:w0.type||'sms',trigger:'time',
           lbl:'Phase '+ph,cadence:'weekly',sticky:true,phName:phName,
-          intervalWeeks:ivw,template:w0.template||''});
+          intervalWeeks:ivw,template:w0.template||'',subject:w0.subject||''});
       }else{
         var entries=w0.entries||[];
         if(!entries.length)throw new Error('Weekly phase "'+phName+'" has no entries');
@@ -1665,7 +1665,7 @@ function compileEngine(e){
           seq.push({ph:ph,icon:typeIcon(en.type||'sms'),
             text:en.text||('Week '+en.week+' check-in'),type:en.type||'sms',trigger:'time',
             week:en.week,lbl:'Phase '+ph+' · Wk '+en.week,
-            cadence:'weekly',phName:phName,template:en.template||''});
+            cadence:'weekly',phName:phName,template:en.template||'',subject:en.subject||''});
         });
       }
     }else{
@@ -3801,7 +3801,12 @@ function getEmailContent(ri){
   // source of truth for on-sequence leads. The legacy Templates sheet only
   // fills in when the step carries none.
   var act=currentAction(ri);
-  if(act&&String(act.template||'').trim()){
+  if(act&&(String(act.subject||'').trim()||String(act.template||'').trim())){
+    // Dedicated subject field wins; the old "Subject:" first-line convention
+    // still parses for templates written before the field existed.
+    if(String(act.subject||'').trim()){
+      return {subject:fillNames(act.subject,names),body:fillNames(String(act.template||''),names)};
+    }
     var e9=templateToEmail(act.template,names);
     if(e9.body||e9.subject)return e9;
   }
@@ -3809,7 +3814,7 @@ function getEmailContent(ri){
   var set=apfm?COLD_EMAIL.apfm:COLD_EMAIL.gen;
   var sa=set.subj||[],ba=set.body||[];
   if(!sa.length||!ba.length){
-    return {subject:'',body:'(No template on this engine step — open ⚙ Settings → Sequence engines → ✏ Edit and fill the step\'s template box. For email steps, start the first line with "Subject: …")'};
+    return {subject:'',body:'(No template on this engine step — open ⚙ Settings → Sequence engines → ✏ Edit and fill the step\'s subject and template boxes.)'};
   }
   var idx2=ri%sa.length;
   return {subject:fillNames(sa[idx2],names),body:fillNames(ba[idx2%ba.length],names)};
@@ -5110,6 +5115,7 @@ function renderEngineEditor(){
             +'<button class="ee-mini" data-action="ee-move-step" data-pi="'+pi+'" data-si="'+si+'" data-dir="1">↓</button>'
             +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-step" data-pi="'+pi+'" data-si="'+si+'">✕</button>'
           +'</span>'
+          +(st.type==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(st.subject||'')+'" data-esp="phases.'+pi+'.steps.'+si+'.subject">'):'')
           +'<textarea class="ee-tpl" rows="2" style="grid-column:1/-1" placeholder="Template text (optional — pre-fills the composer for this step)" data-esp="phases.'+pi+'.steps.'+si+'.template">'+escapeHtml(st.template||'')+'</textarea>'
           +'</div>';
       }).join('')
@@ -5144,7 +5150,10 @@ function renderEngineEditor(){
           return (sl==='am'||on||true)?('<div class="ee-slotbox">'+hd+chips+'</div>'):'';
         }).join('')
         +'<div style="font-size:10.5px;color:var(--soft);margin-top:4px">Pattern rotates by day: [Call, Text] → Day 1 call, Day 2 text, Day 3 call… Windows: calls 8a–1p / 12–4p / 3–9p · texts &amp; emails 8a–5p / 11a–4p / 2–10p.</div>'
-        +'<textarea class="ee-tpl" rows="2" style="margin-top:8px" placeholder="Template for every step in this blitz (optional — {dm}/{pt} fill; for email steps start the first line with Subject: …)" data-esp="phases.'+pi+'.daily.template">'+escapeHtml(d.template||'')+'</textarea>';
+        +'<textarea class="ee-tpl" rows="2" style="margin-top:8px" placeholder="Template for every step in this blitz (optional — {dm}/{pt} fill)" data-esp="phases.'+pi+'.daily.template">'+escapeHtml(d.template||'')+'</textarea>';
+      var _hasEm=false;
+      ['am','mid','pm'].forEach(function(sl){var s9=d.slots&&d.slots[sl];if(s9&&s9.pattern&&s9.pattern.indexOf('email')>-1)_hasEm=true;});
+      if(_hasEm)body+='<input type="text" class="ee-inp" style="margin-top:6px" placeholder="Email subject for this blitz\'s email steps ({dm}/{pt} fill)" value="'+escapeHtml(d.subject||'')+'" data-esp="phases.'+pi+'.daily.subject">';
       }else{
         // Legacy schema — original controls + explicit convert
         body+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
@@ -5174,6 +5183,7 @@ function renderEngineEditor(){
           +'</select></div>'
           +'<div><label class="ee-lbl">Label</label><input type="text" class="ee-inp" value="'+escapeHtml(w.text||'Weekly nurture')+'" data-esp="phases.'+pi+'.weekly.text"></div>'
           +'</div>'
+          +((w.type||'sms')==='email'?('<input type="text" class="ee-inp" style="margin-bottom:6px" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(w.subject||'')+'" data-esp="phases.'+pi+'.weekly.subject">'):'')
           +'<textarea class="ee-tpl" rows="2" placeholder="Template text (optional)" data-esp="phases.'+pi+'.weekly.template">'+escapeHtml(w.template||'')+'</textarea>';
       }else{
         body+=(w.entries||[]).map(function(en,ei){
@@ -5185,6 +5195,7 @@ function renderEngineEditor(){
               +'<option value="email"'+(en.type==='email'?' selected':'')+'>Email</option></select>'
             +'<input type="text" class="ee-inp" placeholder="Label (optional — default: Week N check-in)" value="'+escapeHtml(en.text||'')+'" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.text">'
             +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-wentry" data-pi="'+pi+'" data-si="'+ei+'">✕</button>'
+            +((en.type||'sms')==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(en.subject||'')+'" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.subject">'):'')
             +'<textarea class="ee-tpl" rows="2" style="grid-column:1/-1" placeholder="Template text (optional)" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.template">'+escapeHtml(en.template||'')+'</textarea>'
             +'</div>';
         }).join('')
@@ -5378,6 +5389,7 @@ document.addEventListener('input',function(ev){
       :t.value;
     setPath(esState,t.dataset.esp,val);
     if(t.type==='checkbox')renderEngineEditor(); // forever toggle swaps the panel
+    else if(/\.type$/.test(t.dataset.esp))renderEngineEditor(); // email ⇄ other reveals/hides the subject box
     else renderEnginePreview();                  // keep the live preview current
   }
   if(t&&t.dataset&&t.dataset.asg){
