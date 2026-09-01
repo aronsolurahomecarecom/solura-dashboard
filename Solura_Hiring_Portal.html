@@ -15442,6 +15442,9 @@ async function markCurrentEmailUnread(){
    (Same deep-copy clobber class as the lastAwaitingReview mirror in openWorkspace.) */
 function _mirrorSeenToW(excelRow,messageId,seenAt){
   try{
+    /* A handful of stored records carry no id (6 of 2,103 live). Matching on undefined would
+       find the FIRST id-less entry, i.e. possibly the wrong email — skip instead. */
+    if(!messageId)return;
     if(!W||W.row!==excelRow||!W.st||!Array.isArray(W.st.emails))return;
     const we=W.st.emails.find(x=>x&&x.id===messageId);
     if(we&&!we.seen){we.seen=true;we.seenAt=seenAt;}
