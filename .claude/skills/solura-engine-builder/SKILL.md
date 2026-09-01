@@ -124,8 +124,23 @@ email-first professional engine might use `email` patterns throughout. Keep each
 engine a **single track** — A/B testing happens by building two engines and
 rotating a lead source across them in the dashboard, not by branching inside one.
 
-Message `template` strings may use `{dm}` (decision-maker first name) and `{pt}`
-(patient first name) — the dashboard fills them per lead, with safe fallbacks.
+## Templates live ON the steps
+
+Step templates are the LIVE message source — the dashboard pre-fills the SMS and
+email composers from the current step's `template` (there is no separate
+templates editor). So a good engine ships with its messages:
+
+- `action` steps: `template` per step.
+- `daily` phases: one phase-level `"template"` inside `daily` — it rides every
+  step of the blitz.
+- `weekly` entries and the `forever` nurture: `template` per entry / phase.
+- **Email templates**: start the first line with `Subject: …` — that line
+  becomes the subject, the rest the body. Without it, the whole template is the
+  body.
+- Templates may use `{dm}` (decision-maker first name) and `{pt}` (patient first
+  name) — filled per lead with safe fallbacks ("there" / "your loved one").
+- Calls don't send anything, but a template on a call step is shown as the
+  suggested voicemail/talking line — worth writing for key calls.
 
 ## Hard rules (violations make the import fail)
 

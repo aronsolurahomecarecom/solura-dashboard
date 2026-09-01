@@ -1077,7 +1077,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
 
       <section class="st-sec" id="st-sec-engines">
         <h3 class="st-h">Sequence engines</h3>
-        <p class="st-p">Engines define the outreach sequence. Build from a starting point or an empty canvas, run several side by side, assign each lead source its own engine, and share engines as packages — Claude can author one offline and you import it here.</p>
+        <p class="st-p">Engines define the outreach sequence. Build from a starting point or an empty canvas, run several side by side, assign each lead source its own engine, and share engines as packages — Claude can author one offline and you import it here. <b>Message templates live on the sequence steps:</b> ✏ edit an engine and every manual step, daily blitz, and weekly entry has its own template box ({dm}/{pt} fill per lead; email templates start the first line with <code style="font-size:11px">Subject: …</code>). The old Templates tab is legacy fallback only.</p>
         <div id="es-engine-list" style="margin-bottom:12px"></div>
         <div style="display:flex;gap:8px;margin-bottom:26px;flex-wrap:wrap">
           <button data-action="es-new-engine" class="st-btn-gold">➕ New engine</button>
@@ -1509,7 +1509,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0901-64';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0901-65';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1620,7 +1620,7 @@ function compileEngine(e){
             seq.push({ph:ph,icon:typeIcon(ty),
               text:SLOT_LABEL[sl]+' '+typeWord(ty)+' — Day '+dd,type:ty,trigger:'time',
               day:dd,slot:sl,lbl:'Phase '+ph+' · Day '+dd,
-              cadence:'daily',phName:phName,
+              cadence:'daily',phName:phName,template:d0.template||'',
               window:(SLOT_WINDOWS[sl]||{})[ty]||[8,17],
               maxDay:days,lastSlot:sli===slotOrder.length-1});
           });
@@ -1638,12 +1638,12 @@ function compileEngine(e){
         seq.push({ph:ph,icon:amType==='call'?'📞':'💬',
           text:(amType==='call'?'AM Call':'AM Text')+' — Day '+d,type:amType,trigger:'time',
           day:d,slot:'am',pmIsCall:pmIsCall,lbl:'Phase '+ph+' · Day '+d,
-          cadence:'daily',phName:phName,window:amWin,maxDay:days});
+          cadence:'daily',phName:phName,template:d0.template||'',window:amWin,maxDay:days});
         if(pmType){
           seq.push({ph:ph,icon:pmIsCall?'📞':'💬',
             text:(pmIsCall?'PM Call':'PM Text')+' — Day '+d,type:pmType,trigger:'time',
             day:d,slot:'pm',pmIsCall:pmIsCall,lbl:'Phase '+ph+' · Day '+d,
-            cadence:'daily',phName:phName,
+            cadence:'daily',phName:phName,template:d0.template||'',
             window:pmIsCall?DAILY_WINDOWS.callPm:DAILY_WINDOWS.smsPm,
             maxDay:days,lastSlot:true});
         }else{
@@ -2351,18 +2351,18 @@ async function loadTemplates(){
   SCRIPTS={apfm:{title:'A Place for Mom — Call Script',sections:[]},generic:{title:'General Follow-Up Script',sections:[]},active:{title:'Active Conversation Follow-Up',sections:[]}};
 
   // Fetch the Templates tab as JSON via Graph (avoids re-downloading entire workbook)
+  // The Templates tab is LEGACY: templates live on the engine steps now.
+  // The tab still loads as a silent fallback (and for call scripts) but a
+  // missing or empty tab is no longer an error worth nagging about.
   var r=await gfetch(GR+"/me/drive/items/"+fid+"/workbook/worksheets/Templates/usedRange?$select=values");
   if(!r.ok){
-    if(r.status===404){
-      showErr('Templates tab not found. Run the populate page first, or templates will be unavailable.');
-      return;
-    }
+    if(r.status===404){console.warn('Templates tab absent — step templates only (this is fine)');return;}
     throw new Error('Templates load failed: '+r.status);
   }
   var j=await r.json();
   var vals=j.values||[];
   if(vals.length<2){
-    showErr('Templates tab is empty.');
+    console.warn('Templates tab empty — step templates only');
     return;
   }
   // First row is headers; skip
@@ -3777,6 +3777,14 @@ function getSMSText(ri){
   }
   return (isActive(r[C.ST])||isOffSequence(ri))?getWarmSMS(ri):getColdSMS(ri);
 }
+// A step template that opens with "Subject: …" on its first line splits into
+// subject + body; otherwise the whole template is the body.
+function templateToEmail(tpl,names){
+  var t=String(tpl||'');
+  var m=t.match(/^\s*subject\s*:\s*(.+?)\s*(?:\r?\n+([\s\S]*))?$/i);
+  if(m)return {subject:fillNames(m[1],names),body:fillNames(String(m[2]||'').trim(),names)};
+  return {subject:'',body:fillNames(t,names)};
+}
 function getEmailContent(ri){
   var r=rows[ri]||[];
   var names=getNames(ri);
@@ -3784,16 +3792,24 @@ function getEmailContent(ri){
     var subjArr=WARM.email.subj||[];
     var bodyArr=WARM.email.body||[];
     if(!subjArr.length||!bodyArr.length){
-      return {subject:'',body:'(No warm email template available — add one to the Templates tab.)'};
+      return {subject:'',body:''};
     }
     var idx=ri%subjArr.length;
     return {subject:fillNames(subjArr[idx],names),body:fillNames(bodyArr[idx%bodyArr.length],names)};
+  }
+  // Templates live on the sequence step: the current step's template is the
+  // source of truth for on-sequence leads. The legacy Templates sheet only
+  // fills in when the step carries none.
+  var act=currentAction(ri);
+  if(act&&String(act.template||'').trim()){
+    var e9=templateToEmail(act.template,names);
+    if(e9.body||e9.subject)return e9;
   }
   var apfm=isAPFM(ri);
   var set=apfm?COLD_EMAIL.apfm:COLD_EMAIL.gen;
   var sa=set.subj||[],ba=set.body||[];
   if(!sa.length||!ba.length){
-    return {subject:'',body:'(No cold email template available — add one to the Templates tab.)'};
+    return {subject:'',body:'(No template on this engine step — open ⚙ Settings → Sequence engines → ✏ Edit and fill the step\'s template box. For email steps, start the first line with "Subject: …")'};
   }
   var idx2=ri%sa.length;
   return {subject:fillNames(sa[idx2],names),body:fillNames(ba[idx2%ba.length],names)};
@@ -5127,7 +5143,8 @@ function renderEngineEditor(){
           }
           return (sl==='am'||on||true)?('<div class="ee-slotbox">'+hd+chips+'</div>'):'';
         }).join('')
-        +'<div style="font-size:10.5px;color:var(--soft);margin-top:4px">Pattern rotates by day: [Call, Text] → Day 1 call, Day 2 text, Day 3 call… Windows: calls 8a–1p / 12–4p / 3–9p · texts &amp; emails 8a–5p / 11a–4p / 2–10p.</div>';
+        +'<div style="font-size:10.5px;color:var(--soft);margin-top:4px">Pattern rotates by day: [Call, Text] → Day 1 call, Day 2 text, Day 3 call… Windows: calls 8a–1p / 12–4p / 3–9p · texts &amp; emails 8a–5p / 11a–4p / 2–10p.</div>'
+        +'<textarea class="ee-tpl" rows="2" style="margin-top:8px" placeholder="Template for every step in this blitz (optional — {dm}/{pt} fill; for email steps start the first line with Subject: …)" data-esp="phases.'+pi+'.daily.template">'+escapeHtml(d.template||'')+'</textarea>';
       }else{
         // Legacy schema — original controls + explicit convert
         body+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
@@ -5140,7 +5157,8 @@ function renderEngineEditor(){
             +'<option value="sms"'+(d.pmMode==='sms'?' selected':'')+'>Always text</option>'
             +'<option value="none"'+(d.pmMode==='none'?' selected':'')+'>Morning only</option></select></div>'
           +'</div>'
-          +'<button class="ee-mini" style="margin-top:8px" data-action="ee-adv-slots" data-pi="'+pi+'">⚙ Convert to advanced slot patterns (mix &amp; match, midday slot, email)</button>';
+          +'<button class="ee-mini" style="margin-top:8px" data-action="ee-adv-slots" data-pi="'+pi+'">⚙ Convert to advanced slot patterns (mix &amp; match, midday slot, email)</button>'
+          +'<textarea class="ee-tpl" rows="2" style="margin-top:8px" placeholder="Template for every step in this blitz (optional — {dm}/{pt} fill)" data-esp="phases.'+pi+'.daily.template">'+escapeHtml(d.template||'')+'</textarea>';
       }
     }else if(p.cadence==='weekly'){
       var w=p.weekly||{};
