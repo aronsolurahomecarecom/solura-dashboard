@@ -1510,7 +1510,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0901-67';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0902-68';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1835,13 +1835,19 @@ async function loadEnginesDoc(){
     if(r.status===404){applyEnginesDoc();return;} // first run — embedded default
     if(!r.ok){applyEnginesDoc();return;}
     var j=await r.json();
-    if(j&&j.engines&&j.engines.length){enginesDoc=j;}
+    if(j&&j.engines&&j.engines.length){enginesDoc=j;_lastEnginesBody=JSON.stringify(enginesDoc,null,2);}
     applyEnginesDoc();
     applyConfig();
   }catch(e){console.warn('Engines load failed — using embedded default:',e.message);applyEnginesDoc();}
 }
+/* ⚡PERF-ENGSAVE — BEGIN (sliced by tests/perf.test.mjs) */
+var _lastEnginesBody=null;
 async function saveEnginesDoc(){
   var body=JSON.stringify(enginesDoc,null,2);
+  // ⚡ Skip the upload when nothing actually changed since the last
+  // successful save — settings toggles that resave identical config used
+  // to re-upload the whole doc (potentially MBs with an embedded PDF).
+  if(body===_lastEnginesBody){applyEnginesDoc();return;}
   // Simple PUT is only reliable to ~4MB. Large configs (big training PDFs)
   // go through a chunked upload session — same 320KB-aligned mechanics the
   // email attachments use.
@@ -1854,8 +1860,10 @@ async function saveEnginesDoc(){
   }else{
     await putEnginesContentChunked(body);
   }
+  _lastEnginesBody=body;
   applyEnginesDoc();
 }
+/* ⚡PERF-ENGSAVE — END */
 async function putEnginesContentChunked(body){
   var sess=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/createUploadSession',{
     method:'POST',
@@ -2251,12 +2259,46 @@ async function handleAuthCallback(){
 
 /* ─── §6 Data load + write (with 401 retry) ─────────────────────────────  */
 
-// One central fetch wrapper. Retries once on 401 by refreshing the token.
+/* ⚡PERF-GFETCH — BEGIN (sliced by tests/perf.test.mjs) */
+/* ─── ⚡ Workbook session — the dominant Excel-API speedup ───────────────
+ * Without a session id, EVERY workbook request makes Excel create and
+ * tear down an implicit session (often 1–3s of pure overhead per call).
+ * One persisted session, reused via the workbook-session-id header,
+ * turns those into fast cell operations. Self-healing: if the session
+ * expires (idle ~5 min), the failed call retries once WITHOUT the header
+ * (i.e. exactly today's behavior) and a fresh session is minted next
+ * time — never slower than before, usually far faster.               */
+var _wbSessionId=null,_wbSessionPromise=null;
+function ensureWorkbookSession(){
+  if(_wbSessionId)return Promise.resolve(_wbSessionId);
+  if(_wbSessionPromise)return _wbSessionPromise;
+  if(!tok||!fid)return Promise.resolve(null);
+  _wbSessionPromise=(async function(){
+    try{
+      var r=await fetch(GR+'/me/drive/items/'+fid+'/workbook/createSession',{
+        method:'POST',
+        headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/json'},
+        body:JSON.stringify({persistChanges:true})
+      });
+      if(r.ok){var j=await r.json();_wbSessionId=j.id||null;}
+    }catch(_){/* sessionless still works — just slower */}
+    _wbSessionPromise=null;
+    return _wbSessionId;
+  })();
+  return _wbSessionPromise;
+}
+// One central fetch wrapper. Retries once on 401 by refreshing the token;
+// workbook calls ride the persisted session and retry sessionless if it died.
 async function gfetch(url,opts){
   opts=opts||{};
   opts.headers=opts.headers||{};
   opts.headers['Authorization']='Bearer '+tok;
   if(opts.body&&!opts.headers['Content-Type'])opts.headers['Content-Type']='application/json';
+  var usedSession=false;
+  if(url.indexOf('/workbook/')>-1&&url.indexOf('createSession')===-1){
+    var sid=await ensureWorkbookSession();
+    if(sid){opts.headers['workbook-session-id']=sid;usedSession=true;}
+  }
   var r=await fetch(url,opts);
   if(r.status===401){
     var refreshed=await refreshToken();
@@ -2265,8 +2307,16 @@ async function gfetch(url,opts){
       r=await fetch(url,opts);
     }
   }
+  if(!r.ok&&usedSession&&(r.status===404||r.status===400||r.status===409||r.status===410)){
+    // Session likely expired mid-flight — drop it and retry sessionless
+    // (idempotent cell writes make the duplicate attempt safe).
+    _wbSessionId=null;
+    delete opts.headers['workbook-session-id'];
+    r=await fetch(url,opts);
+  }
   return r;
 }
+/* ⚡PERF-GFETCH — END */
 
 async function loadData(){
   clearErr();
@@ -2305,33 +2355,88 @@ async function loadData(){
 
 // Write specific columns to a row. updates is an object {colIndex: value, ...}.
 // Batches into one Graph "session" of patches.
-async function writeRow(ri,updates){
+/* ⚡PERF-WRITEROW — BEGIN (sliced by tests/perf.test.mjs) */
+function colLetter(i){
   var cols='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  // For column AA (index 26), AB (27), we use double letters
-  function colLetter(i){
-    if(i<26)return cols[i];
-    return cols[Math.floor(i/26)-1]+cols[i%26];
-  }
+  if(i<26)return cols[i];
+  return cols[Math.floor(i/26)-1]+cols[i%26];
+}
+/* ⚡ writeRow: one network round trip instead of one per column.
+ * Updates are grouped into contiguous column runs (each run is a single
+ * multi-cell range PATCH); multiple runs travel together in ONE Graph
+ * $batch request. A queue advance that used to cost ~6 sequential calls
+ * now costs 1. Any batch hiccup falls back to the old sequential loop —
+ * cell writes are idempotent, so the retry is safe.                    */
+async function writeRow(ri,updates){
   var exRow=ri+1; // SheetJS 0-based to Excel 1-based
-  var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
-  var ents=Object.keys(updates);
-  for(var i=0;i<ents.length;i++){
-    var ci=parseInt(ents[i],10), val=updates[ents[i]], addr=colLetter(ci)+exRow;
-    var res=await gfetch(base+"/range(address='"+addr+"')",{
-      method:'PATCH',
-      body:JSON.stringify({values:[[val]]})
-    });
-    if(!res.ok){
-      var e=await res.json().catch(function(){return{};});
-      throw new Error('Save failed col '+colLetter(ci)+': '+(e.error?e.error.message:res.status));
-    }
-    // Also update local cache so reads stay consistent until next loadData
-    if(rows[ri]){
+  var relBase='/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
+  var cis=Object.keys(updates).map(function(k){return parseInt(k,10);})
+    .sort(function(a,b){return a-b;});
+  // Contiguous columns collapse into one range write
+  var runs=[],cur=null;
+  cis.forEach(function(ci){
+    if(cur&&ci===cur.end+1){cur.end=ci;cur.vals.push(updates[ci]);}
+    else{cur={start:ci,end:ci,vals:[updates[ci]]};runs.push(cur);}
+  });
+  function cacheAll(){
+    if(!rows[ri])return;
+    cis.forEach(function(ci){
       while(rows[ri].length<=ci)rows[ri].push('');
-      rows[ri][ci]=val;
+      rows[ri][ci]=updates[ci];
+    });
+  }
+  function runAddr(rn){
+    return rn.start===rn.end?colLetter(rn.start)+exRow
+      :colLetter(rn.start)+exRow+':'+colLetter(rn.end)+exRow;
+  }
+  try{
+    if(runs.length===1){
+      var rn=runs[0];
+      var res=await gfetch(GR+relBase+"/range(address='"+runAddr(rn)+"')",{
+        method:'PATCH',body:JSON.stringify({values:[rn.vals]})
+      });
+      if(!res.ok){
+        var e=await res.json().catch(function(){return{};});
+        throw new Error('Save failed '+runAddr(rn)+': '+(e.error?e.error.message:res.status));
+      }
+      cacheAll();return;
+    }
+    // Several runs → one $batch (Graph allows up to 20 sub-requests)
+    var sid=await ensureWorkbookSession();
+    var reqs=runs.map(function(rn2,i){
+      var h={'Content-Type':'application/json'};
+      if(sid)h['workbook-session-id']=sid;
+      return {id:String(i+1),method:'PATCH',
+        url:relBase+"/range(address='"+runAddr(rn2)+"')",
+        headers:h,body:{values:[rn2.vals]}};
+    });
+    var br=await gfetch(GR+'/$batch',{
+      method:'POST',body:JSON.stringify({requests:reqs})
+    });
+    if(!br.ok)throw new Error('batch http '+br.status);
+    var bj=await br.json();
+    var bad=(bj.responses||[]).filter(function(sr){return sr.status>=400;});
+    if(!bj.responses||bad.length)throw new Error('batch sub-failure');
+    cacheAll();
+  }catch(batchErr){
+    // Fallback: the proven per-column loop (never worse than the old build)
+    for(var k=0;k<cis.length;k++){
+      var ci=cis[k],val=updates[ci];
+      var res2=await gfetch(GR+relBase+"/range(address='"+colLetter(ci)+exRow+"')",{
+        method:'PATCH',body:JSON.stringify({values:[[val]]})
+      });
+      if(!res2.ok){
+        var e2=await res2.json().catch(function(){return{};});
+        throw new Error('Save failed col '+colLetter(ci)+': '+(e2.error?e2.error.message:res2.status));
+      }
+      if(rows[ri]){
+        while(rows[ri].length<=ci)rows[ri].push('');
+        rows[ri][ci]=val;
+      }
     }
   }
 }
+/* ⚡PERF-WRITEROW — END */
 
 /* ─── §6b Templates loader ───────────────────────────────────────────────
  * Reads the Templates tab from the workbook and populates the COLD/WARM/
@@ -3717,9 +3822,22 @@ async function saveEp(ri,mode){
       }
     }
     if(!Object.keys(u).length){closeEp(ri);return;}
-    await writeRow(ri,u);
+    // ⚡ Optimistic save: the local cache takes the new values NOW and the
+    // screen repaints instantly; the Graph write finishes in the background.
+    // If that write fails we say so loudly and reload the sheet, so the
+    // screen never quietly disagrees with the workbook.
+    rows[ri]=rows[ri]||[];
+    Object.keys(u).forEach(function(k){
+      var ci=parseInt(k,10);
+      while(rows[ri].length<=ci)rows[ri].push('');
+      rows[ri][ci]=u[k];
+    });
     closeEp(ri);
     toast('✓ Saved');
+    writeRow(ri,u).catch(function(bgErr){
+      showErr('⚠ Save did not reach the sheet ('+bgErr.message+') — reloading');
+      try{loadData();}catch(_){}
+    });
     await buildUI();
     // After a "Responded" save, pop the conditions picker so user can flag
     // what the lead mentioned. Fires every time (per spec) even if previously set.
