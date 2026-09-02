@@ -1362,6 +1362,8 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <option value="action">Manual steps</option>
           <option value="daily">Daily cadence</option>
           <option value="weekly">Weekly cadence</option>
+          <option value="interval">⏱ Custom gaps (days / weeks / months / years)</option>
+          <option value="forever">♾ Forever nurture (sticky — repeats until they respond)</option>
         </select>
         <button data-action="ee-add-phase" class="st-btn-ghost">➕ Add phase</button>
       </div>
@@ -1510,7 +1512,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0902-68';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0902-69';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1589,6 +1591,38 @@ var SLOT_LABEL={am:'AM',mid:'Midday',pm:'PM'};
 function typeIcon(t){return t==='call'?'📞':t==='email'?'📧':'💬';}
 function typeWord(t){return t==='call'?'Call':t==='email'?'Email':'Text';}
 
+/* ⚡ENGINE-GAPS — BEGIN (sliced by tests/engine-gaps.test.mjs) */
+/* Custom-gap cadence: a wait expressed in years/months/weeks/days, freely
+ * combined ("2 weeks + 3 days", "1 month", "1 year"). Months and years use
+ * real calendar math (Jan 31 + 1 month lands on Feb 28, never Mar 3).    */
+function normGap(g){
+  g=g||{};
+  return {years:parseInt(g.years,10)||0,months:parseInt(g.months,10)||0,
+          weeks:parseInt(g.weeks,10)||0,days:parseInt(g.days,10)||0};
+}
+function gapIsZero(g){g=normGap(g);return !(g.years||g.months||g.weeks||g.days);}
+function addGap(date,g){
+  g=normGap(g);
+  var d=new Date(date.getFullYear(),date.getMonth(),date.getDate());
+  if(g.years||g.months){
+    var wantDay=d.getDate();
+    d=new Date(d.getFullYear()+g.years,d.getMonth()+g.months,1);
+    var lastDay=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();
+    d.setDate(Math.min(wantDay,lastDay));
+  }
+  d.setDate(d.getDate()+g.weeks*7+g.days);
+  return d;
+}
+function gapDaysApprox(g){g=normGap(g);return g.years*365+g.months*30+g.weeks*7+g.days;}
+function gapLabel(g){
+  g=normGap(g);
+  var parts=[];
+  if(g.years)parts.push(g.years+(g.years!==1?' yrs':' yr'));
+  if(g.months)parts.push(g.months+' mo');
+  if(g.weeks)parts.push(g.weeks+(g.weeks!==1?' wks':' wk'));
+  if(g.days)parts.push(g.days+(g.days!==1?' days':' day'));
+  return parts.join(' + ')||'0 days';
+}
 function compileEngine(e){
   if(!e||!e.phases||!e.phases.length)throw new Error('Engine has no phases');
   var seq=[];
@@ -1669,6 +1703,31 @@ function compileEngine(e){
             cadence:'weekly',phName:phName,template:en.template||'',subject:en.subject||''});
         });
       }
+    }else if(p.cadence==='interval'){
+      // Custom-gap cadence: each entry waits a freely-combined gap
+      // (years/months/weeks/days) counted from the PREVIOUS completion.
+      var iv0=p.interval||{};
+      if(iv0.forever){
+        var gF=normGap(iv0.every);
+        if(gapIsZero(gF))throw new Error('Forever phase "'+phName+'" needs a non-zero repeat gap');
+        seq.push({ph:ph,icon:typeIcon(iv0.type||'sms'),
+          text:iv0.text||('Nurture — every '+gapLabel(gF)),type:iv0.type||'sms',
+          trigger:'time',lbl:'Phase '+ph,cadence:'interval',sticky:true,phName:phName,
+          gap:gF,template:iv0.template||'',subject:iv0.subject||''});
+      }else{
+        var ents=iv0.entries||[];
+        if(!ents.length)throw new Error('Interval phase "'+phName+'" has no entries');
+        ents.forEach(function(en,eni){
+          var gE=normGap(en.after);
+          if(gapIsZero(gE))throw new Error('Follow-up '+(eni+1)+' of "'+phName+'" needs a wait time');
+          if(en.type&&en.type!=='call'&&en.type!=='sms'&&en.type!=='email')
+            throw new Error('Bad type "'+en.type+'" in interval phase "'+phName+'"');
+          seq.push({ph:ph,icon:typeIcon(en.type||'sms'),
+            text:en.text||('Follow-up after '+gapLabel(gE)),type:en.type||'sms',
+            trigger:'time',lbl:'Phase '+ph+' · +'+gapLabel(gE),cadence:'interval',
+            phName:phName,gap:gE,template:en.template||'',subject:en.subject||''});
+        });
+      }
     }else{
       throw new Error('Unknown cadence "'+p.cadence+'" in phase "'+phName+'"');
     }
@@ -1676,6 +1735,7 @@ function compileEngine(e){
   if(!seq.length)throw new Error('Engine compiled to zero steps');
   return {id:e.id,name:e.name||e.id,json:e,seq:seq};
 }
+/* ⚡ENGINE-GAPS — END */
 function validateEngine(e){
   try{compileEngine(e);return [];}catch(err){return [err.message];}
 }
@@ -1808,7 +1868,7 @@ function allRuleMatchedLeads(){
 // weeks ahead on enrollment was the "they land a long time ahead" bug.
 function freshStepAt(step,t2){
   var back=0;
-  if(step&&step.sticky)back=(parseInt(step.intervalWeeks,10)||1)*7;
+  if(step&&step.sticky)back=step.gap?gapDaysApprox(step.gap):(parseInt(step.intervalWeeks,10)||1)*7;
   var d=addDays(t2,-back);
   return new Date(d.getFullYear(),d.getMonth(),d.getDate(),12,0,0).toISOString();
 }
@@ -2916,6 +2976,19 @@ function whenToShow(ri){
     return {bucket:'now',at:today};
   }
 
+  // Custom-gap cadence (sticky or finite) — due = previous completion + gap.
+  // Anchored on STEP_AT like the every-N-weeks nurture; a lead with no
+  // anchor yet is due today.
+  if(action.cadence==='interval'){
+    var doneG=getStepDoneAt(ri);
+    var dueG=doneG?addGap(doneG,action.gap):today;
+    var diffG=daysBetween(dueG,today);
+    if(diffG<0)return {bucket:'overdue',at:dueG};
+    if(diffG===0)return {bucket:'now',at:dueG};
+    if(diffG<=7)return {bucket:'week',at:dueG};
+    return {bucket:'future',at:dueG};
+  }
+
   // Weekly cadence (finite check-ins) — on nurtureWeekday
   if(action.cadence==='weekly'&&!action.sticky){
     var weekday=nurtureWeekday(ri);
@@ -3003,6 +3076,8 @@ function stepLabel(step,seqOpt){
   if(a.cadence==='weekly'&&!a.sticky)return 'Phase '+a.ph+' — Weekly Check-In (Week '+a.week+')';
   if(a.ph===4&&a.cadence==='action')return 'Phase 4 — Re-Engagement';
   if(a.cadence==='weekly'&&a.sticky)return 'Phase '+a.ph+' — Long-Term Nurture';
+  if(a.cadence==='interval'&&a.sticky)return 'Phase '+a.ph+' — Long-Term Nurture (every '+gapLabel(a.gap)+')';
+  if(a.cadence==='interval')return 'Phase '+a.ph+' — Timed Follow-Up (+'+gapLabel(a.gap)+')';
   return 'Phase '+a.ph+' — '+(a.phName||'')+(a.text?(' ('+a.text+')'):'');
 }
 
@@ -3035,8 +3110,11 @@ function advanceLead(ri,methodUsed){
     // Follow-Up advances to the NEXT touch date — leaving it stale made
     // nurture leads look like they'd fallen off when they were simply
     // scheduled ahead.
-    var iw=Math.max(1,parseInt(cur.intervalWeeks,10)||1);
-    u[C.NF]=fd(addDays(t,iw*7));
+    if(cur.gap){u[C.NF]=fd(addGap(t,cur.gap));}
+    else{
+      var iw=Math.max(1,parseInt(cur.intervalWeeks,10)||1);
+      u[C.NF]=fd(addDays(t,iw*7));
+    }
     if(methodUsed)u[C.MT]=methodUsed;
     var logHist=String((rows[ri]||[])[C.SL]||'');
     u[C.SL]=appendLogStr(logHist,cur.text,methodUsed);
@@ -3067,6 +3145,11 @@ function advanceLead(ri,methodUsed){
     u[C.NF]=tomorrowStr;
   }else if(prevAction.trigger!=='action'&&nextAction&&nextAction.trigger==='action'){
     u[C.NF]=tomorrowStr;
+  }
+  // Entering a custom-gap step: Follow-Up shows its actual due date so the
+  // sheet never looks stale while a long wait (a month, a year) runs down.
+  if(nextAction&&nextAction.cadence==='interval'&&nextAction.gap){
+    u[C.NF]=fd(addGap(t,nextAction.gap));
   }
   // All other completions: engine does not touch NF.
 
@@ -5211,7 +5294,7 @@ function pickPreset(key){
 }
 function renderEngineEditor(){
   var host=el('ee-phases');if(!host||!esState)return;
-  var cadLabel={action:'Manual steps',daily:'Daily cadence',weekly:'Weekly cadence'};
+  var cadLabel={action:'Manual steps',daily:'Daily cadence',weekly:'Weekly cadence',interval:'Custom gaps'};
   var ICONS=['💬','📞','📧','📅','📄','⭐','❤️','🔔','🏠','🤝'];
   host.innerHTML=(esState.phases||[]).map(function(p,pi){
     var collapsed=!!p._collapsed;
@@ -5223,6 +5306,7 @@ function renderEngineEditor(){
         +'<option value="action"'+(p.cadence==='action'?' selected':'')+'>Manual steps</option>'
         +'<option value="daily"'+(p.cadence==='daily'?' selected':'')+'>Daily</option>'
         +'<option value="weekly"'+(p.cadence==='weekly'?' selected':'')+'>Weekly</option>'
+        +'<option value="interval"'+(p.cadence==='interval'?' selected':'')+'>⏱ Custom gaps</option>'
       +'</select>'
       +'<button class="ee-mini" data-action="ee-move-phase" data-pi="'+pi+'" data-dir="-1">↑</button>'
       +'<button class="ee-mini" data-action="ee-move-phase" data-pi="'+pi+'" data-dir="1">↓</button>'
@@ -5307,7 +5391,7 @@ function renderEngineEditor(){
       }
     }else if(p.cadence==='weekly'){
       var w=p.weekly||{};
-      body='<label class="st-check" style="margin-bottom:10px"><input type="checkbox"'+(w.forever?' checked':'')+' data-esp="phases.'+pi+'.weekly.forever"> Forever (sticky — repeats until the lead responds)</label>';
+      body='<label class="st-check" style="margin-bottom:10px;font-weight:700"><input type="checkbox"'+(w.forever?' checked':'')+' data-esp="phases.'+pi+'.weekly.forever"> ♾ Forever (sticky — repeats until the lead responds)</label>';
       if(w.forever){
         body+='<div style="display:grid;grid-template-columns:120px 150px 1fr;gap:10px">'
           +'<div><label class="ee-lbl">Type</label><select class="ee-inp" data-esp="phases.'+pi+'.weekly.type">'
@@ -5315,7 +5399,7 @@ function renderEngineEditor(){
             +'<option value="call"'+(w.type==='call'?' selected':'')+'>Call</option>'
             +'<option value="email"'+(w.type==='email'?' selected':'')+'>Email</option></select></div>'
           +'<div><label class="ee-lbl">Every</label><select class="ee-inp" data-esp="phases.'+pi+'.weekly.intervalWeeks" data-esptype="int">'
-            +[1,2,3,4].map(function(n){return '<option value="'+n+'"'+((parseInt(w.intervalWeeks,10)||1)===n?' selected':'')+'>'+(n===1?'week':n+' weeks')+'</option>';}).join('')
+            +[1,2,3,4,5,6,8,10,12].map(function(n){return '<option value="'+n+'"'+((parseInt(w.intervalWeeks,10)||1)===n?' selected':'')+'>'+(n===1?'week':n+' weeks')+'</option>';}).join('')
           +'</select></div>'
           +'<div><label class="ee-lbl">Label</label><input type="text" class="ee-inp" value="'+escapeHtml(w.text||'Weekly nurture')+'" data-esp="phases.'+pi+'.weekly.text"></div>'
           +'</div>'
@@ -5336,6 +5420,47 @@ function renderEngineEditor(){
             +'</div>';
         }).join('')
         +'<button class="ee-mini" data-action="ee-add-wentry" data-pi="'+pi+'">＋ Add week</button>';
+      }
+    }else if(p.cadence==='interval'){
+      var iv=p.interval||{};
+      var gapInputs=function(basePath,g){
+        g=g||{};
+        return '<span style="display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'
+          +[['years','yrs'],['months','mo'],['weeks','wks'],['days','days']].map(function(un){
+            return '<span style="display:inline-flex;align-items:center;gap:3px">'
+              +'<input type="number" min="0" max="99" class="ee-inp" style="width:54px" value="'+(parseInt(g[un[0]],10)||0)+'" data-esp="'+basePath+'.'+un[0]+'" data-esptype="int">'
+              +'<span style="font-size:10.5px;color:var(--soft)">'+un[1]+'</span></span>';
+          }).join('')+'</span>';
+      };
+      var typeSel=function(path,ty){
+        return '<select class="ee-inp" data-esp="'+path+'">'
+          +'<option value="sms"'+((ty||'sms')==='sms'?' selected':'')+'>SMS</option>'
+          +'<option value="call"'+(ty==='call'?' selected':'')+'>Call</option>'
+          +'<option value="email"'+(ty==='email'?' selected':'')+'>Email</option></select>';
+      };
+      body='<label class="st-check" style="margin-bottom:10px;font-weight:700"><input type="checkbox"'+(iv.forever?' checked':'')+' data-esp="phases.'+pi+'.interval.forever"> ♾ Forever (sticky — repeats at this gap until the lead responds)</label>';
+      if(iv.forever){
+        body+='<div style="display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:end;margin-bottom:8px">'
+          +'<div><label class="ee-lbl">Type</label>'+typeSel('phases.'+pi+'.interval.type',iv.type)+'</div>'
+          +'<div><label class="ee-lbl">Repeat every (mix freely — e.g. 1 mo, or 2 wks + 3 days)</label>'+gapInputs('phases.'+pi+'.interval.every',iv.every)+'</div>'
+          +'</div>'
+          +'<div style="margin-bottom:6px"><label class="ee-lbl">Label</label><input type="text" class="ee-inp" value="'+escapeHtml(iv.text||'Long-term nurture')+'" data-esp="phases.'+pi+'.interval.text"></div>'
+          +((iv.type||'sms')==='email'?('<input type="text" class="ee-inp" style="margin-bottom:6px" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(iv.subject||'')+'" data-esp="phases.'+pi+'.interval.subject">'):'')
+          +'<textarea class="ee-tpl" rows="2" placeholder="Template text (optional)" data-esp="phases.'+pi+'.interval.template">'+escapeHtml(iv.template||'')+'</textarea>';
+      }else{
+        body+=(iv.entries||[]).map(function(en,ei){
+          var ap='phases.'+pi+'.interval.entries.'+ei;
+          return '<div class="ee-step" style="grid-template-columns:1fr auto">'
+            +'<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:11px;font-weight:700;color:var(--mid)">Wait</span>'+gapInputs(ap+'.after',en.after)
+            +'<span style="font-size:11px;font-weight:700;color:var(--mid)">then</span>'+typeSel(ap+'.type',en.type)+'</span>'
+            +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-ientry" data-pi="'+pi+'" data-si="'+ei+'">✕</button>'
+            +'<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Label (optional — default: Follow-up after '+escapeHtml(gapLabel(en.after))+')" value="'+escapeHtml(en.text||'')+'" data-esp="'+ap+'.text">'
+            +((en.type||'sms')==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(en.subject||'')+'" data-esp="'+ap+'.subject">'):'')
+            +'<textarea class="ee-tpl" rows="2" style="grid-column:1/-1" placeholder="Template text (optional)" data-esp="'+ap+'.template">'+escapeHtml(en.template||'')+'</textarea>'
+            +'</div>';
+        }).join('')
+        +'<button class="ee-mini" data-action="ee-add-ientry" data-pi="'+pi+'">＋ Add follow-up</button>'
+        +'<div style="font-size:10.5px;color:var(--soft);margin-top:4px">Each wait counts from when the PREVIOUS step was completed. Months and years use real calendar dates.</div>';
       }
     }
     return '<div class="ee-phase">'+head+body+'</div>';
@@ -5364,6 +5489,8 @@ function renderEnginePreview(){
     if(p.cadence==='daily')days+=Math.max(1,parseInt((p.daily||{}).days,10)||1);
     if(p.cadence==='weekly'&&!(p.weekly||{}).forever)(p.weekly.entries||[]).forEach(function(en){maxWeek=Math.max(maxWeek,en.week||0);});
     if(p.cadence==='weekly'&&(p.weekly||{}).forever)hasSticky=true;
+    if(p.cadence==='interval'&&!(p.interval||{}).forever)((p.interval||{}).entries||[]).forEach(function(en){days+=gapDaysApprox(en.after);});
+    if(p.cadence==='interval'&&(p.interval||{}).forever)hasSticky=true;
   });
   var counts={call:0,sms:0,email:0};
   sq.forEach(function(st){if(counts[st.type]!=null)counts[st.type]++;});
@@ -5376,7 +5503,7 @@ function renderEnginePreview(){
     if(!byPhase[k]){byPhase[k]={name:st.phName,ph:st.ph,cadence:st.cadence,sticky:st.sticky,steps:[]};order.push(k);}
     byPhase[k].steps.push(st);
   });
-  var badge={action:'manual',daily:'daily',weekly:'weekly'};
+  var badge={action:'manual',daily:'daily',weekly:'weekly',interval:'timed'};
   var html='<h4>Live preview</h4>'+stats;
   order.forEach(function(k){
     var g=byPhase[k];
@@ -5387,6 +5514,7 @@ function renderEnginePreview(){
     shown.forEach(function(st){
       var meta=st.cadence==='daily'?('Day '+st.day+' · '+(st.window?(fmtHour(st.window[0])+'–'+fmtHour(st.window[1])):''))
         :st.week?('Week '+st.week)
+        :st.gap?((st.sticky?'every ':'wait ')+gapLabel(st.gap))
         :st.sticky?('every '+((st.intervalWeeks||1)===1?'week':(st.intervalWeeks+' weeks')))
         :'';
       html+='<div class="ee-pv-step"><span>'+st.icon+'</span><span style="flex:1">'+escapeHtml(st.text)+'</span><span class="ee-pv-meta">'+meta+'</span></div>';
@@ -5408,6 +5536,11 @@ function eeAddPhase(){
   if(cad==='action')p.steps=[{icon:'💬',text:'',type:'sms',template:''}];
   if(cad==='daily')p.daily={days:5,amType:'call',pmMode:'alternate'};
   if(cad==='weekly')p.weekly={entries:[{week:1,type:'sms',text:'',template:''}]};
+  if(cad==='interval')p.interval={entries:[{after:{weeks:1},type:'sms',text:'',template:''}]};
+  if(cad==='forever'){
+    p.cadence='interval';p.name=p.name||'Long-term Nurture';
+    p.interval={forever:true,every:{weeks:1},type:'sms',text:'Long-term nurture',template:''};
+  }
   (esState.phases=esState.phases||[]).push(p);
   renderEngineEditor();
 }
@@ -5652,6 +5785,7 @@ document.addEventListener('change',function(ev){
     if(ncad==='action')esState.phases[cpi].steps=[{icon:'💬',text:'',type:'sms',template:''}];
     if(ncad==='daily')esState.phases[cpi].daily={days:5,slots:{am:{pattern:['call']}}};
     if(ncad==='weekly')esState.phases[cpi].weekly={entries:[{week:1,type:'sms',text:'',template:''}]};
+    if(ncad==='interval')esState.phases[cpi].interval={entries:[{after:{weeks:1},type:'sms',text:'',template:''}]};
     renderEngineEditor();
   }
   // Restart modal engine selector
@@ -6194,7 +6328,8 @@ function pickWeeklyVariant(peekOrSet,maybePeek){
 }
 function isNurtureStep(ri){
   var a=currentAction(ri);
-  return !!(a&&a.cadence==='weekly'&&a.sticky);
+  // ANY sticky forever step is long-term nurture — weekly or custom-gap
+  return !!(a&&a.sticky);
 }
 var _wkIdx=0;
 function wkStash(){
@@ -11417,6 +11552,16 @@ function onClick(ev){
       break;
     case 'ee-del-wentry':
       if(esState){esState.phases[parseInt(t.dataset.pi,10)].weekly.entries.splice(parseInt(t.dataset.si,10),1);renderEngineEditor();}
+      break;
+    case 'ee-add-ientry':
+      if(esState){
+        var pgi=esState.phases[parseInt(t.dataset.pi,10)].interval;
+        (pgi.entries=pgi.entries||[]).push({after:{weeks:1},type:'sms',text:'',template:''});
+        renderEngineEditor();
+      }
+      break;
+    case 'ee-del-ientry':
+      if(esState){esState.phases[parseInt(t.dataset.pi,10)].interval.entries.splice(parseInt(t.dataset.si,10),1);renderEngineEditor();}
       break;
     case 'ee-extract-phase':
       if(esState){

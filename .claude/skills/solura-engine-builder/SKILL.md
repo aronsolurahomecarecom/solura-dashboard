@@ -34,7 +34,7 @@ Emit a single JSON document (a ```json fence is fine — the importer strips it)
 ## Phases — the heart of the engine
 
 `phases` is an ordered array. Each phase has a `name` and a `cadence`, which is
-one of exactly three kinds. The dashboard compiles phases in order into a single
+one of exactly four kinds. The dashboard compiles phases in order into a single
 step list, so sequence = the phases top to bottom.
 
 ### 1. `action` — manual steps, done one at a time
@@ -108,6 +108,40 @@ touch per interval, forever, until they respond or are closed):
 `intervalWeeks: 2` = every other week. This forever-phase is also the population
 that receives the weekly newsletter — most engines should end with one.
 
+### 4. `interval` — custom gaps: days, weeks, months, years, freely combined
+
+When weekly granularity isn't enough — long tails, quarterly touches, an
+anniversary call. Each entry waits its own gap, **counted from when the
+previous step was completed**. Gaps combine units freely, and months/years
+use real calendar dates (Jan 31 + 1 month lands on Feb 28).
+
+```json
+{ "name": "Long Tail", "cadence": "interval", "interval": { "entries": [
+  { "after": { "weeks": 2, "days": 3 }, "type": "sms", "template": "..." },
+  { "after": { "months": 1 }, "type": "email", "subject": "...", "template": "..." },
+  { "after": { "years": 1 }, "type": "call", "text": "Anniversary check-in" }
+]}}
+```
+
+- `after` takes any mix of `years` / `months` / `weeks` / `days`; at least one
+  must be non-zero or the engine refuses to compile.
+- Entry fields mirror weekly entries: `type` (call/sms/email), optional `text`
+  label, `template`, and `subject` for email.
+
+**Forever at a custom gap** — the sticky nurture generalized (monthly email
+forever, quarterly call forever):
+
+```json
+{ "name": "Quarterly Nurture", "cadence": "interval", "interval": {
+  "forever": true, "every": { "months": 3 }, "type": "email",
+  "subject": "...", "template": "..."
+}}
+```
+
+A sticky `interval` phase behaves exactly like the weekly forever phase (ends
+the engine, receives the newsletter) — prefer it whenever the interval is
+better said in months than weeks.
+
 ## Design conventions (why the house engines look the way they do)
 
 The proven Solura shape is: **grab attention fast, persist briefly, then fade to
@@ -147,9 +181,11 @@ templates editor). So a good engine ships with its messages:
 
 ## Hard rules (violations make the import fail)
 
-- Every phase: a `cadence` of exactly `action`, `daily`, or `weekly`.
+- Every phase: a `cadence` of exactly `action`, `daily`, `weekly`, or `interval`.
 - `daily` + slots: at least one slot with a non-empty pattern.
 - `weekly` without `forever`: non-empty `entries`.
+- `interval`: every entry's `after` (and a forever phase's `every`) must have at
+  least one non-zero unit.
 - Step/pattern types: only `call`, `sms`, `email`.
 - The engine must compile to at least one step — no empty `phases`.
 - Changing a phase structure on an engine that already has leads shifts what
