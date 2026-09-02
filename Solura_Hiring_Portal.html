@@ -11342,9 +11342,22 @@ async function _corruptRecoverApply(r){
 async function _stateCompactionPass(){
   try{
     const stampKey='solura_compact_at';
+    const tryKey='solura_compact_try';
     const last=Number(localStorage.getItem(stampKey)||0);
     if(Date.now()-last<20*3600*1000)return;
-    localStorage.setItem(stampKey,String(Date.now()));
+    /* stampKey means "a sweep COMPLETED", and is written at the BOTTOM. Burning the day's turn
+       up front cost a full day every time the pass didn't finish — and it often doesn't: it runs
+       LAST in the load-heal chain, so the next backgroundRefresh (30s) can reassign `pipeline`
+       mid-loop and trip the stale-abort below, and a tab closed or navigated away mid-pass ends
+       it the same way. Measured live 2026-09-01 AND 2026-09-02: the stamp was burned both days
+       while every row above the 27k trigger stayed untrimmed — top row 31,386 chars, i.e. 1,381
+       from the 32,767 cliff this pass exists to keep candidates away from, growing ~800/day.
+       (The rung logic is fine: simulated read-only on that row it reclaims 11,273 chars.)
+       tryKey is only a tight-loop guard — an unfinished sweep retries in 10 minutes, not
+       tomorrow, and a sweep that finishes with nothing to do still spends the day's turn. */
+    const lastTry=Number(localStorage.getItem(tryKey)||0);
+    if(Date.now()-lastTry<10*60*1000)return;
+    localStorage.setItem(tryKey,String(Date.now()));
     const _myPipe=pipeline;let n=0;
     for(const c of pipeline){
       if(pipeline!==_myPipe)return;
@@ -11391,6 +11404,9 @@ async function _stateCompactionPass(){
         n++;
       }catch(e){console.warn('compaction write failed:',c.name,e.message);}
     }
+    /* Reached only by a sweep that walked the whole pipeline — the stale-abort returns above
+       without stamping, so an interrupted pass gets another turn instead of losing the day. */
+    localStorage.setItem(stampKey,String(Date.now()));
     if(n)console.info('🗜 Compacted '+n+' candidate state cell'+(n===1?'':'s'));
   }catch(e){console.warn('state compaction:',e.message);}
 }
