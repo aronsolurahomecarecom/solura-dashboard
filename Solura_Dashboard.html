@@ -1512,7 +1512,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0902-69';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0902-70';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -6562,6 +6562,79 @@ function trackDocUrl(target,meta){
   var d=trkB64(meta||{});
   return tc.url+'/doc?u='+encodeURIComponent(target)+'&d='+encodeURIComponent(d);
 }
+/* ⚡SELF-OPEN — BEGIN (sliced by tests/selfopen.test.mjs)
+ * The IP filter on the worker cannot catch every self-open: Outlook, OWA,
+ * and phones load images through Microsoft/Google PROXY servers, so the
+ * request never carries Meir's IP. The only complete fix is that no copy
+ * living in HIS mailbox contains a live pixel:
+ *  - fast-path sends: auto-save is turned off, a pixel-free copy is filed
+ *    into Sent Items instead (marked read+sent via PR_MESSAGE_FLAGS);
+ *  - draft-path sends (large attachments): the tracked auto-saved copy is
+ *    found by its unique pixel URL, replaced by a clean copy, and the
+ *    tracked one moved to Deleted Items;
+ *  - replies: never get a pixel at all — threads get reread constantly and
+ *    can't be scrubbed without breaking Outlook's conversation view.     */
+function stripTrackingFromHtml(html){
+  var s=String(html||'');
+  s=s.replace(/<img[^>]*\/px\?d=[^>]*>/gi,'');
+  s=s.replace(/https:\/\/[^"'()\s>]+\/doc\?u=([^&"'()\s>]+)[^"'()\s>]*/gi,function(m,u){
+    try{return decodeURIComponent(u);}catch(_e){return m;}
+  });
+  return s;
+}
+async function saveCleanSentCopy(subj,toAddr,html,atts,largeNames){
+  try{
+    var body=stripTrackingFromHtml(html);
+    if(largeNames&&largeNames.length){
+      body+='<div style="font-size:11px;color:#8a8a8a;margin-top:14px">📎 Sent with large file'+(largeNames.length!==1?'s':'')+': '
+        +largeNames.map(escapeHtml).join(', ')+' (not duplicated in this saved copy)</div>';
+    }
+    var msg={subject:subj,body:{contentType:'HTML',content:body},
+      toRecipients:[{emailAddress:{address:toAddr}}],
+      // PR_MESSAGE_FLAGS = 1 (read, not unsent) → files as a real sent
+      // item instead of a draft
+      singleValueExtendedProperties:[{id:'Integer 0x0E07',value:'1'}]};
+    if(atts&&atts.length)msg.attachments=atts;
+    var r=await gfetch(GR+'/me/mailFolders/sentitems/messages',{method:'POST',body:JSON.stringify(msg)});
+    if(!r.ok){var e=await r.json().catch(function(){return{};});
+      throw new Error((e.error&&e.error.message)||('HTTP '+r.status));}
+    traceOp({kind:'clean-sent-copy',subj:String(subj||'').slice(0,60)});
+    return true;
+  }catch(e2){
+    traceOp({kind:'clean-sent-copy-FAIL',err:String(e2.message||'').slice(0,140)});
+    toast('⚠ Pixel-free Sent copy failed to save — the email itself sent fine');
+    return false;
+  }
+}
+async function scrubSentCopy(pxFrag,subj,toAddr,html,atts,largeNames){
+  if(!pxFrag)return;
+  var delays=[4000,8000,15000,30000,60000];
+  for(var i=0;i<delays.length;i++){
+    await new Promise(function(res){setTimeout(res,delays[i]);});
+    try{
+      var r=await gfetch(GR+'/me/mailFolders/sentitems/messages?$top=10&$orderby=createdDateTime%20desc&$select=id,subject');
+      if(!r.ok)continue;
+      var j=await r.json();
+      var cands=(j.value||[]).filter(function(m){return String(m.subject||'')===String(subj||'');});
+      for(var k=0;k<cands.length;k++){
+        var br=await gfetch(GR+'/me/messages/'+encodeURIComponent(cands[k].id)+'?$select=body');
+        if(!br.ok)continue;
+        var bj=await br.json();
+        if(String((bj.body&&bj.body.content)||'').indexOf(pxFrag)===-1)continue;
+        // Found the tracked copy. Clean copy FIRST — only then retire the
+        // original (to Deleted Items), so a failure never loses his record.
+        var okCopy=await saveCleanSentCopy(subj,toAddr,html,atts,largeNames);
+        if(okCopy){
+          var dr=await gfetch(GR+'/me/messages/'+encodeURIComponent(cands[k].id),{method:'DELETE'});
+          traceOp({kind:'sent-scrub',removed:!!(dr.ok||dr.status===204)});
+        }
+        return;
+      }
+    }catch(_){/* transient — retry on the next delay */}
+  }
+  traceOp({kind:'sent-scrub-miss',subj:String(subj||'').slice(0,60)});
+}
+/* ⚡SELF-OPEN — END */
 /* ─── Sent-email record ────────────────────────────────────────────────
  * Every outgoing email gets a send-id. The pixel and tracked doc links
  * carry it; open events resolve back to the ORIGINAL sent record — the
@@ -9301,7 +9374,11 @@ async function sendEmail(){
   _trkMeta={r:ri+1,e:toAddr,s:String(subj||'').slice(0,120),i:_sendId};
   // Authored tracked-doc buttons (weekly link-mode PDF) route through /doc
   bodyHtml=rewriteTrackedDocAnchors(bodyHtml,_trkMeta);
-  var _trkPx=trackingPixelHtml(ri,toAddr,subj,_sendId);
+  // 🛡 Replies carry NO pixel: your own copy of a thread gets reread
+  // constantly, threaded copies can't be scrubbed without breaking the
+  // conversation view, and a lead who's already talking to you doesn't
+  // need open tracking. Tracked doc links still count clicks.
+  var _trkPx=_emailReplyTo?'':trackingPixelHtml(ri,toAddr,subj,_sendId);
   // Inject INSIDE the document: full-doc bodies (HTML weekly variants) were
   // getting the pixel appended after </html>, where clients drop it — that
   // silently killed read receipts for those sends.
@@ -9483,11 +9560,17 @@ async function sendEmail(){
           return att;
         });
       }
-      var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:message,saveToSentItems:true})});
+      // 🛡 Self-open kill: a tracked send must NOT auto-save its Sent copy —
+      // that copy carries the live pixel, and opening your own sent mail
+      // (usually via Microsoft/Google image proxies the IP filter can't
+      // see) reports a false lead open. A pixel-free copy is filed instead.
+      var _tracked=!!_trkPx||bodyHtml.indexOf('/doc?u=')>-1;
+      var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:message,saveToSentItems:!_tracked})});
       if(!(res.ok||res.status===202)){
         var ee=await res.json().catch(function(){return{};});
         throw new Error(ee.error?ee.error.message:'Send failed: '+res.status);
       }
+      if(_tracked)saveCleanSentCopy(subj,toAddr,bodyHtml,message.attachments);
     }else{
       // === Slow path: create draft → upload each large attachment in chunks → send ===
       // 1. Create the draft message (with small attachments inlined)
@@ -9560,6 +9643,14 @@ async function sendEmail(){
       if(!(sendRes.ok||sendRes.status===202)){
         var se=await sendRes.json().catch(function(){return{};});
         throw new Error('Send draft failed: '+(se.error&&se.error.message?se.error.message:sendRes.status));
+      }
+      // 🛡 Same self-open kill for draft-path sends: swap the tracked
+      // auto-saved copy for a pixel-free one in the background. Replies
+      // are exempt — they carry no pixel to begin with.
+      if(!_emailReplyTo&&_trkPx){
+        var _pxFrag=(String(_trkPx).match(/\/px\?d=[^"&]+/)||[])[0]||'';
+        scrubSentCopy(_pxFrag,subj,toAddr,bodyHtml,smallAttsArr,
+          emailAttachments.filter(function(a){return a.large;}).map(function(a){return a.name;}));
       }
     }
 
