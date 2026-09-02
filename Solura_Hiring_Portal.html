@@ -8659,6 +8659,24 @@ function _scYN(v){
   if(s==='n'||s==='no'||s==='false')return false;
   return null;
 }
+/* Years of experience is a BUCKET CODE, never a number. The application form posts
+   '0'|'u1'|'12'|'35'|'5p' and the profile editor writes 'under1'|'y1'|'y2'|'y5'. Every
+   consumer used parseInt, which read '12' (= 1-2 years) as TWELVE and '35' (= 3-5 years) as
+   THIRTY-FIVE. Map each bucket to its LOWER bound — conservative, so a gate can only ever
+   under-credit. Returns null for genuinely unanswered (31 of 161 live rows), which callers
+   must treat as "no data", NOT as zero: reading blank as 0 is what let unscreened
+   applicants trip requirement gates meant only for answered-and-failing data. A bare number
+   still parses for hand-entered values, with the bucket table winning on the two codes that
+   look numeric. */
+function _yearsMin(v){
+  const s=String(v==null?'':v).trim().toLowerCase();
+  if(!s)return null;
+  const T={'0':0,'u1':0,'12':1,'35':3,'5p':5,'under1':0,'y1':1,'y2':2,'y5':5};
+  if(T[s]!=null)return T[s];
+  if(s==='none'||s==='<1'||s.indexOf('less than')>-1)return 0;
+  const n=parseInt(s,10);
+  return isNaN(n)?null:n;
+}
 function predictedQuality(c){
   const s=(c.st&&c.st.screening)||{};
   const g=c.gates||{};
@@ -8668,17 +8686,30 @@ function predictedQuality(c){
   if(_scYN(s.abuseFinding)===true)hard.push('Abuse finding');
   if(_scYN(s.personalCare)===false)hard.push('Refuses personal care');
   if(_scYN(s.lifting)===false)hard.push("Can't lift 25 lbs");
-  if(g.wa==='✗')hard.push('No work authorization');
+  /* c.gates is built verbatim from sheet columns H-L (11108) and every writer emits
+     'Y'/'N'/'' — the ✓/✗ glyphs are display-only (`sym`). So this test, and the tr/cr ones
+     below, never fired for anyone, ever: the same dead-vocabulary class as the screening
+     answers three lines up. Explicit N only. A BLANK gate means "not checked yet", not
+     "failed", and all 161 live rows are blank in H-L, so firing on blank would decline or
+     flag the entire pipeline. */
+  if(_scYN(g.wa)===false)hard.push('No work authorization');
   if(hard.length)return{tier:'decline',reasons:hard};
 
   const soft=[];
-  const yrs=String(c.years||'').toLowerCase();
-  const noExp=yrs==='0'||yrs==='<1'||yrs==='none'||yrs.indexOf('less than')>-1;
+  /* _yearsMin, not parseInt/free-text: this also picks up the real under-1 codes 'u1' and
+     'under1', which the old literal list missed, and its null keeps a candidate with NO years
+     data from being called inexperienced. */
+  const noExp=_yearsMin(c.years)===0;
   if(noExp)soft.push('No prior experience');
-  if(!c.credential&&noExp)soft.push('No certifications');
+  /* c.credential is NEVER ASSIGNED — cardOf (8141) sets 11 fields and this is not one of
+     them; it is undefined on all 161 live rows. So `!c.credential` was constant true and this
+     collapsed to `noExp`: every inexperienced applicant silently earned a second soft reason
+     and the false line "No certifications" while holding STNA + CPR. 4 of the 5 live noExp
+     rows have real certs. st.certs is what payRange (12068) reads for the same question. */
+  if(!((c.st&&c.st.certs)||[]).length&&noExp)soft.push('No certifications');
   if(_scYN(s.smoker)===true)soft.push('Smoker');
-  if(g.tr==='✗')soft.push('No reliable transport');
-  if(g.cr==='?')soft.push('Credential unverified');
+  if(_scYN(g.tr)===false)soft.push('No reliable transport');
+  if(_scYN(g.cr)===false)soft.push('Credential unverified');
   if(soft.length>=2)return{tier:'review',reasons:soft};
   return{tier:'ok',reasons:[]};
 }
@@ -9447,7 +9478,11 @@ function matchFilters(c){
   if(F.cert.size){const certs=(s.certs||[]).map(x=>x.toUpperCase());let ok=false;F.cert.forEach(x=>{if(certs.indexOf(x.toUpperCase())>-1)ok=true;});if(!ok)return false;}
   if(F.expertise.size){const px=(s.pills||[]).map(x=>x.toLowerCase());let ok=false;F.expertise.forEach(x=>{if(px.indexOf(x.toLowerCase())>-1)ok=true;});if(!ok)return false;}
   if(F.languages.size){const langs=(sc.languages||[]).map(x=>String(x).toLowerCase());let ok=false;F.languages.forEach(x=>{if(langs.indexOf(x.toLowerCase())>-1)ok=true;});if(!ok)return false;}
-  if(F.minYears>0){const yrs=parseInt(c.years)||0;if(yrs<F.minYears)return false;}
+  /* The same bucket-code bug _jobMissingReqs carried: parseInt passed '12' and '35' at every
+     minimum up to 10 while excluding '5p' — the MOST experienced bucket, 79 of 161 live rows —
+     at any minimum >= 1, i.e. the slider hid exactly the people it was meant to find. Unknown
+     still excludes, matching the old parseInt('')||0 behaviour. */
+  if(F.minYears>0){const y=_yearsMin(c.years);if(y===null||y<F.minYears)return false;}
 
   /* Availability — schedule grid is AND mode (must cover ALL selected slots) */
   if(F.schedule.size){
@@ -20022,7 +20057,10 @@ function _srcToggleActive(id){
      with its assignment still gone: applicants through that URL silently resolved to the
      default sequence while the row went on saying "managed by job". ✎ and × are already hidden
      AND refused here for job links; ⏸ had neither guard. */
-  if(l.jobId){toast('🧳 This link is managed by a job package — pause or resume it there');return;}
+  /* Job packages have no per-link pause — the editor offers only ✕ remove (which mints a
+     fresh code on re-add, discarding the posted URL) and _jobToggle, which pauses the whole
+     job. Name what actually exists rather than sending the operator hunting. */
+  if(l.jobId){toast('🧳 Managed by a job package — deactivate the job, or remove this platform from it');return;}
   l.active=l.active===false; /* toggle: false → true, everything else → false */
   markSettingsDirty();renderSettings();
 }
@@ -20087,17 +20125,15 @@ function _jobMissingReqs(c,job){
   (r.certs||[]).forEach(n=>{if(!has(certNames,n))miss.push('cert: '+n);});
   (r.expertise||[]).forEach(n=>{if(!has(st.pills,n))miss.push('expertise: '+n);});
   if(r.minYears>0){
-    /* years is a BUCKET CODE, never a number. The application form posts '0'|'u1'|'12'|'35'|'5p'
-       and the profile editor writes 'under1'|'y1'|'y2'|'y5'. parseInt read '12' (= 1-2 years) as
-       TWELVE and '35' (= 3-5 years) as THIRTY-FIVE, so any minYears>=2 passed nearly everyone,
-       and on the rare row where it did fire the operator-facing line read "experience: 12y
-       (needs 5y)". Map each bucket to its LOWER bound — conservative, and the same treatment
-       rComp (~23567) already gives this field. A bare number still parses for hand-entered
-       values, with the bucket table winning on the two codes that look numeric. */
-    const _yRaw=String((st.facts&&st.facts.years)||c.years||'').trim().toLowerCase();
-    const _YMIN={'0':0,'u1':0,'12':1,'35':3,'5p':5,'under1':0,'y1':1,'y2':2,'y5':5};
-    const y=(_YMIN[_yRaw]!=null)?_YMIN[_yRaw]:(parseInt(_yRaw)||0);
-    if(y<r.minYears)miss.push('experience: '+y+'y+ (needs '+r.minYears+'y)');
+    /* Bucket codes — see _yearsMin. Measured live: 15 candidates sit in the '12' bucket and
+       parseInt passed all of them against a 3-year minimum. */
+    const y=_yearsMin((st.facts&&st.facts.years)||c.years);
+    /* null = genuinely unanswered, and it must say so. It used to fall to 0 and emit a miss
+       line with NO "(not answered)" suffix, so it slipped through _jobRequirementsPass's
+       filter (20133) — the one guard stopping a fresh applicant from being auto-routed off
+       the job's sequence as a page-load side effect, against tag-for-life. */
+    if(y===null)miss.push('experience (not answered)');
+    else if(y<r.minYears)miss.push('experience: '+y+'y+ (needs '+r.minYears+'y)');
   }
   const sc=st.screening||{},fa=st.formAnswers||{};
   /* _scYN normalizes the form's 'Y'/'N' and the profile editor's 'yes'/'no' (see its comment) —
@@ -20168,10 +20204,23 @@ async function _jobReqDecide(r,choice){
   c.st.jobReqDecision={choice:choice,at:new Date().toISOString(),missing:miss};
   c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧾 Requirements decision for "'+(jb?jb.name:'?')+'": '+(choice==='proceed'?'proceed on the job flow':'generic pipeline')+(miss.length?' · was missing: '+miss.join(', '):'')});
   closeModal();
-  await _seqCommitState(c,{});
-  if(choice==='generic'){
-    const defId=window.SeqBuilderV3?window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[]):null;
-    if(defId&&defId!==c.st.sequenceId)await _seqAssignTo(c.excelRow,defId);
+  /* The decision is written to memory above and the 🧾 row disappears from the next render on
+     the strength of that in-memory field alone (9168). Unguarded, a rejected patchRange — or
+     _stCell throwing on a corrupt cell — left the operator looking at success while nothing
+     reached AJ, and for 'generic' the reassignment never ran either. Sibling pass
+     _jobRequirementsPass already wraps its write. */
+  try{
+    await _seqCommitState(c,{});
+    if(choice==='generic'){
+      const defId=window.SeqBuilderV3?window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[]):null;
+      if(defId&&defId!==c.st.sequenceId)await _seqAssignTo(c.excelRow,defId);
+    }
+  }catch(e){
+    delete c.st.jobReqDecision;   /* nothing persisted — let the row come back and be decided again */
+    console.warn('job requirements decision:',e);
+    if(typeof render==='function')render();
+    toast('⚠ Could not save that decision — '+(e&&e.message||'write failed'));
+    return;
   }
   if(typeof render==='function')render();
   toast('✓ Decision recorded');
@@ -20371,7 +20420,16 @@ function _jobSave(){
   removed.forEach(lk=>{
     syncLink(lk,false);
     const l=SETTINGS.config.sourceLinks.find(x=>x.code===lk.code);
-    if(l)delete l.jobId;
+    if(!l)return;
+    /* syncLink ran first and stamped the job's label, pay and ZIP onto the row. Undoing only
+       jobId left it disowned but still advertising the job that dropped it — and still
+       quoting the job's wage, which per-link pay precedence feeds straight into {pay}/{wage}
+       for anyone who applies through it. Release the whole identity, keeping only what the
+       operator typed for this link specifically. */
+    delete l.jobId;delete l.jobZip;
+    if(!(lk.method&&lk.method.trim()))l.method='';
+    if(!(lk.wage&&lk.wage.trim()))l.wage='';
+    if(!(lk.notes&&lk.notes.trim()))l.notes='';
   });
   /* Role requirements + miss policy. */
   j.req={
