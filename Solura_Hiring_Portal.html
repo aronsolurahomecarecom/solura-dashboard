@@ -7751,6 +7751,15 @@ function _pushUndoSnapshot(reason){
       templates:_deepClone(SETTINGS.templates||{}),
       sequences:_deepClone(SETTINGS.sequences||[]),
       sequenceAssignments:_deepClone(SETTINGS.sequenceAssignments||[]),
+      /* jobs travels with config.sourceLinks and sequenceAssignments or not at all. _jobSave's
+         syncLink maintains job → link → assignment as ONE unit; snapshotting two thirds of it
+         meant a restore rolled links and assignments back while jobs stayed current, leaving
+         assignments for codes no job owns and — worse — job links whose code is missing from
+         the restored sourceLinks, where _lookupSourceLink returns null and the per-link wage
+         silently drops out of {pay}/{wage}. jobFormConfigs/jobConfirmEmails are deliberately
+         NOT snapshotted: they are keyed by job id, so a stale entry is inert, while restoring
+         them could discard a form the operator still wants. */
+      jobs:_deepClone(SETTINGS.jobs||[]),
       scripts:_deepClone(SETTINGS.scripts||{}),
       flow:_deepClone(SETTINGS.flow||{}),
       scoringWeights:_deepClone(SETTINGS.scoringWeights||{})
@@ -8632,15 +8641,33 @@ function dayName(iso){return DAYS[(new Date(iso+'T00:00').getDay()+6)%7];}
    - 'decline' : at least one hard disqualifier; primary becomes Decline-and-email
    - 'review'  : 2+ soft concerns; primary becomes Review (user opens workspace before deciding)
    - 'ok'      : clean, send screen invite as usual */
+/* Screening answers arrive in TWO vocabularies and always have. The application form posts
+   'Y'/'N' (Solura_Application_Form.html opts: age18, dl, revoked, abuseFinding, personalCare,
+   lifting, smoker, workauth are all [["Yes","Y"],["No","N"]]), while the workspace profile
+   editor writes 'yes'/'no' (the st.screening.* selects, ~13445-13451). Only the dl and smoker
+   tests in _jobMissingReqs ever handled both; every other test compared against ONE of them,
+   so an applicant who came through the form read as unanswered. Consequences, all live: the
+   hard disqualifiers below never fired for a form applicant — credential revoked, abuse
+   finding, refuses personal care, can't lift 25 lbs — the caregiver filter chips matched
+   nobody who applied online, and a job requiring personal care or lifting reported every one
+   of its own applicants as "missing" it. Returns true / false / null, null meaning genuinely
+   unanswered, so every caller keeps failing closed exactly as it did. */
+function _scYN(v){
+  if(v===true||v===false)return v;
+  const s=String(v==null?'':v).trim().toLowerCase();
+  if(s==='y'||s==='yes'||s==='true')return true;
+  if(s==='n'||s==='no'||s==='false')return false;
+  return null;
+}
 function predictedQuality(c){
   const s=(c.st&&c.st.screening)||{};
   const g=c.gates||{};
   const hard=[];
-  if(s.age18==='no')hard.push('Under 18');
-  if(s.revoked==='yes')hard.push('Credential revoked');
-  if(s.abuseFinding==='yes')hard.push('Abuse finding');
-  if(s.personalCare==='no')hard.push('Refuses personal care');
-  if(s.lifting==='no')hard.push("Can't lift 25 lbs");
+  if(_scYN(s.age18)===false)hard.push('Under 18');
+  if(_scYN(s.revoked)===true)hard.push('Credential revoked');
+  if(_scYN(s.abuseFinding)===true)hard.push('Abuse finding');
+  if(_scYN(s.personalCare)===false)hard.push('Refuses personal care');
+  if(_scYN(s.lifting)===false)hard.push("Can't lift 25 lbs");
   if(g.wa==='✗')hard.push('No work authorization');
   if(hard.length)return{tier:'decline',reasons:hard};
 
@@ -8649,7 +8676,7 @@ function predictedQuality(c){
   const noExp=yrs==='0'||yrs==='<1'||yrs==='none'||yrs.indexOf('less than')>-1;
   if(noExp)soft.push('No prior experience');
   if(!c.credential&&noExp)soft.push('No certifications');
-  if(s.smoker==='yes')soft.push('Smoker');
+  if(_scYN(s.smoker)===true)soft.push('Smoker');
   if(g.tr==='✗')soft.push('No reliable transport');
   if(g.cr==='?')soft.push('Credential unverified');
   if(soft.length>=2)return{tier:'review',reasons:soft};
@@ -9470,12 +9497,14 @@ function matchFilters(c){
     const trStr=String(tr).toLowerCase();
     if(trStr!=='car'&&trStr!=='own car'&&trStr!=='yes')return false;
   }
-  if(F.nonSmoker&&sc.smoker!=='no')return false;
-  if(F.willPersonalCare&&sc.personalCare!=='yes')return false;
-  if(F.canLift&&sc.lifting!=='yes')return false;
-  if(F.age18&&sc.age18!=='yes')return false;
-  if(F.noAbuseFinding&&sc.abuseFinding!=='no')return false;
-  if(F.noRevoked&&sc.revoked!=='no')return false;
+  /* _scYN both vocabularies (see its comment) — these six chips matched only profile-edited
+     candidates, never a form applicant. Unanswered still excludes, exactly as before. */
+  if(F.nonSmoker&&_scYN(sc.smoker)!==false)return false;
+  if(F.willPersonalCare&&_scYN(sc.personalCare)!==true)return false;
+  if(F.canLift&&_scYN(sc.lifting)!==true)return false;
+  if(F.age18&&_scYN(sc.age18)!==true)return false;
+  if(F.noAbuseFinding&&_scYN(sc.abuseFinding)!==false)return false;
+  if(F.noRevoked&&_scYN(sc.revoked)!==false)return false;
   if(F.workAuthed&&!(g.wa==='Y'||g.wa==='yes'))return false;
 
   /* Past experience quality */
@@ -19900,7 +19929,7 @@ function renderSettingsSourceLinks(){
         <div style="display:flex;gap:5px">
           <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcCopy('${esc(l.code)}',this)" title="Copy the tracking URL">\u{1F517} copy</button>
           ${l.jobId?'':`<button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcEdit('${esc(l.id)}')" title="Edit platform, method, pay, notes">\u270E edit</button>`}
-          <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcToggleActive('${esc(l.id)}')" title="${inactive?'Reactivate':'Deactivate'}">${inactive?'\u25B6':'\u23F8'}</button>
+          ${l.jobId?'':`<button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcToggleActive('${esc(l.id)}')" title="${inactive?'Reactivate':'Deactivate'}">${inactive?'\u25B6':'\u23F8'}</button>`}
           ${l.jobId?'':`<button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;font-size:10.5px" onclick="_srcDelete('${esc(l.id)}')">\u00d7</button>`}
         </div>
       </div>`;
@@ -19986,6 +20015,14 @@ async function _srcCopy(code,btn){
 function _srcToggleActive(id){
   const l=(SETTINGS.config.sourceLinks||[]).find(x=>x.id===id);
   if(!l)return;
+  /* Job packages are the single control surface for their links (design rule 8). Everywhere
+     else, "active" and the link's sequenceAssignments entry move together — _jobToggle drops
+     and restores the assignment, syncLink rewrites it on save. This handler only ever wrote
+     l.active, so pressing ▶ on a link greyed out by _jobToggle brought the row back to life
+     with its assignment still gone: applicants through that URL silently resolved to the
+     default sequence while the row went on saying "managed by job". ✎ and × are already hidden
+     AND refused here for job links; ⏸ had neither guard. */
+  if(l.jobId){toast('🧳 This link is managed by a job package — pause or resume it there');return;}
   l.active=l.active===false; /* toggle: false → true, everything else → false */
   markSettingsDirty();renderSettings();
 }
@@ -20049,14 +20086,29 @@ function _jobMissingReqs(c,job){
   const certNames=(st.certs||[]).concat((st.credentials||[]).map(cr=>cr.name||''));
   (r.certs||[]).forEach(n=>{if(!has(certNames,n))miss.push('cert: '+n);});
   (r.expertise||[]).forEach(n=>{if(!has(st.pills,n))miss.push('expertise: '+n);});
-  if(r.minYears>0){const y=parseInt((st.facts&&st.facts.years)||c.years)||0;if(y<r.minYears)miss.push('experience: '+y+'y (needs '+r.minYears+'y)');}
+  if(r.minYears>0){
+    /* years is a BUCKET CODE, never a number. The application form posts '0'|'u1'|'12'|'35'|'5p'
+       and the profile editor writes 'under1'|'y1'|'y2'|'y5'. parseInt read '12' (= 1-2 years) as
+       TWELVE and '35' (= 3-5 years) as THIRTY-FIVE, so any minYears>=2 passed nearly everyone,
+       and on the rare row where it did fire the operator-facing line read "experience: 12y
+       (needs 5y)". Map each bucket to its LOWER bound — conservative, and the same treatment
+       rComp (~23567) already gives this field. A bare number still parses for hand-entered
+       values, with the bucket table winning on the two codes that look numeric. */
+    const _yRaw=String((st.facts&&st.facts.years)||c.years||'').trim().toLowerCase();
+    const _YMIN={'0':0,'u1':0,'12':1,'35':3,'5p':5,'under1':0,'y1':1,'y2':2,'y5':5};
+    const y=(_YMIN[_yRaw]!=null)?_YMIN[_yRaw]:(parseInt(_yRaw)||0);
+    if(y<r.minYears)miss.push('experience: '+y+'y+ (needs '+r.minYears+'y)');
+  }
   const sc=st.screening||{},fa=st.formAnswers||{};
-  if(r.dl&&!(sc.dl==='Y'||sc.dl==='yes'))miss.push('driver’s license'+(sc.dl?'':' (not answered)'));
+  /* _scYN normalizes the form's 'Y'/'N' and the profile editor's 'yes'/'no' (see its comment) —
+     personalCare and lifting compared against 'yes' alone, so a job requiring either reported
+     every one of its own form applicants as missing it. Unanswered still counts as missing. */
+  if(r.dl&&_scYN(sc.dl)!==true)miss.push('driver’s license'+(sc.dl?'':' (not answered)'));
   if(r.car&&String(fa.transport||'').toLowerCase()!=='car')miss.push('own car'+(fa.transport?'':' (not answered)'));
-  if(r.personalCare&&sc.personalCare!=='yes')miss.push('personal care'+(sc.personalCare?'':' (not answered)'));
-  if(r.lifting&&sc.lifting!=='yes')miss.push('lifting 25 lbs'+(sc.lifting?'':' (not answered)'));
-  if(r.nonSmoker&&!(sc.smoker==='no'||sc.smoker==='N'))miss.push('non-smoker'+(sc.smoker?'':' (not answered)'));
-  if(r.workauth&&fa.workauth!=='Y')miss.push('work authorization'+(fa.workauth?'':' (not answered)'));
+  if(r.personalCare&&_scYN(sc.personalCare)!==true)miss.push('personal care'+(sc.personalCare?'':' (not answered)'));
+  if(r.lifting&&_scYN(sc.lifting)!==true)miss.push('lifting 25 lbs'+(sc.lifting?'':' (not answered)'));
+  if(r.nonSmoker&&_scYN(sc.smoker)!==false)miss.push('non-smoker'+(sc.smoker?'':' (not answered)'));
+  if(r.workauth&&_scYN(fa.workauth)!==true)miss.push('work authorization'+(fa.workauth?'':' (not answered)'));
   return miss;
 }
 /* GENERIC policy: candidates missing requirements route to the default pipeline on load —
@@ -20309,7 +20361,18 @@ function _jobSave(){
     if(active&&j.sequenceId)SETTINGS.sequenceAssignments.push({match:{sourceCode:lk.code},sequenceId:j.sequenceId});
   };
   j.links.forEach(lk=>syncLink(lk,j.active!==false));
-  removed.forEach(lk=>syncLink(lk,false));
+  /* A platform removed from the job keeps its posted URL alive but stops being job-owned.
+     syncLink still stamps l.jobId=j.id, and leaving it there stranded the row permanently:
+     the job editor can't show it again (the modal builds its draft from j.links), while
+     Source links hides ✎ and × because jobId is truthy and prints "managed by job X" for a
+     job that no longer has it. Releasing ownership degrades it to an ordinary inactive
+     organic link — editable, deletable, honestly labelled. The assignment is already
+     correctly dropped by syncLink, so routing is unaffected either way. */
+  removed.forEach(lk=>{
+    syncLink(lk,false);
+    const l=SETTINGS.config.sourceLinks.find(x=>x.code===lk.code);
+    if(l)delete l.jobId;
+  });
   /* Role requirements + miss policy. */
   j.req={
     certs:(g('job-req-certs')||'').split(',').map(s=>s.trim()).filter(Boolean),
@@ -23172,6 +23235,8 @@ async function _restoreUndoSnapshot(idx){
     if(snap.settings.templates)SETTINGS.templates=_deepClone(snap.settings.templates);
     if(snap.settings.sequences)SETTINGS.sequences=_deepClone(snap.settings.sequences);
     if(snap.settings.sequenceAssignments)SETTINGS.sequenceAssignments=_deepClone(snap.settings.sequenceAssignments);
+    /* Snapshots taken before this key existed simply skip it, same as every line here. */
+    if(snap.settings.jobs)SETTINGS.jobs=_deepClone(snap.settings.jobs);
     if(snap.settings.scripts)SETTINGS.scripts=_deepClone(snap.settings.scripts);
     if(snap.settings.flow)SETTINGS.flow=_deepClone(snap.settings.flow);
     if(snap.settings.scoringWeights)SETTINGS.scoringWeights=_deepClone(snap.settings.scoringWeights);
