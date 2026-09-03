@@ -7549,7 +7549,18 @@ async function loadSettings(){
   let primaryLoaded=false;
   /* 1. PRIMARY — fetch from worker (Solura_Settings.json in OneDrive) */
   try{
-    const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||localStorage.getItem('solura_internal_token')||'';
+    /* BOTH key names, or a browser can get permanently stuck on the fallback tier. The token
+       has two localStorage homes and only ONE of them was consulted here: `solura_internal_token`
+       is written exclusively by _saveSettingsInternal (7932), while the Settings panel's own
+       "Save token" (saveZiToken) writes `solura_zi_token`. That is a deadlock — a browser
+       whose token arrived through the Settings panel finds nothing here, so the primary fetch is
+       skipped, the load is degraded, and the PROVENANCE GATE then refuses every save (7868),
+       which is the only code that would have written the key this line is looking for. The
+       restore at 7615 cannot rescue it either: it runs AFTER this fetch, loadSettings is called
+       exactly once per session (7205), and SETTINGS is rebuilt from defaults on the next load.
+       The two keys are interchangeable by construction — 7615 already reads either into
+       config.ziToken and 7932 writes config.ziToken back out. */
+    const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||localStorage.getItem('solura_internal_token')||localStorage.getItem('solura_zi_token')||'';
     if(tok){
       const r=await fetch(ZI_WORKER_URL+'/settings',{headers:{'X-Solura-Token':tok}});
       if(r.ok){
@@ -8225,6 +8236,19 @@ async function loadData(){
   (SETTINGS.massSends||[]).forEach(b=>{if(b&&Array.isArray(b.recipients))_blastDiag.recipientsAcrossBlasts+=b.recipients.length;});
   for(const c of pipeline){
     if(!c.st)continue;
+    /* THE TWO GUARDS EVERY OTHER HEAL PASS HAS. This inline loop predates them and was the last
+       AJ writer without either — and unlike the chain passes it runs inside loadData, i.e. every
+       30 seconds via backgroundRefresh.
+       __ajCorrupt: a corrupt row must never be written over (rule 5). _stCell throws on the flag,
+       but the throw here is SYNCHRONOUS inside the patchRange(...) argument, so the `.catch`
+       below is never attached and loadData has no try/catch of its own — the exception escapes
+       the loop and skips the whole tail of the function: the sync-time stamp, the heal CHAIN
+       (including _stateCompactionPass, the 32k-cliff guard) and render(). Refuse up front.
+       _wsOpenOn: W is a deep copy taken by loadW, so a heal that writes while the workspace is
+       open on this candidate is reverted by the operator's next saveW — which then re-triggers
+       the heal on the following load, appending its "✓ Auto-healed" line again each round. */
+    if(c.st.__ajCorrupt)continue;
+    if(_wsOpenOn(c.excelRow))continue;
     let touched=false;
     /* ── stuck-awaiting auto-heal (only candidates parked in awaiting) ── */
     if(c.st.manualAwaiting){
@@ -21239,7 +21263,10 @@ async function saveZiToken(){
   SETTINGS.config.ziToken=tok;
   /* Also persist to localStorage as a backup. If the AL1 sheet write fails for any reason
      (token expired, sheet open in Excel, transient network), this keeps working locally. */
-  try{localStorage.setItem('solura_zi_token',tok);}catch(e){}
+  /* Write BOTH key names so the two can never diverge again. loadSettings' primary fetch now
+     reads either one, but keeping them in sync means a browser that only ever goes through this
+     panel is indistinguishable from one that has completed a full settings save. */
+  try{localStorage.setItem('solura_zi_token',tok);localStorage.setItem('solura_internal_token',tok);}catch(e){}
   let saveOk=false,tooBig=false;
   /* This is the ONE settings writer that runs before a worker token exists, so it deliberately
      writes the AL1 mirror instead of the primary file. It must still obey the two rules every
