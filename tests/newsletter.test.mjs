@@ -14,7 +14,7 @@ let PASS = 0, FAIL = 0;
 const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: ' + n); } };
 
 /* ── source-level regression locks ── */
-ok(/UNSUB:29\s*\/\/ AD/.test(html), 'column map: UNSUB at 0-based index 29 = AD');
+ok(/UNSUB:29,?\s*\/\/ AD/.test(html), 'column map: UNSUB at 0-based index 29 = AD');
 ok(html.includes('":AD"+exRow'), 'saveAddLead writes the full A:AD row');
 ok(html.includes(':AD"+(ri+1)'), 'voice-agent lead creation writes A:AD');
 ok(html.includes('c2<30'), 'firstEmptyDataRow scans all 30 columns');

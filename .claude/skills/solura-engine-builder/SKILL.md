@@ -142,6 +142,28 @@ A sticky `interval` phase behaves exactly like the weekly forever phase (ends
 the engine, receives the newsletter) — prefer it whenever the interval is
 better said in months than weeks.
 
+**Special touches inside a forever phase** — extra steps layered into the
+perpetual nurture. Each fires on a chosen touch number (optionally repeating)
+and plays either `"replace"` (instead of the regular touch that cycle) or
+`"beside"` (an additional step the same day, queued right after the regular
+touch is done). Works on both `weekly` and `interval` forever phases:
+
+```json
+{ "name": "Nurture", "cadence": "interval", "interval": {
+  "forever": true, "every": { "weeks": 1 }, "type": "sms", "template": "...",
+  "specials": [
+    { "on": 3, "repeatEvery": 3, "mode": "replace", "type": "email",
+      "text": "Quarterly value email", "subject": "...", "template": "..." },
+    { "on": 6, "repeatEvery": 0, "mode": "beside", "type": "call",
+      "text": "Milestone check-in call", "time": "14:00" }
+  ]
+}}
+```
+
+`on` = first touch number it plays (1-based); `repeatEvery` = 0 for one-time,
+N to repeat every N touches after; each special takes its own `type`, `text`,
+`template`, `subject` (email), and `time`.
+
 ## Design conventions (why the house engines look the way they do)
 
 The proven Solura shape is: **grab attention fast, persist briefly, then fade to

@@ -24,7 +24,7 @@ const SLOT_WINDOWS = { am: {}, mid: {}, pm: {} };
 const DAILY_WINDOWS = { callAm: [8, 13], smsAm: [8, 17], callPm: [12, 16], smsPm: [11, 16] };
 
 const mk = new Function('typeIcon', 'typeWord', 'SLOT_LABEL', 'SLOT_WINDOWS', 'DAILY_WINDOWS',
-  src + '\nreturn {normGap,gapIsZero,addGap,gapDaysApprox,gapLabel,parseTimeStr,compileEngine};');
+  src + '\nreturn {normGap,gapIsZero,addGap,gapDaysApprox,gapLabel,parseTimeStr,compileEngine,normSpecials,specialMatches,nurtureParts};');
 const G = mk(typeIcon, typeWord, SLOT_LABEL, SLOT_WINDOWS, DAILY_WINDOWS);
 
 // ── gap math ──
@@ -101,6 +101,44 @@ ok(/bucket:'later',at:new Date\(td\.getFullYear\(\)/.test(html), 'a timed step w
 ok((html.match(/class="ep-fut"/g) || []).length === 3, 'callback time input present in Done, Responded, and Update dialogs');
 ok(/if\(fPrev!==\(ftv\|\|''\)\)saveEnginesDoc\(\)/.test(html), 'callback time persists to the synced doc only when changed');
 ok(/data-action="ee-add-step" data-pi="'\+pi\+'" data-sttype="sms"/.test(html), 'one-click typed add-step buttons (Text/Call/Email) wired');
+
+// ── ★ special touches in sticky phases (B-0903-72) ──
+ok(G.specialMatches({ on: 4, repeatEvery: 0 }, 4) && !G.specialMatches({ on: 4, repeatEvery: 0 }, 5) && !G.specialMatches({ on: 4, repeatEvery: 0 }, 3), 'one-time special fires on its touch only');
+ok(G.specialMatches({ on: 2, repeatEvery: 3 }, 2) && G.specialMatches({ on: 2, repeatEvery: 3 }, 5) && G.specialMatches({ on: 2, repeatEvery: 3 }, 8) && !G.specialMatches({ on: 2, repeatEvery: 3 }, 4), 'repeating special fires on 2, 5, 8…');
+{
+  const eng2 = G.compileEngine({ id: 's', name: 's', phases: [
+    { name: 'N', cadence: 'interval', interval: { forever: true, every: { months: 1 }, type: 'sms', template: 'regular text', specials: [
+      { on: 3, repeatEvery: 3, mode: 'replace', type: 'email', text: 'Quarterly email', subject: 'Q', template: 'deep value', time: '10:00' },
+      { on: 6, repeatEvery: 0, mode: 'beside', type: 'call', text: 'Half-year call' }
+    ]}}
+  ]});
+  const stk = eng2.seq[0];
+  ok(stk.sticky && stk.specials.length === 2 && stk.specials[0].mode === 'replace' && stk.specials[0].at === 10, 'specials normalized onto the sticky step');
+  let p = G.nurtureParts(stk, '');
+  ok(p.cycle === 1 && p.parts.length === 1 && p.parts[0] === stk && p.partsDone === 0, 'fresh lead: cycle 1, plain regular touch');
+  p = G.nurtureParts(stk, '2');
+  ok(p.cycle === 3 && p.parts.length === 1 && p.parts[0].special === true && p.parts[0].type === 'email' && p.parts[0].template === 'deep value', 'cycle 3: replacement special IS the touch, custom content');
+  ok(p.parts[0].sticky === true && p.parts[0].gap && p.parts[0].gap.months === 1, 'replacement keeps the base scheduling (sticky + gap)');
+  p = G.nurtureParts(stk, '5');
+  ok(p.cycle === 6 && p.parts.length === 2 && p.parts[0].type === 'email' && p.parts[1].type === 'call', 'cycle 6: quarterly replaces AND the beside call queues after');
+  p = G.nurtureParts(stk, '5.1');
+  ok(p.partsDone === 1 && p.parts[p.partsDone].text === 'Half-year call', 'mid-cycle "5.1": the beside special is the due part');
+  p = G.nurtureParts(stk, '5.9');
+  ok(p.partsDone === p.parts.length - 1, 'over-long part index clamps (config shrank mid-cycle)');
+  p = G.nurtureParts(stk, '3');
+  ok(p.cycle === 4 && p.parts.length === 1 && p.parts[0] === stk, 'cycle 4: no special matches — plain regular touch');
+}
+{
+  try { G.compileEngine({ id: 'x', name: 'x', phases: [{ name: 'Z', cadence: 'weekly', weekly: { forever: true, type: 'sms', specials: [{ on: 1, type: 'fax' }] } }] }); ok(false, 'bad special type refused'); }
+  catch (err) { ok(err.message.indexOf('special touch') > -1, 'bad special type refused'); }
+}
+ok(/NCY:30/.test(html), 'nurture cycle counter lives in new column AE (full-width writes stop at AD)');
+ok(/u\[C\.NCY\]=\(info9\.cycle-1\)\+'\.'\+\(info9\.partsDone\+1\)/.test(html), 'advanceLead parks mid-cycle when a beside special is queued');
+ok(/if\(infP&&infP\.partsDone>0\)return \{bucket:'now',at:today\};/.test(html), 'queued beside special is due right now');
+ok(/return inf\.parts\[inf\.partsDone\];/.test(html), 'currentAction presents the due part (composer gets special content)');
+ok(html.indexOf('ee-add-special') > -1 && html.indexOf('ee-del-special') > -1, 'special-touch add/delete wired in the editor');
+ok((html.match(/specialsEditorHtml\(pi,'(weekly|interval)'/g) || []).length === 2, 'specials editor present in BOTH forever panels');
+ok(/writeRow\(3,hU\)/.test(html), 'AE header labeled lazily on load');
 
 // ── source-level locks on scheduling + UI wiring ──
 ok(/cadence==='interval'\)\{\s*\n\s*var doneG=getStepDoneAt/.test(html), 'whenToShow schedules interval steps from last completion + gap');

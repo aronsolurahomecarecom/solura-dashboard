@@ -1510,9 +1510,12 @@ var C={
   STEP_AT:26,// AA step_done_at  (NEW — when current step was completed)
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
-  UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
+  UNSUB:29,  // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
+  NCY:30     // AE nurture_cycle — "3" = 3 nurture touches done; "3.1" = mid-cycle,
+             //    regular touch of cycle 4 done, beside-special #1 due now.
+             //    SAFE add: every full-width writer spans A:AD and never touches AE.
 };
-var BUILD='B-0903-71';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0903-72';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1632,6 +1635,53 @@ function gapLabel(g){
   if(g.days)parts.push(g.days+(g.days!==1?' days':' day'));
   return parts.join(' + ')||'0 days';
 }
+/* ★ Special touches inside a sticky forever phase: extra steps that come in
+ * on a chosen touch number (optionally repeating every N touches) and play
+ * either INSTEAD OF the regular recurring touch or ALONGSIDE it. A lead's
+ * position is tracked in column AE as "cycles[.partsDone]".              */
+function normSpecials(list,phName){
+  return (list||[]).map(function(sp,idx){
+    var ty=sp.type||'sms';
+    if(ty!=='call'&&ty!=='sms'&&ty!=='email')
+      throw new Error('Bad type "'+ty+'" in special touch '+(idx+1)+' of "'+phName+'"');
+    return {on:Math.max(1,parseInt(sp.on,10)||1),
+      repeatEvery:Math.max(0,parseInt(sp.repeatEvery,10)||0),
+      mode:sp.mode==='replace'?'replace':'beside',
+      type:ty,icon:typeIcon(ty),text:sp.text||'',template:sp.template||'',
+      subject:sp.subject||'',time:sp.time||'',at:parseTimeStr(sp.time)};
+  });
+}
+function specialMatches(sp,cycle){
+  if(cycle<sp.on)return false;
+  if(cycle===sp.on)return true;
+  return sp.repeatEvery>0&&((cycle-sp.on)%sp.repeatEvery===0);
+}
+function mkSpecialAction(base,sp,cycle){
+  var a={};
+  Object.keys(base).forEach(function(k){a[k]=base[k];});
+  a.icon=sp.icon;a.type=sp.type;
+  a.text=sp.text||('Special '+typeWord(sp.type)+' — touch '+cycle);
+  a.template=sp.template;a.subject=sp.subject;
+  a.at=sp.at;a.atStr=sp.time;a.special=true;
+  return a;
+}
+// Pure: base sticky step + the raw AE cell → this cycle's ordered parts.
+// parts[0] is the regular touch (or its replacement); beside-specials follow.
+function nurtureParts(base,rawNcy){
+  var m=String(rawNcy||'').trim().match(/^(\d+)(?:\.(\d+))?$/);
+  var c=m?parseInt(m[1],10):0,p=m?parseInt(m[2]||'0',10):0;
+  var cycle=c+1;
+  var rep=null,beside=[];
+  (base.specials||[]).forEach(function(sp){
+    if(!specialMatches(sp,cycle))return;
+    if(sp.mode==='replace'){if(!rep)rep=sp;}
+    else beside.push(sp);
+  });
+  var parts=[rep?mkSpecialAction(base,rep,cycle):base];
+  beside.forEach(function(sp){parts.push(mkSpecialAction(base,sp,cycle));});
+  if(p>=parts.length)p=parts.length-1; // config shrank mid-cycle — clamp
+  return {cycle:cycle,partsDone:p,parts:parts};
+}
 function compileEngine(e){
   if(!e||!e.phases||!e.phases.length)throw new Error('Engine has no phases');
   var seq=[];
@@ -1703,7 +1753,8 @@ function compileEngine(e){
           text:w0.text||'Weekly nurture',type:w0.type||'sms',trigger:'time',
           lbl:'Phase '+ph,cadence:'weekly',sticky:true,phName:phName,
           intervalWeeks:ivw,template:w0.template||'',subject:w0.subject||'',
-          at:parseTimeStr(w0.time),atStr:w0.time||''});
+          at:parseTimeStr(w0.time),atStr:w0.time||'',
+          specials:normSpecials(w0.specials,phName)});
       }else{
         var entries=w0.entries||[];
         if(!entries.length)throw new Error('Weekly phase "'+phName+'" has no entries');
@@ -1726,7 +1777,8 @@ function compileEngine(e){
           text:iv0.text||('Nurture — every '+gapLabel(gF)),type:iv0.type||'sms',
           trigger:'time',lbl:'Phase '+ph,cadence:'interval',sticky:true,phName:phName,
           gap:gF,template:iv0.template||'',subject:iv0.subject||'',
-          at:parseTimeStr(iv0.time),atStr:iv0.time||''});
+          at:parseTimeStr(iv0.time),atStr:iv0.time||'',
+          specials:normSpecials(iv0.specials,phName)});
       }else{
         var ents=iv0.entries||[];
         if(!ents.length)throw new Error('Interval phase "'+phName+'" has no entries');
@@ -2408,6 +2460,14 @@ async function loadData(){
     var ws=wb.Sheets['Lead Tracker'];
     if(!ws)throw new Error('Sheet "Lead Tracker" not found');
     rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+    // One-shot: label the AE column the nurture-cycle counter lives in
+    // (idempotent — only fires while the header cell is still blank).
+    try{
+      if(rows[3]&&!String(rows[3][C.NCY]||'').trim()){
+        var hU={};hU[C.NCY]='Nurture Cycle';
+        writeRow(3,hU).catch(function(){});
+      }
+    }catch(_){}
     lastLoadAt=new Date();
     el('sync-time').textContent='Refreshed: '+lastLoadAt.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
 
@@ -2851,14 +2911,41 @@ function getStepDoneAt(ri){
 }
 function isOffSequence(ri){return getStep(ri)===STEP_OFF_SEQUENCE;}
 
+// The lead's base sticky step (null when not parked on one)
+function nurtureBaseStep(ri){
+  var step=getStep(ri);
+  if(step===STEP_OFF_SEQUENCE)return null;
+  var sq=seqFor(ri);
+  if(step<0)step=0;
+  if(step>=sq.length)step=sq.length-1;
+  var a=sq[step];
+  return (a&&a.sticky)?a:null;
+}
+// Cycle position for a nurture lead: which touch number is next, and which
+// part of the current cycle (regular / beside-specials) is up.
+function nurtureCycleInfo(ri){
+  var base=nurtureBaseStep(ri);
+  if(!base)return null;
+  return nurtureParts(base,(rows[ri]||[])[C.NCY]);
+}
 // Current pending action (or null if off-sequence/excluded)
 function currentAction(ri){
   var step=getStep(ri);
   if(step===STEP_OFF_SEQUENCE)return null;
   var sq=seqFor(ri);
-  if(step<0)return sq[0]; // new lead → first step
-  if(step>=sq.length)return sq[sq.length-1]; // final step sticky
-  return sq[step];
+  var a;
+  if(step<0)a=sq[0]; // new lead → first step
+  else if(step>=sq.length)a=sq[sq.length-1]; // final step sticky
+  else a=sq[step];
+  // Sticky step with special touches: present THIS cycle's due part —
+  // the replacement special, a queued beside-special, or the regular touch.
+  if(a&&a.sticky&&a.specials&&a.specials.length){
+    try{
+      var inf=nurtureCycleInfo(ri);
+      if(inf)return inf.parts[inf.partsDone];
+    }catch(_){/* fall through to the base step */}
+  }
+  return a;
 }
 
 // Phase 2 time windows
@@ -2971,6 +3058,13 @@ function whenToShowCore(ri){
   var action=currentAction(ri);
   if(!action)return {bucket:'hidden'};
   var today=localToday();
+
+  // Mid-cycle nurture: a beside-special queued behind today's completed
+  // regular touch is due RIGHT NOW (still time-gated by the wrapper).
+  if(action.sticky){
+    var infP=null;try{infP=nurtureCycleInfo(ri);}catch(_){}
+    if(infP&&infP.partsDone>0)return {bucket:'now',at:today};
+  }
 
   // Action-triggered phases (1 & 4) use NF as visibility signal
   if(action.trigger==='action'){
@@ -3140,17 +3234,28 @@ function advanceLead(ri,methodUsed){
     u[C.STEP_AT]=noonToday;
     u[C.LC]=todayStr;
     u[C.SQ]=stepLabel(step,sq);
-    // Follow-Up advances to the NEXT touch date — leaving it stale made
-    // nurture leads look like they'd fallen off when they were simply
-    // scheduled ahead.
-    if(cur.gap){u[C.NF]=fd(addGap(t,cur.gap));}
-    else{
-      var iw=Math.max(1,parseInt(cur.intervalWeeks,10)||1);
-      u[C.NF]=fd(addDays(t,iw*7));
+    var info9=null;try{info9=nurtureCycleInfo(ri);}catch(_){}
+    var eff9=(info9&&info9.parts[info9.partsDone])||cur;
+    if(info9&&info9.partsDone+1<info9.parts.length){
+      // More parts this cycle: a beside-special comes next, TODAY. The
+      // cycle counter parks mid-cycle ("c.p") and NF stays on today.
+      u[C.NCY]=(info9.cycle-1)+'.'+(info9.partsDone+1);
+      u[C.NF]=todayStr;
+    }else{
+      // Cycle complete → count it and schedule the next touch at the gap.
+      // Follow-Up advances to the NEXT touch date — leaving it stale made
+      // nurture leads look like they'd fallen off when they were simply
+      // scheduled ahead.
+      if(info9)u[C.NCY]=String(info9.cycle);
+      if(cur.gap){u[C.NF]=fd(addGap(t,cur.gap));}
+      else{
+        var iw=Math.max(1,parseInt(cur.intervalWeeks,10)||1);
+        u[C.NF]=fd(addDays(t,iw*7));
+      }
     }
     if(methodUsed)u[C.MT]=methodUsed;
     var logHist=String((rows[ri]||[])[C.SL]||'');
-    u[C.SL]=appendLogStr(logHist,cur.text,methodUsed);
+    u[C.SL]=appendLogStr(logHist,eff9.text,methodUsed);
     return u;
   }
 
@@ -5338,6 +5443,44 @@ function pickPreset(key){
   var pr=ENGINE_PRESETS.find(function(x){return x.key===key;});
   if(pr){var e2=deepCopy(pr.engine);e2.name=pr.name;openEngineEditor(e2,true);}
 }
+// ★ Special-touches editor for a sticky forever phase (weekly or interval)
+function specialsEditorHtml(pi,kind,list){
+  var base='phases.'+pi+'.'+kind+'.specials.';
+  var rowsH=(list||[]).map(function(sp,si){
+    var ap=base+si;
+    return '<div class="ee-step" style="grid-template-columns:1fr auto;background:rgba(190,150,60,.06)">'
+      +'<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+        +'<span style="font-size:11px;font-weight:700;color:var(--mid)">★ Comes in on touch #</span>'
+        +'<input type="number" min="1" max="999" class="ee-inp" style="width:62px" value="'+(parseInt(sp.on,10)||1)+'" data-esp="'+ap+'.on" data-esptype="int">'
+        +'<span style="font-size:11px;color:var(--mid)">then every</span>'
+        +'<input type="number" min="0" max="999" class="ee-inp" style="width:62px" title="0 = one-time" value="'+(parseInt(sp.repeatEvery,10)||0)+'" data-esp="'+ap+'.repeatEvery" data-esptype="int">'
+        +'<span style="font-size:11px;color:var(--mid)">touches (0 = just once)</span>'
+      +'</span>'
+      +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-special" data-pi="'+pi+'" data-kind="'+kind+'" data-si="'+si+'">✕</button>'
+      +'<span style="grid-column:1/-1;display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+        +'<select class="ee-inp" style="width:auto" data-esp="'+ap+'.mode">'
+          +'<option value="beside"'+(sp.mode!=='replace'?' selected':'')+'>➕ Alongside the regular touch (extra step that day)</option>'
+          +'<option value="replace"'+(sp.mode==='replace'?' selected':'')+'>🔁 Instead of the regular touch</option>'
+        +'</select>'
+        +'<select class="ee-inp" style="width:auto" data-esp="'+ap+'.type">'
+          +'<option value="sms"'+((sp.type||'sms')==='sms'?' selected':'')+'>SMS</option>'
+          +'<option value="call"'+(sp.type==='call'?' selected':'')+'>Call</option>'
+          +'<option value="email"'+(sp.type==='email'?' selected':'')+'>Email</option>'
+        +'</select>'
+        +'<span style="font-size:10.5px;color:var(--soft)">🕐</span>'
+        +'<input type="time" class="ee-inp" style="width:104px" title="Time on its day (optional)" value="'+escapeHtml(sp.time||'')+'" data-esp="'+ap+'.time">'
+      +'</span>'
+      +'<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Label (e.g. Quarterly value email)" value="'+escapeHtml(sp.text||'')+'" data-esp="'+ap+'.text">'
+      +((sp.type||'sms')==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(sp.subject||'')+'" data-esp="'+ap+'.subject">'):'')
+      +'<textarea class="ee-tpl" rows="2" style="grid-column:1/-1" placeholder="Template text (optional)" data-esp="'+ap+'.template">'+escapeHtml(sp.template||'')+'</textarea>'
+      +'</div>';
+  }).join('');
+  return '<div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">'
+    +'<div style="font-size:11.5px;font-weight:700;color:var(--mid);margin-bottom:6px">★ Special touches — customized steps that come in on a chosen touch number</div>'
+    +rowsH
+    +'<button class="ee-mini" data-action="ee-add-special" data-pi="'+pi+'" data-kind="'+kind+'">＋ Add special touch</button>'
+    +'</div>';
+}
 function renderEngineEditor(){
   var host=el('ee-phases');if(!host||!esState)return;
   var cadLabel={action:'Manual steps',daily:'Daily cadence',weekly:'Weekly cadence',interval:'Custom gaps'};
@@ -5457,7 +5600,8 @@ function renderEngineEditor(){
           +'</div>'
           +'<div style="display:flex;align-items:center;gap:6px;margin:6px 0"><span style="font-size:10.5px;color:var(--soft)">🕐 Time on its day (optional)</span><input type="time" class="ee-inp" style="width:112px" value="'+escapeHtml(w.time||'')+'" data-esp="phases.'+pi+'.weekly.time"></div>'
           +((w.type||'sms')==='email'?('<input type="text" class="ee-inp" style="margin-bottom:6px" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(w.subject||'')+'" data-esp="phases.'+pi+'.weekly.subject">'):'')
-          +'<textarea class="ee-tpl" rows="2" placeholder="Template text (optional)" data-esp="phases.'+pi+'.weekly.template">'+escapeHtml(w.template||'')+'</textarea>';
+          +'<textarea class="ee-tpl" rows="2" placeholder="Template text (optional)" data-esp="phases.'+pi+'.weekly.template">'+escapeHtml(w.template||'')+'</textarea>'
+          +specialsEditorHtml(pi,'weekly',w.specials);
       }else{
         body+=(w.entries||[]).map(function(en,ei){
           return '<div class="ee-step" style="grid-template-columns:90px 100px 1fr auto">'
@@ -5501,7 +5645,8 @@ function renderEngineEditor(){
           +'<div style="margin-bottom:6px"><label class="ee-lbl">Label</label><input type="text" class="ee-inp" value="'+escapeHtml(iv.text||'Long-term nurture')+'" data-esp="phases.'+pi+'.interval.text"></div>'
           +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:10.5px;color:var(--soft)">🕐 Time on its day (optional)</span><input type="time" class="ee-inp" style="width:112px" value="'+escapeHtml(iv.time||'')+'" data-esp="phases.'+pi+'.interval.time"></div>'
           +((iv.type||'sms')==='email'?('<input type="text" class="ee-inp" style="margin-bottom:6px" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(iv.subject||'')+'" data-esp="phases.'+pi+'.interval.subject">'):'')
-          +'<textarea class="ee-tpl" rows="2" placeholder="Template text (optional)" data-esp="phases.'+pi+'.interval.template">'+escapeHtml(iv.template||'')+'</textarea>';
+          +'<textarea class="ee-tpl" rows="2" placeholder="Template text (optional)" data-esp="phases.'+pi+'.interval.template">'+escapeHtml(iv.template||'')+'</textarea>'
+          +specialsEditorHtml(pi,'interval',iv.specials);
       }else{
         body+=(iv.entries||[]).map(function(en,ei){
           var ap='phases.'+pi+'.interval.entries.'+ei;
@@ -5575,6 +5720,14 @@ function renderEnginePreview(){
         :'';
       if(st.atStr)meta+=(meta?' · ':'')+'🕐 '+st.atStr;
       html+='<div class="ee-pv-step"><span>'+st.icon+'</span><span style="flex:1">'+escapeHtml(st.text)+'</span><span class="ee-pv-meta">'+meta+'</span></div>';
+      if(st.sticky&&st.specials&&st.specials.length){
+        st.specials.forEach(function(sp){
+          var when='touch '+sp.on+(sp.repeatEvery?(' + every '+sp.repeatEvery):' once');
+          html+='<div class="ee-pv-step"><span>★</span><span style="flex:1">'+sp.icon+' '+escapeHtml(sp.text||('Special '+typeWord(sp.type)))
+            +' <em style="color:var(--soft)">('+(sp.mode==='replace'?'instead of':'alongside')+' the regular touch)</em></span>'
+            +'<span class="ee-pv-meta">'+when+(sp.time?(' · 🕐 '+sp.time):'')+'</span></div>';
+        });
+      }
     });
     if(g.steps.length>shown.length)html+='<div class="ee-pv-step" style="font-style:italic;color:var(--soft)">… '+(g.steps.length-shown.length)+' more</div>';
     html+='</div>';
@@ -11705,6 +11858,18 @@ function onClick(ev){
       break;
     case 'ee-del-wentry':
       if(esState){esState.phases[parseInt(t.dataset.pi,10)].weekly.entries.splice(parseInt(t.dataset.si,10),1);renderEngineEditor();}
+      break;
+    case 'ee-add-special':
+      if(esState){
+        var phSp=esState.phases[parseInt(t.dataset.pi,10)][t.dataset.kind];
+        if(phSp){(phSp.specials=phSp.specials||[]).push({on:2,repeatEvery:0,mode:'beside',type:'sms',text:'',template:''});renderEngineEditor();}
+      }
+      break;
+    case 'ee-del-special':
+      if(esState){
+        var phSp2=esState.phases[parseInt(t.dataset.pi,10)][t.dataset.kind];
+        if(phSp2&&phSp2.specials){phSp2.specials.splice(parseInt(t.dataset.si,10),1);renderEngineEditor();}
+      }
       break;
     case 'ee-add-ientry':
       if(esState){
