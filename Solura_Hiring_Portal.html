@@ -7720,6 +7720,13 @@ async function saveSettings(){
     if(diff.length>=4){
       const ok=await _showSavePreview(diff);
       if(!ok){
+        /* Cancel leaves the edits in memory (the operator may want to adjust rather than lose
+           them) and leaves _settingsDirty set. That was harmless while dirty-at-close meant
+           "vanishes" — but the pagehide keepalive flush turned it into "guaranteed to be
+           saved", so declining the diff persisted exactly the changes just rejected, stamped
+           with a fresh _savedAt that wins every later tier comparison. Latch the refusal; a
+           real save clears it. */
+        window._settingsSaveCancelled=true;
         toast('Save cancelled');
         return {cancelled:true};
       }
@@ -7728,6 +7735,9 @@ async function saveSettings(){
   /* Push undo snapshot BEFORE the write so we can step back if we want */
   _pushUndoSnapshot('save');
   const result=await _saveSettingsInternal();
+  /* A completed save means memory and file agree again — the cancel latch has nothing left
+     to protect. */
+  if(result&&(result.workerFile||result.localStorage))window._settingsSaveCancelled=false;
   /* Update the baseline snapshot so the NEXT save shows a diff against this state */
   window._settingsBaseline=_deepClone(SETTINGS);
   return result;
@@ -7858,10 +7868,29 @@ async function _saveSettingsInternal(){
   if(_loadSrc&&_loadSrc!=='workerFile'){
     status.errors.push('Refused: settings were loaded from the '+_loadSrc+' fallback, not the primary file — saving would overwrite newer settings with this stale copy. Reload the portal once the worker is reachable.');
     window._lastSettingsSaveStatus=status;
-    if(!window._degradedSaveWarned){window._degradedSaveWarned=true;toast('🛑 Settings NOT saved — this session loaded from a fallback copy ('+_loadSrc+'). Reload the portal to re-sync before editing settings.');}
+    /* Nearly every caller — saveTemplate, saveScript, importSettings, addAdmin, seqSave, the
+       verification and scoring panels, and the sensitive-section password — discards this
+       status and toasts its own '✓ saved' synchronously right after awaiting us. toast() is a
+       single shared element, so the refusal below used to be wiped within milliseconds and the
+       operator was left with a green tick for a save that never happened; the password case
+       even leaves them believing Pipeline config and Access are locked when they are not.
+       Re-assert on the next macrotask, i.e. after the caller's success toast has painted.
+       Throttled so a degraded session doesn't nag on every 700ms autosave. */
+    const _degMsg='🛑 Settings NOT saved — this session loaded from a fallback copy ('+_loadSrc+'). Reload the portal to re-sync before editing settings.';
+    if(!window._degradedSaveWarned){window._degradedSaveWarned=true;toast(_degMsg);}
+    const _now=Date.now();
+    if(!window._degradedWarnAt||_now-window._degradedWarnAt>10000){
+      window._degradedWarnAt=_now;
+      setTimeout(()=>toast(_degMsg),0);
+    }
     console.warn('saveSettings refused — degraded load source:',_loadSrc);
     return status;
   }
+  /* Capture this BEFORE stamping: the empty-settings guard below asks "was this object ever
+     saved before?", and reading SETTINGS._savedAt after the line that writes it made the
+     clause unconditionally true — the guard was dead for the second time (the first was
+     admins:[] being truthy, noted below). A stale stamp is exactly the evidence we want. */
+  const _hadSavedStamp=!!SETTINGS._savedAt;
   /* Version stamps ride with every save; the loader picks the newest copy across tiers. */
   SETTINGS._savedAt=new Date().toISOString();
   SETTINGS._gen=(Number(SETTINGS._gen)||0)+1;
@@ -7874,7 +7903,7 @@ async function _saveSettingsInternal(){
      consider the object "user-customized" if it has any of: sequence, templates, config.admins,
      scoringWeights, flow.custom, massSends, or seqPasswordHash. */
   const looksLikeDefaults=!(
-    SETTINGS._savedAt|| /* anything ever saved carries this stamp */
+    _hadSavedStamp|| /* anything ever saved carries this stamp — read from BEFORE this save */
     (SETTINGS.sequences&&SETTINGS.sequences.length)||
     (SETTINGS.jobs&&SETTINGS.jobs.length)||
     (SETTINGS.sequence&&SETTINGS.sequence.length)||
@@ -21510,7 +21539,12 @@ async function forceSaveAndVerify(){
       if(r.ok){
         const data=await r.json();
         const fileJson=JSON.stringify(data.settings);
-        const memJson=JSON.stringify(SETTINGS);
+        /* Compare like with like: the file holds the PERSISTED shape, which never carries
+           _undoHistory. Measuring it against raw SETTINGS (96% undo history, measured live)
+           put the ratio at ~0.04 and made this check fail after every successful save — the
+           one control that answers "are my settings actually safe?" crying wolf permanently. */
+        const _mem=Object.assign({},SETTINGS);delete _mem._undoHistory;
+        const memJson=JSON.stringify(_mem);
         verifyOk=fileJson.length>0&&fileJson.length>=memJson.length*0.95;
       }
     }
@@ -23804,7 +23838,7 @@ async function saveAdd(){if(!AD.name){toast('Name required');return;}
   try{
     await patchRange('C'+row+':L'+row,[[AD.name,AD.phone,AD.email,source,'Applied',bl(gv('wa')),bl(gv('cr')),bl(gv('bg')),bl(gv('tr')),bl(gv('av'))]]);
     await patchRange('N'+row+':Y'+row,[['','','','','',bl(cmp),'','',bl(ten),bl(prx),bl(ava),'']]);
-    await patchRange('AJ'+row,[[JSON.stringify(st)]]);
+    await patchRange('AJ'+row,[[_stCell(st)]]); /* rule 5: no raw AJ writes, new row or not */
     /* Résumé upload — same folder convention as the worker (safeName mirror), simple PUT (<8MB). */
     const rf=window._adResumeFile;
     if(rf){
@@ -23816,7 +23850,7 @@ async function saveAdd(){if(!AD.name){toast('Name required');return;}
         if(up.ok){
           st.hasResume=true;st.resumeName=rf.name;
           st.log.push({t:stamp(),x:'📄 Résumé uploaded at add: '+rf.name});
-          await patchRange('AJ'+row,[[JSON.stringify(st)]]);
+          await patchRange('AJ'+row,[[_stCell(st)]]);
         }else{toast('⚠ Résumé upload failed ('+up.status+') — candidate saved without it');}
       }catch(ue){toast('⚠ Résumé upload failed: '+ue.message);}
     }
@@ -23843,6 +23877,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.sty
   window.addEventListener('pagehide',()=>{
     try{
       if(!_settingsDirty)return;
+      if(window._settingsSaveCancelled)return; /* operator declined this diff — don't flush it */
       if(((window._lastSettingsLoadStatus||{}).source)!=='workerFile')return;
       const zt=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
       if(!zt)return;
