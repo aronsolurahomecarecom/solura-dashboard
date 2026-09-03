@@ -916,7 +916,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <label class="st-check" style="font-size:12px"><input type="checkbox" id="wk-set-pdflink"> Deliver the PDF as a <strong>tracked link</strong> instead of an attachment — you'll see who opens it (attached PDFs can't be tracked)</label>
       </div>
       <div style="margin-bottom:12px">
-        <label class="ee-lbl">SMS template for this sequence's nurture texts ({dm}/{pt} fill)</label>
+        <label class="ee-lbl">SMS template for this sequence's nurture texts ({dm}/{pt}/{rel} fill)</label>
         <textarea id="wk-set-sms" rows="2" class="ee-inp" placeholder="Hi {dm}, Meir from Solura — just checking in on you and {pt} this week."></textarea>
       </div>
       <div id="weekly-tabs" style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap"></div>
@@ -1078,7 +1078,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
 
       <section class="st-sec" id="st-sec-engines">
         <h3 class="st-h">Sequence engines</h3>
-        <p class="st-p">Engines define the outreach sequence. Build from a starting point or an empty canvas, run several side by side, assign each lead source its own engine, and share engines as packages — Claude can author one offline and you import it here. <b>Message templates live on the sequence steps:</b> ✏ edit an engine and every manual step, daily blitz, and weekly entry has its own template box ({dm}/{pt} fill per lead) — email steps get a dedicated <b>subject</b> field too. The old Templates tab is legacy fallback only.</p>
+        <p class="st-p">Engines define the outreach sequence. Build from a starting point or an empty canvas, run several side by side, assign each lead source its own engine, and share engines as packages — Claude can author one offline and you import it here. <b>Message templates live on the sequence steps:</b> ✏ edit an engine and every manual step, daily blitz, and weekly entry has its own template box ({dm}/{pt}/{rel} fill per lead — {rel} is their relationship to the patient, e.g. "daughter") — email steps get a dedicated <b>subject</b> field too. The old Templates tab is legacy fallback only.</p>
         <div id="es-engine-list" style="margin-bottom:12px"></div>
         <div style="display:flex;gap:8px;margin-bottom:26px;flex-wrap:wrap">
           <button data-action="es-new-engine" class="st-btn-gold">➕ New engine</button>
@@ -1515,7 +1515,7 @@ var C={
              //    regular touch of cycle 4 done, beside-special #1 due now.
              //    SAFE add: every full-width writer spans A:AD and never touches AE.
 };
-var BUILD='B-0903-72';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0903-73';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2223,8 +2223,10 @@ function getNames(ri){
       ptFirst=clientFirst;
     }
   }
-  return {dm:dmFirst,pt:ptFirst,hasDM:!!dmFirst,apfm:isAPFM(ri)};
+  return {dm:dmFirst,pt:ptFirst,hasDM:!!dmFirst,apfm:isAPFM(ri),
+    rel:String(r[C.REL]||'').trim().toLowerCase()};
 }
+/* ⚡FILLNAMES — BEGIN (sliced by tests/engine-gaps.test.mjs) */
 function fillNames(s,names){
   // Graceful fallbacks — a missing name must never ship a broken phrase
   // like "\u2014's care" to a real family.
@@ -2239,8 +2241,14 @@ function fillNames(s,names){
     .replace(/\{\{\s*(?:name|dm|first_?name)\s*\}\}/gi,'{dm}')
     .replace(/\{\s*(?:name|first_?name)\s*\}/gi,'{dm}')
     .replace(/\{\{\s*(?:pt|patient|client)\s*\}\}/gi,'{pt}')
-    .replace(/\{\s*(?:patient|client)\s*\}/gi,'{pt}');
+    .replace(/\{\s*(?:patient|client)\s*\}/gi,'{pt}')
+    .replace(/\{\{\s*(?:rel|relationship)\s*\}\}/gi,'{rel}')
+    .replace(/\{\s*relationship\s*\}/gi,'{rel}');
   s=s.replace(/\{dm\}/g,dm);
+  // {rel} → the relationship to the patient, lowercased for mid-sentence use
+  // ("your daughter", "your mom"). Blank falls back to "loved one" so
+  // "your {rel}" never ships broken.
+  s=s.replace(/\{rel\}/g,String(names.rel||'').trim().toLowerCase()||'loved one');
   if(names.pt){
     s=s.replace(/\{pt\}/g,names.pt);
   }else{
@@ -2273,6 +2281,7 @@ function fillNames(s,names){
   // so multi-paragraph email bodies don't get steamrolled into one block.
   return s.trim().replace(/[ \t]+/g,' ');
 }
+/* ⚡FILLNAMES — END */
 function isAPFM(ri){return lc((rows[ri]||[])[C.SO]).indexOf('place for mom')>-1;}
 
 /* ─── §5 Auth (PKCE) ─────────────────────────────────────────────────────  */
@@ -5471,7 +5480,7 @@ function specialsEditorHtml(pi,kind,list){
         +'<input type="time" class="ee-inp" style="width:104px" title="Time on its day (optional)" value="'+escapeHtml(sp.time||'')+'" data-esp="'+ap+'.time">'
       +'</span>'
       +'<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Label (e.g. Quarterly value email)" value="'+escapeHtml(sp.text||'')+'" data-esp="'+ap+'.text">'
-      +((sp.type||'sms')==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(sp.subject||'')+'" data-esp="'+ap+'.subject">'):'')
+      +((sp.type||'sms')==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt}/{rel} fill)" value="'+escapeHtml(sp.subject||'')+'" data-esp="'+ap+'.subject">'):'')
       +'<textarea class="ee-tpl" rows="2" style="grid-column:1/-1" placeholder="Template text (optional)" data-esp="'+ap+'.template">'+escapeHtml(sp.template||'')+'</textarea>'
       +'</div>';
   }).join('');
@@ -5524,7 +5533,7 @@ function renderEngineEditor(){
             +'<button class="ee-mini" data-action="ee-move-step" data-pi="'+pi+'" data-si="'+si+'" data-dir="1">↓</button>'
             +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-step" data-pi="'+pi+'" data-si="'+si+'">✕</button>'
           +'</span>'
-          +(st.type==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(st.subject||'')+'" data-esp="phases.'+pi+'.steps.'+si+'.subject">'):'')
+          +(st.type==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt}/{rel} fill)" value="'+escapeHtml(st.subject||'')+'" data-esp="phases.'+pi+'.steps.'+si+'.subject">'):'')
           +'<span style="grid-column:1/-1;display:flex;align-items:center;gap:6px"><span style="font-size:10.5px;color:var(--soft)">🕐 Time on its day (optional — waits in Later Today until then)</span><input type="time" class="ee-inp" style="width:112px" value="'+escapeHtml(st.time||'')+'" data-esp="phases.'+pi+'.steps.'+si+'.time"></span>'
           +'<textarea class="ee-tpl" rows="2" style="grid-column:1/-1" placeholder="Template text (optional — pre-fills the composer for this step)" data-esp="phases.'+pi+'.steps.'+si+'.template">'+escapeHtml(st.template||'')+'</textarea>'
           +'</div>';
@@ -5565,10 +5574,10 @@ function renderEngineEditor(){
           return (sl==='am'||on||true)?('<div class="ee-slotbox">'+hd+chips+'</div>'):'';
         }).join('')
         +'<div style="font-size:10.5px;color:var(--soft);margin-top:4px">Pattern rotates by day: [Call, Text] → Day 1 call, Day 2 text, Day 3 call… Windows: calls 8a–1p / 12–4p / 3–9p · texts &amp; emails 8a–5p / 11a–4p / 2–10p.</div>'
-        +'<textarea class="ee-tpl" rows="2" style="margin-top:8px" placeholder="Template for every step in this blitz (optional — {dm}/{pt} fill)" data-esp="phases.'+pi+'.daily.template">'+escapeHtml(d.template||'')+'</textarea>';
+        +'<textarea class="ee-tpl" rows="2" style="margin-top:8px" placeholder="Template for every step in this blitz (optional — {dm}/{pt}/{rel} fill)" data-esp="phases.'+pi+'.daily.template">'+escapeHtml(d.template||'')+'</textarea>';
       var _hasEm=false;
       ['am','mid','pm'].forEach(function(sl){var s9=d.slots&&d.slots[sl];if(s9&&s9.pattern&&s9.pattern.indexOf('email')>-1)_hasEm=true;});
-      if(_hasEm)body+='<input type="text" class="ee-inp" style="margin-top:6px" placeholder="Email subject for this blitz\'s email steps ({dm}/{pt} fill)" value="'+escapeHtml(d.subject||'')+'" data-esp="phases.'+pi+'.daily.subject">';
+      if(_hasEm)body+='<input type="text" class="ee-inp" style="margin-top:6px" placeholder="Email subject for this blitz\'s email steps ({dm}/{pt}/{rel} fill)" value="'+escapeHtml(d.subject||'')+'" data-esp="phases.'+pi+'.daily.subject">';
       }else{
         // Legacy schema — original controls + explicit convert
         body+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
@@ -5582,7 +5591,7 @@ function renderEngineEditor(){
             +'<option value="none"'+(d.pmMode==='none'?' selected':'')+'>Morning only</option></select></div>'
           +'</div>'
           +'<button class="ee-mini" style="margin-top:8px" data-action="ee-adv-slots" data-pi="'+pi+'">⚙ Convert to advanced slot patterns (mix &amp; match, midday slot, email)</button>'
-          +'<textarea class="ee-tpl" rows="2" style="margin-top:8px" placeholder="Template for every step in this blitz (optional — {dm}/{pt} fill)" data-esp="phases.'+pi+'.daily.template">'+escapeHtml(d.template||'')+'</textarea>';
+          +'<textarea class="ee-tpl" rows="2" style="margin-top:8px" placeholder="Template for every step in this blitz (optional — {dm}/{pt}/{rel} fill)" data-esp="phases.'+pi+'.daily.template">'+escapeHtml(d.template||'')+'</textarea>';
       }
     }else if(p.cadence==='weekly'){
       var w=p.weekly||{};
@@ -5599,7 +5608,7 @@ function renderEngineEditor(){
           +'<div><label class="ee-lbl">Label</label><input type="text" class="ee-inp" value="'+escapeHtml(w.text||'Weekly nurture')+'" data-esp="phases.'+pi+'.weekly.text"></div>'
           +'</div>'
           +'<div style="display:flex;align-items:center;gap:6px;margin:6px 0"><span style="font-size:10.5px;color:var(--soft)">🕐 Time on its day (optional)</span><input type="time" class="ee-inp" style="width:112px" value="'+escapeHtml(w.time||'')+'" data-esp="phases.'+pi+'.weekly.time"></div>'
-          +((w.type||'sms')==='email'?('<input type="text" class="ee-inp" style="margin-bottom:6px" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(w.subject||'')+'" data-esp="phases.'+pi+'.weekly.subject">'):'')
+          +((w.type||'sms')==='email'?('<input type="text" class="ee-inp" style="margin-bottom:6px" placeholder="Email subject ({dm}/{pt}/{rel} fill)" value="'+escapeHtml(w.subject||'')+'" data-esp="phases.'+pi+'.weekly.subject">'):'')
           +'<textarea class="ee-tpl" rows="2" placeholder="Template text (optional)" data-esp="phases.'+pi+'.weekly.template">'+escapeHtml(w.template||'')+'</textarea>'
           +specialsEditorHtml(pi,'weekly',w.specials);
       }else{
@@ -5613,7 +5622,7 @@ function renderEngineEditor(){
             +'<input type="text" class="ee-inp" placeholder="Label (optional — default: Week N check-in)" value="'+escapeHtml(en.text||'')+'" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.text">'
             +'<span style="display:flex;gap:4px;align-items:center"><input type="time" class="ee-inp" style="width:104px" title="Time on its day (optional)" value="'+escapeHtml(en.time||'')+'" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.time">'
             +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-wentry" data-pi="'+pi+'" data-si="'+ei+'">✕</button></span>'
-            +((en.type||'sms')==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(en.subject||'')+'" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.subject">'):'')
+            +((en.type||'sms')==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt}/{rel} fill)" value="'+escapeHtml(en.subject||'')+'" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.subject">'):'')
             +'<textarea class="ee-tpl" rows="2" style="grid-column:1/-1" placeholder="Template text (optional)" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.template">'+escapeHtml(en.template||'')+'</textarea>'
             +'</div>';
         }).join('')
@@ -5644,7 +5653,7 @@ function renderEngineEditor(){
           +'</div>'
           +'<div style="margin-bottom:6px"><label class="ee-lbl">Label</label><input type="text" class="ee-inp" value="'+escapeHtml(iv.text||'Long-term nurture')+'" data-esp="phases.'+pi+'.interval.text"></div>'
           +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:10.5px;color:var(--soft)">🕐 Time on its day (optional)</span><input type="time" class="ee-inp" style="width:112px" value="'+escapeHtml(iv.time||'')+'" data-esp="phases.'+pi+'.interval.time"></div>'
-          +((iv.type||'sms')==='email'?('<input type="text" class="ee-inp" style="margin-bottom:6px" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(iv.subject||'')+'" data-esp="phases.'+pi+'.interval.subject">'):'')
+          +((iv.type||'sms')==='email'?('<input type="text" class="ee-inp" style="margin-bottom:6px" placeholder="Email subject ({dm}/{pt}/{rel} fill)" value="'+escapeHtml(iv.subject||'')+'" data-esp="phases.'+pi+'.interval.subject">'):'')
           +'<textarea class="ee-tpl" rows="2" placeholder="Template text (optional)" data-esp="phases.'+pi+'.interval.template">'+escapeHtml(iv.template||'')+'</textarea>'
           +specialsEditorHtml(pi,'interval',iv.specials);
       }else{
@@ -5656,7 +5665,7 @@ function renderEngineEditor(){
             +'<span style="font-size:10.5px;color:var(--soft)">🕐</span><input type="time" class="ee-inp" style="width:104px" title="Time on its day (optional)" value="'+escapeHtml(en.time||'')+'" data-esp="'+ap+'.time"></span>'
             +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-ientry" data-pi="'+pi+'" data-si="'+ei+'">✕</button>'
             +'<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Label (optional — default: Follow-up after '+escapeHtml(gapLabel(en.after))+')" value="'+escapeHtml(en.text||'')+'" data-esp="'+ap+'.text">'
-            +((en.type||'sms')==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(en.subject||'')+'" data-esp="'+ap+'.subject">'):'')
+            +((en.type||'sms')==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt}/{rel} fill)" value="'+escapeHtml(en.subject||'')+'" data-esp="'+ap+'.subject">'):'')
             +'<textarea class="ee-tpl" rows="2" style="grid-column:1/-1" placeholder="Template text (optional)" data-esp="'+ap+'.template">'+escapeHtml(en.template||'')+'</textarea>'
             +'</div>';
         }).join('')

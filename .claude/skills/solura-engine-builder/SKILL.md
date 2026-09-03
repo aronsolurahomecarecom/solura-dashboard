@@ -196,8 +196,11 @@ templates editor). So a good engine ships with its messages:
 - Always use the dedicated `subject` field for email content. (A legacy
   `Subject: …` first line inside the template still parses, but don't write new
   engines that way.)
-- Templates may use `{dm}` (decision-maker first name) and `{pt}` (patient first
-  name) — filled per lead with safe fallbacks ("there" / "your loved one").
+- Templates may use `{dm}` (decision-maker first name), `{pt}` (patient first
+  name), and `{rel}` (the decision-maker's relationship to the patient,
+  lowercased — "daughter", "son", "spouse") — filled per lead with safe
+  fallbacks ("there" / "your loved one" / "loved one"). `{rel}` reads best
+  mid-sentence: "caring for your {rel}" → "caring for your mother".
 - Any `action` step, `weekly` entry/forever phase, or `interval` entry/forever
   phase may carry a `time` field (`"time": "14:30"`, 24-hour HH:MM): on its due
   day the step waits in "Later Today" until that clock time. Omit it for

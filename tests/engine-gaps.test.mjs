@@ -140,6 +140,21 @@ ok(html.indexOf('ee-add-special') > -1 && html.indexOf('ee-del-special') > -1, '
 ok((html.match(/specialsEditorHtml\(pi,'(weekly|interval)'/g) || []).length === 2, 'specials editor present in BOTH forever panels');
 ok(/writeRow\(3,hU\)/.test(html), 'AE header labeled lazily on load');
 
+// ── {rel} placeholder (B-0903-73) ──
+{
+  const fb = html.indexOf('/* ⚡FILLNAMES — BEGIN');
+  const fe = html.indexOf('/* ⚡FILLNAMES — END */');
+  ok(fb > -1 && fe > -1, 'FILLNAMES markers present');
+  const fill = new Function(html.slice(html.indexOf('*/', fb) + 2, fe) + '\nreturn fillNames;')();
+  ok(fill('Hi {dm}, how is your {rel} {pt} doing?', { dm: 'Karen', pt: 'Miriam', rel: 'Mother' }) === 'Hi Karen, how is your mother Miriam doing?', '{rel} fills lowercased mid-sentence');
+  ok(fill('caring for your {rel}', { dm: 'K', pt: 'M', rel: '' }) === 'caring for your loved one', 'blank relationship falls back to loved one');
+  ok(fill('as her {relationship}', { dm: 'K', pt: 'M', rel: 'daughter' }) === 'as her daughter', '{relationship} dialect normalizes to {rel}');
+  ok(fill('{{rel}} of {pt}', { dm: 'K', pt: 'Miriam', rel: 'son' }) === 'son of Miriam', '{{rel}} dialect normalizes too');
+  ok(fill('Hi {dm} and {pt}', { dm: 'Karen', pt: 'Miriam', rel: 'daughter' }) === 'Hi Karen and Miriam', '{dm}/{pt} untouched by the rel addition');
+}
+ok(/rel:String\(r\[C\.REL\]\|\|''\)\.trim\(\)\.toLowerCase\(\)/.test(html), 'getNames exposes the relationship column');
+ok((html.match(/\{dm\}\/\{pt\}\/\{rel\} fill/g) || []).length >= 10, 'editor hints mention {rel} everywhere templates are written');
+
 // ── source-level locks on scheduling + UI wiring ──
 ok(/cadence==='interval'\)\{\s*\n\s*var doneG=getStepDoneAt/.test(html), 'whenToShow schedules interval steps from last completion + gap');
 ok(/if\(cur\.gap\)\{u\[C\.NF\]=fd\(addGap\(t,cur\.gap\)\);\}/.test(html), 'sticky advance uses the gap for the next Follow-Up date');
