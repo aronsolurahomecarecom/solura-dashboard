@@ -13498,8 +13498,22 @@ const APP_SECTIONS=[
     {label:'ZIP',path:'st.zip',type:'text',altPath:'st.facts.zip'}
   ]},
   {title:'Experience',fields:[
-    {label:'Years of experience',path:'years',altPath:'st.facts.years',type:'select',options:[['—',''],['Under 1','under1'],['1-2','y1'],['2-5','y2'],['5+','y5']]},
-    {label:'Longest tenure (at one job)',path:'st.facts.longest',altPath:'st.longest',type:'select',options:[['—',''],['Under 6 mo','u6mo'],['6-12 mo','y1'],['1-2 yr','y2'],['2+ yr','y2p']]},
+    /* Option values are the APPLICATION FORM's vocabulary (18977/19016) — the same codes the
+       manual-add dialog (23655) and rTen (23689) use. The editor used to offer its own set
+       ('under1','y1','y2','y5' / 'u6mo','y1','y2','y2p'), which nothing else in the portal
+       ever wrote or read: 130 of 161 live rows carried a years code and 128 a tenure code
+       that was not in this list, so _displayValue fell through to String(v) and printed the
+       raw code while the chip row highlighted nothing. `alias` maps the legacy codes still
+       stored on old rows (1 live row holds 'y2p') onto the canonical option so they display
+       and select correctly; picking a chip always writes the canonical code. Years aliases
+       round DOWN where the two ladders disagree ('2-5' has no canonical twin), matching the
+       fail-closed reading _yearsMin (8671) already applies to the same legacy codes. */
+    {label:'Years of experience',path:'years',altPath:'st.facts.years',type:'select',
+     options:[['—',''],['None yet','0'],['Under 1','u1'],['1–2','12'],['3–5','35'],['5+','5p']],
+     alias:{under1:'u1',y1:'12',y2:'12',y5:'5p'}},
+    {label:'Longest tenure (at one job)',path:'st.facts.longest',altPath:'st.longest',type:'select',
+     options:[['—',''],['Under 6 mo','u6'],['6–12 mo','u12'],['1–2 yr','y12'],['2–3 yr','y23'],['3+ yr','y3p']],
+     alias:{u6mo:'u6',y1:'u12',y2:'y12',y2p:'y23'}},
     {label:'Where worked',path:'st.facts.settings',altPath:'st.settings',type:'tags'},
     {label:'Certifications',path:'st.certs',type:'tags'},
     {label:'Expertise',path:'st.pills',type:'tags'},
@@ -13856,7 +13870,7 @@ function renderAppField(src,f,editing){
     /* Chip-style — same UX as the application form. Buttons toggle the chosen value; "—" clears it. */
     const opts=f.options||[];
     const chips=opts.map(o=>{
-      const isSel=String(value)===String(o[1]);
+      const isSel=_optVal(f,value)===String(o[1]);
       const isClear=o[1]==='';
       return `<button type="button" class="app-chip${isSel?' on':''}${isClear?' clear':''}" data-v="${esc(o[1])}" onclick="_setAppChoice('${id}',this,'${esc(o[1])}',false)">${esc(o[0])}</button>`;
     }).join('');
@@ -13942,10 +13956,14 @@ function _toggleShift(groupId,day,shift,btn){
   else{ds[day].push(shift);btn.classList.add('on');}
   group.dataset.val=JSON.stringify(ds);
 }
+/* Resolve a stored option value to the canonical code this field's options use. Fields with
+   no `alias` map are unaffected. Declaration hoists within this script block, which is where
+   both call sites live. */
+function _optVal(f,v){const a=f&&f.alias;const s=String(v==null?'':v);return (a&&a[s]!=null)?String(a[s]):s;}
 function _displayValue(v,f){
   if(v==null||v==='')return '—';
   if(Array.isArray(v))return v.join(', ')||'—';
-  if(f&&f.type==='select'&&f.options){const found=f.options.find(o=>String(o[1])===String(v));if(found)return found[0];}
+  if(f&&f.type==='select'&&f.options){const found=f.options.find(o=>String(o[1])===_optVal(f,v));if(found)return found[0];}
   if(f&&f.type==='shifts'){
     if(!v||typeof v!=='object'||!Object.keys(v).length)return '—';
     return Object.entries(v).map(([d,shifts])=>d+': '+(Array.isArray(shifts)?shifts.join('/'):shifts)).join('; ');
@@ -20120,7 +20138,14 @@ function _jobLinks(j){
    missing with a '(not answered)' note — surfaced for a human, never guessed past. */
 function _jobMissingReqs(c,job){
   const r=(job&&job.req)||{};const miss=[];const st=c.st||{};
-  const has=(arr,n)=>(arr||[]).some(x=>String(x).toLowerCase().indexOf(String(n).toLowerCase())>-1);
+  /* Requirements are free text typed into a comma field ("Parkinsons"); the catalogs they
+     are matched against are fixed labels ("Parkinson's"). Punctuation and spacing must not
+     decide the match. Measured live 2026-09-02: 57 candidates carry the pill "Parkinson's",
+     the one live job requires "Parkinsons", and ALL 19 of its applicants were reported
+     missing it — 5 of them qualify. An all-punctuation requirement normalizes to '' and is
+     counted missing rather than met, the same fail-closed choice the rest of the gate makes. */
+  const _rqn=x=>String(x).toLowerCase().replace(/[^a-z0-9]+/g,'');
+  const has=(arr,n)=>{const t=_rqn(n);return !!t&&(arr||[]).some(x=>_rqn(x).indexOf(t)>-1);};
   const certNames=(st.certs||[]).concat((st.credentials||[]).map(cr=>cr.name||''));
   (r.certs||[]).forEach(n=>{if(!has(certNames,n))miss.push('cert: '+n);});
   (r.expertise||[]).forEach(n=>{if(!has(st.pills,n))miss.push('expertise: '+n);});
