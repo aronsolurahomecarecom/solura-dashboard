@@ -7428,12 +7428,59 @@ function watchForBounce(recipient,candidateRow){
 }
 
 /* ===================== availability storage (cell AK1) ===================== */
+/* PROVENANCE, the same rule settings live by (design rule 7): a session that never managed to
+   READ the stored copy must not WRITE over it. Both failure paths below were silent — `!r.ok`
+   returned and the JSON.parse catch was empty — and either one leaves AVAIL at its module
+   default {pattern:{},slots:[],offs:[]}. The very next saveAvailability (the availability
+   editor, the manual assign flow, or the auto-link pass) then wrote that empty default over
+   AK1, destroying the weekly pattern, every specific slot, every day off and the entire
+   unmatched-booking pool. One transient 429 on the first read of a session was enough to arm
+   it, and nothing anywhere said so — the portal could not tell "no availability recorded" from
+   "could not read it", which is exactly what this flag is for. */
+let _availLoadOk=false;
 async function loadAvailability(){
-  try{const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AK1')?$select=values");
-    if(!r.ok)return;const v=(await r.json()).values;if(v&&v[0]&&v[0][0]){try{AVAIL=Object.assign({pattern:{},slots:[],offs:[]},JSON.parse(v[0][0]));}catch(e){}}}catch(e){}
+  try{
+    const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AK1')?$select=values");
+    if(!r.ok){console.warn('AK1 read failed:',r.status,'— availability saves held for this session');}
+    else{
+      const v=(await r.json()).values;
+      const raw=(v&&v[0]&&v[0][0])||'';
+      if(raw){
+        try{AVAIL=Object.assign({pattern:{},slots:[],offs:[]},JSON.parse(raw));_availLoadOk=true;}
+        catch(e){console.warn('AK1 parse failed (cell corrupt or truncated) — availability saves held:',e.message);}
+      }else{
+        _availLoadOk=true; /* cell genuinely empty — a first run, not a failure */
+      }
+    }
+  }catch(e){console.warn('AK1 read threw — availability saves held:',e.message);}
   _autoLinkUnmatchedBookings().then(()=>_backfillCalBookings()).catch(e=>console.warn('booking link/backfill:',e.message));
 }
-async function saveAvailability(){try{await patchRange('AK1',[[JSON.stringify(AVAIL)]]);}catch(e){toast('Could not save availability');}}
+async function saveAvailability(){
+  if(!_availLoadOk){
+    toast('⚠ Availability not saved — this session could not read the stored copy, and saving now would overwrite it with an empty one. Reload the portal.');
+    return false;
+  }
+  /* AK1 is an Excel cell, so it is subject to the SAME silent 32,767-char truncation that
+     corrupts AJ and wipes profiles — and this writer had no size guard at all. AVAIL.unmatched
+     is append-only: every entry past the 2-hour grace is pushed back into the pool on each
+     pass and only ever leaves by being linked or manually assigned. Left alone it grows until
+     Graph truncates the cell, the parse above fails, and the empty default is written back
+     over it. Trim the OLDEST unmatched entries (index 0 is oldest — `keep` preserves order)
+     until it fits; refuse rather than hand Graph more than it will store. */
+  let json=JSON.stringify(AVAIL);
+  if(json.length>32000&&Array.isArray(AVAIL.unmatched)){
+    for(const n of [200,100,50,25,10]){
+      if(json.length<=32000)break;
+      if(AVAIL.unmatched.length>n){AVAIL.unmatched=AVAIL.unmatched.slice(-n);json=JSON.stringify(AVAIL);}
+    }
+  }
+  if(json.length>32000){
+    toast('⚠ Availability not saved — too large for the cell ('+json.length+' chars). Clear some unmatched bookings first.');
+    return false;
+  }
+  try{await patchRange('AK1',[[json]]);return true;}
+  catch(e){toast('Could not save availability');return false;}
+}
 
 /* Cal.com BACKFILL — the definitive net under the webhook. Pulls ALL upcoming bookings
    straight from the Cal.com API (worker GET /cal/bookings; requires the v8.1 paste-deploy —
@@ -7465,10 +7512,19 @@ async function _backfillCalBookings(){
       if(!cand||cand.stage==='Hired'||cand.stage==='Declined')continue;
       if(_wsOpenOn(cand.excelRow))continue; /* workspace open — saveW would clobber; next pull */
       cand.st=cand.st||{};
+      if(cand.st.__ajCorrupt)continue; /* corrupt cell — nothing may write over it (rule 5) */
       if(cand.st.calBookingId===b.uid)continue; /* already on file */
       const hasOtherUpcoming=cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
       if(hasOtherUpcoming)continue; /* a different live booking is already tracked — manual call */
       const hay=String((b.title||'')+' '+(b.eventTypeSlug||'')).toLowerCase();
+      /* PER-ITEM, like the sibling auto-link pass. _stCell throws — on __ajCorrupt and on a
+         state that will not fit after trimming — and that throw is evaluated as an ARGUMENT to
+         patchRange, inside this loop, with only the function-level catch below to land in. So
+         one bad row abandoned every booking queued behind it; and because the 10-minute
+         throttle is stamped up front, the next attempt re-read the same Cal.com list, reached
+         the same row at the same position and aborted again — permanent starvation of "the
+         definitive net under the webhook" for everyone after it. */
+      try{
       cand.st.booking=b.start;
       cand.st.bookingKind=/onboard|orientation|welcome|start/.test(hay)?'onboarding':/interview|final|in.person|meet|second|video/.test(hay)?'interview':/screen|phone|intro|initial|chat|call|first|consult/.test(hay)?'screen':null;
       cand.st.bookingSource='cal-backfill';
@@ -7478,6 +7534,7 @@ async function _backfillCalBookings(){
       cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🔗 Booking backfilled from Cal.com ('+(b.title||b.eventTypeSlug||'?')+') — '+new Date(t).toLocaleString()+' · the webhook never delivered this one'});
       await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
       linked++;
+      }catch(e){console.warn('cal backfill row',cand.excelRow,'failed:',e.message);}
     }
     if(linked){
       toast('🔗 '+linked+' booking'+(linked===1?'':'s')+' backfilled from Cal.com');
@@ -7514,6 +7571,7 @@ async function _autoLinkUnmatchedBookings(){
     else if(byName.length===1)cand=byName[0];
     const hasUpcoming=cand&&cand.st&&cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
     if(!cand||cand.stage==='Hired'||cand.stage==='Declined'||hasUpcoming||_wsOpenOn(cand.excelRow)){keep.push(u);continue;}
+    if(cand.st&&cand.st.__ajCorrupt){keep.push(u);continue;} /* rule 5 — never write over a corrupt cell */
     try{
       cand.st=cand.st||{};
       cand.st.booking=u.start;
@@ -20238,8 +20296,16 @@ function _jobMissingReqs(c,job){
   const _rqn=x=>String(x).toLowerCase().replace(/[^a-z0-9]+/g,'');
   const has=(arr,n)=>{const t=_rqn(n);return !!t&&(arr||[]).some(x=>_rqn(x).indexOf(t)>-1);};
   const certNames=(st.certs||[]).concat((st.credentials||[]).map(cr=>cr.name||''));
-  (r.certs||[]).forEach(n=>{if(!has(certNames,n))miss.push('cert: '+n);});
-  (r.expertise||[]).forEach(n=>{if(!has(st.pills,n))miss.push('expertise: '+n);});
+  /* "(not answered)" for the two families the earlier fix skipped. An EMPTY certs/pills array
+     is not "they don't have it", it is "nobody has recorded it yet" — and pState scaffolds both
+     as [] for every candidate, so a fresh applicant emitted a bare `cert: CNA`. That line
+     survives _jobRequirementsPass's "(not answered)" filter, which is the only guard stopping
+     an unscreened applicant from being routed off their job's sequence on page load against
+     tag-for-life (rule 6) — the same hole that was closed for minYears just below. A candidate
+     who HAS certs recorded but not this one is a genuine miss and still reads as one. */
+  const _noCerts=!certNames.length,_noPills=!((st.pills||[]).length);
+  (r.certs||[]).forEach(n=>{if(!has(certNames,n))miss.push('cert: '+n+(_noCerts?' (not answered)':''));});
+  (r.expertise||[]).forEach(n=>{if(!has(st.pills,n))miss.push('expertise: '+n+(_noPills?' (not answered)':''));});
   if(r.minYears>0){
     /* Bucket codes — see _yearsMin. Measured live: 15 candidates sit in the '12' bucket and
        parseInt passed all of them against a 3-year minimum. */
@@ -20284,15 +20350,30 @@ async function _jobRequirementsPass(){
          silently shunted off the job's flow on first load. */
       const miss=_jobMissingReqs(c,jb).filter(m=>String(m).indexOf('(not answered)')<0);
       if(!miss.length)continue;
-      if(defSeq&&jb.sequenceId&&jb.sequenceId!==defSeq.id){
+      /* `c.st.sequenceId!==defSeq.id` is the clause that was missing. The test asked only about
+         the JOB's sequence, so a candidate ALREADY ON the default still entered the branch and
+         had sequenceStepId overwritten by _classicPointerFor — which returns the step for their
+         current column-G stage and only skips email steps already in st.sent, so every wait,
+         gate, integration and hub they had cleared inside that stage was un-done. That is a
+         pointer moving BACKWARD (rule 2), stamped jobReqRouted so it never self-corrects.
+         Deliberately NOT widened: the branch still requires the job to name a non-default
+         sequence. Keying it on the candidate alone would be the more faithful reading of the
+         policy, but it would also move candidates the job never pointed anywhere, in bulk, as
+         a page-load side effect — that is Meir's call, not a bug fix. */
+      let _routed=false;
+      if(defSeq&&jb.sequenceId&&jb.sequenceId!==defSeq.id&&c.st.sequenceId!==defSeq.id){
         const ptr=_classicPointerFor(c,defSeq); /* null for an empty default — keep their sequence rather than dangle */
         if(ptr){
           c.st.sequenceId=defSeq.id;c.st.sequenceStepId=ptr;
           c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
+          _routed=true;
         }
       }
       c.st.jobReqRouted=1;
-      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧾 Missing for "'+jb.name+'": '+miss.join(', ')+' → routed to the generic pipeline (job policy)'});
+      /* Say what actually happened. The line claimed "routed to the generic pipeline" every
+         time, including the common case where the job names no sequence at all and nothing was
+         re-pointed — a permanent record of a move that never occurred. */
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧾 Missing for "'+jb.name+'": '+miss.join(', ')+(_routed?' → routed to the generic pipeline (job policy)':' → flagged (job policy); sequence unchanged')});
       try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);n++;}catch(e){console.warn('jobreq route:',c.name,e.message);}
     }
     if(n){toast('🧾 '+n+' candidate'+(n===1?'':'s')+' routed to the generic pipeline (job requirements)');if(typeof render==='function')render();}
@@ -22711,7 +22792,13 @@ function _seqV3Action(c,info){
               cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Pointer snapped to stage '+c.stage+' → '+ptr});
               _seqCommitState(cand,{}).catch(e2=>console.warn('stage snap persist:',e2));
             }
-          }else{
+          }else if(cand!==c){
+            /* ONLY the ephemeral copy. When cand===c the else was reached with a workspace open
+               on the row, and cand.st IS the live c.st — so this appended a sequenceHistory
+               entry on every evaluation with no once-guard, the exact growth toward the 32k cap
+               the comment above says is being prevented. Nothing is committed on that path
+               anyway (the workspace holds the write), and the snap recomputes after the next
+               load, so skipping the append loses nothing. */
             cand.st.sequenceHistory=(cand.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
           }
           ev=window.SeqBuilderV3.evaluate(seq,cand,_seqTriggerEval,undefined,_seqHostCtx());
