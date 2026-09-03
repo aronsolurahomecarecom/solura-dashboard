@@ -176,6 +176,10 @@ templates editor). So a good engine ships with its messages:
   engines that way.)
 - Templates may use `{dm}` (decision-maker first name) and `{pt}` (patient first
   name) — filled per lead with safe fallbacks ("there" / "your loved one").
+- Any `action` step, `weekly` entry/forever phase, or `interval` entry/forever
+  phase may carry a `time` field (`"time": "14:30"`, 24-hour HH:MM): on its due
+  day the step waits in "Later Today" until that clock time. Omit it for
+  anytime-that-day steps. Daily-blitz phases have built-in windows instead.
 - Calls don't send anything, but a template on a call step is shown as the
   suggested voicemail/talking line — worth writing for key calls.
 

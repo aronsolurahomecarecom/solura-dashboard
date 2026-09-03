@@ -1512,7 +1512,7 @@ var C={
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29   // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
 };
-var BUILD='B-0902-70';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0903-71';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1614,6 +1614,15 @@ function addGap(date,g){
   return d;
 }
 function gapDaysApprox(g){g=normGap(g);return g.years*365+g.months*30+g.weeks*7+g.days;}
+// "HH:MM" → decimal hour (14:30 → 14.5), null for blank/invalid. A step
+// with a time hides in "Later today" until that clock time on its due day.
+function parseTimeStr(t){
+  var m=String(t||'').match(/^(\d{1,2}):(\d{2})$/);
+  if(!m)return null;
+  var h=parseInt(m[1],10),mi=parseInt(m[2],10);
+  if(h>23||mi>59)return null;
+  return h+mi/60;
+}
 function gapLabel(g){
   g=normGap(g);
   var parts=[];
@@ -1635,7 +1644,8 @@ function compileEngine(e){
       steps.forEach(function(s){
         seq.push({ph:ph,icon:s.icon||(s.type==='call'?'📞':s.type==='email'?'📧':'💬'),
           text:s.text||'(untitled)',type:s.type||'sms',trigger:'action',
-          lbl:'Phase '+ph,cadence:'action',phName:phName,template:s.template||'',subject:s.subject||''});
+          lbl:'Phase '+ph,cadence:'action',phName:phName,template:s.template||'',subject:s.subject||'',
+          at:parseTimeStr(s.time),atStr:s.time||''});
       });
     }else if(p.cadence==='daily'){
       var d0=p.daily||{};
@@ -1692,7 +1702,8 @@ function compileEngine(e){
         seq.push({ph:ph,icon:typeIcon(w0.type||'sms'),
           text:w0.text||'Weekly nurture',type:w0.type||'sms',trigger:'time',
           lbl:'Phase '+ph,cadence:'weekly',sticky:true,phName:phName,
-          intervalWeeks:ivw,template:w0.template||'',subject:w0.subject||''});
+          intervalWeeks:ivw,template:w0.template||'',subject:w0.subject||'',
+          at:parseTimeStr(w0.time),atStr:w0.time||''});
       }else{
         var entries=w0.entries||[];
         if(!entries.length)throw new Error('Weekly phase "'+phName+'" has no entries');
@@ -1700,7 +1711,8 @@ function compileEngine(e){
           seq.push({ph:ph,icon:typeIcon(en.type||'sms'),
             text:en.text||('Week '+en.week+' check-in'),type:en.type||'sms',trigger:'time',
             week:en.week,lbl:'Phase '+ph+' · Wk '+en.week,
-            cadence:'weekly',phName:phName,template:en.template||'',subject:en.subject||''});
+            cadence:'weekly',phName:phName,template:en.template||'',subject:en.subject||'',
+            at:parseTimeStr(en.time),atStr:en.time||''});
         });
       }
     }else if(p.cadence==='interval'){
@@ -1713,7 +1725,8 @@ function compileEngine(e){
         seq.push({ph:ph,icon:typeIcon(iv0.type||'sms'),
           text:iv0.text||('Nurture — every '+gapLabel(gF)),type:iv0.type||'sms',
           trigger:'time',lbl:'Phase '+ph,cadence:'interval',sticky:true,phName:phName,
-          gap:gF,template:iv0.template||'',subject:iv0.subject||''});
+          gap:gF,template:iv0.template||'',subject:iv0.subject||'',
+          at:parseTimeStr(iv0.time),atStr:iv0.time||''});
       }else{
         var ents=iv0.entries||[];
         if(!ents.length)throw new Error('Interval phase "'+phName+'" has no entries');
@@ -1725,7 +1738,8 @@ function compileEngine(e){
           seq.push({ph:ph,icon:typeIcon(en.type||'sms'),
             text:en.text||('Follow-up after '+gapLabel(gE)),type:en.type||'sms',
             trigger:'time',lbl:'Phase '+ph+' · +'+gapLabel(gE),cadence:'interval',
-            phName:phName,gap:gE,template:en.template||'',subject:en.subject||''});
+            phName:phName,gap:gE,template:en.template||'',subject:en.subject||'',
+            at:parseTimeStr(en.time),atStr:en.time||''});
         });
       }
     }else{
@@ -2910,7 +2924,26 @@ function nurtureWeekday(ri){
 function isUnsubscribed(ri){
   return !!String(((rows[ri]||[])[C.UNSUB])||'').trim();
 }
+// Per-lead callback times — "call them back at 2:30" — stored in the synced
+// engines doc keyed by row (same pattern as engineOverrides). A lead's own
+// time beats the engine step's time; both only refine a day that is already
+// "due now" into "later today" until the clock reaches it.
+function followUpTimes(){enginesDoc.followUpTimes=enginesDoc.followUpTimes||{};return enginesDoc.followUpTimes;}
 function whenToShow(ri){
+  var w=whenToShowCore(ri);
+  try{
+    if(w&&w.bucket==='now'){
+      var at=parseTimeStr(followUpTimes()[String(ri)]);
+      if(at==null){var a9=currentAction(ri);if(a9&&a9.at!=null)at=a9.at;}
+      if(at!=null&&nowDecimalHour()<at){
+        var td=localToday();
+        return {bucket:'later',at:new Date(td.getFullYear(),td.getMonth(),td.getDate(),Math.floor(at),Math.round((at%1)*60))};
+      }
+    }
+  }catch(_){/* time gating must never break the queue */}
+  return w;
+}
+function whenToShowCore(ri){
   var r=rows[ri]||[];
   var st=String(r[C.ST]||'');
   if(isUnsubscribed(ri))return {bucket:'hidden'}; // opted out → no scheduled outreach, ever
@@ -3633,6 +3666,8 @@ function openEp(ri,mode,opts){
       +'<div class="done-pop-action">'+escapeHtml(action?action.text:'Action')+'</div>'
       +'<label>Method used</label>'
       +'<select class="ep-mt">'+moptsForDone+'</select>'
+      +'<label style="margin-top:8px">Next step at (optional time)</label>'
+      +'<input type="time" class="ep-fut" style="width:120px" title="The next step waits in Later Today until this time on its due day">'
       +'<div class="done-pop-foot">'
       +'<button class="confirm" data-action="save-ep" data-ri="'+ri+'" data-mode="done">Confirm</button>'
       +'<button class="cancel" data-action="close-ep" data-ri="'+ri+'">Cancel</button>'
@@ -3701,7 +3736,7 @@ function openEp(ri,mode,opts){
       +'</div>'
       +'<div class="la-grid g3">'
       +epLockField('Pay Type',vPT,'<select class="ep-pay">'+payOpts+'</select>')
-      +'<div class="la-f"><label>Next Follow-Up</label><input type="date" class="ep-fu" value="'+escapeHtml(nfDate?ds(nfDate):ds(def3))+'"></div>'
+      +'<div class="la-f"><label>Next Follow-Up</label><div style="display:flex;gap:6px"><input type="date" class="ep-fu" value="'+escapeHtml(nfDate?ds(nfDate):ds(def3))+'"><input type="time" class="ep-fut" style="width:104px" title="Callback time (optional — hides in Later Today until then)" value="'+escapeHtml(followUpTimes()[String(ri)]||'')+'"></div></div>'
       +'<div class="la-f"><label>Next Method</label><select class="ep-nsm"><option value="">\u2014 select \u2014</option>'+MOPS.slice(1).map(function(s){return '<option'+(s===curNSM?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
       +'</div>'
       +'<div class="la-grid g1">'
@@ -3734,7 +3769,7 @@ function openEp(ri,mode,opts){
     html='<div class="la-banner gold">Adjust this lead\u2019s next step, log a note, or change status.</div>'
       +'<div class="la-grid g4">'
       +'<div class="la-f"><label>Status</label><select class="ep-st">'+statusOpts+'</select></div>'
-      +'<div class="la-f"><label>Next Follow-Up</label><input type="date" class="ep-fu" value="'+escapeHtml(curFu?ds(curFu):'')+'"></div>'
+      +'<div class="la-f"><label>Next Follow-Up</label><div style="display:flex;gap:6px"><input type="date" class="ep-fu" value="'+escapeHtml(curFu?ds(curFu):'')+'"><input type="time" class="ep-fut" style="width:104px" title="Callback time (optional — hides in Later Today until then)" value="'+escapeHtml(followUpTimes()[String(ri)]||'')+'"></div></div>'
       +'<div class="la-f"><label>Method Used</label><select class="ep-mt">'+moptsForDone+'</select></div>'
       +'<div class="la-f"><label>Next Suggested Method</label><select class="ep-nsm"><option value="">\u2014 select \u2014</option>'+MOPS.slice(1).map(function(s){return '<option value="'+escapeHtml(s)+'"'+(s===curNSM?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
       +'</div>'
@@ -3903,6 +3938,17 @@ async function saveEp(ri,mode){
         u[C.STEP_AT]=new Date().toISOString();
         u[C.SQ]=stepLabel(STEP_OFF_SEQUENCE);
       }
+    }
+    // 🕐 Per-lead callback time: whatever the time box holds is the truth —
+    // set it, keep it, or clear it. Rides the synced engines doc (cheap:
+    // identical bodies skip the upload entirely).
+    var futEl=container.querySelector('.ep-fut');
+    if(futEl){
+      var ftv=String(futEl.value||'').trim();
+      var fMap=followUpTimes();
+      var fPrev=fMap[String(ri)]||'';
+      if(ftv)fMap[String(ri)]=ftv;else delete fMap[String(ri)];
+      if(fPrev!==(ftv||''))saveEnginesDoc().catch(function(){});
     }
     if(!Object.keys(u).length){closeEp(ri);return;}
     // ⚡ Optimistic save: the local cache takes the new values NOW and the
@@ -5336,10 +5382,16 @@ function renderEngineEditor(){
             +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-step" data-pi="'+pi+'" data-si="'+si+'">✕</button>'
           +'</span>'
           +(st.type==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(st.subject||'')+'" data-esp="phases.'+pi+'.steps.'+si+'.subject">'):'')
+          +'<span style="grid-column:1/-1;display:flex;align-items:center;gap:6px"><span style="font-size:10.5px;color:var(--soft)">🕐 Time on its day (optional — waits in Later Today until then)</span><input type="time" class="ee-inp" style="width:112px" value="'+escapeHtml(st.time||'')+'" data-esp="phases.'+pi+'.steps.'+si+'.time"></span>'
           +'<textarea class="ee-tpl" rows="2" style="grid-column:1/-1" placeholder="Template text (optional — pre-fills the composer for this step)" data-esp="phases.'+pi+'.steps.'+si+'.template">'+escapeHtml(st.template||'')+'</textarea>'
           +'</div>';
       }).join('')
-      +'<button class="ee-mini" data-action="ee-add-step" data-pi="'+pi+'">＋ Add step</button>';
+      +'<div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;padding:8px;border:1.5px dashed var(--border);border-radius:10px">'
+        +'<span style="font-size:11.5px;font-weight:700;color:var(--mid)">➕ Add a step:</span>'
+        +'<button type="button" class="ee-chip-add" data-action="ee-add-step" data-pi="'+pi+'" data-sttype="sms">💬 Text</button>'
+        +'<button type="button" class="ee-chip-add" data-action="ee-add-step" data-pi="'+pi+'" data-sttype="call">📞 Call</button>'
+        +'<button type="button" class="ee-chip-add" data-action="ee-add-step" data-pi="'+pi+'" data-sttype="email">📧 Email</button>'
+      +'</div>';
     }else if(p.cadence==='daily'){
       var d=p.daily||{};
       body='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
@@ -5403,6 +5455,7 @@ function renderEngineEditor(){
           +'</select></div>'
           +'<div><label class="ee-lbl">Label</label><input type="text" class="ee-inp" value="'+escapeHtml(w.text||'Weekly nurture')+'" data-esp="phases.'+pi+'.weekly.text"></div>'
           +'</div>'
+          +'<div style="display:flex;align-items:center;gap:6px;margin:6px 0"><span style="font-size:10.5px;color:var(--soft)">🕐 Time on its day (optional)</span><input type="time" class="ee-inp" style="width:112px" value="'+escapeHtml(w.time||'')+'" data-esp="phases.'+pi+'.weekly.time"></div>'
           +((w.type||'sms')==='email'?('<input type="text" class="ee-inp" style="margin-bottom:6px" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(w.subject||'')+'" data-esp="phases.'+pi+'.weekly.subject">'):'')
           +'<textarea class="ee-tpl" rows="2" placeholder="Template text (optional)" data-esp="phases.'+pi+'.weekly.template">'+escapeHtml(w.template||'')+'</textarea>';
       }else{
@@ -5414,7 +5467,8 @@ function renderEngineEditor(){
               +'<option value="call"'+(en.type==='call'?' selected':'')+'>Call</option>'
               +'<option value="email"'+(en.type==='email'?' selected':'')+'>Email</option></select>'
             +'<input type="text" class="ee-inp" placeholder="Label (optional — default: Week N check-in)" value="'+escapeHtml(en.text||'')+'" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.text">'
-            +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-wentry" data-pi="'+pi+'" data-si="'+ei+'">✕</button>'
+            +'<span style="display:flex;gap:4px;align-items:center"><input type="time" class="ee-inp" style="width:104px" title="Time on its day (optional)" value="'+escapeHtml(en.time||'')+'" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.time">'
+            +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-wentry" data-pi="'+pi+'" data-si="'+ei+'">✕</button></span>'
             +((en.type||'sms')==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(en.subject||'')+'" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.subject">'):'')
             +'<textarea class="ee-tpl" rows="2" style="grid-column:1/-1" placeholder="Template text (optional)" data-esp="phases.'+pi+'.weekly.entries.'+ei+'.template">'+escapeHtml(en.template||'')+'</textarea>'
             +'</div>';
@@ -5445,6 +5499,7 @@ function renderEngineEditor(){
           +'<div><label class="ee-lbl">Repeat every (mix freely — e.g. 1 mo, or 2 wks + 3 days)</label>'+gapInputs('phases.'+pi+'.interval.every',iv.every)+'</div>'
           +'</div>'
           +'<div style="margin-bottom:6px"><label class="ee-lbl">Label</label><input type="text" class="ee-inp" value="'+escapeHtml(iv.text||'Long-term nurture')+'" data-esp="phases.'+pi+'.interval.text"></div>'
+          +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:10.5px;color:var(--soft)">🕐 Time on its day (optional)</span><input type="time" class="ee-inp" style="width:112px" value="'+escapeHtml(iv.time||'')+'" data-esp="phases.'+pi+'.interval.time"></div>'
           +((iv.type||'sms')==='email'?('<input type="text" class="ee-inp" style="margin-bottom:6px" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(iv.subject||'')+'" data-esp="phases.'+pi+'.interval.subject">'):'')
           +'<textarea class="ee-tpl" rows="2" placeholder="Template text (optional)" data-esp="phases.'+pi+'.interval.template">'+escapeHtml(iv.template||'')+'</textarea>';
       }else{
@@ -5452,7 +5507,8 @@ function renderEngineEditor(){
           var ap='phases.'+pi+'.interval.entries.'+ei;
           return '<div class="ee-step" style="grid-template-columns:1fr auto">'
             +'<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:11px;font-weight:700;color:var(--mid)">Wait</span>'+gapInputs(ap+'.after',en.after)
-            +'<span style="font-size:11px;font-weight:700;color:var(--mid)">then</span>'+typeSel(ap+'.type',en.type)+'</span>'
+            +'<span style="font-size:11px;font-weight:700;color:var(--mid)">then</span>'+typeSel(ap+'.type',en.type)
+            +'<span style="font-size:10.5px;color:var(--soft)">🕐</span><input type="time" class="ee-inp" style="width:104px" title="Time on its day (optional)" value="'+escapeHtml(en.time||'')+'" data-esp="'+ap+'.time"></span>'
             +'<button class="ee-mini" style="color:var(--red)" data-action="ee-del-ientry" data-pi="'+pi+'" data-si="'+ei+'">✕</button>'
             +'<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Label (optional — default: Follow-up after '+escapeHtml(gapLabel(en.after))+')" value="'+escapeHtml(en.text||'')+'" data-esp="'+ap+'.text">'
             +((en.type||'sms')==='email'?('<input type="text" class="ee-inp" style="grid-column:1/-1" placeholder="Email subject ({dm}/{pt} fill)" value="'+escapeHtml(en.subject||'')+'" data-esp="'+ap+'.subject">'):'')
@@ -5517,6 +5573,7 @@ function renderEnginePreview(){
         :st.gap?((st.sticky?'every ':'wait ')+gapLabel(st.gap))
         :st.sticky?('every '+((st.intervalWeeks||1)===1?'week':(st.intervalWeeks+' weeks')))
         :'';
+      if(st.atStr)meta+=(meta?' · ':'')+'🕐 '+st.atStr;
       html+='<div class="ee-pv-step"><span>'+st.icon+'</span><span style="flex:1">'+escapeHtml(st.text)+'</span><span class="ee-pv-meta">'+meta+'</span></div>';
     });
     if(g.steps.length>shown.length)html+='<div class="ee-pv-step" style="font-style:italic;color:var(--soft)">… '+(g.steps.length-shown.length)+' more</div>';
@@ -11621,7 +11678,12 @@ function onClick(ev){
       }
       break;
     case 'ee-add-step':
-      if(esState){var ph1=esState.phases[parseInt(t.dataset.pi,10)];(ph1.steps=ph1.steps||[]).push({icon:'💬',text:'',type:'sms',template:''});renderEngineEditor();}
+      if(esState){
+        var ph1=esState.phases[parseInt(t.dataset.pi,10)];
+        var nty=t.dataset.sttype||'sms';
+        (ph1.steps=ph1.steps||[]).push({icon:typeIcon(nty),text:'',type:nty,template:''});
+        renderEngineEditor();
+      }
       break;
     case 'ee-del-step':
       if(esState){esState.phases[parseInt(t.dataset.pi,10)].steps.splice(parseInt(t.dataset.si,10),1);renderEngineEditor();}

@@ -24,7 +24,7 @@ const SLOT_WINDOWS = { am: {}, mid: {}, pm: {} };
 const DAILY_WINDOWS = { callAm: [8, 13], smsAm: [8, 17], callPm: [12, 16], smsPm: [11, 16] };
 
 const mk = new Function('typeIcon', 'typeWord', 'SLOT_LABEL', 'SLOT_WINDOWS', 'DAILY_WINDOWS',
-  src + '\nreturn {normGap,gapIsZero,addGap,gapDaysApprox,gapLabel,compileEngine};');
+  src + '\nreturn {normGap,gapIsZero,addGap,gapDaysApprox,gapLabel,parseTimeStr,compileEngine};');
 const G = mk(typeIcon, typeWord, SLOT_LABEL, SLOT_WINDOWS, DAILY_WINDOWS);
 
 // ── gap math ──
@@ -80,6 +80,27 @@ const legacy = G.compileEngine({ id: 'l', name: 'l', phases: [
 ]});
 ok(legacy.seq[0].week === 2 && legacy.seq[0].cadence === 'weekly' && !legacy.seq[0].gap, 'weekly entries compile exactly as before (no gap field)');
 ok(legacy.seq[1].sticky && legacy.seq[1].intervalWeeks === 2 && !legacy.seq[1].gap, 'weekly forever keeps intervalWeeks, no gap');
+
+// ── step times (B-0903-71) ──
+ok(G.parseTimeStr('14:30') === 14.5 && G.parseTimeStr('08:05') === 8 + 5 / 60 && G.parseTimeStr('0:00') === 0, 'HH:MM parses to decimal hours');
+ok(G.parseTimeStr('') === null && G.parseTimeStr('25:00') === null && G.parseTimeStr('9:75') === null && G.parseTimeStr('soon') === null, 'blank/invalid times are null');
+{
+  const t = G.compileEngine({ id: 't', name: 't', phases: [
+    { name: 'A', cadence: 'action', steps: [{ text: 'Call', type: 'call', time: '10:30' }, { text: 'Text', type: 'sms' }] },
+    { name: 'W', cadence: 'weekly', weekly: { forever: true, type: 'sms', intervalWeeks: 1, time: '15:00' } },
+    { name: 'I', cadence: 'interval', interval: { entries: [{ after: { days: 3 }, type: 'call', time: '9:15' }] } }
+  ]});
+  ok(t.seq[0].at === 10.5 && t.seq[0].atStr === '10:30', 'action step carries its clock time');
+  ok(t.seq[1].at === null && t.seq[1].atStr === '', 'timeless step stays anytime-that-day');
+  ok(t.seq[2].at === 15 && t.seq[2].sticky, 'weekly forever carries a time');
+  ok(t.seq[3].at === 9.25, 'interval entry carries a time');
+}
+ok(/function whenToShowCore\(ri\)\{/.test(html) && /var w=whenToShowCore\(ri\);/.test(html), 'whenToShow wraps the core with the time gate');
+ok(/parseTimeStr\(followUpTimes\(\)\[String\(ri\)\]\)/.test(html), 'per-lead callback time beats the step time');
+ok(/bucket:'later',at:new Date\(td\.getFullYear\(\)/.test(html), 'a timed step waits in Later Today until its clock time');
+ok((html.match(/class="ep-fut"/g) || []).length === 3, 'callback time input present in Done, Responded, and Update dialogs');
+ok(/if\(fPrev!==\(ftv\|\|''\)\)saveEnginesDoc\(\)/.test(html), 'callback time persists to the synced doc only when changed');
+ok(/data-action="ee-add-step" data-pi="'\+pi\+'" data-sttype="sms"/.test(html), 'one-click typed add-step buttons (Text/Call/Email) wired');
 
 // ── source-level locks on scheduling + UI wiring ──
 ok(/cadence==='interval'\)\{\s*\n\s*var doneG=getStepDoneAt/.test(html), 'whenToShow schedules interval steps from last completion + gap');
