@@ -200,7 +200,12 @@ templates editor). So a good engine ships with its messages:
   name), and `{rel}` (the decision-maker's relationship to the patient,
   lowercased — "daughter", "son", "spouse") — filled per lead with safe
   fallbacks ("there" / "your loved one" / "loved one"). `{rel}` reads best
-  mid-sentence: "caring for your {rel}" → "caring for your mother".
+  mid-sentence: "as her {rel}" → "as her daughter".
+- `{ptrel}` is the flip of `{rel}` — what the PATIENT is to the lead:
+  daughter/son → "parent", wife/husband → "spouse", grandson → "grandparent",
+  father/mother → "child". Use it in "your …" phrasings: "caring for your
+  {ptrel}" → "caring for your parent". Relationships with no determined
+  inverse (friend, POA, self, blank) fall back to "loved one".
 - Any `action` step, `weekly` entry/forever phase, or `interval` entry/forever
   phase may carry a `time` field (`"time": "14:30"`, 24-hour HH:MM): on its due
   day the step waits in "Later Today" until that clock time. Omit it for

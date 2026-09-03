@@ -1078,7 +1078,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
 
       <section class="st-sec" id="st-sec-engines">
         <h3 class="st-h">Sequence engines</h3>
-        <p class="st-p">Engines define the outreach sequence. Build from a starting point or an empty canvas, run several side by side, assign each lead source its own engine, and share engines as packages — Claude can author one offline and you import it here. <b>Message templates live on the sequence steps:</b> ✏ edit an engine and every manual step, daily blitz, and weekly entry has its own template box ({dm}/{pt}/{rel} fill per lead — {rel} is their relationship to the patient, e.g. "daughter") — email steps get a dedicated <b>subject</b> field too. The old Templates tab is legacy fallback only.</p>
+        <p class="st-p">Engines define the outreach sequence. Build from a starting point or an empty canvas, run several side by side, assign each lead source its own engine, and share engines as packages — Claude can author one offline and you import it here. <b>Message templates live on the sequence steps:</b> ✏ edit an engine and every manual step, daily blitz, and weekly entry has its own template box ({dm}/{pt}/{rel}/{ptrel} fill per lead — {rel} is their relationship to the patient, e.g. "daughter"; {ptrel} is the flip, what the patient is to them, e.g. "parent"/"spouse") — email steps get a dedicated <b>subject</b> field too. The old Templates tab is legacy fallback only.</p>
         <div id="es-engine-list" style="margin-bottom:12px"></div>
         <div style="display:flex;gap:8px;margin-bottom:26px;flex-wrap:wrap">
           <button data-action="es-new-engine" class="st-btn-gold">➕ New engine</button>
@@ -1515,7 +1515,7 @@ var C={
              //    regular touch of cycle 4 done, beside-special #1 due now.
              //    SAFE add: every full-width writer spans A:AD and never touches AE.
 };
-var BUILD='B-0903-73';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0903-74';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2227,6 +2227,23 @@ function getNames(ri){
     rel:String(r[C.REL]||'').trim().toLowerCase()};
 }
 /* ⚡FILLNAMES — BEGIN (sliced by tests/engine-gaps.test.mjs) */
+// The flip of {rel}: what the PATIENT is to the lead. The sheet doesn't
+// record the patient's gender, so only relationships with a determined
+// inverse get a word (daughter → parent, wife → spouse, grandson →
+// grandparent); everything ambiguous returns '' and the caller falls back
+// to "loved one" — "your {ptrel}" must always read naturally.
+function inverseRel(rel){
+  var s=' '+String(rel||'').toLowerCase().replace(/[^a-z]+/g,' ')+' ';
+  var has=function(w){return s.indexOf(' '+w+' ')>-1;};
+  if(has('granddaughter')||has('grandson')||has('grandchild'))return 'grandparent';
+  if(has('grandmother')||has('grandma')||has('grandfather')||has('grandpa'))return 'grandchild';
+  if(has('stepdaughter')||has('stepson'))return 'parent';
+  if(has('daughter')||has('son')||has('child'))return 'parent';
+  if(has('mother')||has('mom')||has('father')||has('dad')||has('parent'))return 'child';
+  if(has('wife')||has('husband')||has('spouse')||has('partner'))return 'spouse';
+  if(has('sister')||has('brother')||has('sibling'))return 'sibling';
+  return '';
+}
 function fillNames(s,names){
   // Graceful fallbacks — a missing name must never ship a broken phrase
   // like "\u2014's care" to a real family.
@@ -2245,9 +2262,13 @@ function fillNames(s,names){
     .replace(/\{\{\s*(?:rel|relationship)\s*\}\}/gi,'{rel}')
     .replace(/\{\s*relationship\s*\}/gi,'{rel}');
   s=s.replace(/\{dm\}/g,dm);
-  // {rel} → the relationship to the patient, lowercased for mid-sentence use
-  // ("your daughter", "your mom"). Blank falls back to "loved one" so
-  // "your {rel}" never ships broken.
+  // {ptrel} → the flip: what the patient is to the lead ("your parent",
+  // "your spouse"). Ambiguous inverses fall back to "loved one".
+  s=s.replace(/\{\{\s*ptrel\s*\}\}/gi,'{ptrel}');
+  s=s.replace(/\{ptrel\}/gi,inverseRel(names.rel)||'loved one');
+  // {rel} → the lead's relationship to the patient, lowercased for
+  // mid-sentence use ("as her daughter"). Blank falls back to "loved one"
+  // so "your {rel}" never ships broken.
   s=s.replace(/\{rel\}/g,String(names.rel||'').trim().toLowerCase()||'loved one');
   if(names.pt){
     s=s.replace(/\{pt\}/g,names.pt);

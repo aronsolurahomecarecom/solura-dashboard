@@ -151,6 +151,15 @@ ok(/writeRow\(3,hU\)/.test(html), 'AE header labeled lazily on load');
   ok(fill('as her {relationship}', { dm: 'K', pt: 'M', rel: 'daughter' }) === 'as her daughter', '{relationship} dialect normalizes to {rel}');
   ok(fill('{{rel}} of {pt}', { dm: 'K', pt: 'Miriam', rel: 'son' }) === 'son of Miriam', '{{rel}} dialect normalizes too');
   ok(fill('Hi {dm} and {pt}', { dm: 'Karen', pt: 'Miriam', rel: 'daughter' }) === 'Hi Karen and Miriam', '{dm}/{pt} untouched by the rel addition');
+  // {ptrel} — the flip (B-0903-74)
+  ok(fill('caring for your {ptrel}', { dm: 'K', pt: 'M', rel: 'Daughter' }) === 'caring for your parent', 'daughter → your parent');
+  ok(fill('your {ptrel}', { dm: 'K', pt: 'M', rel: 'Wife' }) === 'your spouse', 'wife → your spouse');
+  ok(fill('your {ptrel}', { dm: 'K', pt: 'M', rel: 'Grandson' }) === 'your grandparent', 'grandson → your grandparent (not tripped by the son substring)');
+  ok(fill('your {ptrel}', { dm: 'K', pt: 'M', rel: 'Grandmother' }) === 'your grandchild', 'grandmother → your grandchild (not tripped by mother substring)');
+  ok(fill('your {ptrel}', { dm: 'K', pt: 'M', rel: 'Father' }) === 'your child', 'father → your child');
+  ok(fill('your {ptrel}', { dm: 'K', pt: 'M', rel: 'Friend' }) === 'your loved one', 'undetermined inverse → loved one');
+  ok(fill('your {ptrel}', { dm: 'K', pt: 'M', rel: '' }) === 'your loved one', 'no relationship → loved one');
+  ok(fill('your {ptrel}, as her {rel}', { dm: 'K', pt: 'M', rel: 'Daughter (POA)' }) === 'your parent, as her daughter (poa)', 'both directions in one sentence; parenthetical value still matches');
 }
 ok(/rel:String\(r\[C\.REL\]\|\|''\)\.trim\(\)\.toLowerCase\(\)/.test(html), 'getNames exposes the relationship column');
 ok((html.match(/\{dm\}\/\{pt\}\/\{rel\} fill/g) || []).length >= 10, 'editor hints mention {rel} everywhere templates are written');
