@@ -7560,7 +7560,12 @@ async function loadSettings(){
           SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},data.settings.flow||{});
           primaryLoaded=true;
           load.source='workerFile';load.workerFile=true;
-          try{localStorage.setItem('solura_settings',JSON.stringify(SETTINGS));}catch(e){}
+          /* Cache the SAME shape the save path caches: _undoHistory never rides into any
+             persisted tier (see _saveSettingsInternal). Caching it raw put 1.8MB of undo
+             snapshots into a ~5MB localStorage quota, and the catch below is empty — so the
+             QuotaExceededError that eventually follows silently kills the cache tier, the
+             very last fallback. */
+          try{const _c=Object.assign({},SETTINGS);delete _c._undoHistory;localStorage.setItem('solura_settings',JSON.stringify(_c));}catch(e){}
         }else{
           load.errors.push('Worker file exists but is empty');
         }
@@ -7909,7 +7914,14 @@ async function _saveSettingsInternal(){
       const r=await fetch(ZI_WORKER_URL+'/settings',{
         method:'POST',
         headers:{'Content-Type':'application/json','X-Solura-Token':tok},
-        body:JSON.stringify({settings:SETTINGS})
+        /* `persist`, NOT SETTINGS — the primary file is the one tier that was still being
+           handed the undo history. The pagehide flush already sends `persist`; this path did
+           not, so the two writers to the same file disagreed by 27x. Measured live 2026-09-03:
+           Solura_Settings.json was 1,871,244 chars, 1,803,295 of it (96%) _undoHistory —
+           downloaded in full on every page load. It also made the truncation check below
+           meaningless: it compares data.bytes against json.length (the STRIPPED length), so a
+           file holding 4% of what was sent still passed. */
+        body:JSON.stringify({settings:persist})
       });
       if(r.ok){
         const data=await r.json();
@@ -21199,15 +21211,31 @@ async function saveZiToken(){
   /* Also persist to localStorage as a backup. If the AL1 sheet write fails for any reason
      (token expired, sheet open in Excel, transient network), this keeps working locally. */
   try{localStorage.setItem('solura_zi_token',tok);}catch(e){}
-  let saveOk=false;
-  try{
-    await patchRange('AL1',[[JSON.stringify(SETTINGS)]]);
-    saveOk=true;
-  }catch(e){
-    /* Don't silently swallow — tell the user it's local-only so they don't lose the token. */
-    toast('⚠ Saved locally only — could not reach Excel sheet. Will retry on next page load.');
+  let saveOk=false,tooBig=false;
+  /* This is the ONE settings writer that runs before a worker token exists, so it deliberately
+     writes the AL1 mirror instead of the primary file. It must still obey the two rules every
+     other persistence writer obeys: strip _undoHistory (browser-local only) and never hand a
+     cell more than it can hold. Microsoft Graph SILENTLY TRUNCATES cell writes past 32,767
+     chars — the mechanism behind the AJ profile wipes — so an oversized write here would leave
+     AL1 holding unparseable JSON, destroying the fallback settings tier rather than updating
+     it. Measured live 2026-09-03: JSON.stringify(SETTINGS) was 1,871,244 chars, 57x the cap.
+     Skipping is safe: loadSettings reads the token back from localStorage (7610 falls back to
+     solura_zi_token), which is written above. */
+  const _persist=Object.assign({},SETTINGS);delete _persist._undoHistory;
+  const _json=JSON.stringify(_persist);
+  if(_json.length>32000){
+    tooBig=true;
+  }else{
+    try{
+      await patchRange('AL1',[[_json]]);
+      saveOk=true;
+    }catch(e){
+      /* Don't silently swallow — tell the user it's local-only so they don't lose the token. */
+      toast('⚠ Saved locally only — could not reach Excel sheet. Will retry on next page load.');
+    }
   }
-  if(saveOk)toast('✓ ZoomInfo token saved (sheet + local backup)');
+  if(tooBig)toast('✓ ZoomInfo token saved to this browser — settings are too large for the AL1 mirror, so the sheet copy was skipped.');
+  else if(saveOk)toast('✓ ZoomInfo token saved (sheet + local backup)');
   renderSettings();
 }
 
