@@ -7675,7 +7675,13 @@ async function _runAutoSave(){
   _updateAutosaveStatus('saving');
   try{
     const status=await saveSettings();
-    if(status&&status.workerFile){
+    /* Declining the diff preview is a CHOICE, not a failure. {cancelled:true} carries neither
+       tier flag nor an errors array, so it fell to the else below and painted "✗ Save failed /
+       Unknown error" — and stuck there, because nothing re-runs until the next edit. The edits
+       are still in memory and still unsaved, which is exactly what 'dirty' says. */
+    if(status&&status.cancelled){
+      _updateAutosaveStatus('dirty');
+    }else if(status&&status.workerFile){
       _settingsDirty=false;
       _updateAutosaveStatus('saved');
     }else if(status&&status.localStorage){
@@ -23440,7 +23446,13 @@ async function _restoreUndoSnapshot(idx){
 }
 
 function exportSettings(){
-  const blob=new Blob([JSON.stringify(SETTINGS,null,2)],{type:'application/json'});
+  /* THE FIFTH PERSISTENCE WRITER. The undo-history strip covered the four that write to a tier
+     (localStorage, the worker file, the AL1 mirror, the pagehide flush) — the export is the one
+     the operator actually keeps, and it was still handing over the raw object: measured live
+     2026-09-03, 1,871,244 chars of which 96% was 50 undo snapshots, pretty-printed to ~3MB.
+     A backup should be the shape the file tier holds and the shape import expects. */
+  const _exp=Object.assign({},SETTINGS);delete _exp._undoHistory;
+  const blob=new Blob([JSON.stringify(_exp,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download='solura-settings-'+today()+'.json';a.click();
   URL.revokeObjectURL(url);
@@ -23451,6 +23463,10 @@ async function importSettings(){
   if(!txt){toast('Paste JSON first');return;}
   let parsed;try{parsed=JSON.parse(txt);}catch(e){toast('Invalid JSON: '+e.message);return;}
   if(!confirm('Overwrite ALL settings with this JSON? This cannot be undone.'))return;
+  /* The other half of the round trip: an export taken before the strip carries 1.8MB of undo
+     snapshots, and importing it would put them straight back into memory (and into the next
+     export). Undo is this session's, never an imported file's. */
+  delete parsed._undoHistory;
   SETTINGS=Object.assign(SETTINGS,parsed);
   SETTINGS.config=Object.assign({},SETTINGS.config,parsed.config||{});
   SETTINGS.flow=Object.assign({order:null,labels:{},custom:[]},parsed.flow||{});
