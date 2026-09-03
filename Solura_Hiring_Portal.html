@@ -8685,7 +8685,7 @@ function predictedQuality(c){
   if(_scYN(s.revoked)===true)hard.push('Credential revoked');
   if(_scYN(s.abuseFinding)===true)hard.push('Abuse finding');
   if(_scYN(s.personalCare)===false)hard.push('Refuses personal care');
-  if(_scYN(s.lifting)===false)hard.push("Can't lift 25 lbs");
+  if(_scYN(s.lifting)===false)hard.push("Can't lift 50 lbs");
   /* c.gates is built verbatim from sheet columns H-L (11108) and every writer emits
      'Y'/'N'/'' — the ✓/✗ glyphs are display-only (`sym`). So this test, and the tr/cr ones
      below, never fired for anyone, ever: the same dead-vocabulary class as the screening
@@ -9461,7 +9461,7 @@ function matchFilters(c){
     if(hay==null){
       const vals=o=>{const out=[];(function walk(x){if(x==null)return;if(Array.isArray(x))x.forEach(walk);else if(typeof x==='object')Object.keys(x).forEach(k=>walk(x[k]));else{const sv=String(x);if(sv.length>1)out.push(sv);}})(o);return out.join(' ');};
       hay=(c.name+' '+c.email+' '+(s0.pills||[]).join(' ')+' '+(s0.certs||[]).join(' ')+' '+c.stage
-        +' '+trWords+(s0.liveIn?' live-in':'')
+        +' '+trWords+(_liveIn(s0.liveIn)?' live-in':'')
         +' '+vals(s0.formAnswers)+' '+vals(s0.screening)+' '+vals(s0.facts)).toLowerCase();
       window._hayMemo.set(c,{g:_memGen,hay});
     }
@@ -9491,7 +9491,7 @@ function matchFilters(c){
     F.schedule.forEach(key=>{const [day,shift]=key.split('-');if(!(ds[day]||[]).includes(shift))ok=false;});
     if(!ok)return false;
   }
-  if(F.liveIn&&!s.liveIn)return false;
+  if(F.liveIn&&!_liveIn(s.liveIn))return false;
   if(F.availWeekdays||F.availWeekends||F.availOvernight){
     const ds=s.dayShifts||{};
     const weekdays=['Mon','Tue','Wed','Thu','Fri'];
@@ -9608,6 +9608,15 @@ function clearFilters(){
 }
 function updateFilterCount(){const ct=filterCount();const el=document.getElementById('filterct');el.textContent=ct;el.style.display=ct?'inline-block':'none';document.getElementById('btn-filter').classList.toggle('on',ct>0);}
 function toggleFilterPanel(){const p=document.getElementById('filterpanel');p.classList.toggle('open');if(p.classList.contains('open'))renderFilterPanel();}
+/* st.liveIn arrives as a real boolean from the application form and worker, but the
+   profile editor's chips write their option value back as a STRING — and 'false' is
+   truthy, so a candidate marked "No" passed the Live-in-only filter and read as live-in
+   in search. Every consumer goes through here. */
+/* Application form work-setting codes → what the operator should read on the chip.
+   Unknown codes fall back to the raw value (chip() already does that). */
+const _YNALIAS={yes:'Y',no:'N',true:'Y',false:'N'};
+const _WORK_SETTING_LABELS={home:'Private home',al:'Assisted living',snf:'Hospital / SNF',memory:'Memory care',hospice:'Hospice'};
+function _liveIn(v){return v===true||/^(true|y|yes|1)$/i.test(String(v==null?'':v));}
 function chip(cat,val,label){return '<button class="fchip'+(F[cat].has(val)?' on':'')+'" onclick="toggleFilter(\''+cat+'\',\''+val.replace(/'/g,"\\'")+'\')">'+esc(label||val)+'</button>';}
 function flagToggle(flag,label,hint){
   return `<label class="ff-toggle"><input type="checkbox" ${F[flag]?'checked':''} onchange="toggleFlag('${flag}')"><div><span class="ff-toggle-label">${esc(label)}</span>${hint?'<span class="ff-toggle-hint">'+esc(hint)+'</span>':''}</div></label>`;
@@ -9629,7 +9638,10 @@ function renderFilterPanel(){
   const settingSet=new Set();
   pipeline.forEach(c=>{const ws=(c.st.facts&&c.st.facts.settings)||c.st.settings||[];if(Array.isArray(ws))ws.forEach(x=>{if(x)settingSet.add(x);});});
   /* Add the standard ones so they show up even if no candidate has them yet */
-  ['Private home','Assisted living','Nursing home (SNF)','Hospital','Memory care','Hospice'].forEach(x=>settingSet.add(x));
+  /* The stored values are the application form's codes, not English labels: seeding
+     labels meant `settArr.includes(x)` could never be true for any of the six, and the
+     auto-discovered chips showed the operator a bare 'al' or 'snf'. */
+  Object.keys(_WORK_SETTING_LABELS).forEach(x=>settingSet.add(x));
   const workSettingOptions=Array.from(settingSet).sort();
 
   /* Schedule grid */
@@ -9685,7 +9697,7 @@ function renderFilterPanel(){
           ${flagToggle('hasOwnCar','Has own car','Owns a vehicle they can use for shifts — critical for many client visits')}
           ${flagToggle('hasTransport','Has reliable transportation','Transportation gate passed (car, transit, rides, etc.)')}
           ${flagToggle('willPersonalCare','Will provide personal care','Bathing, toileting, dressing')}
-          ${flagToggle('canLift','Can lift 25+ lbs','Physical lift capability confirmed')}
+          ${flagToggle('canLift','Can lift 50 lbs','Physical lift capability confirmed')}
           ${flagToggle('nonSmoker','Non-smoker','No tobacco use')}
           ${flagToggle('age18','Confirmed 18+','Age requirement met')}
           ${flagToggle('workAuthed','Work-authorized in US','Work authorization gate passed')}
@@ -9698,7 +9710,7 @@ function renderFilterPanel(){
         <summary><span class="fp-label">Past experience</span></summary>
         <div class="fp-content">
           <div class="fp-group"><label>Worked at (search past employer names)</label><input class="fpinput" placeholder="e.g. Cleveland Clinic" value="${esc(F.workedAt)}" oninput="setWorkedAt(this.value)"></div>
-          <div class="fp-group"><label>Past work settings</label><div class="fp-chips">${workSettingOptions.map(x=>chip('workSettings',x)).join('')}</div></div>
+          <div class="fp-group"><label>Past work settings</label><div class="fp-chips">${workSettingOptions.map(x=>chip('workSettings',x,_WORK_SETTING_LABELS[x])).join('')}</div></div>
           ${flagToggle('hasVerifiedEmployer','Has any verified past employer','At least 1 employer marked verified')}
           ${flagToggle('allEmployersVerified','All past employers verified','Every employer marked verified')}
           ${flagToggle('has2Refs','Has 2+ references on file','References form submitted with 2+ entries')}
@@ -13519,13 +13531,15 @@ const APP_SECTIONS=[
     {label:'Expertise',path:'st.pills',type:'tags'},
     {label:'Languages',path:'st.screening.languages',type:'tags'}
   ]},
+  /* Legacy 'yes'/'no' written by this editor before its options were corrected to the
+     form's Y/N. _scYN normalizes both for the gates; this keeps them displaying. */
   {title:'Eligibility (screening)',fields:[
-    {label:'18+',path:'st.screening.age18',type:'select',options:[['—',''],['Yes','yes'],['No','no']]},
+    {label:'18+',path:'st.screening.age18',type:'select',options:[['—',''],['Yes','Y'],['No','N']],alias:_YNALIAS},
     {label:'Valid driver license',path:'st.screening.dl',type:'select',options:[['—',''],['Yes','Y'],['No','N']]},
-    {label:'Credential ever revoked',path:'st.screening.revoked',type:'select',options:[['—',''],['No','no'],['Yes','yes']]},
-    {label:'Abuse finding on record',path:'st.screening.abuseFinding',type:'select',options:[['—',''],['No','no'],['Yes','yes']]},
-    {label:'Will provide personal care',path:'st.screening.personalCare',type:'select',options:[['—',''],['Yes','yes'],['No','no']]},
-    {label:'Can lift 25 lbs',path:'st.screening.lifting',type:'select',options:[['—',''],['Yes','yes'],['No','no']]},
+    {label:'Credential ever revoked',path:'st.screening.revoked',type:'select',options:[['—',''],['No','N'],['Yes','Y']],alias:_YNALIAS},
+    {label:'Abuse finding on record',path:'st.screening.abuseFinding',type:'select',options:[['—',''],['No','N'],['Yes','Y']],alias:_YNALIAS},
+    {label:'Will provide personal care',path:'st.screening.personalCare',type:'select',options:[['—',''],['Yes','Y'],['No','N']],alias:_YNALIAS},
+    {label:'Can lift 50 lbs',path:'st.screening.lifting',type:'select',options:[['—',''],['Yes','Y'],['No','N']],alias:_YNALIAS},
     {label:'Smoker',path:'st.screening.smoker',type:'select',options:[['—',''],['No','N'],['Yes','Y']]},
     {label:'Transportation',path:'st.formAnswers.transport',type:'select',options:[['—',''],['Own car','car'],['Public transit','transit'],['Rides','rides'],['Not yet','none']]},
     {label:'Work authorization',path:'st.formAnswers.workauth',type:'select',options:[['—',''],['Yes','Y'],['No','N']]},
@@ -13857,7 +13871,9 @@ const APP_TAG_OPTIONS={
 function renderAppField(src,f,editing){
   const v=_appField(src,f.path);
   const altV=f.altPath?_appField(src,f.altPath):'';
-  const value=v||altV;
+  /* Not `v||altV`: a stored `false` (or 0) is an ANSWER, and falling through to the
+     legacy path printed it as "—" — an answered question looking unanswered. */
+  const value=(v===undefined||v===null||v==='')?altV:v;
   if(!editing){
     return `<div class="app-row"><span class="app-label">${esc(f.label)}</span><span class="app-value">${esc(_displayValue(value,f))}</span></div>`;
   }
@@ -19529,6 +19545,10 @@ function _extraAnswerRows(c){
     const m=/^st\.formAnswers\.(\w+)$/.exec(f.path||'');if(m)covered.add(m[1]);
   }));
   ['age18','dl','revoked','abuseFinding','personalCare','lifting','smoker','languages'].forEach(k=>covered.add(k));
+  /* Shown in the Experience section under other paths (st.certs, st.pills, st.facts.*),
+     which the st.formAnswers.* path scan above cannot see. Without these the card and
+     the application PDF repeat them as raw codes: "Years — 35", "Longest — y3p". */
+  ['cred','years','settings','longest','expertise'].forEach(k=>covered.add(k));
   const rows=[];
   const fa=(c&&c.st&&c.st.formAnswers)||{};
   Object.keys(fa).forEach(k=>{
@@ -20167,7 +20187,7 @@ function _jobMissingReqs(c,job){
   if(r.dl&&_scYN(sc.dl)!==true)miss.push('driver’s license'+(sc.dl?'':' (not answered)'));
   if(r.car&&String(fa.transport||'').toLowerCase()!=='car')miss.push('own car'+(fa.transport?'':' (not answered)'));
   if(r.personalCare&&_scYN(sc.personalCare)!==true)miss.push('personal care'+(sc.personalCare?'':' (not answered)'));
-  if(r.lifting&&_scYN(sc.lifting)!==true)miss.push('lifting 25 lbs'+(sc.lifting?'':' (not answered)'));
+  if(r.lifting&&_scYN(sc.lifting)!==true)miss.push('lifting 50 lbs'+(sc.lifting?'':' (not answered)'));
   if(r.nonSmoker&&_scYN(sc.smoker)!==false)miss.push('non-smoker'+(sc.smoker?'':' (not answered)'));
   if(r.workauth&&_scYN(fa.workauth)!==true)miss.push('work authorization'+(fa.workauth?'':' (not answered)'));
   return miss;
@@ -20316,7 +20336,7 @@ function _jobOpenModal(id){
       <label style="font-size:12px;color:var(--mid)">Required expertise (comma-separated)<input id="job-req-exp" type="text" value="${esc(((j.req||{}).expertise||[]).join(', '))}" placeholder="e.g. dementia, hoyer lift" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Minimum years of experience<input id="job-req-years" type="number" min="0" value="${esc((j.req||{}).minYears||'')}" placeholder="0 = no minimum" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <div style="font-size:12px;color:var(--mid);display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding-bottom:2px">
-        ${[['dl','Driver’s license'],['car','Own car'],['personalCare','Personal care'],['lifting','Lift 25 lbs'],['nonSmoker','Non-smoker'],['workauth','Work authorization']].map(([k,lb])=>`<label style="display:flex;gap:4px;align-items:center;font-size:11.5px;cursor:pointer"><input type="checkbox" id="job-req-${k}" ${(j.req||{})[k]?'checked':''} style="accent-color:var(--gold-deep)">${lb}</label>`).join('')}
+        ${[['dl','Driver’s license'],['car','Own car'],['personalCare','Personal care'],['lifting','Lift 50 lbs'],['nonSmoker','Non-smoker'],['workauth','Work authorization']].map(([k,lb])=>`<label style="display:flex;gap:4px;align-items:center;font-size:11.5px;cursor:pointer"><input type="checkbox" id="job-req-${k}" ${(j.req||{})[k]?'checked':''} style="accent-color:var(--gold-deep)">${lb}</label>`).join('')}
       </div>
     </div>
     <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">When a candidate is missing any of the above
