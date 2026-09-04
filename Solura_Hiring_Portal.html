@@ -9040,10 +9040,20 @@ function _autoCancelDoneFor(c){
   return st.autoCancelledFor===undefined||st.autoCancelledFor===String(st.booking||'');
 }
 function _bgFormBlocks(c){
-  /* The BG-form blocker applies only when a Yardstik check was actually initiated — a
-     candidate who was never sent the form cannot be warned/cancelled over it. */
+  /* The BG-form blocker applies only when a BACKGROUND CHECK was actually ordered — a candidate
+     who was never sent the intake form cannot be warned or cancelled over it.
+     Testing the bare existence of st.yardstik was wrong: orderYardstikVerification creates that
+     SAME object for an EMPLOYMENT-VERIFICATION order and writes only verify* fields — no
+     reportId, no status — so _yardstikFormFilled stayed false forever and this returned true
+     forever, with nothing able to clear it (refreshYardstik refuses without reportId/candidateId,
+     and no BG webhook can arrive for a BG check that was never ordered). A verification-only
+     candidate was therefore warned at T-60 about a background-check form they were never sent,
+     and had their interview auto-cancelled at T-30 over it. This is exactly the vocabulary
+     mismatch the bgStarted trigger documents ~45 lines above; use the same BG-only evidence. */
   const ys=c&&c.st&&c.st.yardstik;
-  return !!(ys&&!_yardstikFormFilled(c));
+  if(!ys)return false;
+  const bgOrdered=!!(ys.orderedAt||ys.packageId||ys.applyUrl);
+  return bgOrdered&&!_yardstikFormFilled(c);
 }
 function evalTrigger(name,c){
   if(!name)return false;
@@ -9365,7 +9375,7 @@ function action(c){
     }
   }
   /* All certs in → cross-check hub is the action, until ✓ Done with checks is pressed there. */
-  if(c&&c.st&&c.st.certsReadyReview&&c.stage!=='Hired'&&c.stage!=='Declined'){
+  if(c&&c.st&&c.st.certsReadyReview&&c.stage!=='Hired'&&!_isTerminalStage(c.stage)){
     return{bucket:'action',timing:{txt:'Certs in \u2014 cross-check them',pill:'pnew',date:_fmtBooking(c.st.booking)},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'checks',label:'\ud83d\udccb Cross-check certs',cls:'gold'}};
   }
   /* Job-requirements gate (review policy): came through a job link, doesn't show everything
@@ -15110,8 +15120,20 @@ async function _orderYardstikGo(packageId){
     });
     const data=await r.json();
     if(!r.ok){toast('✗ Order failed: '+(data.error||r.status));return;}
-    /* Worker already wrote st.yardstik to AJ — mirror it locally. */
+    /* Worker already wrote st.yardstik to AJ — mirror it locally.
+       The BACKGROUND-CHECK fields are deliberately replaced wholesale (a re-order is a new report,
+       so the old verdict/PDF/adjudication must not survive it) — but EMPLOYMENT VERIFICATION is a
+       separate Yardstik product that lives in this same object. orderYardstikVerification is
+       careful to leave BG state alone; this path must be equally careful in the other direction.
+       Replacing the object wholesale dropped verifyReportId/verifyPackageId/verifyOrderedAt, which
+       (a) un-set the verifyStarted trigger mid-verification and (b) disarmed the filter in
+       refreshYardstik that stops "newest report on the candidate" from fabricating a BG verdict out
+       of the VERIFICATION report — the exact bug that filter was added to fix. Live: 19 rows carry
+       verify state and 6 sit at Verify employers with an expired/absent BG check, which is exactly
+       the population a re-order targets. */
+    const _pvY=W.st.yardstik||{};
     W.st.yardstik={candidateId:data.candidateId,invitationId:data.invitationId,reportId:data.reportId,status:'created',applyUrl:data.applyUrl,orderedAt:new Date().toISOString(),packageId:packageId};
+    ['verifyReportId','verifyPackageId','verifyOrderedAt'].forEach(k=>{if(_pvY[k])W.st.yardstik[k]=_pvY[k];});
     W.st.tpCheck='pending';
     logW('🛡 Yardstik check ordered ('+packageId+') · candidate '+String(data.candidateId||'').slice(0,8)+'…');
     await saveW(true);
@@ -15530,8 +15552,15 @@ async function _credSave(id,isEdit){
   cred.expiresAt=expires;
   cred.remindDaysBefore=parseInt(get('remind'),10)||60;
   cred.notes=get('notes').trim();
-  /* Keep st.certs in sync — flat string array of names, used by scoring/search/payRange */
-  W.st.certs=W.st.credentials.map(c=>c.name);
+  /* Keep st.certs in sync — flat string array of names, used by scoring/search/payRange.
+     UNION, never assign: st.certs is what the candidate CLAIMED on their application and
+     st.credentials is what we hold on file — two different vocabularies. Overwriting the first
+     with the second silently dropped every claim we had no file for yet, which is the sole input
+     to _missingAppCerts: filing one cert erased the claim for the others, the interview cert gate
+     read 'nothing missing', and the interview ran with a required cert never received and no
+     record it was ever claimed. Same idiom already used when claims are recorded. Shrinking this
+     list is not how a claim is retired — st.certsWaived is (removeAwaitingItem stamps it). */
+  W.st.certs=Array.from(new Set([...(W.st.certs||[]),...W.st.credentials.map(c=>c.name)]));
   logW((isEdit==='true'||isEdit===true?'✎ Edited':'+ Added')+' credential: '+name+' (expires '+expires+')');
   await saveW(true);
   closeModal();
@@ -15545,7 +15574,9 @@ async function removeCredential(id){
   if(!c)return;
   if(!confirm('Remove credential "'+c.name+'"?'))return;
   W.st.credentials=W.st.credentials.filter(x=>x.id!==id);
-  W.st.certs=W.st.credentials.map(c=>c.name);
+  /* UNION, not assign — removing a FILE must not un-claim what they said on the application
+     (that would drop every other claim at the same time). st.certsWaived retires a claim. */
+  W.st.certs=Array.from(new Set([...(W.st.certs||[]),...W.st.credentials.map(c=>c.name)]));
   logW('✕ Removed credential: '+c.name);
   await saveW(true);
   renderWorkspace();
@@ -15649,11 +15680,36 @@ async function refreshYardstik(){
     W.st.yardstik.status=data.status||W.st.yardstik.status;
     W.st.yardstik.lastUpdate=new Date().toISOString();
     if(data.reportUrl)W.st.yardstik.reportUrl=data.reportUrl;
-    /* Map status to tpCheck */
-    if(['clear','proceed','pass'].includes(data.status))W.st.tpCheck='clear';
-    else if(['consider','pre_adverse','ys_qa_review','final_adverse','fail'].includes(data.status))W.st.tpCheck='flag';
+    /* Map status to tpCheck — and settle decisionRequired in the SAME two families, exactly as
+       the worker's webhook branch does. This refresh used to write status+tpCheck and leave
+       decisionRequired untouched, so a report Yardstik itself later resolved kept the "needs a
+       manual decision" flag forever (live: r93 Denise Clark and r89 germya bradley both carried
+       it for three weeks after their reports came back 'proceed', tpCheck 'clear'). It also wrote
+       no log line at all, which is why the silent flip was invisible.
+       An operator adjudication (st.yardstik.decision, written by decideBgReport behind a required
+       note) OUTRANKS a re-read: the portal cannot write adjudications back into Yardstik (see #14
+       in decideBgReport), so Yardstik keeps reporting the pre-adjudication status forever and a
+       refresh would otherwise revert the decision and re-lock the offer hard gate. */
+    const _ysClean=['clear','proceed','pass'].includes(data.status);
+    const _ysFlag=['consider','pre_adverse','ys_qa_review','final_adverse','fail'].includes(data.status);
+    const _ysAdj=(W.st.yardstik&&W.st.yardstik.decision)||'';
+    let _adjHeld=false;
+    if(_ysClean){
+      const _was=W.st.tpCheck,_wasReq=!!W.st.yardstik.decisionRequired;
+      W.st.tpCheck='clear';W.st.yardstik.decisionRequired=false;
+      if(_was!=='clear'||_wasReq)logW('🛡 Yardstik status refreshed → '+data.status+' · check CLEAR');
+    }else if(_ysFlag&&!_ysAdj){
+      const _was=W.st.tpCheck,_wasReq=!!W.st.yardstik.decisionRequired;
+      W.st.tpCheck='flag';W.st.yardstik.decisionRequired=true;
+      if(_was!=='flag'||!_wasReq)logW('⚠ Yardstik status refreshed → '+data.status+' · needs a manual decision');
+    }else if(_ysFlag&&_ysAdj){
+      /* Leave tpCheck and decisionRequired exactly as the adjudication left them. No log line:
+         a refresh can be clicked repeatedly and this branch would otherwise grow the log toward
+         the 32k AJ cap for no new information. The toast below says it instead. */
+      _adjHeld=true;
+    }
     await saveW(true);
-    toast('✓ Status: '+data.status);
+    toast('✓ Status: '+data.status+(_adjHeld?(' — your '+String(_ysAdj).toUpperCase()+' decision stands (Yardstik is not told about adjudications)'):''));
     renderWorkspace();
   }catch(e){toast('✗ Refresh failed: '+e.message);}
 }
@@ -16289,8 +16345,11 @@ async function _doAssignment(messageId,attIdx,cand,item){
           addedBy:window.userEmail||''
         });
       }
-      /* Keep st.certs flat-string array in sync (legacy code reads this) */
-      cand.st.certs=cand.st.credentials.map(c=>c.name);
+      /* Keep st.certs flat-string array in sync (legacy code reads this). UNION, not assign:
+         this is the attachment-assignment path, so replacing the claims with the credential
+         names is precisely the case that erased the still-awaited certs the moment the FIRST
+         one was filed from an email. */
+      cand.st.certs=Array.from(new Set([...(cand.st.certs||[]),...cand.st.credentials.map(c=>c.name)]));
       /* A cert just landed — the interview cert gate should re-open for operator review
          (this was only being set on the narrow parked-queue-drain path before, so certs
          assigned from email never resurfaced a signed-off candidate). */
@@ -22445,6 +22504,12 @@ async function _seqAutomationTick(){
   for(const c of pipeline){
     if(budget<=0)break;
     if(!c.st||!c.st.sequenceId||_isTerminalStage(c.stage))continue;
+    /* Corrupt AJ → never act. Every sibling pass carries this guard and the tick did not.
+       It was masked (pState rebuilds a corrupt row as the default shape, which has no
+       sequenceId, so the line above already skipped it) but the ordering was wrong in
+       principle: the cert lane below performs an IRREVERSIBLE outward act (an email, a
+       Cal.com cancellation) before _stCell ever gets its chance to refuse the write. */
+    if(c.st.__ajCorrupt)continue;
     /* Workspace open on this candidate → skip entirely. Every heal pass has this guard;
        the tick was the one place without it — loadW deep-copies state, so a tick action
        here gets erased by the operator's next saveW and then RE-FIRES (duplicate outward
