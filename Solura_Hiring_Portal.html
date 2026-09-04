@@ -7908,6 +7908,14 @@ function _showSavePreview(diff){
       </div>`;
     }).join('');
     const more=diff.length>40?`<div style="padding:8px;text-align:center;font-size:11px;color:var(--soft);font-style:italic">+ ${diff.length-40} more changes</div>`:'';
+    /* One at a time. _settingsSaveInFlight is set only by _runAutoSave, so a direct caller
+       (addAdmin, saveTemplate, saveScript, setSeqPassword, saveYardstik…) can open modal A
+       and have the 700ms autosave open modal B on top of it — same DOM id, same
+       window._savePreviewResolve. Clicking Apply then removes A (getElementById returns the
+       first in tree order), resolves B, and leaves B's overlay on screen while A's caller
+       waits on a promise nothing will ever settle: addAdmin never resumes and its admin list
+       never repaints. Decline the second request rather than strand the first. */
+    if(document.getElementById('save-preview-modal')){resolve(false);return;}
     const host=document.createElement('div');
     host.id='save-preview-modal';
     host.style.cssText='position:fixed;inset:0;background:rgba(20,18,14,.5);display:flex;align-items:center;justify-content:center;z-index:10001';
@@ -23475,7 +23483,7 @@ function renderSettingsPreferences(){
     return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--border-soft);font-size:12px">
       <span style="color:var(--soft);min-width:110px">${esc(when)}</span>
       <span style="flex:1;color:var(--ink)">${esc(h.reason)}</span>
-      <button class="btn-sm bg-cream" style="cursor:pointer" onclick="_restoreUndoSnapshot(${i})">\u2190 restore this state</button>
+      <button class="btn-sm bg-cream" style="cursor:pointer" onclick="_restoreUndoSnapshot('${esc(h.at)}')">\u2190 restore this state</button>
     </div>`;
   }).join('');
   return `
@@ -23546,7 +23554,15 @@ function _prefsSetHistoryDepth(n){
 /* Restore a snapshot from _undoHistory. Snapshots the CURRENT state first so restoring is reversible. */
 async function _restoreUndoSnapshot(idx){
   const history=SETTINGS._undoHistory||[];
-  const snap=history[idx];
+  /* Key on the snapshot's own stamp, not its position. _pushUndoSnapshot UNSHIFTS, so every
+     save shifts every index by one — and the one editable control on this very panel
+     (_prefsSetHistoryDepth) marks dirty WITHOUT re-rendering, so 700ms later the autosave
+     pushes a snapshot and each rendered row now points one generation newer than the
+     timestamp printed beside it. Clicking "restore this state" on the 2:15pm row restored
+     something else and then persisted it over the primary file. Lowering the depth was worse:
+     the array truncates and the lower rows restore the wrong state while the rest report
+     "Snapshot not found". Numeric idx still works for any caller that passes one. */
+  const snap=(typeof idx==='string')?history.find(h=>h&&h.at===idx):history[idx];
   if(!snap){toast('Snapshot not found');return;}
   const when=new Date(snap.at).toLocaleString();
   if(!confirm('Restore settings to the state from '+when+'?\n\n('+ (snap.reason||'save') +')\n\nYour current state will be saved as a new snapshot so you can restore back if needed.'))return;
@@ -24052,6 +24068,14 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.sty
       if(!zt)return;
       SETTINGS._savedAt=new Date().toISOString();SETTINGS._gen=(Number(SETTINGS._gen)||0)+1;
       const persist=Object.assign({},SETTINGS);delete persist._undoHistory;
+      /* Write the CACHE too, or this flush hands the next session a tier that is one
+         generation behind the file it just wrote. Close the tab inside the 700ms debounce and
+         the file goes to gen N+1 while localStorage (and AL1) stay at gen N; if the worker is
+         briefly unreachable next time, the fallback picks the newest of those two — both
+         stale — and the session runs an edit behind, now locked read-only by the provenance
+         gate so it cannot correct itself. The edits keepalive exists to rescue were exactly
+         the ones missing from the last-resort tier. Synchronous, so pagehide always completes it. */
+      try{localStorage.setItem('solura_settings',JSON.stringify(persist));}catch(e){}
       fetch(ZI_WORKER_URL+'/settings',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-Solura-Token':zt},body:JSON.stringify({settings:persist})});
     }catch(e){}
   });
