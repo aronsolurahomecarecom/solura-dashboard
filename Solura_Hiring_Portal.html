@@ -8572,6 +8572,17 @@ async function _seqV3RepairPass(){
     /* Re-entrancy: loadData/backfill/auto-link can each fire this chain; a stale instance
        iterating the OLD pipeline array after loadData replaced it would patch AJ with
        stale state. One instance at a time + abort if the pipeline was swapped underneath. */
+    /* HOLD WHILE THE SEQUENCE EDITOR IS OPEN, the same discipline as _wsOpenOn. The builder
+       deep-clones SETTINGS.sequences/assignments/packs at MOUNT and hands the whole snapshot
+       back on save, and nothing re-mounts it on the 30s refresh — so anything this pass adds
+       meanwhile (a minted Classic flow + Claude screen, a repaired ★ assignment) is reverted
+       wholesale by the operator's next Save. The candidates this pass had already stamped
+       onto that sequence keep naming it in their AJ cells, and the NEXT repair pass reads
+       that as "their sequence was deleted" and moves the whole cohort onto the ★default —
+       a bulk sequence switch with no operator action, which is exactly what tag-for-life
+       (rule 6) forbids. The pass is idempotent and runs on every load, so waiting for the
+       editor to close costs nothing. */
+    if(document.getElementById('seqv3-builder-mount'))return;
     if(window._seqRepairRunning)return;window._seqRepairRunning=true;
     const _myPipe=pipeline;
     try{
@@ -8603,7 +8614,15 @@ async function _seqV3RepairPass(){
       if(!target)target=base; /* fail-safe: plain Classic flow still has proper session steps */
     }
     if(!target)return;
-    if(window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[])!==target.id){
+    /* Only re-star when the ★ points at NOTHING. _starred requires steps.length, so starring a
+       sequence in the builder before adding steps to it — the ordinary order of doing that —
+       left _starred undefined, target fell through to Classic flow + Claude screen, and the
+       operator's brand-new default was silently moved back and persisted. Unlike the
+       legacy-shape heal this was not gated by _seqDefaultHealedV1, so it repeated every load.
+       An empty starred sequence is still the operator's stated choice; repairs simply use a
+       usable target for the candidates without touching the star. */
+    const _defStillExists=(SETTINGS.sequences||[]).some(q=>q.id===_defId);
+    if(!_defStillExists&&window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[])!==target.id){
       SETTINGS.sequenceAssignments=window.SeqBuilderV3.setDefaultSequence(SETTINGS.sequenceAssignments||[],target.id);
       markSettingsDirty();
     }
@@ -19875,7 +19894,13 @@ function _docTplCapture(){
   const key=ta.dataset.key;
   const def=(DOC_TEMPLATE_DEFAULTS[key]||{}).b||'';
   SETTINGS.docTemplates=SETTINGS.docTemplates||{};
+  /* An edit that lands ON the built-in wording, or clears the box, is still an edit — it means
+     "go back to the default". The if had no else, so the PREVIOUS override stayed in
+     SETTINGS.docTemplates while saveDocTemplate toasted "✓ Template saved" and renderSettings
+     repainted the textarea from that override: the operator watched their change revert under
+     a success message. Dropping the key is exactly what revertDocTemplate does. */
   if(ta.value.trim()&&ta.value!==def)SETTINGS.docTemplates[key]={b:ta.value};
+  else delete SETTINGS.docTemplates[key];
 }
 function saveDocTemplate(){
   _docTplCapture();
@@ -23785,7 +23810,16 @@ function saveConfigSilent(){
   if(get('cfg_requiredCerts'))SETTINGS.config.requiredCerts=get('cfg_requiredCerts').value.split(',').map(s=>s.trim()).filter(Boolean);
   if(get('cfg_requiredCertGroup')){
     const opts=get('cfg_requiredCertGroup').value.split(',').map(s=>s.trim()).filter(Boolean);
-    SETTINGS.config.requiredCertGroups=opts.length?[{label:'Care credential (one minimum)',options:opts}]:[];
+    /* Write back into the EXISTING array. The editor renders group [0] only, but
+       missingRequiredCerts iterates every group — and this runs from the delegated change
+       handler on ANY input in the section, so a config carrying two or more groups (reachable
+       through importSettings, which does no schema normalisation) lost groups 2..n, and its
+       label, the first time the operator touched something unrelated like the pay floor.
+       Candidates gated on the second group would quietly have started passing. */
+    const _gs=Array.isArray(SETTINGS.config.requiredCertGroups)?SETTINGS.config.requiredCertGroups:[];
+    if(opts.length)_gs[0]=Object.assign({label:'Care credential (one minimum)'},_gs[0]||{},{options:opts});
+    else _gs.splice(0,1);
+    SETTINGS.config.requiredCertGroups=_gs;
   }
 }
 
