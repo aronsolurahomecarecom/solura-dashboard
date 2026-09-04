@@ -7636,7 +7636,14 @@ async function loadSettings(){
              very last fallback. */
           try{const _c=Object.assign({},SETTINGS);delete _c._undoHistory;localStorage.setItem('solura_settings',JSON.stringify(_c));}catch(e){}
         }else{
-          load.errors.push('Worker file exists but is empty');
+          /* The GET SUCCEEDED and the file holds nothing. That is a different fact from "this
+         session is running on a stale fallback", and the save gate below needs to tell them
+         apart: an empty primary has nothing that a save could overwrite. Without this flag a
+         file that is empty — a fresh install, or the known worker path that could write {} —
+         degrades every session to AL1/cache forever, and the gate then refuses the only code
+         that could ever repopulate the file. Nothing in the portal could break that loop. */
+      load.primaryEmpty=true;
+      load.errors.push('Worker file exists but is empty');
         }
       }else{
         load.errors.push('Worker GET /settings returned '+r.status);
@@ -7939,8 +7946,16 @@ async function _saveSettingsInternal(){
      load → the portal silently fell back to a months-stale AL1 mirror / browser cache →
      the heal chain marked settings dirty → 700ms later the autosave OVERWROTE the real
      primary with the ancient copy. A degraded load may NEVER auto-save over the primary. */
-  const _loadSrc=(window._lastSettingsLoadStatus||{}).source;
-  if(_loadSrc&&_loadSrc!=='workerFile'){
+  /* 'unloaded', NOT undefined. The status is stamped at the very END of loadSettings, and the
+     worker fetch inside it has no timeout — so during a cold start or a network stall the
+     source is undefined and `_loadSrc&&` short-circuited the whole gate OPEN. markSettingsDirty
+     has a boot guard, but ~8 callers reach saveSettings() directly (forceSaveAndVerify,
+     addAdmin, removeAdmin, importSettings, saveScoringEngine, _restoreUndoSnapshot, adAddCustom,
+     saveAdd), and at that moment SETTINGS is still the module defaults. A session that cannot
+     say where its settings came from must not write them anywhere. */
+  const _loadSrc=(window._lastSettingsLoadStatus||{}).source||'unloaded';
+  const _primaryEmpty=(window._lastSettingsLoadStatus||{}).primaryEmpty===true;
+  if(_loadSrc!=='workerFile'&&!_primaryEmpty){
     status.errors.push('Refused: settings were loaded from the '+_loadSrc+' fallback, not the primary file — saving would overwrite newer settings with this stale copy. Reload the portal once the worker is reachable.');
     window._lastSettingsSaveStatus=status;
     /* Nearly every caller — saveTemplate, saveScript, importSettings, addAdmin, seqSave, the
@@ -7986,10 +8001,15 @@ async function _saveSettingsInternal(){
     /* NOTE: admins must be non-EMPTY and payFloor non-default — the default scaffold has
        admins:[] (truthy!) and payFloor:14, which made this guard dead code: pure defaults
        passed every clause and were happily saved over real settings. */
-    (SETTINGS.config&&((SETTINGS.config.admins&&SETTINGS.config.admins.length)||SETTINGS.config.serviceZips||
+    /* serviceZips, calOnboardingUrl and applyFormUrl were removed from this clause: all three
+       ship with a non-empty value in the module default scaffold, so testing them for TRUTH
+       made the whole OR true for a pure-defaults object — the guard has now been dead three
+       times over (admins:[] was truthy, then _savedAt was read after being stamped, now this).
+       Everything left is either absent from the defaults or genuinely operator-entered. */
+    (SETTINGS.config&&((SETTINGS.config.admins&&SETTINGS.config.admins.length)||
       SETTINGS.config.vr||SETTINGS.config.bandThresholds||SETTINGS.config.qualityWeights||SETTINGS.config.retentionWeights||
       SETTINGS.config.customQuestions||SETTINGS.config.fastTrackEnabled!==undefined||SETTINGS.config.ziToken||
-      SETTINGS.config.calScreenUrl||SETTINGS.config.calInterviewUrl||SETTINGS.config.calOnboardingUrl||SETTINGS.config.applyFormUrl||SETTINGS.config.yardstikVerifyPackageId))||
+      SETTINGS.config.calScreenUrl||SETTINGS.config.calInterviewUrl||SETTINGS.config.yardstikVerifyPackageId))||
     (SETTINGS.scoringWeights)||
     (SETTINGS.flow&&SETTINGS.flow.custom&&SETTINGS.flow.custom.length)||
     (SETTINGS.massSends&&SETTINGS.massSends.length)||
@@ -21354,7 +21374,7 @@ async function saveZiToken(){
      reads either one, but keeping them in sync means a browser that only ever goes through this
      panel is indistinguishable from one that has completed a full settings save. */
   try{localStorage.setItem('solura_zi_token',tok);localStorage.setItem('solura_internal_token',tok);}catch(e){}
-  let saveOk=false,tooBig=false;
+  let saveOk=false,tooBig=false,mirrorHeld=false;
   /* This is the ONE settings writer that runs before a worker token exists, so it deliberately
      writes the AL1 mirror instead of the primary file. It must still obey the two rules every
      other persistence writer obeys: strip _undoHistory (browser-local only) and never hand a
@@ -21366,7 +21386,19 @@ async function saveZiToken(){
      solura_zi_token), which is written above. */
   const _persist=Object.assign({},SETTINGS);delete _persist._undoHistory;
   const _json=JSON.stringify(_persist);
-  if(_json.length>32000){
+  /* RULE 7 APPLIES HERE TOO. This is the one settings writer that skipped the provenance
+     gate entirely — and it writes the AL1 mirror, the tier a degraded session is most likely
+     to be running FROM. A throttled AL1 read plus a cold cache leaves SETTINGS as defaults or
+     a stale copy; the operator's natural next move is Settings → Integrations → paste token →
+     Save token, and that wrote those defaults straight over the mirror, unstamped, so the
+     next fallback load's _savedAt comparison sees an old stamp on brand-new wrong content.
+     _saveSettingsInternal refuses this exact write; this path never asked. Holding it costs
+     nothing: the token's real home for this purpose is localStorage (written above), which is
+     where loadSettings reads it back from. */
+  const _degraded=((window._lastSettingsLoadStatus||{}).source||'unloaded')!=='workerFile';
+  if(_degraded){
+    mirrorHeld=true;
+  }else if(_json.length>32000){
     tooBig=true;
   }else{
     try{
@@ -21377,7 +21409,8 @@ async function saveZiToken(){
       toast('⚠ Saved locally only — could not reach Excel sheet. Will retry on next page load.');
     }
   }
-  if(tooBig)toast('✓ ZoomInfo token saved to this browser — settings are too large for the AL1 mirror, so the sheet copy was skipped.');
+  if(mirrorHeld)toast('✓ Token saved to this browser — settings came from a fallback copy this session, so the AL1 mirror was left untouched. Reload once the worker is reachable.');
+  else if(tooBig)toast('✓ ZoomInfo token saved to this browser — settings are too large for the AL1 mirror, so the sheet copy was skipped.');
   else if(saveOk)toast('✓ ZoomInfo token saved (sheet + local backup)');
   renderSettings();
 }
@@ -21659,7 +21692,13 @@ async function forceSaveAndVerify(){
            one control that answers "are my settings actually safe?" crying wolf permanently. */
         const _mem=Object.assign({},SETTINGS);delete _mem._undoHistory;
         const memJson=JSON.stringify(_mem);
-        verifyOk=fileJson.length>0&&fileJson.length>=memJson.length*0.95;
+        /* Ask whether OUR save landed, not merely whether the file looks big. verifyOk never
+         consulted `status`, so a save the provenance gate REFUSED still read the (healthy,
+         full) file back and reported "✓ Hard-saved and verified — settings are safe in
+         SharePoint". Memory in that session comes from the <=32k AL1/cache tier, so the file
+         comfortably clears the 95% test and the one control that answers "are my settings
+         safe?" is the one that lies. Same for a save the operator cancelled. */
+      verifyOk=!!(status&&status.workerFile)&&fileJson.length>0&&fileJson.length>=memJson.length*0.95;
       }
     }
   }catch(e){console.warn('Verify failed:',e.message);}
