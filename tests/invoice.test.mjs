@@ -18,7 +18,7 @@ const src = html.slice(html.indexOf('*/', b) + 2, e);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cfgStore = {};
 const mk = new Function('cfg', 'lc', 'escapeHtml',
-  src + '\nreturn {DEFAULT_INVOICE_FROM,DEFAULT_INVOICE_SUBJECT,DEFAULT_INVOICE_TEMPLATE,invoiceCfg,isOnService,fmtMoney,invPrettyDate,fillInvoiceTokens,resolveDiscount};');
+  src + '\nreturn {DEFAULT_INVOICE_FROM,DEFAULT_INVOICE_SUBJECT,DEFAULT_INVOICE_TEMPLATE,invoiceCfg,isOnService,fmtMoney,invPrettyDate,fillInvoiceTokens,resolveDiscount,resolveDiscounts};');
 const I = mk(k => cfgStore[k], v => String(v || '').toLowerCase().trim(), esc);
 
 // ── status gate ──
@@ -69,9 +69,29 @@ ok(I.resolveDiscount('', 960).amt === 0 && I.resolveDiscount('free', 960).amt ==
   const custom = I.fillInvoiceTokens('<p>{subtotal} minus {discount} = {amount}</p>', Object.assign({}, F, { discount: '60', amount: '900' }));
   ok(custom === '<p>$960.00 minus $60.00 = $900.00</p>', 'granular {subtotal}/{discount} tokens work in custom templates');
 }
-ok(/hours × rate − discount/.test(html), 'modal explains the discount math');
-ok(/id="inv-discount"/.test(html) && /t\.id==='inv-discount'/.test(html), 'discount field wired into the live autocalc');
-ok(/resolveDiscount\(f\.discount,n\)/.test(html), 'send-time amount fallback subtracts the discount too');
+// ── multiple discounts + attachments (B-0907-77) ──
+{
+  const multi = I.resolveDiscounts([{ label: 'Veteran', value: '10%' }, { label: 'Referral credit', value: '50' }, { label: 'junk', value: 'nope' }], 960);
+  ok(multi.total === 146 && multi.items.length === 2, 'discounts stack (10% of 960 + $50 = $146), junk skipped');
+  ok(multi.items[0].label === 'Veteran' && multi.items[0].pct === '10%', 'labels and percent tags survive');
+  ok(I.resolveDiscounts([{ value: '10%' }, { value: '5%' }], 1000).total === 150, 'each percent resolves against the SUBTOTAL (10%+5% = 15%)');
+  ok(I.resolveDiscounts([], 960).total === 0 && I.resolveDiscounts(null, 960).total === 0, 'empty list → zero');
+  const dm = I.fillInvoiceTokens(I.DEFAULT_INVOICE_TEMPLATE, Object.assign({}, F, {
+    discounts: [{ label: 'Veteran', value: '10%' }, { label: '', value: '50' }], amount: '814' }));
+  ok(dm.indexOf('Veteran (10%)') > -1 && dm.indexOf('−$96.00') > -1, 'labeled percent discount gets its own invoice line');
+  ok(dm.indexOf('>Discount<') > -1 && dm.indexOf('−$50.00') > -1, 'unlabeled discount falls back to plain Discount line');
+  ok(dm.indexOf('Subtotal') > -1 && dm.indexOf('$960.00') > -1 && dm.indexOf('$814.00') > -1, 'subtotal + net amount both shown');
+  const dEvil = I.fillInvoiceTokens('<div>{discountrow}</div>', Object.assign({}, F, { discounts: [{ label: '<img onerror=x>', value: '5' }] }));
+  ok(dEvil.indexOf('<img') === -1 && dEvil.indexOf('&lt;img') > -1, 'discount labels are HTML-escaped');
+  ok(I.fillInvoiceTokens('<p>{discount}</p>', Object.assign({}, F, { discount: '60' })).indexOf('$60.00') > -1, 'legacy single-string discount still fills');
+}
+ok(/id="inv-discounts"/.test(html) && /inv-add-disc/.test(html) && /inv-del-disc/.test(html), 'discount list UI wired (add/remove rows)');
+ok(/inv-disc-val/.test(html) && /invRecalcAmount\(\)/.test(html), 'discount rows feed the live amount recalc');
+ok(/resolveDiscounts\(f\.discounts,n\)/.test(html), 'send-time amount fallback subtracts ALL discounts');
+ok(/id="inv-file"/.test(html) && /inv-attach/.test(html) && /inv-del-att/.test(html), 'attachment picker wired (add/remove chips)');
+ok(/payload\.message\.attachments=_invAtts\.map/.test(html), 'attachments ride the invoice send as fileAttachments');
+ok(/under ~2\.5 MB total/.test(html), 'oversize attachments refused with guidance before sending');
+ok(/_invAtts=\[\];_invDiscounts=\[\];/.test(html) && /_invDiscounts=\[\];_invAtts=\[\];/.test(html), 'state resets on open AND after send');
 
 // ── send-path + UI wiring (source locks) ──
 ok(/Mail\.Send\.Shared/.test(html) && (html.match(/Mail\.Send\.Shared/g) || []).length >= 2, 'Mail.Send.Shared scope requested on auth AND refresh');

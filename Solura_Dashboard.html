@@ -763,15 +763,25 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div class="la-f"><label>Service period — from</label><input type="date" id="inv-from-date"></div>
         <div class="la-f"><label>Service period — to</label><input type="date" id="inv-to-date"></div>
       </div>
-      <div class="la-grid g3" style="margin-bottom:10px">
+      <div class="la-grid g2" style="margin-bottom:10px">
         <div class="la-f"><label>Hours of care</label><input type="number" min="0" step="0.5" id="inv-hours"></div>
         <div class="la-f"><label>Hourly rate ($)</label><input type="number" min="0" step="0.01" id="inv-rate"></div>
-        <div class="la-f"><label>Discount ($ or %)</label><input type="text" id="inv-discount" placeholder="e.g. 50 or 10%"></div>
+      </div>
+      <div class="la-f" style="margin-bottom:10px">
+        <label>Discounts (each takes flat $ or % — every one gets its own line on the invoice)</label>
+        <div id="inv-discounts"></div>
+        <button data-action="inv-add-disc" style="padding:6px 12px;background:none;border:1.5px dashed var(--border);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">＋ Add discount</button>
       </div>
       <div class="la-grid g3" style="margin-bottom:10px">
         <div class="la-f"><label>Amount due ($)</label><input type="number" min="0" step="0.01" id="inv-amount" placeholder="auto"></div>
         <div class="la-f"><label>Due date</label><input type="date" id="inv-due"></div>
-        <div class="la-f"><label>&nbsp;</label><div style="font-size:11px;color:var(--soft);padding-top:8px">Amount = hours × rate − discount. Type over it to override. A discount shows as its own line on the invoice.</div></div>
+        <div class="la-f"><label>&nbsp;</label><div style="font-size:11px;color:var(--soft);padding-top:8px">Amount = hours × rate − discounts. Type over it to override.</div></div>
+      </div>
+      <div class="la-f" style="margin-bottom:10px">
+        <label>Attachments (optional — e.g. a PDF invoice or timesheet; ~2.5 MB total)</label>
+        <input type="file" id="inv-file" multiple style="display:none">
+        <div id="inv-att-list" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"></div>
+        <button data-action="inv-attach" style="padding:6px 12px;background:none;border:1.5px dashed var(--border);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">📎 Attach file(s)</button>
       </div>
       <div class="la-f" style="margin-bottom:12px"><label>Notes (optional — appears as a highlighted block on the invoice)</label><textarea id="inv-notes" rows="3" style="width:100%" placeholder="e.g. Includes the two extra weekend shifts we discussed."></textarea></div>
       <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end">
@@ -1562,7 +1572,7 @@ var C={
              //    regular touch of cycle 4 done, beside-special #1 due now.
              //    SAFE add: every full-width writer spans A:AD and never touches AE.
 };
-var BUILD='B-0907-76';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0907-77';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2415,6 +2425,18 @@ function resolveDiscount(raw,subtotal){
   if(isNaN(n)||n<=0)return {amt:0,label:''};
   return {amt:Math.round(n*100)/100,label:''};
 }
+// Several discounts stack; each percent resolves against the SUBTOTAL
+// (not the running remainder), so "10% + 5%" always means 15% of subtotal.
+function resolveDiscounts(list,subtotal){
+  var items=[],total=0;
+  (list||[]).forEach(function(d){
+    var r=resolveDiscount(d&&d.value,subtotal);
+    if(r.amt<=0)return;
+    items.push({label:String((d&&d.label)||'').trim(),amt:r.amt,pct:r.label});
+    total+=r.amt;
+  });
+  return {total:Math.round(total*100)/100,items:items};
+}
 // "2026-09-01" → "Sep 1, 2026" (anything else passes through untouched)
 function invPrettyDate(iso){
   var m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -2433,14 +2455,18 @@ function fillInvoiceTokens(tpl,f){
   // when a discount is actually given.
   var subN=parseFloat(f.hours)*parseFloat(f.rate);
   if(isNaN(subN))subN=parseFloat(String(f.subtotal||f.amount||'').replace(/[$,]/g,''));
-  var disc=resolveDiscount(f.discount,subN);
+  // Accept a discounts LIST (each {label,value}) or the legacy single string
+  var dList=f.discounts||(String(f.discount||'').trim()?[{label:'',value:f.discount}]:[]);
+  var dRes=resolveDiscounts(dList,subN);
   var discountRow='';
-  if(disc.amt>0){
+  if(dRes.total>0){
     var tdL='padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700';
     var tdR='padding:9px 12px;border:1px solid #e4ddcf';
-    discountRow=
-      '<tr><td style="'+tdL+'">Subtotal</td><td style="'+tdR+'">'+fmtMoney(subN)+'</td></tr>'
-      +'<tr><td style="'+tdL+'">Discount'+(disc.label?(' ('+disc.label+')'):'')+'</td><td style="'+tdR+';color:#1f4d3a;font-weight:700">−'+fmtMoney(disc.amt)+'</td></tr>';
+    discountRow='<tr><td style="'+tdL+'">Subtotal</td><td style="'+tdR+'">'+fmtMoney(subN)+'</td></tr>'
+      +dRes.items.map(function(it){
+        var lbl=(it.label||'Discount')+(it.pct?(' ('+it.pct+')'):'');
+        return '<tr><td style="'+tdL+'">'+escapeHtml(lbl)+'</td><td style="'+tdR+';color:#1f4d3a;font-weight:700">−'+fmtMoney(it.amt)+'</td></tr>';
+      }).join('');
   }
   var notesBlock=String(f.notes||'').trim()
     ?('<div style="background:#f6f1e6;border:1px solid #e4ddcf;border-radius:8px;padding:12px 14px;font-size:13.5px;line-height:1.55"><b>Notes</b><br>'
@@ -2457,14 +2483,42 @@ function fillInvoiceTokens(tpl,f){
     .replace(/\{due\}/gi,invPrettyDate(f.due))
     .replace(/\{date\}/gi,invPrettyDate(f.date))
     .replace(/\{subtotal\}/gi,isNaN(subN)?'':fmtMoney(subN))
-    .replace(/\{discount\}/gi,disc.amt>0?fmtMoney(disc.amt):'')
+    .replace(/\{discount\}/gi,dRes.total>0?fmtMoney(dRes.total):'')
     .replace(/\{discountrow\}/gi,discountRow)
     .replace(/\{notes\}/gi,notesBlock);
 }
 /* 🧾 INVOICING — END */
-var _invRi=-1,_invAmountTouched=false;
+var _invRi=-1,_invAmountTouched=false,_invDiscounts=[],_invAtts=[];
+function renderInvDiscounts(){
+  var host=el('inv-discounts');if(!host)return;
+  host.innerHTML=_invDiscounts.map(function(d,i){
+    return '<div style="display:flex;gap:6px;margin-bottom:6px">'
+      +'<input type="text" class="inv-disc-label" data-idx="'+i+'" placeholder="Label (e.g. Veteran discount)" value="'+escapeHtml(d.label||'')+'" style="flex:1">'
+      +'<input type="text" class="inv-disc-val" data-idx="'+i+'" placeholder="50 or 10%" value="'+escapeHtml(d.value||'')+'" style="width:110px">'
+      +'<button data-action="inv-del-disc" data-idx="'+i+'" style="background:none;border:1.5px solid var(--border);border-radius:8px;color:var(--red);cursor:pointer;font-family:inherit;padding:0 10px">✕</button>'
+      +'</div>';
+  }).join('')||'<div style="font-size:11px;color:var(--soft);margin-bottom:6px">No discounts.</div>';
+}
+function renderInvAtts(){
+  var host=el('inv-att-list');if(!host)return;
+  host.innerHTML=_invAtts.map(function(a,i){
+    return '<span style="display:inline-flex;align-items:center;gap:5px;background:var(--cream,#f6f1e6);border:1px solid var(--border);border-radius:14px;padding:4px 10px;font-size:11.5px">📎 '
+      +escapeHtml(a.name)+' <span style="color:var(--soft)">'+Math.max(1,Math.round(a.size/1024))+' KB</span>'
+      +' <b data-action="inv-del-att" data-idx="'+i+'" style="cursor:pointer;color:var(--red)">×</b></span>';
+  }).join('');
+}
+function invRecalcAmount(){
+  if(_invAmountTouched)return;
+  var ia=el('inv-amount');if(!ia)return;
+  var ih=parseFloat((el('inv-hours')||{}).value),ir=parseFloat((el('inv-rate')||{}).value);
+  if(isNaN(ih)||isNaN(ir)){ia.value='';return;}
+  var sub=ih*ir;
+  ia.value=String(Math.round(Math.max(0,sub-resolveDiscounts(_invDiscounts,sub).total)*100)/100);
+}
 function openInvoice(ri){
   _invRi=ri;_invAmountTouched=false;
+  _invDiscounts=[];_invAtts=[];
+  renderInvDiscounts();renderInvAtts();
   var r=rows[ri]||[];
   var ic=invoiceCfg();
   el('inv-title').textContent='🧾 Send invoice — '+(String(r[C.NM]||r[C.DM]||'').trim()||'Client');
@@ -2476,7 +2530,7 @@ function openInvoice(ri){
   el('inv-from-date').value=ds(new Date(t.getFullYear(),t.getMonth(),1));
   el('inv-to-date').value=ds(t);
   el('inv-due').value=ds(addDays(t,14));
-  el('inv-hours').value='';el('inv-rate').value='';el('inv-discount').value='';el('inv-amount').value='';
+  el('inv-hours').value='';el('inv-rate').value='';el('inv-amount').value='';
   el('inv-notes').value='';
   el('inv-out').textContent='';
   el('modal-invoice').classList.add('open');
@@ -2488,7 +2542,7 @@ function invFields(){
     to:String(el('inv-to-date').value||'').trim(),
     hours:String(el('inv-hours').value||'').trim(),
     rate:String(el('inv-rate').value||'').trim(),
-    discount:String(el('inv-discount').value||'').trim(),
+    discounts:_invDiscounts.map(function(d){return {label:d.label,value:d.value};}),
     amount:String(el('inv-amount').value||'').trim(),
     due:String(el('inv-due').value||'').trim(),
     notes:String(el('inv-notes').value||''),
@@ -2498,7 +2552,7 @@ function invFields(){
   if(!f.amount&&f.hours&&f.rate){
     var n=parseFloat(f.hours)*parseFloat(f.rate);
     if(!isNaN(n)){
-      n=Math.max(0,n-resolveDiscount(f.discount,n).amt);
+      n=Math.max(0,n-resolveDiscounts(f.discounts,n).total);
       f.amount=String(Math.round(n*100)/100);
     }
   }
@@ -2526,6 +2580,8 @@ async function invSend(){
   var em=invBuildEmail();
   if(!em.to||em.to.indexOf('@')<1){out.style.color='var(--red)';out.textContent='✗ Enter a valid recipient email.';return;}
   if(!em.fields.amount){out.style.color='var(--red)';out.textContent='✗ Fill in the amount (or hours × rate).';return;}
+  var attBytes=_invAtts.reduce(function(s,a){return s+a.size;},0);
+  if(attBytes>2.5*1024*1024){out.style.color='var(--red)';out.textContent='✗ Attachments total '+Math.round(attBytes/1024/1024*10)/10+' MB — keep invoice attachments under ~2.5 MB total. For big files, use the regular ✉ email composer (it handles large uploads).';return;}
   if(spin)spin.style.display='inline-flex';
   out.style.color='var(--mid)';out.textContent='Sending from '+em.from+'…';
   try{
@@ -2535,6 +2591,11 @@ async function invSend(){
       toRecipients:[{emailAddress:{address:em.to}}],
       from:{emailAddress:{address:em.from}}
     },saveToSentItems:true};
+    if(_invAtts.length){
+      payload.message.attachments=_invAtts.map(function(a){
+        return {'@odata.type':'#microsoft.graph.fileAttachment',name:a.name,contentType:a.type,contentBytes:a.dataBase64};
+      });
+    }
     var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify(payload)});
     if(!(res.ok||res.status===202)){
       var ee=await res.json().catch(function(){return{};});
@@ -2557,7 +2618,7 @@ async function invSend(){
     traceOp({kind:'invoice-sent',to:em.to,from:em.from,no:em.fields.invno,amount:em.fields.amount});
     el('modal-invoice').classList.remove('open');
     toast('🧾 Invoice '+em.fields.invno+' sent from '+em.from);
-    _invRi=-1;
+    _invRi=-1;_invAtts=[];_invDiscounts=[];
   }catch(e){
     out.style.color='var(--red)';
     out.textContent='✗ '+e.message;
@@ -6185,18 +6246,13 @@ document.addEventListener('input',function(ev){
       }else asgnState[i][parts[1]]=t.value;
     }
   }
-  // 🧾 Invoice amount auto-fills from hours × rate − discount until typed over
+  // 🧾 Invoice amount auto-fills from hours × rate − discounts until typed over
   if(t&&t.id==='inv-amount')_invAmountTouched=true;
-  if(t&&(t.id==='inv-hours'||t.id==='inv-rate'||t.id==='inv-discount')&&!_invAmountTouched){
-    var ih=parseFloat((el('inv-hours')||{}).value),ir=parseFloat((el('inv-rate')||{}).value);
-    var ia=el('inv-amount');
-    if(ia){
-      if(!isNaN(ih)&&!isNaN(ir)){
-        var sub9=ih*ir;
-        var net9=Math.max(0,sub9-resolveDiscount((el('inv-discount')||{}).value,sub9).amt);
-        ia.value=String(Math.round(net9*100)/100);
-      }else ia.value='';
-    }
+  if(t&&(t.id==='inv-hours'||t.id==='inv-rate'))invRecalcAmount();
+  if(t&&t.classList&&(t.classList.contains('inv-disc-label')||t.classList.contains('inv-disc-val'))){
+    var di=parseInt(t.dataset.idx,10);
+    if(_invDiscounts[di])_invDiscounts[di][t.classList.contains('inv-disc-val')?'value':'label']=t.value;
+    if(t.classList.contains('inv-disc-val'))invRecalcAmount();
   }
   // Claude training-section fields → straight into config, dirty-bar saves
   if(t&&t.dataset&&t.dataset.cts){
@@ -6299,6 +6355,19 @@ document.addEventListener('change',function(ev){
     importEnginePackage(t.files[0]);
     t.value='';
     if(t.id==='eng-import-input2')closeModal('modal-engine-editor');
+  }
+  // 🧾 Invoice attachments — read as base64, chip-listed, removable
+  if(t&&t.id==='inv-file'&&t.files&&t.files.length){
+    Array.prototype.slice.call(t.files).forEach(function(file){
+      var fr=new FileReader();
+      fr.onload=function(){
+        _invAtts.push({name:file.name,type:file.type||'application/octet-stream',
+          size:file.size,dataBase64:String(fr.result).split(',')[1]});
+        renderInvAtts();
+      };
+      fr.readAsDataURL(file);
+    });
+    t.value='';
   }
   // Cadence switch on a phase — converts with sensible defaults
   if(t&&t.dataset&&t.dataset.eecad!=null&&esState){
@@ -12178,6 +12247,21 @@ function onClick(ev){
       break;
     case 'open-invoice':
       openInvoice(parseInt(t.dataset.ri,10));
+      break;
+    case 'inv-add-disc':
+      _invDiscounts.push({label:'',value:''});
+      renderInvDiscounts();
+      break;
+    case 'inv-del-disc':
+      _invDiscounts.splice(parseInt(t.dataset.idx,10),1);
+      renderInvDiscounts();invRecalcAmount();
+      break;
+    case 'inv-attach':
+      if(el('inv-file'))el('inv-file').click();
+      break;
+    case 'inv-del-att':
+      _invAtts.splice(parseInt(t.dataset.idx,10),1);
+      renderInvAtts();
       break;
     case 'inv-preview':
       invPreview();
