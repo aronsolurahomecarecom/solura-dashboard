@@ -14447,7 +14447,14 @@ async function skipEmployerVerification(){
   const i=stages.indexOf('Verify employers');
   const here=stages.indexOf(W.stage);
   const next=(i>=0&&stages[i+1])?stages[i+1]:null;
-  const moving=!!next&&(here<0||here<=i);
+  /* `here<0` means their CURRENT stage is not one of their sequence's stage steps — the direction of a
+     move is then unknowable, so it must not happen. The guard shipped inverted (b64d3b4) and read the
+     unknown case as permission: measured live, 14 of the 50 rows carrying employers were still movable,
+     13 of them DECLINED (terminal stages are never stage steps, so `here` is always -1 there — Skip would
+     have resurrected them to 'References') and one standing at 'References' in a sequence whose step is
+     named 'Ask references', who would have been written to 'Interview invite'. Fail closed: record the
+     waiver, leave column G alone (rule 2). */
+  const moving=!!next&&here>=0&&here<=i;
   if(moving)W.stage=next;
   await saveW(true);
   toast(moving?('⏭ Verification skipped — moved to '+next):'⏭ Verification waived — stage left as '+W.stage);
@@ -18121,7 +18128,17 @@ async function backgroundRefresh(){
     updateInboxBadge();
   }catch(e){console.warn('BG render:',e.message);}
   /* The tick's re-entrancy mutex is released HERE, in the sole caller's finally, so that a throw escaping the tick (patchRange sits outside its per-candidate try/catch) can never leave window._seqTickRunning stuck true and silently disable automation for the rest of the session. Any future call site must do the same. */
-  try{await _seqAutomationTick();}catch(e){console.warn('Automation tick:',e.message);}finally{window._seqTickRunning=false;}
+  /* …but ONLY the call that actually took the mutex may release it. backgroundRefresh is not
+     serialized with itself — `setInterval(…,30000)` (24385) never waits for the previous run, and the
+     window 'focus' listener (24379) fires another one on every alt-tab back — so overlapping runs are
+     ordinary, not a rare race. When run B reached this line while run A's tick was mid-send, B was
+     turned away by the guard (22699) and then B's own finally cleared A's flag: the next run walked
+     straight into a tick that was still performing outward sends, which is exactly the duplicate
+     sending the mutex was added to stop. `_owned` is read synchronously immediately before the call,
+     and the tick's guards up to and including the acquire are synchronous, so it is exactly true when
+     this call is the one that will take (or harmlessly not need) the flag. */
+  const _owned=!window._seqTickRunning;
+  try{await _seqAutomationTick();}catch(e){console.warn('Automation tick:',e.message);}finally{if(_owned)window._seqTickRunning=false;}
 }
 async function manualBookingsSync(){return manualRefresh();} /* legacy name */
 function openAddFromBooking(name,email,startISO){
