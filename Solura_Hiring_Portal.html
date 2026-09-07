@@ -11493,7 +11493,14 @@ function sanitizeState(st){
     st.emails=st.emails.slice(0,40).map(e=>{
       if(!e||typeof e!=='object')return e;
       const cleaned={};
-      ['id','direction','subject','preview','from','to','received','receivedAt','sentAt','seen','webLink','hasAttachments'].forEach(k=>{if(e[k]!==undefined)cleaned[k]=e[k];});
+      /* blastId/blastSubject BELONG here: two separate mechanisms work to keep them — the outbound
+         poll lifts them off the synthetic 'mass-' entry and re-attaches them to the real Sent-Items
+         copy that replaces it, and the load-time backfill re-derives them by cross-referencing
+         SETTINGS.massSends and writes them to AJ. This whitelist then silently dropped them again
+         on the very next sanitize — including the one the poll runs moments later in the same pass
+         — so the "BLAST ↗" collapse anchor never persisted, the backfill never converged, and it
+         rewrote the same rows on every load. Two short strings; the subject is capped at 80. */
+      ['id','direction','subject','preview','from','to','received','receivedAt','sentAt','seen','webLink','hasAttachments','blastId','blastSubject'].forEach(k=>{if(e[k]!==undefined)cleaned[k]=e[k];});
       if(cleaned.subject)cleaned.subject=String(cleaned.subject).slice(0,140);
       if(cleaned.preview)cleaned.preview=String(cleaned.preview).slice(0,200);
       return cleaned;
@@ -11985,10 +11992,23 @@ async function _markReceivedCore(cand,idx,note){
 async function markAwaitingReceivedWS(idx){
   if(!W)return;
   const cand=pipeline.find(x=>x.excelRow===W.row)||W;
-  const item=(cand.st.awaitingItems||[])[idx];if(!item)return;
+  /* The pill this idx came from was rendered off W.st.awaitingItems (_awaitingItemsPill), and its
+     sibling ✕ button indexes W.st too — but this handler resolved the item against cand.st. The two
+     are routinely different objects: loadW deep-copies state on open, and the inbox poll REPLACES
+     c.st wholesale with its merged copy every time mail lands. Once they diverge, clicking ✓ on the
+     second pill marks the THIRD item received, or silently no-ops. Resolve by identity (kind+name),
+     the discipline the ✓-assign button on an attachment already uses; position is the fallback. */
+  const _wItem=((W.st&&W.st.awaitingItems)||[])[idx];
+  const _cItems=(cand.st&&cand.st.awaitingItems)||[];
+  let ridx=idx;
+  if(_wItem&&cand.st!==W.st){
+    const _j=_cItems.findIndex(a=>a&&a.kind===_wItem.kind&&String(a.name||'')===String(_wItem.name||''));
+    if(_j>=0)ridx=_j;
+  }
+  const item=_cItems[ridx];if(!item)return;
   const note=prompt('Mark "'+_awaitingItemLabel(item)+'" received.\nOptional \u2014 note what they sent / where it went (availability saved, SSN on file, form done\u2026):','');
   if(note===null)return;
-  await _markReceivedCore(cand,idx,note.trim());
+  await _markReceivedCore(cand,ridx,note.trim());
   toast('\u2713 '+_awaitingItemLabel(item)+' received');
   renderWorkspace();
   render();
@@ -16118,7 +16138,7 @@ function _renderAttachmentRow(a,i,messageId,cand,awaiting){
   }
   const suggestionLabel=suggestion?_awaitingItemLabel(suggestion):'';
   const primaryBtn=suggestion
-    ? `<button class="att-assign-primary" onclick="_assignAttachmentToAwaiting('${esc(messageId)}',${i},${cand?cand.excelRow:'null'},${suggestIdx},'${esc(suggestion.kind)}','${encodeURIComponent(String(suggestion.name||''))}')" style="background:linear-gradient(135deg,#8B6500,#C59B4E);color:#fff;border:none;padding:6px 12px;border-radius:6px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer">✓ Assign as ${esc(suggestionLabel)}</button>`
+    ? `<button class="att-assign-primary" id="att-assign-${i}" onclick="_assignAttachmentToAwaiting('${esc(messageId)}',${i},${cand?cand.excelRow:'null'},${suggestIdx},'${esc(suggestion.kind)}','${encodeURIComponent(String(suggestion.name||''))}')" style="background:linear-gradient(135deg,#8B6500,#C59B4E);color:#fff;border:none;padding:6px 12px;border-radius:6px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer">✓ Assign as ${esc(suggestionLabel)}</button>`
     : '';
   /* The dropdown lets the user override the primary suggestion (assign to a non-awaiting kind),
      or assign when there's no current awaiting request at all. Each kind shows up; "cert" expands
@@ -16292,7 +16312,13 @@ async function _doAssignment(messageId,attIdx,cand,item){
   const msg=_emailCache[messageId];if(!msg){toast('Email not in cache — refresh and retry');return;}
   const atts=(msg.attachments||[]);
   const att=atts[attIdx];if(!att||!att.contentBytes){toast('No content available for this attachment');return;}
-  const btnPrim=document.querySelector('.att-assign-primary');
+  /* Per-row id, not the shared class: _renderAttachmentRow puts .att-assign-primary on EVERY
+     attachment row (the suggestion comes from the one shared awaiting array), so querySelector
+     always returned row 1's button. Assigning from row 2 disabled row 1's button and, on failure,
+     put "Save failed — retry" on row 1 while row 2 still read "✓ Assign as …" — clicking the button
+     that said retry then filed the WRONG attachment. Same class as the .nudge-toggle selector fixed
+     earlier; the file already numbers its sibling controls att-btn-${i} / att-go-${i}. */
+  const btnPrim=document.getElementById('att-assign-'+attIdx);
   if(btnPrim){btnPrim.disabled=true;btnPrim.textContent='Saving…';}
   try{
     const kindCfg=ASSIGNMENT_KINDS.find(k=>k.key===item.kind);
@@ -16416,8 +16442,18 @@ async function _doAssignment(messageId,attIdx,cand,item){
     const releasedNow=wasParked&&queueEmpty;
     const remainingMsg=cand.st.awaitingItems.length?cand.st.awaitingItems.length+' awaiting item'+(cand.st.awaitingItems.length===1?'':'s')+' remaining':(releasedNow?'released from awaiting — next step ready':'all requests fulfilled');
     toast('✓ Assigned as '+_awaitingItemLabel(item)+' — '+remainingMsg);
-    /* If user is currently viewing this candidate's workspace, refresh it */
-    if(W&&W.row===cand.excelRow){renderWorkspace();}
+    /* If user is currently viewing this candidate's workspace, refresh it — and SYNC IT FIRST.
+       Everything above was written to cand.st only: the credential with its fileUrl, the st.certs
+       union, certsReadyReview, the drained awaiting item, the auto-release, lastAssignmentAt and the
+       log line. loadW deep-copies state (JSON.parse(JSON.stringify)) and renderWorkspace does not
+       re-read it, so W.st was still the pre-assignment snapshot — and the operator is already inside
+       that workspace, one click from a save. Any saveW (a second attachment's "Just save", a note, a
+       credential edit, an awaiting change) then wrote that stale copy back over AJ: the filed
+       certificate vanished, the awaiting item came back, certsReadyReview was lost, and
+       _missingAppCerts — the sole input to the T-60/T-30 interview cancel lane — went on reporting
+       the cert missing while the uploaded file sat orphaned in the candidate's folder. Same mirror
+       idiom as _markReceivedCore. */
+    if(W&&W.row===cand.excelRow){if(W.st!==cand.st)W.st=cand.st;renderWorkspace();}
     /* Refresh the email detail to update the awaiting badge + buttons */
     openEmailDetail(messageId);
     /* Refresh pipeline so action engine picks up the fulfillment */
@@ -16453,7 +16489,16 @@ async function saveAttachment(messageId,attIdx,row){
     if(!r.ok)throw new Error(r.status);
     btn.textContent='✓ Saved';btn.style.background='var(--grn-pale,#EBF5EA)';btn.style.color='var(--grn)';btn.style.borderColor='var(--grn-mid,#8FCC87)';
     /* note in candidate log */
-    if(W){logW('📎 Saved attachment "'+filename+'" from email');await saveW(true);}
+    /* Log to the EMAIL'S candidate, never to whichever workspace happens to be open. The upload
+       above was already fixed to file under ownerC; this line was not — so saving an attachment
+       from the Inbox pane while a workspace sat open on somebody else wrote 'Saved attachment X'
+       onto that OTHER candidate and ran a full saveW of them: a stray log line on the wrong person
+       plus an unrelated state write. */
+    if(ownerC&&_wsOpenOn(ownerC.excelRow)){logW('📎 Saved attachment "'+filename+'" from email');await saveW(true);}
+    else if(ownerC&&ownerC.st&&!ownerC.st.__ajCorrupt){
+      ownerC.st.log=(ownerC.st.log||[]).concat({t:stamp(),x:'📎 Saved attachment "'+filename+'" from email'});
+      try{await patchRange('AJ'+ownerC.excelRow,[[_stCell(ownerC.st)]]);}catch(e2){console.warn('attachment log write failed row',ownerC.excelRow,e2.message);}
+    }
     toast('✓ Attachment saved to candidate folder');
   }catch(e){
     btn.disabled=false;btn.textContent='Save to folder';
@@ -16495,14 +16540,21 @@ async function diagnoseInboxPoll(){
     /* Test the raw Graph call directly so we can report what came back BEFORE filtering */
     const cutoff=new Date(Date.now()-30*86400000).toISOString();
     const inUrl=GR+'/me/messages?$top=100&$orderby=receivedDateTime desc&$select=id,from,subject,receivedDateTime&$filter=receivedDateTime ge '+cutoff;
-    const r=await gfetch(inUrl);
+    /* DEEP scan. This is the tool the operator reaches for when candidate mail seems to be missing,
+       so it must not repeat the bug it exists to diagnose: reading one page of 100 covered about 33
+       hours of this mailbox and matched ZERO candidate messages, and the modal then confidently
+       blamed the candidates' addresses — while eight pages over the same window matched 23. */
+    const scan=await _mailScanPages(inUrl,'',m=>m.receivedDateTime||'',MAIL_SCAN_PAGES_DEEP);
+    const r=scan.resp||{ok:false,status:'no response',text:()=>Promise.resolve('')};
     let report='';
-    if(!r.ok){
+    if(!scan.ok){
       const body=await r.text().catch(()=>'');
       report=`<b style="color:var(--red)">✗ Graph returned ${r.status}</b><div style="font-family:Menlo,monospace;font-size:11px;color:var(--mid);background:#fff;padding:8px;border-radius:6px;margin-top:8px;word-break:break-all">${esc(body.slice(0,400))}</div>`;
     }else{
-      const data=await r.json();
-      const msgs=data.value||[];
+      const msgs=scan.items;
+      const _oldestSeen=msgs.length?(msgs[msgs.length-1].receivedDateTime||''):'';
+      const _spanDays=_oldestSeen?Math.max(0,Math.round((Date.now()-Date.parse(_oldestSeen))/86400000)):0;
+      const _covered=scan.complete; /* true only if the scan actually reached the 30-day cutoff */
       const byEmail={};
       pipeline.forEach(c=>{if(c.email)byEmail[c.email.toLowerCase()]=c;});
       const candidateEmails=Object.keys(byEmail);
@@ -16512,13 +16564,14 @@ async function diagnoseInboxPoll(){
       });
       const fromAddrs=Array.from(new Set(msgs.map(m=>((m.from||{}).emailAddress||{}).address||'').filter(Boolean))).slice(0,12);
       report=`<b style="color:var(--grn-deep)">✓ Connected to Outlook</b><br><br>
-        <div><b>${msgs.length}</b> messages in your mailbox in the last 30 days</div>
+        <div><b>${msgs.length}</b> messages read from your mailbox${_covered?' — the full 30-day window':' — reaching back <b>'+_spanDays+'</b> day'+(_spanDays===1?'':'s')+' (scan limit reached before 30 days)'}</div>
         <div><b>${candidateEmails.length}</b> candidates have an email on file in the pipeline</div>
         <div><b>${matched.length}</b> messages match a candidate's email</div>
         <br>
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px;letter-spacing:.05em">Recent senders in your mailbox (top 12)</div>
         <div style="font-family:Menlo,monospace;font-size:11px;color:var(--mid);background:#fff;padding:8px;border-radius:6px;max-height:140px;overflow-y:auto">${fromAddrs.map(a=>esc(a)).join('<br>')||'(none)'}</div>
-        ${matched.length===0&&msgs.length>0?'<div style="background:#FFF6E6;border:1px solid var(--gold-mid);border-radius:8px;padding:9px 12px;margin-top:12px;font-size:12px;color:#8B6500"><b>Diagnosis:</b> Your mailbox has emails, but none of them are from candidates in the pipeline. Either candidates email a different address (like careers@solurahomecare.com) and you do not have access to that mailbox here, or their email addresses on file do not match what they are sending from.</div>':''}
+        ${matched.length===0&&msgs.length>0&&_covered?'<div style="background:#FFF6E6;border:1px solid var(--gold-mid);border-radius:8px;padding:9px 12px;margin-top:12px;font-size:12px;color:#8B6500"><b>Diagnosis:</b> Your mailbox has emails, but none of them are from candidates in the pipeline. Either candidates email a different address (like careers@solurahomecare.com) and you do not have access to that mailbox here, or their email addresses on file do not match what they are sending from.</div>':''}
+        ${matched.length===0&&msgs.length>0&&!_covered?'<div style="background:#FFF6E6;border:1px solid var(--gold-mid);border-radius:8px;padding:9px 12px;margin-top:12px;font-size:12px;color:#8B6500"><b>Diagnosis:</b> No candidate messages in the <b>'+_spanDays+' day'+(_spanDays===1?'':'s')+'</b> this scan could reach — but it stopped short of the full 30 days, so this is <i>not</i> evidence that candidates use a different address. Your mailbox is busy enough that '+msgs.length+' messages only cover that span.</div>':''}
         ${msgs.length===0?'<div style="background:#FDECEA;border:1px solid var(--red);border-radius:8px;padding:9px 12px;margin-top:12px;font-size:12px;color:#8B1A1A"><b>Diagnosis:</b> Your mailbox returned zero recent messages. Either you have no email, or the connected account is not the one receiving candidate replies.</div>':''}`;
     }
     /* Show as a modal */
@@ -16527,8 +16580,10 @@ async function diagnoseInboxPoll(){
     }
     document.getElementById('diag-body').innerHTML=report;
     document.getElementById('diag-modal').classList.add('open');
-    /* Also run the real poll to actually ingest anything new */
-    await pollInboxForCandidateEmails();
+    /* Also run the real poll to actually ingest anything new — DEEP, ignoring the watermark. This
+       is the operator's catch-up path after a gap longer than the 60-second poll's page cap can
+       reach (a holiday, an outage), which is exactly when they open this dialog. */
+    await pollInboxForCandidateEmails({deep:true});
   }catch(e){
     toast('Diagnostic failed: '+e.message);
   }
@@ -16541,6 +16596,45 @@ async function diagnoseInboxPoll(){
    writes — exact symptom: "interview time lost, BG check shows not started, jumped back to resume
    received." Fix: re-read the row's AJ right before writing, then overlay only the fields the poll
    touched. Server-owned fields (booking, yardstik, tpCheck, …) survive untouched. */
+/* ───── Mail scan paging ─────
+   Graph returns at most $top items per page and hands the rest back behind @odata.nextLink.
+   Both mail scans asked for a THIRTY-DAY window and then read only the first page of 100 — and on
+   this mailbox 100 messages span about 33 HOURS, over half of them the operator's own sent mail
+   (/me/messages covers every folder, Sent Items included, and a message from the operator can never
+   match a candidate). Measured live 2026-09-06 on the signed-in portal: one page reached back 33h
+   and matched ZERO candidate messages, while eight pages over the same window matched 23. So the
+   declared 30-day window was in practice a ~1.4-day window: any candidate reply that arrived while
+   nothing was polling — a weekend, a holiday, an outage, three consecutive poll failures — was
+   never ingested at all. It never became an email record, never surfaced as unread mail, never
+   reset the silence ladder, and left the candidate looking like someone who had never written back.
+   Page back only as far as we actually need. A watermark records how far the last successful scan
+   reached, so the steady-state poll (every ~60s) still costs exactly ONE request and only a real gap
+   pays for extra pages. The cap bounds what any single pass can cost Graph; a gap longer than the
+   cap's reach is caught by the operator-initiated deep scan in the inbox diagnostic. */
+const MAIL_SCAN_PAGES=8;       /* ~800 messages ≈ a week on this mailbox */
+const MAIL_SCAN_PAGES_DEEP=30; /* diagnostic / manual catch-up only, never the 60s poll */
+function _mailWatermark(){try{return localStorage.getItem('solura_mailscan_at')||'';}catch(e){return '';}}
+function _setMailWatermark(iso){try{localStorage.setItem('solura_mailscan_at',iso);}catch(e){}}
+async function _mailScanPages(url,sinceIso,stampOf,maxPages){
+  const items=[];let next=url,pages=0,firstResp=null;
+  while(next&&pages<maxPages){
+    const r=await gfetch(next);
+    if(pages===0)firstResp=r;
+    if(!r.ok)break;
+    let j;try{j=await r.json();}catch(e){break;}
+    const batch=j.value||[];
+    items.push.apply(items,batch);
+    pages++;
+    next=j['@odata.nextLink']||'';
+    if(!batch.length)break;
+    /* Stop as soon as this page reaches past what the last successful scan already covered.
+       With no watermark (first run on this browser) the page cap is the only bound. */
+    const oldest=stampOf(batch[batch.length-1])||'';
+    if(sinceIso&&oldest&&oldest<=sinceIso)break;
+  }
+  return {resp:firstResp,ok:!!(firstResp&&firstResp.ok),items:items,pages:pages,complete:!next};
+}
+
 async function _pollMergeFreshAJ(excelRow, mutated){
   try{
     const sid=await getWorkbookSession();const h=sid?{'workbook-session-id':sid}:{};
@@ -16576,7 +16670,7 @@ async function _pollMergeFreshAJ(excelRow, mutated){
   }
 }
 
-async function pollInboxForCandidateEmails(){
+async function pollInboxForCandidateEmails(opts){
   if(!pipeline.length)return;
   /* index candidates by lowercased email for O(1) match */
   const byEmail={};
@@ -16588,13 +16682,18 @@ async function pollInboxForCandidateEmails(){
 
     /* ───── INBOUND: messages received from candidates ───── */
     const inUrl=GR+'/me/messages?$top=100&$orderby=receivedDateTime desc&$select=id,from,subject,receivedDateTime,bodyPreview,webLink,hasAttachments&$filter=receivedDateTime ge '+cutoff;
-    const inR=await gfetch(inUrl);
-    if(!inR.ok){
+    /* Page rather than taking whatever the first 100 happened to be — see _mailScanPages. */
+    const _scanStart=new Date().toISOString();
+    const _deepScan=!!(opts&&opts.deep);
+    const _scanCap=_deepScan?MAIL_SCAN_PAGES_DEEP:MAIL_SCAN_PAGES;
+    const _scanSince=_deepScan?'':_mailWatermark();
+    const inScan=await _mailScanPages(inUrl,_scanSince,m=>m.receivedDateTime||'',_scanCap);
+    if(!inScan.ok){
       /* Detailed error so we know WHY — auth vs throttle vs forbidden */
-      const errBody=await inR.text().catch(()=>'');
-      throw new Error('Inbox fetch returned '+inR.status+(errBody?' · '+errBody.slice(0,140):''));
+      const errBody=inScan.resp?await inScan.resp.text().catch(()=>''):'';
+      throw new Error('Inbox fetch returned '+(inScan.resp?inScan.resp.status:'no response')+(errBody?' · '+errBody.slice(0,140):''));
     }
-    const msgs=((await inR.json()).value)||[];
+    const msgs=inScan.items;
     for(const m of msgs){
       const from=((m.from||{}).emailAddress||{}).address||'';
       if(!from)continue;
@@ -16633,9 +16732,10 @@ async function pollInboxForCandidateEmails(){
        Same data shape, just direction:'out'. Stored together so the inbox panel can show
        both sides as a unified thread per-candidate. */
     const outUrl=GR+"/me/mailFolders/SentItems/messages?$top=100&$orderby=sentDateTime desc&$select=id,toRecipients,subject,sentDateTime,bodyPreview,webLink,hasAttachments&$filter=sentDateTime ge "+cutoff;
-    const outR=await gfetch(outUrl);
-    if(outR.ok){
-      const msgs=((await outR.json()).value)||[];
+    const outScan=await _mailScanPages(outUrl,_scanSince,m=>m.sentDateTime||'',_scanCap);
+    if(!outScan.ok)console.warn('Sent Items scan failed — outbound copies will be reconciled on a later pass');
+    if(outScan.ok){
+      const msgs=outScan.items;
       for(const m of msgs){
         const toList=(m.toRecipients||[]).map(t=>((t.emailAddress||{}).address||'').toLowerCase()).filter(Boolean);
         const matchedAddr=toList.find(addr=>byEmail[addr]);
@@ -16724,6 +16824,14 @@ async function pollInboxForCandidateEmails(){
     }
     if(inboundCount){toast('📬 '+inboundCount+' candidate'+(inboundCount===1?'':'s')+' got new email');render();}
     if(writeFailCount)toast('⚠ '+writeFailCount+' candidate'+(writeFailCount===1?'':'s')+' had state too large to save — open their workspace and click Save manually to repair.');
+    /* The inbound scan reached this line, so everything newer than _scanStart has now been read.
+       Record it, so the next pass stops at its first page instead of walking the mailbox again.
+       Advance to the scan's OWN start time, never to "now": a message that arrived while this pass
+       was running must still be picked up next time. The mark is per browser (localStorage), which
+       is the right scope — it describes what THIS browser has ingested. A failed Sent Items scan
+       does not hold it back: outbound copies are already recorded locally at send time, so that
+       scan only reconciles ids, and freezing the mark would make every later poll walk 8 pages. */
+    _setMailWatermark(_scanStart);
     /* Successful poll — reset failure tracking + clear any sticky indicator */
     if(_pollFailCount>0){_pollFailCount=0;_pollLastError='';_updatePollIndicator();}
   }catch(e){
@@ -22526,23 +22634,52 @@ async function _seqAutomationTick(){
       const missingAny=(miss.length||_bgFormBlocks(c))&&!c.st.certsReadyReview; /* fresh certs awaiting review → never auto-warn/cancel */
       /* T-60→T-30: auto-send the cancellation warning (once per booking). T-30→0: auto-cancel. */
       if(m!=null&&m<=60&&m>30&&missingAny&&!_certWarnSentFor(c)){
-        try{
-          if(await _autoSendTpl(c,'interview_cert_warning',true)){ /* _certWarnSentFor above is the per-booking gate */
-            c.st.warnedForBooking=String(c.st.booking||'');
-            c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-sent interview cert warning (cancel at T-30)'});
-            await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
-            budget--;continue; /* one action per candidate per tick */
-          }
-        }catch(e){console.warn('auto warning failed:',c.name,e.message);}
+        let _warnSent=false,_warnErr='';
+        try{ _warnSent=await _autoSendTpl(c,'interview_cert_warning',true); } /* _certWarnSentFor above is the per-booking gate */
+        catch(e){ _warnErr=(e&&e.message)||String(e); }
+        if(_warnSent){
+          c.st.warnedForBooking=String(c.st.booking||'');
+          c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-sent interview cert warning (cancel at T-30)'});
+          await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+          budget--;continue; /* one action per candidate per tick */
+        }
+        /* THE WARNING DID NOT GO OUT. This branch had no else at all — _autoSendTpl returning false
+           was ignored and a throw was a bare console.warn — so a failed warning left no stamp, no
+           log line and no mark of any kind, and the T-30 branch below could cancel the interview
+           minutes later with the record still showing nothing wrong. Record it ONCE per booking:
+           the tick runs every ~30s and an unbounded log line here is exactly the growth that feeds
+           the 32,767 cap. Whether a missing warning should BLOCK the cancel is a policy question
+           for the operator (proposal P-14) and is deliberately not decided here. */
+        if(c.st.warnFailedFor!==String(c.st.booking||'')){
+          c.st.warnFailedFor=String(c.st.booking||'');
+          c.st.log=(c.st.log||[]).concat({t:stamp(),x:'⚠🤖 Interview cert warning did NOT send'+(_warnErr?' ('+_warnErr.slice(0,80)+')':'')+' — the T-30 cancellation rule still runs'});
+          try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);}catch(e2){console.warn('warn-failure mark write failed row',c.excelRow,e2.message);}
+        }
       }
       if(m!=null&&m<=30&&m>0&&missingAny){
         const reason=miss.length?('Required certificates not received before the interview: '+miss.join(', ')):'Background-check form not completed before the interview';
+        /* Say what actually happened. This log line hardcoded "warned at T-60" whether or not any
+           warning was ever sent, so the record asserted a notice the candidate may never have
+           received — the T-60→T-30 window is only observed while the portal is open, and the send
+           can fail outright. Telling the truth about it is a bug fix; whether a missing warning
+           should BLOCK the cancel is P-14, the operator's call, and is left alone. */
+        const _wasWarned=_certWarnSentFor(c);
         if(await _cancelBookingHeadless(c,reason)){
           c.st.autoCancelledAt=new Date().toISOString();
           c.st.autoCancelledFor=String(c.st.booking||'');
-          c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-cancelled interview (30-minute rule; warned at T-60) — '+reason});
+          c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-cancelled interview (30-minute rule; '+(_wasWarned?'warned at T-60':'NO T-60 warning was sent')+') — '+reason});
           await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
           budget--;continue; /* one action per candidate per tick */
+        }
+        /* The cancel FAILED — no worker token, a Cal.com error, a network blip — and this had no
+           else either: nothing logged, nothing stamped, and the tick simply tried again next pass,
+           roughly sixty times across the remaining half hour, with the board showing the operator
+           nothing at all. Keep retrying (a transient failure should still resolve itself) but leave
+           ONE mark per booking so a cancellation that never lands is visible. */
+        if(c.st.cancelFailedFor!==String(c.st.booking||'')){
+          c.st.cancelFailedFor=String(c.st.booking||'');
+          c.st.log=(c.st.log||[]).concat({t:stamp(),x:'⚠🤖 Automated interview cancellation FAILED — '+(((SETTINGS.config||{}).ziToken)?'Cal.com refused the request':'no worker token configured')+'; will keep retrying each pass'});
+          try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);}catch(e2){console.warn('cancel-failure mark write failed row',c.excelRow,e2.message);}
         }
       }
     }
