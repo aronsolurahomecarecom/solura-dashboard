@@ -767,6 +767,11 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div class="la-f"><label>Hours of care</label><input type="number" min="0" step="0.5" id="inv-hours"></div>
         <div class="la-f"><label>Hourly rate ($)</label><input type="number" min="0" step="0.01" id="inv-rate"></div>
       </div>
+      <div style="margin-bottom:10px">
+        <input type="file" id="inv-hha-file" accept=".xlsx,.xls,.csv" style="display:none">
+        <button data-action="inv-hha-pull" style="padding:6px 12px;background:none;border:1.5px dashed var(--border);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">⏱ Pull hours from an HHAeXchange export</button>
+        <div id="inv-hha-out" style="font-size:11.5px;margin-top:5px;white-space:pre-wrap"></div>
+      </div>
       <div class="la-f" style="margin-bottom:10px">
         <label>Discounts (each takes flat $ or % — every one gets its own line on the invoice)</label>
         <div id="inv-discounts"></div>
@@ -1573,7 +1578,7 @@ var C={
              //    regular touch of cycle 4 done, beside-special #1 due now.
              //    SAFE add: every full-width writer spans A:AD and never touches AE.
 };
-var BUILD='B-0907-78';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0907-79';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2488,6 +2493,86 @@ function fillInvoiceTokens(tpl,f){
     .replace(/\{discountrow\}/gi,discountRow)
     .replace(/\{notes\}/gi,notesBlock);
 }
+/* ⏱ HHAeXchange hours import: no public self-service API exists (access is
+ * ticket-gated through HHAX support), so hours arrive via their report
+ * exports (Excel/CSV). These parsers are format-tolerant: header row found
+ * by content, "Last, First" names matched token-wise, H:MM durations and
+ * Excel time-fraction columns both handled.                              */
+function hhaNorm(s){return String(s||'').toLowerCase().replace(/[^a-z ]+/g,' ').replace(/\s+/g,' ').trim();}
+function hhaNameMatch(rowName,patient){
+  var a=hhaNorm(rowName).split(' ').filter(Boolean);
+  var b=hhaNorm(patient).split(' ').filter(Boolean);
+  if(!a.length||!b.length)return false;
+  var small=a.length<=b.length?a:b,big=a.length<=b.length?b:a;
+  return small.every(function(tk){return big.indexOf(tk)>-1;});
+}
+function hhaParseDate(v){
+  if(v instanceof Date&&!isNaN(v))return new Date(v.getFullYear(),v.getMonth(),v.getDate());
+  var s=String(v||'').trim();
+  var m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if(m){var y=parseInt(m[3],10);if(y<100)y+=2000;return new Date(y,parseInt(m[1],10)-1,parseInt(m[2],10));}
+  var m2=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m2)return new Date(parseInt(m2[1],10),parseInt(m2[2],10)-1,parseInt(m2[3],10));
+  return null;
+}
+function hhaParseHours(v){
+  if(typeof v==='number')return v>=0?v:null;
+  var s=String(v||'').trim();
+  var m=s.match(/^(\d{1,2}):(\d{2})$/);
+  if(m)return parseInt(m[1],10)+parseInt(m[2],10)/60;
+  if(!/\d/.test(s))return null;
+  var n=parseFloat(s.replace(/[^\d.]/g,''));
+  return isNaN(n)?null:n;
+}
+function parseHhaSheet(aoa){
+  for(var hi=0;hi<Math.min(aoa.length,25);hi++){
+    var row=aoa[hi]||[];
+    var nameCi=-1,dateCi=-1,hrsCi=-1;
+    row.forEach(function(c,ci){
+      var h=hhaNorm(c);
+      if(nameCi<0&&/(patient|client|member)/.test(h)&&/name/.test(h))nameCi=ci;
+      if(dateCi<0&&/date/.test(h))dateCi=ci;
+      if(hrsCi<0&&/(hour|duration)/.test(h))hrsCi=ci;
+    });
+    if(nameCi<0)row.forEach(function(c,ci){if(nameCi<0&&hhaNorm(c)==='name')nameCi=ci;});
+    if(nameCi>-1&&hrsCi>-1){
+      var out=[],fracCount=0,numCount=0;
+      for(var r=hi+1;r<aoa.length;r++){
+        var rr=aoa[r]||[];
+        var hv=hhaParseHours(rr[hrsCi]);
+        if(hv==null||!String(rr[nameCi]||'').trim())continue;
+        var isNum=typeof rr[hrsCi]==='number';
+        if(isNum){numCount++;if(rr[hrsCi]>0&&rr[hrsCi]<1)fracCount++;}
+        out.push({name:String(rr[nameCi]),date:dateCi>-1?hhaParseDate(rr[dateCi]):null,
+          hours:hv,rawNum:isNum?rr[hrsCi]:null});
+      }
+      // A column where most numeric values sit under 1 is Excel TIME cells
+      // (fractions of a day) — convert; a real 0.75-hour entry in a normal
+      // hours column stays as typed.
+      if(numCount>0&&fracCount/numCount>0.6){
+        out.forEach(function(o){if(o.rawNum!=null&&o.rawNum>0&&o.rawNum<1)o.hours=Math.round(o.rawNum*24*100)/100;});
+      }
+      return {rows:out,nameCol:nameCi,hoursCol:hrsCi,dateCol:dateCi};
+    }
+  }
+  return null;
+}
+function sumHhaHours(parsed,patient,fromIso,toIso){
+  if(!parsed||!parsed.rows.length)return {hours:0,visits:0,names:[]};
+  var from=fromIso?hhaParseDate(fromIso):null,to=toIso?hhaParseDate(toIso):null;
+  var total=0,visits=0,namesSeen={};
+  parsed.rows.forEach(function(o){
+    if(o.name.trim())namesSeen[hhaNorm(o.name)]=o.name.trim();
+    if(!hhaNameMatch(o.name,patient))return;
+    if(o.date){
+      if(from&&o.date<from)return;
+      if(to&&o.date>to)return;
+    }
+    total+=o.hours;visits++;
+  });
+  return {hours:Math.round(total*100)/100,visits:visits,
+    names:Object.keys(namesSeen).map(function(k){return namesSeen[k];})};
+}
 /* 🧾 INVOICING — END */
 var _invRi=-1,_invAmountTouched=false,_invDiscounts=[],_invAtts=[];
 function renderInvDiscounts(){
@@ -2534,6 +2619,7 @@ function openInvoice(ri){
   el('inv-hours').value='';el('inv-rate').value='';el('inv-amount').value='';
   el('inv-notes').value='';
   el('inv-out').textContent='';
+  if(el('inv-hha-out'))el('inv-hha-out').textContent='';
   el('modal-invoice').classList.add('open');
 }
 function invFields(){
@@ -6356,6 +6442,39 @@ document.addEventListener('change',function(ev){
     importEnginePackage(t.files[0]);
     t.value='';
     if(t.id==='eng-import-input2')closeModal('modal-engine-editor');
+  }
+  // ⏱ HHAeXchange export → sum the client's visit hours in the period
+  if(t&&t.id==='inv-hha-file'&&t.files&&t.files.length){
+    (function(){
+      var file=t.files[0];t.value='';
+      var out=el('inv-hha-out');
+      if(out){out.style.color='var(--mid)';out.textContent='Reading '+file.name+'…';}
+      var fr=new FileReader();
+      fr.onload=function(){
+        try{
+          var wb=XLSX.read(fr.result,{type:'array',cellDates:true});
+          var ws=wb.Sheets[wb.SheetNames[0]];
+          var aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+          var parsed=parseHhaSheet(aoa);
+          if(!parsed)throw new Error('No column headers found — the file needs a patient/client name column and an hours or duration column.');
+          var r=rows[_invRi]||[];
+          var patient=String(r[C.NM]||r[C.DM]||'').trim();
+          var res=sumHhaHours(parsed,patient,el('inv-from-date').value,el('inv-to-date').value);
+          if(res.visits>0){
+            el('inv-hours').value=String(res.hours);
+            invRecalcAmount();
+            if(out){out.style.color='var(--grn)';out.textContent='✓ '+res.visits+' visit'+(res.visits!==1?'s':'')+' for '+patient+' in the service period → '+res.hours+' hours (filled below — adjust freely).';}
+          }else{
+            var sample=res.names.slice(0,6).join(', ');
+            if(out){out.style.color='var(--red)';out.textContent='✗ No visits matched "'+patient+'" in that period. Names in the file: '+(sample||'(none found)')+(res.names.length>6?'…':'')+'. Check the service-period dates, or that this export covers this client.';}
+          }
+        }catch(e){
+          if(out){out.style.color='var(--red)';out.textContent='✗ Could not read that export: '+e.message;}
+        }
+      };
+      fr.onerror=function(){if(out){out.style.color='var(--red)';out.textContent='✗ Could not read the file.';}};
+      fr.readAsArrayBuffer(file);
+    })();
   }
   // 🧾 Invoice attachments — read as base64, chip-listed, removable
   if(t&&t.id==='inv-file'&&t.files&&t.files.length){
@@ -12259,6 +12378,9 @@ function onClick(ev){
       break;
     case 'inv-attach':
       if(el('inv-file'))el('inv-file').click();
+      break;
+    case 'inv-hha-pull':
+      if(el('inv-hha-file'))el('inv-hha-file').click();
       break;
     case 'inv-del-att':
       _invAtts.splice(parseInt(t.dataset.idx,10),1);
