@@ -749,6 +749,40 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
   <div class="done-pop-inner" id="done-pop-inner"></div>
 </div>
 
+<!-- 🧾 Invoice modal — on-service clients, sends from the billing mailbox -->
+<div class="modal" id="modal-invoice">
+  <div class="mbox" style="max-width:560px">
+    <div class="mhead"><div class="mtitle" id="inv-title">🧾 Send invoice</div><button class="mclose" data-action="close-modal" data-mid="modal-invoice">✕</button></div>
+    <div class="mbody">
+      <div style="font-size:12px;color:var(--mid);margin-bottom:14px">Sends from <b id="inv-from-label"></b> using the template in ⚙ Settings → Invoicing. Fill the fields — everything else is automatic.</div>
+      <div class="la-grid g2" style="margin-bottom:10px">
+        <div class="la-f"><label>To (email)</label><input type="email" id="inv-to"></div>
+        <div class="la-f"><label>Invoice #</label><input type="text" id="inv-no"></div>
+      </div>
+      <div class="la-grid g2" style="margin-bottom:10px">
+        <div class="la-f"><label>Service period — from</label><input type="date" id="inv-from-date"></div>
+        <div class="la-f"><label>Service period — to</label><input type="date" id="inv-to-date"></div>
+      </div>
+      <div class="la-grid g3" style="margin-bottom:10px">
+        <div class="la-f"><label>Hours of care</label><input type="number" min="0" step="0.5" id="inv-hours"></div>
+        <div class="la-f"><label>Hourly rate ($)</label><input type="number" min="0" step="0.01" id="inv-rate"></div>
+        <div class="la-f"><label>Amount due ($)</label><input type="number" min="0" step="0.01" id="inv-amount" placeholder="auto: hours × rate"></div>
+      </div>
+      <div class="la-grid g2" style="margin-bottom:10px">
+        <div class="la-f"><label>Due date</label><input type="date" id="inv-due"></div>
+        <div class="la-f"><label>&nbsp;</label><div style="font-size:11px;color:var(--soft);padding-top:8px">Amount fills itself from hours × rate — type over it to override.</div></div>
+      </div>
+      <div class="la-f" style="margin-bottom:12px"><label>Notes (optional — appears as a highlighted block on the invoice)</label><textarea id="inv-notes" rows="3" style="width:100%" placeholder="e.g. Includes the two extra weekend shifts we discussed."></textarea></div>
+      <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end">
+        <button data-action="inv-preview" style="padding:9px 14px;background:none;border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">👁 Preview</button>
+        <button data-action="inv-send" style="padding:9px 18px;background:linear-gradient(135deg,#1f4d3a,#2c6b52);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📤 Send invoice</button>
+        <span id="inv-spin" style="display:none"><div class="mspin"></div></span>
+      </div>
+      <div id="inv-out" style="font-size:12px;margin-top:10px;white-space:pre-wrap"></div>
+    </div>
+  </div>
+</div>
+
 <!-- Conditions picker modal (fires when status flips to Responded; also editable from edit panel) -->
 <div class="modal" id="modal-conditions">
   <div class="mbox" style="max-width:680px">
@@ -1076,6 +1110,18 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
     </nav>
     <div class="st-content">
 
+      <section class="st-sec" id="st-sec-invoicing">
+        <h3 class="st-h">🧾 Invoicing</h3>
+        <p class="st-p">Clients whose status is <b>On Service</b> get a 🧾 button — a short form fills this template and sends it from the shared billing mailbox. Your Microsoft account needs <b>Send As</b> rights on that mailbox (Microsoft 365 admin → shared mailbox → delegation); the first send may ask you to sign in again to grant the new permission.</p>
+        <div class="la-grid g2" style="margin-bottom:10px">
+          <div class="la-f"><label>Send from (shared mailbox)</label><input type="email" data-cfg="billingFrom" placeholder="billing@solurahomecare.com"></div>
+          <div class="la-f"><label>Next invoice number</label><input type="number" min="1" data-cfg="invoiceNextNo" data-cfgtype="int" placeholder="1001"></div>
+        </div>
+        <div class="la-f" style="margin-bottom:10px"><label>Email subject</label><input type="text" data-cfg="invoiceSubject"></div>
+        <label class="ee-lbl">Invoice template (HTML — edits save with the Save bar)</label>
+        <textarea data-cfg="invoiceTemplate" rows="12" style="width:100%;font-family:monospace;font-size:11.5px"></textarea>
+        <p class="st-p" style="font-size:11px;margin-top:6px">Tokens: <code>{invno}</code> <code>{period}</code> <code>{from}</code> <code>{to}</code> <code>{hours}</code> <code>{rate}</code> <code>{amount}</code> <code>{due}</code> <code>{date}</code> <code>{notes}</code> — plus <code>{dm}</code>/<code>{pt}</code>/<code>{rel}</code>/<code>{ptrel}</code> per client. <code>{notes}</code> renders as a highlighted block, or disappears when empty. Clear the box to go back to the built-in template.</p>
+      </section>
       <section class="st-sec" id="st-sec-engines">
         <h3 class="st-h">Sequence engines</h3>
         <p class="st-p">Engines define the outreach sequence. Build from a starting point or an empty canvas, run several side by side, assign each lead source its own engine, and share engines as packages — Claude can author one offline and you import it here. <b>Message templates live on the sequence steps:</b> ✏ edit an engine and every manual step, daily blitz, and weekly entry has its own template box ({dm}/{pt}/{rel}/{ptrel} fill per lead — {rel} is their relationship to the patient, e.g. "daughter"; {ptrel} is the flip, what the patient is to them, e.g. "parent"/"spouse") — email steps get a dedicated <b>subject</b> field too. The old Templates tab is legacy fallback only.</p>
@@ -1515,7 +1561,7 @@ var C={
              //    regular touch of cycle 4 done, beside-special #1 due now.
              //    SAFE add: every full-width writer spans A:AD and never touches AE.
 };
-var BUILD='B-0903-74';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0907-75';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2303,6 +2349,182 @@ function fillNames(s,names){
   return s.trim().replace(/[ \t]+/g,' ');
 }
 /* ⚡FILLNAMES — END */
+
+/* ─── 🧾 INVOICING — BEGIN (sliced by tests/invoice.test.mjs) ───────────────
+ * On-service clients get a 🧾 button → a small form (invoice #, period,
+ * hours, rate, amount, due date, notes) fills the Settings-editable
+ * template and sends FROM the shared billing mailbox via Graph
+ * (from-override on /me/sendMail; needs Send As rights + Mail.Send.Shared).
+ * No tracking pixel — invoices are never open-tracked.                   */
+var DEFAULT_INVOICE_FROM='billing@solurahomecare.com';
+var DEFAULT_INVOICE_SUBJECT='Invoice {invno} — Solura Home Care ({period})';
+var DEFAULT_INVOICE_TEMPLATE=[
+'<div style="max-width:640px;margin:0 auto;font-family:Georgia,\'Times New Roman\',serif;color:#2a2a28">',
+'  <div style="background:#1f4d3a;color:#fff;padding:26px 30px;border-radius:10px 10px 0 0">',
+'    <div style="font-size:21px;font-weight:700;letter-spacing:.3px">Solura Home Care</div>',
+'    <div style="font-size:12px;opacity:.85;margin-top:4px">Licensed Ohio Home Care · License 4574HHN · (216) 770-4886</div>',
+'  </div>',
+'  <div style="border:1px solid #ddd;border-top:none;padding:26px 30px;border-radius:0 0 10px 10px;background:#fffdf8">',
+'    <div style="font-size:17px;font-weight:700;margin-bottom:2px">Invoice {invno}</div>',
+'    <div style="font-size:12.5px;color:#777;margin-bottom:18px">Issued {date}</div>',
+'    <p style="font-size:14px;line-height:1.55;margin:0 0 16px">Dear {dm},</p>',
+'    <p style="font-size:14px;line-height:1.55;margin:0 0 18px">Thank you for trusting Solura with {pt}’s care. Here is the invoice for services provided.</p>',
+'    <table style="width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:18px">',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700;width:45%">Service period</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{period}</td></tr>',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Hours of care</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{hours}</td></tr>',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Hourly rate</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{rate}</td></tr>',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700;font-size:15px">Amount due</td><td style="padding:9px 12px;border:1px solid #e4ddcf;font-weight:700;font-size:15px">{amount}</td></tr>',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Due date</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{due}</td></tr>',
+'    </table>',
+'    {notes}',
+'    <p style="font-size:13.5px;line-height:1.55;margin:18px 0 0">Questions about this invoice? Just reply to this email or call (216) 770-4886.</p>',
+'    <p style="font-size:13.5px;margin:14px 0 0">With gratitude,<br><b>Solura Home Care — Billing</b></p>',
+'  </div>',
+'</div>'].join('\n');
+function invoiceCfg(){
+  return {
+    from:String(cfg('billingFrom')||'').trim()||DEFAULT_INVOICE_FROM,
+    subject:String(cfg('invoiceSubject')||'').trim()||DEFAULT_INVOICE_SUBJECT,
+    template:String(cfg('invoiceTemplate')||'').trim()||DEFAULT_INVOICE_TEMPLATE
+  };
+}
+function isOnService(st){var s=lc(st);return s.indexOf('on service')>-1||s.indexOf('service')===0;}
+function fmtMoney(v){
+  var s=String(v==null?'':v).trim();
+  if(!s)return '';
+  var n=parseFloat(s.replace(/[$,]/g,''));
+  if(isNaN(n))return s; // free text stays as typed
+  return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+// "2026-09-01" → "Sep 1, 2026" (anything else passes through untouched)
+function invPrettyDate(iso){
+  var m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!m)return String(iso||'');
+  var MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return MO[parseInt(m[2],10)-1]+' '+parseInt(m[3],10)+', '+m[1];
+}
+// Pure: template + field values → filled HTML. {notes} becomes a styled
+// block when notes exist, or vanishes entirely when blank.
+function fillInvoiceTokens(tpl,f){
+  f=f||{};
+  var pFrom=invPrettyDate(f.from),pTo=invPrettyDate(f.to);
+  var period=(pFrom&&pTo)?(pFrom+' – '+pTo):(pFrom||pTo||'');
+  var notesBlock=String(f.notes||'').trim()
+    ?('<div style="background:#f6f1e6;border:1px solid #e4ddcf;border-radius:8px;padding:12px 14px;font-size:13.5px;line-height:1.55"><b>Notes</b><br>'
+      +escapeHtml(String(f.notes).trim()).replace(/\n/g,'<br>')+'</div>')
+    :'';
+  return String(tpl||'')
+    .replace(/\{invno\}/gi,String(f.invno||''))
+    .replace(/\{period\}/gi,period)
+    .replace(/\{from\}/gi,pFrom)
+    .replace(/\{to\}/gi,pTo)
+    .replace(/\{hours\}/gi,String(f.hours||''))
+    .replace(/\{rate\}/gi,fmtMoney(f.rate))
+    .replace(/\{amount\}/gi,fmtMoney(f.amount))
+    .replace(/\{due\}/gi,invPrettyDate(f.due))
+    .replace(/\{date\}/gi,invPrettyDate(f.date))
+    .replace(/\{notes\}/gi,notesBlock);
+}
+/* 🧾 INVOICING — END */
+var _invRi=-1,_invAmountTouched=false;
+function openInvoice(ri){
+  _invRi=ri;_invAmountTouched=false;
+  var r=rows[ri]||[];
+  var ic=invoiceCfg();
+  el('inv-title').textContent='🧾 Send invoice — '+(String(r[C.NM]||r[C.DM]||'').trim()||'Client');
+  el('inv-from-label').textContent=ic.from;
+  el('inv-to').value=String(r[C.EM]||'').trim();
+  el('inv-no').value='INV-'+(parseInt(cfg('invoiceNextNo'),10)||1001);
+  // Sensible period default: the 1st of this month through today
+  var t=localToday();
+  el('inv-from-date').value=ds(new Date(t.getFullYear(),t.getMonth(),1));
+  el('inv-to-date').value=ds(t);
+  el('inv-due').value=ds(addDays(t,14));
+  el('inv-hours').value='';el('inv-rate').value='';el('inv-amount').value='';
+  el('inv-notes').value='';
+  el('inv-out').textContent='';
+  el('modal-invoice').classList.add('open');
+}
+function invFields(){
+  var f={
+    invno:String(el('inv-no').value||'').trim(),
+    from:String(el('inv-from-date').value||'').trim(),
+    to:String(el('inv-to-date').value||'').trim(),
+    hours:String(el('inv-hours').value||'').trim(),
+    rate:String(el('inv-rate').value||'').trim(),
+    amount:String(el('inv-amount').value||'').trim(),
+    due:String(el('inv-due').value||'').trim(),
+    notes:String(el('inv-notes').value||''),
+    date:ds(localToday())
+  };
+  // Amount fallback at send time too — never send a blank amount silently
+  if(!f.amount&&f.hours&&f.rate){
+    var n=parseFloat(f.hours)*parseFloat(f.rate);
+    if(!isNaN(n))f.amount=String(Math.round(n*100)/100);
+  }
+  return f;
+}
+function invBuildEmail(){
+  var ic=invoiceCfg();
+  var f=invFields();
+  var names=getNames(_invRi);
+  var html=fillNames(fillInvoiceTokens(ic.template,f),names);
+  var subj=fillNames(fillInvoiceTokens(ic.subject,f),names);
+  return {to:String(el('inv-to').value||'').trim(),from:ic.from,subject:subj,html:html,fields:f};
+}
+function invPreview(){
+  if(_invRi<0)return;
+  var em=invBuildEmail();
+  var blob=new Blob(['<!doctype html><html><head><meta charset="utf-8"><title>'+escapeHtml(em.subject)+'</title></head><body style="margin:20px;background:#eee">'+em.html+'</body></html>'],{type:'text/html'});
+  var url=URL.createObjectURL(blob);
+  window.open(url,'_blank');
+  setTimeout(function(){URL.revokeObjectURL(url);},60000);
+}
+async function invSend(){
+  if(_invRi<0)return;
+  var out=el('inv-out'),spin=el('inv-spin');
+  var em=invBuildEmail();
+  if(!em.to||em.to.indexOf('@')<1){out.style.color='var(--red)';out.textContent='✗ Enter a valid recipient email.';return;}
+  if(!em.fields.amount){out.style.color='var(--red)';out.textContent='✗ Fill in the amount (or hours × rate).';return;}
+  if(spin)spin.style.display='inline-flex';
+  out.style.color='var(--mid)';out.textContent='Sending from '+em.from+'…';
+  try{
+    var payload={message:{
+      subject:em.subject,
+      body:{contentType:'HTML',content:em.html},
+      toRecipients:[{emailAddress:{address:em.to}}],
+      from:{emailAddress:{address:em.from}}
+    },saveToSentItems:true};
+    var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify(payload)});
+    if(!(res.ok||res.status===202)){
+      var ee=await res.json().catch(function(){return{};});
+      var msg=(ee.error&&ee.error.message)||('HTTP '+res.status);
+      if(/SendAsDenied|ErrorSendAs/i.test(JSON.stringify(ee)))
+        throw new Error('Microsoft refused to send AS '+em.from+'. Two fixes: (1) in Microsoft 365 admin, give your account "Send As" on the shared mailbox; (2) sign out and back in here so the new permission (Mail.Send.Shared) is granted. Then try again.');
+      throw new Error(msg);
+    }
+    // Log it and advance the invoice counter (background — hash-skip safe)
+    try{
+      logComms(commsEntryForLead(_invRi,{direction:'out',channel:'email',contact:em.to,
+        subject:em.subject,preview:'Invoice '+em.fields.invno+' — '+(fmtMoney(em.fields.amount)||em.fields.amount)+' due '+em.fields.due,
+        outcome:'invoice-sent',messageId:''}));
+    }catch(_){}
+    try{
+      var cur9=parseInt(cfg('invoiceNextNo'),10)||1001;
+      setCfg('invoiceNextNo',cur9+1);
+      saveEnginesDoc().catch(function(){});
+    }catch(_){}
+    traceOp({kind:'invoice-sent',to:em.to,from:em.from,no:em.fields.invno,amount:em.fields.amount});
+    el('modal-invoice').classList.remove('open');
+    toast('🧾 Invoice '+em.fields.invno+' sent from '+em.from);
+    _invRi=-1;
+  }catch(e){
+    out.style.color='var(--red)';
+    out.textContent='✗ '+e.message;
+  }finally{
+    if(spin)spin.style.display='none';
+  }
+}
 function isAPFM(ri){return lc((rows[ri]||[])[C.SO]).indexOf('place for mom')>-1;}
 
 /* ─── §5 Auth (PKCE) ─────────────────────────────────────────────────────  */
@@ -2318,7 +2540,7 @@ async function signIn(){
   sessionStorage.setItem('pkce_v',pkce.verifier);
   var url='https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/authorize?'
     +'client_id='+CLIENT_ID+'&response_type=code&redirect_uri='+encodeURIComponent(REDIRECT)
-    +'&scope='+encodeURIComponent('openid profile email Files.ReadWrite Mail.Send Mail.ReadWrite offline_access')
+    +'&scope='+encodeURIComponent('openid profile email Files.ReadWrite Mail.Send Mail.Send.Shared Mail.ReadWrite offline_access')
     +'&code_challenge='+pkce.challenge+'&code_challenge_method=S256&prompt=select_account';
   location.href=url;
 }
@@ -2328,7 +2550,7 @@ async function refreshToken(){
   var rt=localStorage.getItem('sr');
   if(!rt)return false;
   try{
-    var body=new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:'openid profile email Files.ReadWrite Mail.Send Mail.ReadWrite offline_access'});
+    var body=new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:'openid profile email Files.ReadWrite Mail.Send Mail.Send.Shared Mail.ReadWrite offline_access'});
     var r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
     var j=await r.json();
     if(j.access_token){
@@ -3648,6 +3870,8 @@ function renderRows(leads){
 
 function buildButtons(l){
   var ri=l.ri;
+  // On-service clients: the invoice button rides every button row
+  var inv=isOnService(l.status)?'<button class="btn-sm bg-cream" data-action="open-invoice" data-ri="'+ri+'" title="Send invoice from the billing mailbox">🧾</button>':'';
   // Assessment Scheduled: show prominent assessment-start button in place of
   // the usual primary. Falls through to normal handling otherwise.
   if(l.active && String(l.status||'').toLowerCase().indexOf('assessment scheduled')>-1){
@@ -3655,7 +3879,7 @@ function buildButtons(l){
     altsA+='<button class="btn-sm bg-sky-l" data-action="call" data-ri="'+ri+'">📞</button>';
     altsA+='<button class="btn-sm bg-grn-l" data-action="open-sms" data-ri="'+ri+'">💬</button>';
     altsA+='<button class="btn-sm bg-gold-l" data-action="open-email" data-ri="'+ri+'">✉</button>';
-    altsA+='<button class="btn-sm bg-cream" data-action="open-script" data-ri="'+ri+'">📋</button>';
+    altsA+='<button class="btn-sm bg-cream" data-action="open-script" data-ri="'+ri+'">📋</button>'+inv;
     return '<div class="bwrap">'
       +'<div class="brow" style="flex:1"><button class="btn-primary asmt-primary-btn" data-action="open-assessment" data-ri="'+ri+'">🏥 Start Assessment</button><button class="btn-sec bg-gold-l" style="flex:0 0 auto" data-action="open-ep" data-ri="'+ri+'" data-mode="update">✏</button></div>'
       +'<div class="brow">'+altsA+'</div>'
@@ -3678,7 +3902,7 @@ function buildButtons(l){
     if(!(nsm.indexOf('call')>-1||nsm.indexOf('phone')>-1))alts+='<button class="btn-sm bg-sky-l" data-action="call" data-ri="'+ri+'">📞</button>';
     if(!(nsm.indexOf('sms')>-1||nsm.indexOf('text')>-1))alts+='<button class="btn-sm bg-grn-l" data-action="open-sms" data-ri="'+ri+'">💬</button>';
     if(!(nsm.indexOf('email')>-1))alts+='<button class="btn-sm bg-gold-l" data-action="open-email" data-ri="'+ri+'">✉</button>';
-    alts+='<button class="btn-sm bg-cream" data-action="open-script" data-ri="'+ri+'">📋</button>';
+    alts+='<button class="btn-sm bg-cream" data-action="open-script" data-ri="'+ri+'">📋</button>'+inv;
     return '<div class="bwrap">'
       +'<div class="brow" style="flex:1">'+primary+'<button class="btn-sec bg-gold-l" style="flex:0 0 auto" data-action="open-ep" data-ri="'+ri+'" data-mode="update">✏</button></div>'
       +'<div class="brow">'+alts+'</div>'
@@ -3698,7 +3922,7 @@ function buildButtons(l){
   if(!a||a.type!=='call')alts2+='<button class="btn-sm bg-sky-l" data-action="call" data-ri="'+ri+'">📞</button>';
   if(!a||a.type!=='sms')alts2+='<button class="btn-sm bg-grn-l" data-action="open-sms" data-ri="'+ri+'">💬</button>';
   if(!a||a.type!=='email')alts2+='<button class="btn-sm bg-gold-l" data-action="open-email" data-ri="'+ri+'">✉</button>';
-  alts2+='<button class="btn-sm bg-cream" data-action="open-script" data-ri="'+ri+'">📋</button>';
+  alts2+='<button class="btn-sm bg-cream" data-action="open-script" data-ri="'+ri+'">📋</button>'+inv;
   return '<div class="bwrap">'
     +primaryBtn
     +'<div class="brow">'
@@ -5242,6 +5466,16 @@ function renderConfigInputs(){
     if(ty==='bool')inp.checked=v!==false;
     else inp.value=(v==null?'':v);
   });
+  // Invoice settings show the built-in defaults as the editable starting
+  // point (blank config = still using the default at send time).
+  document.querySelectorAll('[data-cfg="billingFrom"],[data-cfg="invoiceSubject"],[data-cfg="invoiceTemplate"],[data-cfg="invoiceNextNo"]').forEach(function(inp){
+    if(String(inp.value||'').trim())return;
+    var k=inp.dataset.cfg;
+    inp.value=k==='billingFrom'?DEFAULT_INVOICE_FROM
+      :k==='invoiceSubject'?DEFAULT_INVOICE_SUBJECT
+      :k==='invoiceTemplate'?DEFAULT_INVOICE_TEMPLATE
+      :'1001';
+  });
   // API key is device-local only — deliberately NOT in the synced config
   var ck=el('claude-key');
   if(ck){try{ck.value=localStorage.getItem('claudeApiKey')||(enginesDoc.config&&enginesDoc.config.claudeApiKey)||'';}catch(_){}}
@@ -5910,6 +6144,13 @@ document.addEventListener('input',function(ev){
         asgnState[i].engineIds[parseInt(parts[2],10)]=t.value;
       }else asgnState[i][parts[1]]=t.value;
     }
+  }
+  // 🧾 Invoice amount auto-fills from hours × rate until typed over
+  if(t&&t.id==='inv-amount')_invAmountTouched=true;
+  if(t&&(t.id==='inv-hours'||t.id==='inv-rate')&&!_invAmountTouched){
+    var ih=parseFloat((el('inv-hours')||{}).value),ir=parseFloat((el('inv-rate')||{}).value);
+    var ia=el('inv-amount');
+    if(ia)ia.value=(!isNaN(ih)&&!isNaN(ir))?String(Math.round(ih*ir*100)/100):'';
   }
   // Claude training-section fields → straight into config, dirty-bar saves
   if(t&&t.dataset&&t.dataset.cts){
@@ -11888,6 +12129,15 @@ function onClick(ev){
       break;
     case 'ee-del-wentry':
       if(esState){esState.phases[parseInt(t.dataset.pi,10)].weekly.entries.splice(parseInt(t.dataset.si,10),1);renderEngineEditor();}
+      break;
+    case 'open-invoice':
+      openInvoice(parseInt(t.dataset.ri,10));
+      break;
+    case 'inv-preview':
+      invPreview();
+      break;
+    case 'inv-send':
+      invSend();
       break;
     case 'ee-add-special':
       if(esState){
