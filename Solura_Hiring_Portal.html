@@ -11807,7 +11807,13 @@ const TEMPLATES={
  missed_interview:c=>{const url=(SETTINGS.config&&SETTINGS.config.calInterviewUrl)||BOOK_LINK;return {s:'Rescheduling your Solura Home Care interview',b:`Hi ${first(c)},\n\nWe were expecting you for the interview today. Since you're further along in our process, we'd like to give you one more chance to reschedule — please grab a slot here:\n${url}\n\nIf this isn't the right time for you, just reply and let us know.\n\nSolura Home Care`};},
  interview_cert_warning:c=>{
    const miss=(typeof _missingAppCerts==='function')?_missingAppCerts(c):[];
-   const formOk=(typeof _yardstikFormFilled==='function')?_yardstikFormFilled(c):true;
+   /* Use the same BG-only evidence the GATE uses. _yardstikFormFilled returns false whenever there is no
+      st.yardstik at all, so this outward email appended 'the background-check intake form' to the missing
+      list for every candidate who was never sent one — warned on a missing certificate alone, then told to
+      complete a form that does not exist for them, under threat of cancellation. _bgFormBlocks is the
+      predicate action() (9341) and the tick (22600/22664) already consult; the email must not claim more
+      than the rule that fired it. */
+   const formOk=!((typeof _bgFormBlocks==='function')?_bgFormBlocks(c):false);
    const items=miss.slice();if(!formOk)items.push('the background-check intake form');
    const when=c.st&&c.st.booking?new Date(c.st.booking).toLocaleString('en-US',{weekday:'long',hour:'numeric',minute:'2-digit'}):'today';
    return {s:'⚠ Action needed before your Solura interview — documents missing',
@@ -12133,6 +12139,15 @@ async function recordCertAnswer(row,idx){
     }
     await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
     toast(advancedTo?'\u2713 Recorded \u2014 advanced to Screen invite':(missingRequired.length?'\u2713 Recorded \u2014 decline suggested':'\u2713 Recorded'));
+    /* saveW does not merely serialize W.st — it REBUILDS the pipeline card from the row it writes,
+       so anything written to cand.st and not mirrored here is thrown away by the operator's next Save.
+       This handler is reached from the email reader, which the action engine opens via openWorkspace(r)
+       + openEmailDetail(...), so W routinely holds a loadW deep copy of this very candidate. Without the
+       mirror the recorded cert claim, the drained awaiting item, the park release and the declineHint all
+       revert — and because saveW also writes W.stage to column G, an unmirrored advancedTo puts the
+       candidate BACK to Applied (rule 2: stage is truth and never moves backward). The renderWorkspace()
+       below was already re-rendering from the stale copy, showing the operator nothing had changed. */
+    if(W&&W.row===row){if(W.st!==cand.st)W.st=cand.st;if(advancedTo)W.stage=advancedTo;}
     _renderEmailAwait(_currentEmailMsgId);
     if(W&&W.row===row)renderWorkspace();
     render();
@@ -14420,11 +14435,22 @@ async function skipEmployerVerification(){
   logW('⏭ Employer verification waived by '+(userEmail||'operator'));
   const cand=pipeline.find(x=>x.excelRow===W.row);
   const stages=(typeof _seqStagesFor==='function')?_seqStagesFor(cand||{st:W.st,stage:W.stage}):[];
+  /* WAIVING IS NOT REPOSITIONING. The verify hub is not stage-gated — employersPreviewCard renders
+     for anyone carrying st.employers and its '🏢 Open verify hub' button reaches this Skip control from
+     Offer, Onboarding or Hired just as easily as from Verify employers. This wrote W.stage unconditionally,
+     and saveW writes W.stage straight to column G, so an operator opening the hub late just to LOOK at the
+     employer list and clicking Skip demoted the candidate (rule 2: stage is truth, pointers and stages move
+     forward only). The hardcoded 'Interview invite' fallback was the same violation in rule-8 form: a stage
+     name from the host's vocabulary written onto a candidate whose own sequence may not contain it.
+     The waiver itself is always recorded; only the MOVE is now conditional on actually standing at (or
+     before) the verification step, and only ever moves forward within their own sequence. */
   const i=stages.indexOf('Verify employers');
-  const next=(i>=0&&stages[i+1])?stages[i+1]:'Interview invite';
-  W.stage=next;
+  const here=stages.indexOf(W.stage);
+  const next=(i>=0&&stages[i+1])?stages[i+1]:null;
+  const moving=!!next&&(here<0||here<=i);
+  if(moving)W.stage=next;
   await saveW(true);
-  toast('⏭ Verification skipped — moved to '+next);
+  toast(moving?('⏭ Verification skipped — moved to '+next):'⏭ Verification waived — stage left as '+W.stage);
   renderWorkspace();
 }
 function verifyBlock(){
@@ -15033,7 +15059,18 @@ function yardstikBlock(){
     }
   }
   const ys=W.st.yardstik||null;
-  if(!ys){
+  /* A VERIFICATION order is not a background check. orderYardstikVerification writes verifyReportId/
+     verifyPackageId/verifyOrderedAt into this SAME object and nothing else, so testing the bare existence
+     of st.yardstik made the card claim 'already ordered' for candidates who had never had a BG check:
+     a blank ordered date, a grey UNKNOWN pill, no Order button at all, and a '🔄 Refresh status' whose
+     first line bails with 'No Yardstik order on file' — the card and its only button contradicting each
+     other, with no route left to actually order the check. Same vocabulary error bgStarted (8976) and
+     _bgFormBlocks (9055) were both rewritten to eliminate. Verified against all 48 live yardstik rows:
+     37 BG, 10 verification-only, and this predicate agrees with the stricter orderedAt/packageId/applyUrl
+     form on every one of them while still keeping webhook-only rows (reportId, no orderedAt) on the
+     status card. The verification order stays visible in the verify hub, where it belongs. */
+  const _bgOrdered=!!(ys&&(ys.orderedAt||ys.packageId||ys.applyUrl||ys.reportId||ys.candidateId));
+  if(!ys||!_bgOrdered){
     /* Not ordered yet */
     return `<div style="background:linear-gradient(135deg,#FFFCF5,#FAF6EE);border:1.5px solid var(--gold-mid);border-radius:11px;padding:14px 16px;margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -21407,26 +21444,38 @@ async function restoreYardstikReportId(excelRow){
   c.st.yardstik.restoredAt=new Date().toISOString();
   c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'🩹 Yardstik report ID re-linked from race repair · '+reportId.slice(0,8)+'…'});
   toast('🔄 Re-linking and refreshing status…');
+  /* THE RE-LINK IS THE POINT; the status read is a bonus. patchRange used to sit INSIDE this try, after
+     the fetch — so a worker that was down, a network blip, or any non-JSON body (a 502 page makes
+     r.json() throw) skipped the write entirely while the catch toasted 'Re-link saved but status fetch
+     failed'. The operator pasted a report ID, was told it was saved, and nothing was: the candidate
+     stayed in the race-repair list with the same symptom. The else branch below already carried the
+     intent — 'still persist the re-link so the user isn't stuck' — it just could not be reached. */
+  let data=null,fetchErr='';
   try{
     /* Reuse the existing /yardstik/status path to pull live status + map to tpCheck. */
     const r=await fetch(ZI_WORKER_URL+'/yardstik/status?reportId='+encodeURIComponent(reportId),{headers:{'X-Solura-Token':tok}});
-    const data=await r.json();
-    if(r.ok&&data.status){
-      c.st.yardstik.status=data.status;
-      c.st.yardstik.lastUpdate=new Date().toISOString();
-      if(data.reportUrl)c.st.yardstik.reportUrl=data.reportUrl;
-      if(['clear','proceed','pass'].includes(data.status))c.st.tpCheck='clear';
-      else if(['consider','pre_adverse','ys_qa_review','final_adverse','fail'].includes(data.status))c.st.tpCheck='flag';
-      else c.st.tpCheck='pending';
-    }else{
-      /* Worker call failed — still persist the re-link so the user isn't stuck. */
-      c.st.tpCheck=c.st.tpCheck||'pending';
-    }
+    const d=await r.json();
+    if(r.ok&&d&&d.status)data=d; else fetchErr=(d&&d.error)||('HTTP '+r.status);
+  }catch(e){ fetchErr=(e&&e.message)||String(e); }
+  if(data){
+    c.st.yardstik.status=data.status;
+    c.st.yardstik.lastUpdate=new Date().toISOString();
+    if(data.reportUrl)c.st.yardstik.reportUrl=data.reportUrl;
+    if(['clear','proceed','pass'].includes(data.status))c.st.tpCheck='clear';
+    else if(['consider','pre_adverse','ys_qa_review','final_adverse','fail'].includes(data.status))c.st.tpCheck='flag';
+    else c.st.tpCheck='pending';
+  }else{
+    /* Worker call failed — still persist the re-link so the user isn't stuck. */
+    c.st.tpCheck=c.st.tpCheck||'pending';
+  }
+  try{
     await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
-    toast('✓ Re-linked '+esc(c.name)+' · status '+(data&&data.status||'pending'));
-    scanRaceAffected();
-    render();
-  }catch(e){toast('✗ Re-link saved but status fetch failed: '+e.message);}
+  }catch(e){toast('✗ Re-link NOT saved: '+e.message);return;}
+  /* Mirror into an open workspace — see markBgManuallyClear below for why W can be holding this row. */
+  if(W&&W.row===c.excelRow&&W.st!==c.st)W.st=c.st;
+  toast(fetchErr?('✓ Re-linked '+esc(c.name)+' — saved, but the status fetch failed: '+String(fetchErr).slice(0,60)):('✓ Re-linked '+esc(c.name)+' · status '+(data&&data.status||'pending')));
+  scanRaceAffected();
+  render();
 }
 
 /* Skip re-linking — just mark BG check as clear. Use only when you have already confirmed in
@@ -21439,6 +21488,11 @@ async function markBgManuallyClear(excelRow){
   c.st.tpCheck='clear';
   c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'🩹 BG check manually marked clear via race repair'});
   await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+  /* Same deep-copy hazard as _sendNudgeHeadless/_staleCallDone: W is never nulled (closeWorkspace clears
+     only wsRow) and this race-repair panel offers openWorkspace on the very rows it lists, so the operator
+     can be holding a pre-repair snapshot. Unmirrored, the next Save reverts tpCheck to '' and the Offer
+     hard gate silently re-locks — the exact 'BG not started' symptom this button exists to clear. */
+  if(W&&W.row===c.excelRow&&W.st!==c.st)W.st=c.st;
   toast('✓ Marked BG clear for '+esc(c.name));
   scanRaceAffected();
   render();
