@@ -766,11 +766,12 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <div class="la-grid g3" style="margin-bottom:10px">
         <div class="la-f"><label>Hours of care</label><input type="number" min="0" step="0.5" id="inv-hours"></div>
         <div class="la-f"><label>Hourly rate ($)</label><input type="number" min="0" step="0.01" id="inv-rate"></div>
-        <div class="la-f"><label>Amount due ($)</label><input type="number" min="0" step="0.01" id="inv-amount" placeholder="auto: hours × rate"></div>
+        <div class="la-f"><label>Discount ($ or %)</label><input type="text" id="inv-discount" placeholder="e.g. 50 or 10%"></div>
       </div>
-      <div class="la-grid g2" style="margin-bottom:10px">
+      <div class="la-grid g3" style="margin-bottom:10px">
+        <div class="la-f"><label>Amount due ($)</label><input type="number" min="0" step="0.01" id="inv-amount" placeholder="auto"></div>
         <div class="la-f"><label>Due date</label><input type="date" id="inv-due"></div>
-        <div class="la-f"><label>&nbsp;</label><div style="font-size:11px;color:var(--soft);padding-top:8px">Amount fills itself from hours × rate — type over it to override.</div></div>
+        <div class="la-f"><label>&nbsp;</label><div style="font-size:11px;color:var(--soft);padding-top:8px">Amount = hours × rate − discount. Type over it to override. A discount shows as its own line on the invoice.</div></div>
       </div>
       <div class="la-f" style="margin-bottom:12px"><label>Notes (optional — appears as a highlighted block on the invoice)</label><textarea id="inv-notes" rows="3" style="width:100%" placeholder="e.g. Includes the two extra weekend shifts we discussed."></textarea></div>
       <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end">
@@ -1120,7 +1121,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div class="la-f" style="margin-bottom:10px"><label>Email subject</label><input type="text" data-cfg="invoiceSubject"></div>
         <label class="ee-lbl">Invoice template (HTML — edits save with the Save bar)</label>
         <textarea data-cfg="invoiceTemplate" rows="12" style="width:100%;font-family:monospace;font-size:11.5px"></textarea>
-        <p class="st-p" style="font-size:11px;margin-top:6px">Tokens: <code>{invno}</code> <code>{period}</code> <code>{from}</code> <code>{to}</code> <code>{hours}</code> <code>{rate}</code> <code>{amount}</code> <code>{due}</code> <code>{date}</code> <code>{notes}</code> — plus <code>{dm}</code>/<code>{pt}</code>/<code>{rel}</code>/<code>{ptrel}</code> per client. <code>{notes}</code> renders as a highlighted block, or disappears when empty. Clear the box to go back to the built-in template.</p>
+        <p class="st-p" style="font-size:11px;margin-top:6px">Tokens: <code>{invno}</code> <code>{period}</code> <code>{from}</code> <code>{to}</code> <code>{hours}</code> <code>{rate}</code> <code>{subtotal}</code> <code>{discount}</code> <code>{discountrow}</code> <code>{amount}</code> <code>{due}</code> <code>{date}</code> <code>{notes}</code> — plus <code>{dm}</code>/<code>{pt}</code>/<code>{rel}</code>/<code>{ptrel}</code> per client. <code>{notes}</code> renders as a highlighted block, or disappears when empty. Clear the box to go back to the built-in template.</p>
       </section>
       <section class="st-sec" id="st-sec-engines">
         <h3 class="st-h">Sequence engines</h3>
@@ -1561,7 +1562,7 @@ var C={
              //    regular touch of cycle 4 done, beside-special #1 due now.
              //    SAFE add: every full-width writer spans A:AD and never touches AE.
 };
-var BUILD='B-0907-75';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0907-76';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2373,6 +2374,7 @@ var DEFAULT_INVOICE_TEMPLATE=[
 '      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700;width:45%">Service period</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{period}</td></tr>',
 '      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Hours of care</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{hours}</td></tr>',
 '      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Hourly rate</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{rate}</td></tr>',
+'      {discountrow}',
 '      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700;font-size:15px">Amount due</td><td style="padding:9px 12px;border:1px solid #e4ddcf;font-weight:700;font-size:15px">{amount}</td></tr>',
 '      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Due date</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{due}</td></tr>',
 '    </table>',
@@ -2396,6 +2398,23 @@ function fmtMoney(v){
   if(isNaN(n))return s; // free text stays as typed
   return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
+// Discounts: the field takes "50", "$50", or "10%" — percent resolves
+// against the subtotal. Returns {amt, label} ready for the invoice.
+function resolveDiscount(raw,subtotal){
+  var s=String(raw==null?'':raw).trim();
+  if(!s)return {amt:0,label:''};
+  var pm=s.match(/^([\d.]+)\s*%$/);
+  if(pm){
+    var pct=parseFloat(pm[1]);
+    if(isNaN(pct)||pct<=0)return {amt:0,label:''};
+    var base=parseFloat(subtotal);
+    if(isNaN(base))return {amt:0,label:''};
+    return {amt:Math.round(base*pct)/100,label:pct+'%'};
+  }
+  var n=parseFloat(s.replace(/[$,]/g,''));
+  if(isNaN(n)||n<=0)return {amt:0,label:''};
+  return {amt:Math.round(n*100)/100,label:''};
+}
 // "2026-09-01" → "Sep 1, 2026" (anything else passes through untouched)
 function invPrettyDate(iso){
   var m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -2409,6 +2428,20 @@ function fillInvoiceTokens(tpl,f){
   f=f||{};
   var pFrom=invPrettyDate(f.from),pTo=invPrettyDate(f.to);
   var period=(pFrom&&pTo)?(pFrom+' – '+pTo):(pFrom||pTo||'');
+  // Discount math: subtotal = hours × rate (when both numeric, else the
+  // amount itself); {discountrow} renders Subtotal + Discount lines only
+  // when a discount is actually given.
+  var subN=parseFloat(f.hours)*parseFloat(f.rate);
+  if(isNaN(subN))subN=parseFloat(String(f.subtotal||f.amount||'').replace(/[$,]/g,''));
+  var disc=resolveDiscount(f.discount,subN);
+  var discountRow='';
+  if(disc.amt>0){
+    var tdL='padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700';
+    var tdR='padding:9px 12px;border:1px solid #e4ddcf';
+    discountRow=
+      '<tr><td style="'+tdL+'">Subtotal</td><td style="'+tdR+'">'+fmtMoney(subN)+'</td></tr>'
+      +'<tr><td style="'+tdL+'">Discount'+(disc.label?(' ('+disc.label+')'):'')+'</td><td style="'+tdR+';color:#1f4d3a;font-weight:700">−'+fmtMoney(disc.amt)+'</td></tr>';
+  }
   var notesBlock=String(f.notes||'').trim()
     ?('<div style="background:#f6f1e6;border:1px solid #e4ddcf;border-radius:8px;padding:12px 14px;font-size:13.5px;line-height:1.55"><b>Notes</b><br>'
       +escapeHtml(String(f.notes).trim()).replace(/\n/g,'<br>')+'</div>')
@@ -2423,6 +2456,9 @@ function fillInvoiceTokens(tpl,f){
     .replace(/\{amount\}/gi,fmtMoney(f.amount))
     .replace(/\{due\}/gi,invPrettyDate(f.due))
     .replace(/\{date\}/gi,invPrettyDate(f.date))
+    .replace(/\{subtotal\}/gi,isNaN(subN)?'':fmtMoney(subN))
+    .replace(/\{discount\}/gi,disc.amt>0?fmtMoney(disc.amt):'')
+    .replace(/\{discountrow\}/gi,discountRow)
     .replace(/\{notes\}/gi,notesBlock);
 }
 /* 🧾 INVOICING — END */
@@ -2440,7 +2476,7 @@ function openInvoice(ri){
   el('inv-from-date').value=ds(new Date(t.getFullYear(),t.getMonth(),1));
   el('inv-to-date').value=ds(t);
   el('inv-due').value=ds(addDays(t,14));
-  el('inv-hours').value='';el('inv-rate').value='';el('inv-amount').value='';
+  el('inv-hours').value='';el('inv-rate').value='';el('inv-discount').value='';el('inv-amount').value='';
   el('inv-notes').value='';
   el('inv-out').textContent='';
   el('modal-invoice').classList.add('open');
@@ -2452,6 +2488,7 @@ function invFields(){
     to:String(el('inv-to-date').value||'').trim(),
     hours:String(el('inv-hours').value||'').trim(),
     rate:String(el('inv-rate').value||'').trim(),
+    discount:String(el('inv-discount').value||'').trim(),
     amount:String(el('inv-amount').value||'').trim(),
     due:String(el('inv-due').value||'').trim(),
     notes:String(el('inv-notes').value||''),
@@ -2460,7 +2497,10 @@ function invFields(){
   // Amount fallback at send time too — never send a blank amount silently
   if(!f.amount&&f.hours&&f.rate){
     var n=parseFloat(f.hours)*parseFloat(f.rate);
-    if(!isNaN(n))f.amount=String(Math.round(n*100)/100);
+    if(!isNaN(n)){
+      n=Math.max(0,n-resolveDiscount(f.discount,n).amt);
+      f.amount=String(Math.round(n*100)/100);
+    }
   }
   return f;
 }
@@ -6145,12 +6185,18 @@ document.addEventListener('input',function(ev){
       }else asgnState[i][parts[1]]=t.value;
     }
   }
-  // 🧾 Invoice amount auto-fills from hours × rate until typed over
+  // 🧾 Invoice amount auto-fills from hours × rate − discount until typed over
   if(t&&t.id==='inv-amount')_invAmountTouched=true;
-  if(t&&(t.id==='inv-hours'||t.id==='inv-rate')&&!_invAmountTouched){
+  if(t&&(t.id==='inv-hours'||t.id==='inv-rate'||t.id==='inv-discount')&&!_invAmountTouched){
     var ih=parseFloat((el('inv-hours')||{}).value),ir=parseFloat((el('inv-rate')||{}).value);
     var ia=el('inv-amount');
-    if(ia)ia.value=(!isNaN(ih)&&!isNaN(ir))?String(Math.round(ih*ir*100)/100):'';
+    if(ia){
+      if(!isNaN(ih)&&!isNaN(ir)){
+        var sub9=ih*ir;
+        var net9=Math.max(0,sub9-resolveDiscount((el('inv-discount')||{}).value,sub9).amt);
+        ia.value=String(Math.round(net9*100)/100);
+      }else ia.value='';
+    }
   }
   // Claude training-section fields → straight into config, dirty-bar saves
   if(t&&t.dataset&&t.dataset.cts){

@@ -18,7 +18,7 @@ const src = html.slice(html.indexOf('*/', b) + 2, e);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cfgStore = {};
 const mk = new Function('cfg', 'lc', 'escapeHtml',
-  src + '\nreturn {DEFAULT_INVOICE_FROM,DEFAULT_INVOICE_SUBJECT,DEFAULT_INVOICE_TEMPLATE,invoiceCfg,isOnService,fmtMoney,invPrettyDate,fillInvoiceTokens};');
+  src + '\nreturn {DEFAULT_INVOICE_FROM,DEFAULT_INVOICE_SUBJECT,DEFAULT_INVOICE_TEMPLATE,invoiceCfg,isOnService,fmtMoney,invPrettyDate,fillInvoiceTokens,resolveDiscount};');
 const I = mk(k => cfgStore[k], v => String(v || '').toLowerCase().trim(), esc);
 
 // ── status gate ──
@@ -51,6 +51,27 @@ const noNotes = I.fillInvoiceTokens(I.DEFAULT_INVOICE_TEMPLATE, Object.assign({}
 ok(noNotes.indexOf('Notes') === -1 && noNotes.indexOf('{notes}') === -1, 'blank notes: the block vanishes entirely');
 const evil = I.fillInvoiceTokens('<div>{notes}</div>', Object.assign({}, F, { notes: '<script>alert(1)</script>' }));
 ok(evil.indexOf('<script>') === -1 && evil.indexOf('&lt;script&gt;') > -1, 'notes are HTML-escaped (no injection into the email)');
+
+// ── discounts (B-0907-76) ──
+ok(I.resolveDiscount('50', 960).amt === 50 && I.resolveDiscount('50', 960).label === '', 'flat $50 discount');
+ok(I.resolveDiscount('$1,000', 5000).amt === 1000, 'dollar-formatted flat discount parses');
+ok(I.resolveDiscount('10%', 960).amt === 96 && I.resolveDiscount('10%', 960).label === '10%', 'percent resolves against subtotal, keeps its label');
+ok(I.resolveDiscount('2.5%', 1000).amt === 25, 'fractional percent');
+ok(I.resolveDiscount('', 960).amt === 0 && I.resolveDiscount('free', 960).amt === 0 && I.resolveDiscount('-20', 960).amt === 0, 'blank / junk / negative → no discount');
+{
+  const FD = Object.assign({}, F, { discount: '10%', amount: '864' });
+  const d1 = I.fillInvoiceTokens(I.DEFAULT_INVOICE_TEMPLATE, FD);
+  ok(d1.indexOf('Subtotal') > -1 && d1.indexOf('$960.00') > -1, 'discount invoice shows the subtotal line');
+  ok(d1.indexOf('Discount (10%)') > -1 && d1.indexOf('−$96.00') > -1, 'discount line labeled with the percent, shown negative');
+  ok(d1.indexOf('$864.00') > -1, 'amount due reflects the discount');
+  const d0 = I.fillInvoiceTokens(I.DEFAULT_INVOICE_TEMPLATE, F);
+  ok(d0.indexOf('Subtotal') === -1 && d0.indexOf('Discount') === -1 && d0.indexOf('{discountrow}') === -1, 'no discount → rows vanish, no leftover token');
+  const custom = I.fillInvoiceTokens('<p>{subtotal} minus {discount} = {amount}</p>', Object.assign({}, F, { discount: '60', amount: '900' }));
+  ok(custom === '<p>$960.00 minus $60.00 = $900.00</p>', 'granular {subtotal}/{discount} tokens work in custom templates');
+}
+ok(/hours × rate − discount/.test(html), 'modal explains the discount math');
+ok(/id="inv-discount"/.test(html) && /t\.id==='inv-discount'/.test(html), 'discount field wired into the live autocalc');
+ok(/resolveDiscount\(f\.discount,n\)/.test(html), 'send-time amount fallback subtracts the discount too');
 
 // ── send-path + UI wiring (source locks) ──
 ok(/Mail\.Send\.Shared/.test(html) && (html.match(/Mail\.Send\.Shared/g) || []).length >= 2, 'Mail.Send.Shared scope requested on auth AND refresh');
