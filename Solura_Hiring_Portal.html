@@ -8668,6 +8668,19 @@ async function _seqV3RepairPass(){
       }catch(e){}
       if(!dest.steps.some(s=>s.kind==='stage'&&s.stage&&s.stage.setStage===c.stage))continue; /* target has no stage step for their stage — leave alone */
       const wasAdopted=!!c.st.sequenceId;
+      /* A DEGRADED SETTINGS LOAD IS NOT EVIDENCE THAT THEIR SEQUENCE WAS DELETED (rules 6 + 7).
+         Reaching here with wasAdopted means SETTINGS.sequences has no entry for c.st.sequenceId —
+         which is true both when the operator really deleted it and when the settings this session
+         is holding are a fallback tier: the worker GET was skipped or failed, the AL1 mirror is
+         unreadable or months stale, no localStorage (a fresh or private window). In that state the
+         whole cohort of any sequence missing from the fallback copy gets rewritten onto the
+         ★default, one AJ write each, and their ORIGINAL sequenceId is overwritten in the cell — not
+         recoverable from the sheet. That is precisely the mass "candidates randomly switch
+         sequences" incident this pass's own comments were written to stop. Rule 7 already refuses to
+         SAVE settings from a degraded load; this is the same principle applied to candidate rows.
+         The unadopted case below is left alive: adopting a brand-new candidate is additive and the
+         operator can reassign, whereas a move destroys the tag. */
+      if(wasAdopted&&((window._lastSettingsLoadStatus||{}).source!=='workerFile'))continue;
       const ptr=_classicPointerFor(c,dest);
       if(!ptr)continue;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧬 '+(wasAdopted?'Sequence was deleted — moved onto':'Adopted')+' "'+dest.name+'" — pointer '+ptr});
@@ -11044,6 +11057,8 @@ async function _sendNudgeHeadless(c){
   c.st.emails.unshift({id:'local-'+Date.now()+'-'+c.excelRow,direction:'out',subject:(subj||'').slice(0,140),preview:(body||'').slice(0,200),from:'careers@solurahomecare.com',to:c.email,received:new Date().toISOString(),seen:true});
   if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
   c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'\ud83d\udd14 Nudge sent: '+tpl.replace(/_/g,' ')});
+  /* Keep an open workspace pointed at this candidate on the SAME state object. W holds a deep copy from loadW and W.row survives leaving the workspace, so without this the operator's next Save writes the pre-nudge snapshot back over the row \u2014 dropping the outbound email record, the log line, and (the one that bites) the c.st.sent[tpl] stamp that is the ONLY thing stopping _autoSendTpl and needsNudge from sending the very same scripted message a second time. Mirrored BEFORE the write on purpose: the email has already gone out by this line, so the workspace must reflect that even if the AJ patch then fails. */
+  if(W&&W.row===c.excelRow&&W.st!==c.st)W.st=c.st;
   await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
 }
 /* Nudge ALL idle candidates — resilient batch (per-send timeout + guaranteed toast/re-render). */
@@ -18068,7 +18083,8 @@ async function backgroundRefresh(){
     if(view==='calendar')renderCalendar();else if(view==='inbox')renderInbox();else if(view==='pipeline'&&typeof render==='function')render(); /* #17: the poll updates unread/reply state on candidates — without this re-render the pipeline cards stayed stale until you visited the email tab */
     updateInboxBadge();
   }catch(e){console.warn('BG render:',e.message);}
-  try{await _seqAutomationTick();}catch(e){console.warn('Automation tick:',e.message);}
+  /* The tick's re-entrancy mutex is released HERE, in the sole caller's finally, so that a throw escaping the tick (patchRange sits outside its per-candidate try/catch) can never leave window._seqTickRunning stuck true and silently disable automation for the rest of the session. Any future call site must do the same. */
+  try{await _seqAutomationTick();}catch(e){console.warn('Automation tick:',e.message);}finally{window._seqTickRunning=false;}
 }
 async function manualBookingsSync(){return manualRefresh();} /* legacy name */
 function openAddFromBooking(name,email,startISO){
@@ -22249,12 +22265,13 @@ async function _seqRunIntent(row,intentJson){
         if(!cand.st.awaitingItems.some(a2=>a2.kind===item.kind&&(a2.name||'')===(item.name||'')))cand.st.awaitingItems.push({kind:item.kind,name:item.name||''});
       });
     }
-    if(W&&W.row===row)parkInAwaiting(); else toast('Open the workspace to park');
+    /* MIRROR BEFORE HANDING OFF. Everything above was written to cand.st, but the save runs through W.st — loadW deep-copies (st:JSON.parse(JSON.stringify(p.st))) and saveW not only serializes W.st, it REBUILDS the pipeline object from the row it just wrote (pipeline[_idx]=cardOf(...)). So the intent's awaitingItems and sequenceDroppedAt were discarded every time — and unconditionally, not as a race, because this branch only acts when the workspace IS open. Concretely: a park step carrying items [{kind:'cert',name:'CNA'}] parked the candidate watching for NOTHING (commitPark counts awaitingItemsInitialCount off W.st), so the auto-release-on-fulfilment counter could never satisfy and the gate failure never reached the dropped stats. */
+    if(W&&W.row===row){if(W.st!==cand.st)W.st=cand.st;parkInAwaiting();} else toast('Open the workspace to park');
     return;
   }
   if(t==='decline'){
     cand.st.sequenceDroppedAt=new Date().toISOString();
-    if(W&&W.row===row)declineCandidate(); else toast('Open the workspace to decline');
+    if(W&&W.row===row){if(W.st!==cand.st)W.st=cand.st;declineCandidate();} else toast('Open the workspace to decline'); /* same deep-copy loss as the park branch above: sequenceDroppedAt was written to cand.st and thrown away by saveW's rebuild */
     return;
   }
   if(t==='integration'){
@@ -22512,6 +22529,8 @@ async function _staleCallDone(r,reached){
   }
   c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📞 Silence-check call #'+n+' — '+(reached?'REACHED them':'no answer')+(!reached&&n>=2?(nudged?' · nudge email sent — back on the email cycle':' · round closed'+nudgeNote):!reached&&n===1?' · one more call tomorrow':'')});
   try{await patchRange('AJ'+r,[[_stCell(c.st)]]);}catch(e){toast('⚠ '+e.message);return;}
+  /* Same deep-copy hazard as _sendNudgeHeadless: the reached path re-opens the workspace (loadW re-reads, fine), but the UNREACHED path leaves a stale W behind — and that is the path that logs the call, re-parks, and on call #2 SENDS the stage's nudge. A later Save would revert staleParkCalls, lastAwaitingReview, the call log line and the sent stamp, re-arming the whole ladder on someone who has just been called twice and emailed. */
+  if(W&&W.row===r&&W.st!==c.st)W.st=c.st;
   closeModal();_memGen++;
   if(reached){openWorkspace(r);toast('📞 Logged — over to you');}
   else{toast(n>=2?(nudged?'📞 Logged — nudge email sent; they re-park on the email cycle.':'📞 Logged — re-parked'+nudgeNote+'.'):'📞 Logged — they resurface tomorrow for the second call.');}
@@ -22615,9 +22634,13 @@ function _seqAutomationPreview(){
 async function _seqAutomationTick(){
   if(!(SETTINGS.config&&SETTINGS.config.seqAutomation))return;
   if(!window.SeqEngineV2||!(SETTINGS.sequences||[]).length)return;
+  /* ONE TICK AT A TIME. Every sibling heal pass carries this (_seqRepairRunning, _reconRunning) and the tick — the only pass that performs IRREVERSIBLE outward acts — carried neither the mutex nor the stale-pipeline abort. backgroundRefresh has no guard of its own and awaits loadData + loadAvailability + an up-to-8-page inbox scan before reaching here, so a pass routinely outlives the 30s setInterval, and the window 'focus' handler can fire another at any moment. Two live ticks overlap badly: _autoSendTpl's never-double-send stamp (c.st.sent[tpl]) is written only AFTER the sendMailViaGraph await, and loadData replaces `pipeline` with objects rebuilt from the sheet — where that stamp is not yet written — so the second tick re-evaluates the same candidate to the same step and SENDS THE SAME SCRIPTED EMAIL AGAIN. Identical window on _cancelBookingHeadless (autoCancelledFor is also stamped after the await) = a double Cal.com cancellation, and the two passes together spend 20 actions against a documented cap of 10. The flag is cleared by the caller's finally (backgroundRefresh, the sole call site) so an escaping throw — patchRange outside the per-candidate try can throw — can never wedge automation off permanently. */
+  if(window._seqTickRunning)return;window._seqTickRunning=true;
+  const _myPipe=pipeline;
   let budget=10; /* hard per-tick cap across all candidates */
   for(const c of pipeline){
     if(budget<=0)break;
+    if(pipeline!==_myPipe)return; /* loadData swapped the board out from under this instance — a stale tick would act on, and patch AJ from, pre-reload state (same abort every heal pass carries) */
     if(!c.st||!c.st.sequenceId||_isTerminalStage(c.stage))continue;
     /* Corrupt AJ → never act. Every sibling pass carries this guard and the tick did not.
        It was masked (pState rebuilds a corrupt row as the default shape, which has no
@@ -22965,7 +22988,7 @@ function _classicPointerFor(c,seq){
    not by step ARRAY order — canvas-authored sequences store steps in arbitrary array order,
    and the old index comparison (sIdx>pIdx) made snap and walk fight each other every render,
    growing log/history until the 32k AJ cap killed all saves. Follows every outgoing edge
-   (next, elseNext, route options…) breadth-first. */
+   (next, elseNext, and a branch's then/else) breadth-first. */
 function _seqReachesDownstream(seq,fromId,targetId){
   if(!fromId||!targetId)return false;
   const byId={};(seq.steps||[]).forEach(s2=>{if(s2&&s2.id)byId[s2.id]=s2;});
@@ -22975,7 +22998,7 @@ function _seqReachesDownstream(seq,fromId,targetId){
       if(!o||typeof o!=='object')return;
       for(const k in o){
         const v=o[k];
-        if((k==='next'||/Next$/.test(k))&&typeof v==='string'&&v)out.push(v);
+        /* BRANCH EDGES COUNT. The engine's resolveThroughBranches follows step.branch.THEN and step.branch.ELSE — keys this walker never collected, so the BFS died at the first branch step and every step past it was invisible to the test. Both live Classic flows put branch_1 third, so the stage snap (the whole "stage is truth" enforcement, rule 2) was dead for their entire cohort: live 2026-09-07, Chloe Petersen r112 (column G "Interview booked", pointer still email_3) and germya bradley r89 (pointer still session_1, the phone-screen leg) could never snap forward. Edge values are validated against byId, so a plain string like branch.if.trigger can never pose as an edge. */ if((k==='next'||/Next$/.test(k)||k==='then'||k==='else')&&typeof v==='string'&&v&&byId[v])out.push(v);
         else if(v&&typeof v==='object')walk(v);
       }
     })(step);
