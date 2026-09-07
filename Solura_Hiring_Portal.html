@@ -16798,6 +16798,12 @@ async function pollInboxForCandidateEmails(opts){
        to avoid clobbering server-side writes (Cal.com/Yardstik webhooks). See _pollMergeFreshAJ. */
     let inboundCount=0;
     let writeFailCount=0;
+    /* Counted SEPARATELY from a write failure. A corrupt row is not "state too large to save", and
+       the advice that toast gives — open the workspace and save manually — cannot work for one:
+       saveW refuses a corrupt row too, by design. The only way back is the recovery card's
+       version-history restore. Telling the operator to try a save that is guaranteed to be refused
+       sends them at the one row where a bypass would cement the wipe. */
+    let corruptSkipCount=0;
     for(const [row,c] of changedRows){
       try{
         /* A corrupt cell must NEVER be written over. pState hands back a default-shaped ghost
@@ -16806,7 +16812,7 @@ async function pollInboxForCandidateEmails(opts){
            one could not even see it, because sanitizeState (next line, IN PLACE on c.st)
            deletes __ajCorrupt before _stCell ever gets the chance to refuse. Guard first, the
            way saveW does. */
-        if(c.st&&c.st.__ajCorrupt){writeFailCount++;console.warn('Poll: row',row,'- AJ corrupt, refusing to write over it');continue;}
+        if(c.st&&c.st.__ajCorrupt){corruptSkipCount++;console.warn('Poll: row',row,'- AJ corrupt, refusing to write over it');continue;}
         const sanitized=sanitizeState(c.st);
         /* Race protector: re-read AJ now, overlay only the fields the poll touched. */
         const merged=await _pollMergeFreshAJ(row, sanitized);
@@ -16824,6 +16830,7 @@ async function pollInboxForCandidateEmails(opts){
     }
     if(inboundCount){toast('📬 '+inboundCount+' candidate'+(inboundCount===1?'':'s')+' got new email');render();}
     if(writeFailCount)toast('⚠ '+writeFailCount+' candidate'+(writeFailCount===1?'':'s')+' had state too large to save — open their workspace and click Save manually to repair.');
+    if(corruptSkipCount)toast('🛑 '+corruptSkipCount+' candidate'+(corruptSkipCount===1?'':'s')+' have corrupted stored data — new email was NOT recorded for them. Open the candidate and use the red recovery card (version history); a manual Save is refused too.');
     /* The inbound scan reached this line, so everything newer than _scanStart has now been read.
        Record it, so the next pass stops at its first page instead of walking the mailbox again.
        Advance to the scan's OWN start time, never to "now": a message that arrived while this pass
