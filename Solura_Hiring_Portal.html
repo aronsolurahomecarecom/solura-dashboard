@@ -22680,7 +22680,9 @@ function _seqAutomationPreview(){
     if(it.automatable!==true)continue;
     if(c.st.seqAutoFail&&c.st.seqAutoFail.stepId===ev.currentStep.id)continue;
     if(it.type==='send-email'&&it.templateKey){
-      if(c.st.sent&&c.st.sent[it.templateKey])continue; /* _autoSendTpl's never-double-send rule */
+      /* Already sent → the tick now advances the pointer past the step (no re-send) rather
+         than stalling it. Mirror that, and spend the same budget, instead of skipping silently. */
+      if(c.st.sent&&c.st.sent[it.templateKey]){rows.push({n:c.name,what:'skip "'+String(it.templateKey).replace(/_/g,' ')+'" (already sent) and advance the pointer',cls:'soft'});budget--;continue;}
       const _hold=_tickOutwardHold(c);
       if(_hold){rows.push({n:c.name,what:'HELD — would send "'+String(it.templateKey).replace(/_/g,' ')+'", but '+_hold,cls:'soft'});continue;} /* no budget: the tick skips it too */
       rows.push({n:c.name,what:'send "'+String(it.templateKey).replace(/_/g,' ')+'" and advance the sequence',cls:'warn'});budget--;
@@ -22811,9 +22813,35 @@ async function _seqAutomationTick(){
     const _clearFail=()=>{if(c.st.seqAutoFail)delete c.st.seqAutoFail;};
     try{
       if(it.type==='send-email'&&it.templateKey){
+        /* ALREADY SENT → the step is done in reality: advance the pointer, re-send nothing,
+           stamp no failure. _autoSendTpl returns false for two OPPOSITE reasons — no email
+           address on the row (a real blocker) and st.sent[tpl] already stamped (the work is
+           COMPLETE) — and this lane read both as failure, stamping seqAutoFail('email not
+           sent') on a step whose email had already gone out. The guard above then makes every
+           later tick skip that step, so the pointer STALLS THERE PERMANENTLY while the board
+           (bucketing flips a seqAutoFail row to 'action') asks the operator to send an email
+           the candidate already has. st.sent is per-LIFETIME, so an operator sending the
+           template by hand before the sequence reached this step is enough to trigger it, and
+           8353845 widened the exposure today by making the stage snap actually cross branches
+           onto steps like this one. Same "done in reality" rule the Claude-screen branch below
+           already applies to c.st.aiScreen; advancing here is the RESULT of the completed send
+           (rule 1), not a button. */
+        if(c.st.sent&&c.st.sent[it.templateKey]){
+          _clearFail();
+          const adv0=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
+          if(!adv0.error){
+            Object.assign(c.st,adv0.partialState||{});
+            c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ '+it.templateKey+' already sent — pointer advanced, no re-send'});
+            await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+            budget--;
+          }
+          continue;
+        }
         /* The operator has the ball — hold the send (not a failure, so no seqAutoFail stamp:
            releasing the park or reading the reply lets the very next tick send it). */
         if(_tickOutwardHold(c))continue;
+        /* Name the actual blocker: 'email not sent' was also what an already-sent step got. */
+        if(!c.email){await _stampFail('no email address on file');continue;}
         if(await _autoSendTpl(c,it.templateKey)){
           _clearFail();
           const adv=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
@@ -23244,7 +23272,13 @@ function _seqV3Action(c,info){
          END-TO-END honesty: a set-stage outside the flow order is one the tick refuses to
          write; a claude screen needs the worker token configured. */
       const _flowArr=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
-      const _tickCan=i2=>i2&&(i2.type==='send-email'
+      /* A send-email intent with NO templateKey is not executable: the tick's first branch
+         demands it.templateKey, and the if/else chain has no final else, so such a step
+         matched no branch, stamped no seqAutoFail, and sat in Scheduled forever — the exact
+         rot this block exists to prevent. The engine emits templateKey straight from
+         step.email.templateKey and marks it automatable from step.automate alone, so the two
+         are independent. */
+      const _tickCan=i2=>i2&&((i2.type==='send-email'&&!!i2.templateKey)
         ||(i2.type==='set-stage'&&_flowArr.includes(i2.stage))
         ||(i2.type==='integration'&&i2.provider==='claude'&&/resume[-_]screen/.test(i2.action||'')&&!!(SETTINGS.config&&SETTINGS.config.ziToken)));
       /* The tick also provably skips: unadopted rows (no sequenceId) and steps whose last
