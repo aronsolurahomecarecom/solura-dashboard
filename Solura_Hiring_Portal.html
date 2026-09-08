@@ -11515,7 +11515,16 @@ function sanitizeState(st){
          on the very next sanitize — including the one the poll runs moments later in the same pass
          — so the "BLAST ↗" collapse anchor never persisted, the backfill never converged, and it
          rewrote the same rows on every load. Two short strings; the subject is capped at 80. */
-      ['id','direction','subject','preview','from','to','received','receivedAt','sentAt','seen','webLink','hasAttachments','blastId','blastSubject'].forEach(k=>{if(e[k]!==undefined)cleaned[k]=e[k];});
+      /* webLink is NOT persisted: it is written by both inbox pollers and read by nothing. The
+         one place that opens an email in Outlook (the em-outlook-btn handler) uses the webLink
+         from its OWN fresh /me/messages fetch, never this cached copy — so every stored one was
+         dead weight on the single cell whose overflow silently wipes a profile. Measured live
+         2026-09-07: ~229 bytes per email record, 5,720 chars on Tasha Williams alone — 21% of her
+         26,951-char cell, with six rows sitting at 80-82% of the 32,767 cap. Dropping it here (the
+         one chokepoint governing what reaches AJ) sheds it from each row on its next write, with
+         no migration and no behaviour change, and buys those rows back the email history the
+         compaction pass would otherwise trim at 27k. */
+      ['id','direction','subject','preview','from','to','received','receivedAt','sentAt','seen','hasAttachments','blastId','blastSubject'].forEach(k=>{if(e[k]!==undefined)cleaned[k]=e[k];});
       if(cleaned.subject)cleaned.subject=String(cleaned.subject).slice(0,140);
       if(cleaned.preview)cleaned.preview=String(cleaned.preview).slice(0,200);
       return cleaned;
