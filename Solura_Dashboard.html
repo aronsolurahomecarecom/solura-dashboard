@@ -763,6 +763,16 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <div class="la-f" style="margin-bottom:10px"><label>Location</label><input type="text" id="as-location" placeholder="Client's home — street address"></div>
       <div class="la-f" style="margin-bottom:10px"><label>Notes (go on the email and the lead's record)</label><textarea id="as-notes" rows="3" placeholder="Who will be present, parking, documents worth having handy…"></textarea></div>
       <label class="st-check" style="margin-bottom:8px;display:block"><input type="checkbox" id="as-send-email" checked> 📧 Send the family a confirmation email on save (template editable in ⚙ Settings → Email)</label>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <label class="st-check" style="margin:0"><input type="checkbox" id="as-cal" checked> 📆 Calendar invite — on your Outlook calendar, with an Accept/Decline invite to the family</label>
+        <span style="font-size:11.5px;color:var(--soft)">Length:</span>
+        <select id="as-dur" class="ee-inp" style="width:auto;padding:5px 8px;font-size:12px">
+          <option value="30">30 min</option><option value="45">45 min</option>
+          <option value="60" selected>1 hour</option><option value="90">1.5 hours</option>
+          <option value="120">2 hours</option>
+        </select>
+        <span style="font-size:10.5px;color:var(--soft)">(needs a date + time)</span>
+      </div>
       <div class="la-f" style="margin-bottom:12px"><label>Send to</label><input type="email" id="as-to"></div>
       <div style="display:flex;gap:8px;align-items:center">
         <span id="as-out" style="flex:1;font-size:11.5px;white-space:pre-wrap"></span>
@@ -1611,7 +1621,7 @@ var C={
              //    regular touch of cycle 4 done, beside-special #1 due now.
              //    SAFE add: every full-width writer spans A:AD and never touches AE.
 };
-var BUILD='B-0911-81';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0911-82';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2657,6 +2667,45 @@ var DEFAULT_ASMTSCHED_TEMPLATE=[
 '  </p></td></tr>',
 '</table>',
 '</td></tr></table>'].join('\n');
+// 📆 Fallback calendar invite: a standards .ics (METHOD:REQUEST) attached
+// to the confirmation email when the Outlook-native event can't be created
+// (Calendars scope not yet consented). Every mail client shows it as an
+// add-to-calendar invite. Times convert local → UTC.
+function icsEsc(s){return String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n');}
+function icsUtc(d){
+  function p(n){return (n<10?'0':'')+n;}
+  return d.getUTCFullYear()+p(d.getUTCMonth()+1)+p(d.getUTCDate())+'T'+p(d.getUTCHours())+p(d.getUTCMinutes())+p(d.getUTCSeconds())+'Z';
+}
+function buildAssessmentIcs(f,opts){
+  opts=opts||{};
+  var start=new Date(f.date+'T'+(f.time||'12:00')+':00');
+  if(isNaN(start))return null;
+  var durMin=parseInt(opts.duration,10)||60;
+  var end=new Date(start.getTime()+durMin*60000);
+  var uid='asmt-'+start.getTime()+'-'+Math.random().toString(36).slice(2,8)+'@solurahomecare.com';
+  var lines=[
+    'BEGIN:VCALENDAR',
+    'PRODID:-//Solura Home Care//Dashboard//EN',
+    'VERSION:2.0',
+    'METHOD:REQUEST',
+    'BEGIN:VEVENT',
+    'UID:'+uid,
+    'DTSTAMP:'+icsUtc(new Date()),
+    'DTSTART:'+icsUtc(start),
+    'DTEND:'+icsUtc(end),
+    'SUMMARY:'+icsEsc(opts.summary||'In-home assessment — Solura Home Care'),
+    'LOCATION:'+icsEsc(f.location||'Your home'),
+    'DESCRIPTION:'+icsEsc('Your in-home assessment with '+(f.assessor||'Solura Home Care')
+      +'.'+(String(f.notes||'').trim()?('\n'+f.notes):'')+'\nQuestions or reschedule: (216) 770-4886'),
+    'ORGANIZER;CN='+icsEsc(f.assessor||'Solura Home Care')+':mailto:meir@solurahomecare.com'
+  ];
+  if(opts.to&&opts.to.indexOf('@')>0){
+    lines.push('ATTENDEE;CN='+icsEsc(opts.attendeeName||opts.to)+';RSVP=TRUE:mailto:'+opts.to);
+  }
+  lines.push('STATUS:CONFIRMED','BEGIN:VALARM','TRIGGER:-PT60M','ACTION:DISPLAY',
+    'DESCRIPTION:In-home assessment in 1 hour','END:VALARM','END:VEVENT','END:VCALENDAR');
+  return {ics:lines.join('\r\n'),fileName:'Solura_Assessment_'+String(f.date||'').replace(/-/g,'')+'.ics'};
+}
 function asmtSchedCfg(){
   return {subject:String(cfg('asmtSchedSubject')||'').trim()||DEFAULT_ASMTSCHED_SUBJECT,
     template:String(cfg('asmtSchedTemplate')||'').trim()||DEFAULT_ASMTSCHED_TEMPLATE};
@@ -2696,6 +2745,8 @@ function openAsmtSched(ri){
   el('as-location').value='';el('as-notes').value='';
   el('as-to').value=String(r[C.EM]||'').trim();
   el('as-send-email').checked=!!String(r[C.EM]||'').trim();
+  if(el('as-cal'))el('as-cal').checked=true;
+  if(el('as-dur'))el('as-dur').value='60';
   el('as-out').textContent='';
   el('modal-asmt-sched').classList.add('open');
 }
@@ -2755,11 +2806,49 @@ async function asSave(){
       }
       if(docDirty)saveEnginesDoc().catch(function(){});
     }catch(_){}
+    // 📆 Calendar invite: an Outlook-native event first (lands on Meir's
+    // calendar; Exchange emails the family a real Accept/Decline invite).
+    // Missing Calendars scope (or any failure) → a standards .ics rides
+    // the confirmation email instead, so an invite always goes out.
+    var wantCal=!!(el('as-cal')&&el('as-cal').checked)&&!!f.time;
+    var calDur=parseInt((el('as-dur')||{}).value,10)||60;
+    var calMode='off',icsAtt=null;
+    var dmName=String(r[C.DM]||r[C.NM]||'').trim();
+    var ptName=String(r[C.NM]||'').trim();
+    if(wantCal){
+      try{
+        var tzName='America/New_York';
+        try{tzName=Intl.DateTimeFormat().resolvedOptions().timeZone||tzName;}catch(_){}
+        var stD=new Date(f.date+'T'+f.time+':00');
+        var enD=new Date(stD.getTime()+calDur*60000);
+        var pad2=function(n){return (n<10?'0':'')+n;};
+        var locIso=function(d){return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+'T'+pad2(d.getHours())+':'+pad2(d.getMinutes())+':00';};
+        var ev={subject:'In-home assessment — '+(ptName||dmName||'Solura Home Care'),
+          body:{contentType:'HTML',content:'<p>'+escapeHtml(detail)+'</p><p>Questions or reschedule: (216) 770-4886</p>'},
+          start:{dateTime:locIso(stD),timeZone:tzName},
+          end:{dateTime:locIso(enD),timeZone:tzName},
+          location:{displayName:f.location||'Client home'},
+          isReminderOn:true,reminderMinutesBeforeStart:60};
+        if(em.to&&em.to.indexOf('@')>0)ev.attendees=[{emailAddress:{address:em.to,name:dmName||em.to},type:'required'}];
+        var er=await gfetch(GR+'/me/events',{method:'POST',body:JSON.stringify(ev)});
+        if(!er.ok)throw new Error('event '+er.status);
+        calMode='event';
+      }catch(calErr){
+        var built=buildAssessmentIcs(f,{to:em.to,attendeeName:dmName,duration:calDur,
+          summary:'In-home assessment — Solura Home Care'});
+        if(built&&wantEmail){
+          icsAtt={'@odata.type':'#microsoft.graph.fileAttachment',name:built.fileName,
+            contentType:'text/calendar',contentBytes:btoa(unescape(encodeURIComponent(built.ics)))};
+          calMode='ics';
+        }else calMode='fail';
+      }
+    }
     var sent=false;
     if(wantEmail){
-      var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:{
-        subject:em.subject,body:{contentType:'HTML',content:em.html},
-        toRecipients:[{emailAddress:{address:em.to}}]},saveToSentItems:true})});
+      var msg9={subject:em.subject,body:{contentType:'HTML',content:em.html},
+        toRecipients:[{emailAddress:{address:em.to}}]};
+      if(icsAtt)msg9.attachments=[icsAtt];
+      var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:msg9,saveToSentItems:true})});
       if(!(res.ok||res.status===202)){
         var ee=await res.json().catch(function(){return{};});
         throw new Error('Saved to the sheet, but the email failed: '+(ee.error?ee.error.message:res.status));
@@ -2768,9 +2857,14 @@ async function asSave(){
     }
     logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
       contact:sent?em.to:'',subject:sent?em.subject:'Assessment scheduled',
-      preview:detail,outcome:'assessment-scheduled'}));
+      preview:detail+(calMode==='event'?' · Outlook invite sent':calMode==='ics'?' · .ics invite attached':''),
+      outcome:'assessment-scheduled'}));
     el('modal-asmt-sched').classList.remove('open');
-    toast(sent?('📅 Assessment logged — confirmation sent to '+em.to):'📅 Assessment logged');
+    var doneMsg=sent?('📅 Assessment logged — confirmation sent to '+em.to):'📅 Assessment logged';
+    if(calMode==='event')doneMsg+=' · 📆 on your calendar, invite sent';
+    else if(calMode==='ics')doneMsg+=' · 📆 invite attached as .ics (sign out and back in once to enable full Outlook invites)';
+    else if(calMode==='fail')doneMsg+=' · ⚠ calendar invite could not be created';
+    toast(doneMsg);
     _asRi=-1;
     try{await buildUI();}catch(_){}
   }catch(e){
@@ -2933,7 +3027,7 @@ async function signIn(){
   sessionStorage.setItem('pkce_v',pkce.verifier);
   var url='https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/authorize?'
     +'client_id='+CLIENT_ID+'&response_type=code&redirect_uri='+encodeURIComponent(REDIRECT)
-    +'&scope='+encodeURIComponent('openid profile email Files.ReadWrite Mail.Send Mail.Send.Shared Mail.ReadWrite offline_access')
+    +'&scope='+encodeURIComponent('openid profile email Files.ReadWrite Mail.Send Mail.Send.Shared Mail.ReadWrite Calendars.ReadWrite offline_access')
     +'&code_challenge='+pkce.challenge+'&code_challenge_method=S256&prompt=select_account';
   location.href=url;
 }
@@ -2943,7 +3037,7 @@ async function refreshToken(){
   var rt=localStorage.getItem('sr');
   if(!rt)return false;
   try{
-    var body=new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:'openid profile email Files.ReadWrite Mail.Send Mail.Send.Shared Mail.ReadWrite offline_access'});
+    var body=new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:'openid profile email Files.ReadWrite Mail.Send Mail.Send.Shared Mail.ReadWrite Calendars.ReadWrite offline_access'});
     var r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
     var j=await r.json();
     if(j.access_token){

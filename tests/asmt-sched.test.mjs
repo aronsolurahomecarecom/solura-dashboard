@@ -20,7 +20,7 @@ let CFG = {};
 const cfgStub = k => CFG[k];
 const escapeHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const mk = new Function('cfg', 'lc', 'escapeHtml',
-  src + '\nreturn {DEFAULT_ASMTSCHED_SUBJECT,DEFAULT_ASMTSCHED_TEMPLATE,asmtSchedCfg,asmtPrettyTime,fillAsmtSchedTokens};');
+  src + '\nreturn {DEFAULT_ASMTSCHED_SUBJECT,DEFAULT_ASMTSCHED_TEMPLATE,asmtSchedCfg,asmtPrettyTime,fillAsmtSchedTokens,buildAssessmentIcs,icsEsc};');
 const A = mk(cfgStub, s => String(s || '').toLowerCase(), escapeHtml);
 
 // ── time prettifier ──
@@ -70,6 +70,35 @@ ok(dflt.indexOf('{dm}') > -1 && dflt.indexOf('{pt}') > -1, 'name tokens survive 
 ok(/enginesDoc\.assessors\[String\(ri\)\]=f\.assessor/.test(html), 'scheduler saves the assessor per lead (synced doc)');
 ok(/\(enginesDoc\.assessors\|\|\{\}\)\[String\(ri\)\]/.test(html), 'openAssessment reads the scheduled assessor');
 ok(/assessor:schedAssessor,\s*\n\s*assessor_signed_name:schedAssessor/.test(html), 'form prefills BOTH assessor fields from the scheduled name');
+
+// ── 📆 calendar invite (B-0911-82) ──
+{
+  const cf = { date: '2026-09-15', time: '14:30', location: '123 Superior Ave, Cleveland', assessor: 'Meir Schwimer', notes: 'Dog on premises' };
+  const built = A.buildAssessmentIcs(cf, { to: 'karen@x.com', attendeeName: 'Karen Gold', duration: 90 });
+  const ics = built.ics;
+  ok(ics.indexOf('BEGIN:VCALENDAR') === 0 && ics.indexOf('METHOD:REQUEST') > -1 && ics.indexOf('END:VCALENDAR') > -1, 'valid VCALENDAR with METHOD:REQUEST (shows Accept in mail clients)');
+  const expStart = new Date('2026-09-15T14:30:00');
+  const p = n => (n < 10 ? '0' : '') + n;
+  const utc = d => d.getUTCFullYear() + p(d.getUTCMonth() + 1) + p(d.getUTCDate()) + 'T' + p(d.getUTCHours()) + p(d.getUTCMinutes()) + p(d.getUTCSeconds()) + 'Z';
+  ok(ics.indexOf('DTSTART:' + utc(expStart)) > -1, 'start converts local → UTC correctly');
+  ok(ics.indexOf('DTEND:' + utc(new Date(expStart.getTime() + 90 * 60000))) > -1, 'end honors the chosen duration (90 min)');
+  ok(ics.indexOf('LOCATION:123 Superior Ave\\, Cleveland') > -1, 'commas escaped per RFC 5545');
+  ok(ics.indexOf('ORGANIZER;CN=Meir Schwimer:mailto:meir@solurahomecare.com') > -1, 'organizer is Meir');
+  ok(ics.indexOf('ATTENDEE;CN=Karen Gold;RSVP=TRUE:mailto:karen@x.com') > -1, 'family attendee with RSVP');
+  ok(ics.indexOf('TRIGGER:-PT60M') > -1, '1-hour reminder alarm included');
+  ok(ics.indexOf('Dog on premises') > -1, 'notes ride the description');
+  ok(built.fileName === 'Solura_Assessment_20260915.ics', 'file named by date');
+  const noTo = A.buildAssessmentIcs(cf, { duration: 60 });
+  ok(noTo.ics.indexOf('ATTENDEE') === -1, 'no attendee line without a valid email');
+  ok(A.buildAssessmentIcs({ date: 'garbage' }, {}) === null, 'unparseable date → null, never a broken invite');
+  ok(A.icsEsc('a;b,c\nd') === 'a\\;b\\,c\\nd', 'escaping covers ; , and newlines');
+}
+ok(/Calendars\.ReadWrite offline_access/.test(html) && (html.match(/Calendars\.ReadWrite/g) || []).length === 2, 'Calendars.ReadWrite added to BOTH the login and refresh scopes');
+ok(/gfetch\(GR\+'\/me\/events',\{method:'POST'/.test(html), 'native Outlook event created via Graph');
+ok(/attendees=\[\{emailAddress:\{address:em\.to/.test(html), 'family added as attendee → Exchange sends the real invite');
+ok(/contentType:'text\/calendar'/.test(html), 'fallback .ics attaches to the confirmation email');
+ok(/sign out and back in once to enable full Outlook invites/.test(html), 'fallback explains how to unlock native invites');
+ok(/id="as-cal" checked/.test(html) && /id="as-dur"/.test(html), 'invite toggle (default on) + duration picker in the modal');
 
 // ── source-level locks on the flow ──
 ok(/id="modal-asmt-sched"/.test(html) && /data-action="as-save"/.test(html) && /data-action="as-preview"/.test(html), 'logger modal with Save & Send + Preview');
