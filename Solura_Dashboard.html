@@ -972,6 +972,12 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <input type="text" id="al-safety" placeholder="Falls, wandering…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none">
         </div>
       </div>
+      <div style="margin-bottom:12px">
+        <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Conditions mentioned</label>
+        <input type="text" id="al-cond-search" placeholder="Search — dementia, parkinson, diabetes…" style="width:100%;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;outline:none;margin-bottom:8px">
+        <div class="asmt-cond-grid" id="al-cond-grid"></div>
+        <div id="al-cond-count" style="font-size:11px;color:var(--soft);margin-top:4px"></div>
+      </div>
       <div style="margin-bottom:14px">
         <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin-bottom:6px">Notes</label>
         <textarea id="al-notes" rows="3" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;outline:none;resize:vertical;line-height:1.5"></textarea>
@@ -1621,7 +1627,7 @@ var C={
              //    regular touch of cycle 4 done, beside-special #1 due now.
              //    SAFE add: every full-width writer spans A:AD and never touches AE.
 };
-var BUILD='B-0911-82';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0911-83';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -7145,8 +7151,45 @@ function renderActivityForEmail(email){
  * update the local cache and rebuild. Column G gets a real source string
  * from the dropdown — never a gate value.
  * ─────────────────────────────────────────────────────────────────────── */
+/* Conditions picker inline in the add-lead form: same catalog + pill UI
+ * as the Responded picker, selection lands in column AC on save — so the
+ * assessment form pre-selects them later without any extra step.       */
+var _alConds=[];
+function renderAlConds(){
+  var host=el('al-cond-grid');if(!host)return;
+  var q=String((el('al-cond-search')||{}).value||'').toLowerCase().trim();
+  var match=function(c){
+    if(!q)return true;
+    return String(c.label).toLowerCase().indexOf(q)>-1||String(c.kw||'').toLowerCase().indexOf(q)>-1;
+  };
+  // Common pills always compete; long-tail ones surface when searched for
+  // (or already selected, so a chosen one never vanishes).
+  var pool=ASMT_COMMON_CONDITIONS.filter(match)
+    .concat(ASMT_OTHER_CONDITIONS.filter(function(c){
+      return _alConds.indexOf(c.k)>-1||(q&&match(c));
+    }));
+  host.innerHTML=pool.map(function(c){
+    var on=_alConds.indexOf(c.k)>-1;
+    return '<button type="button" class="asmt-cond'+(on?' on':'')+'" data-al-cond-k="'+c.k+'">'
+      +'<span class="chk">'+(on?'✓':'')+'</span><span>'+escapeHtml(c.label)+'</span></button>';
+  }).join('')||'<div style="font-size:11.5px;color:var(--soft);font-style:italic">No conditions match that search.</div>';
+  host.querySelectorAll('[data-al-cond-k]').forEach(function(b){
+    b.addEventListener('click',function(e){
+      var k=e.currentTarget.dataset.alCondK;
+      var i=_alConds.indexOf(k);
+      if(i>-1)_alConds.splice(i,1);else _alConds.push(k);
+      renderAlConds();
+    });
+  });
+  var cnt=el('al-cond-count');
+  if(cnt)cnt.textContent=_alConds.length?(_alConds.length+' selected — they pre-fill the in-home assessment later'):'Optional — tap any that came up. Search reveals the less common ones.';
+}
 function openAddLead(){
   ['al-name','al-dm','al-phone','al-email','al-rel','al-area','al-hrs','al-services','al-start','al-pay','al-notes','al-mv','al-safety'].forEach(function(id){var e2=el(id);if(e2)e2.value='';});
+  _alConds=[];
+  var acs=el('al-cond-search');
+  if(acs){acs.value='';acs.oninput=function(){renderAlConds();};}
+  renderAlConds();
   var src=el('al-source');if(src)src.value='';
   var stt=el('al-status');if(stt)stt.value='Cold';
   // Datalists from the sheet's own distinct values — guarantees new leads use
@@ -9571,7 +9614,7 @@ async function saveAddLead(){
     0,                     // Z  step_idx — engine truth, Phase 1 start
     '',                    // AA step_done_at
     '',                    // AB nurture_weekday_override
-    '',                    // AC mentioned_conditions
+    serializeConditionList(_alConds), // AC mentioned_conditions — picked right on the form
     ''                     // AD Unsubscribed
   ];
   // First truly-empty data row — NOT rows.length. SheetJS's used range often

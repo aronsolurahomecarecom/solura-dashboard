@@ -100,6 +100,12 @@ ok(/contentType:'text\/calendar'/.test(html), 'fallback .ics attaches to the con
 ok(/sign out and back in once to enable full Outlook invites/.test(html), 'fallback explains how to unlock native invites');
 ok(/id="as-cal" checked/.test(html) && /id="as-dur"/.test(html), 'invite toggle (default on) + duration picker in the modal');
 
+// ── conditions on the add-lead form (B-0911-83) ──
+ok(/id="al-cond-grid"/.test(html) && /id="al-cond-search"/.test(html), 'add-lead form carries the conditions picker + search');
+ok(/serializeConditionList\(_alConds\), \/\/ AC/.test(html), 'picked conditions land in column AC on save');
+ok(/_alConds=\[\];\s*\n\s*var acs=el\('al-cond-search'\)/.test(html), 'selection resets every time the form opens');
+ok(/_alConds\.indexOf\(c\.k\)>-1\|\|\(q&&match\(c\)\)/.test(html), 'long-tail conditions surface via search and never vanish once selected');
+
 // ── source-level locks on the flow ──
 ok(/id="modal-asmt-sched"/.test(html) && /data-action="as-save"/.test(html) && /data-action="as-preview"/.test(html), 'logger modal with Save & Send + Preview');
 ok(/data-action="open-asmt-sched" data-ri/.test(html), '📅 launch button rides the Responded/Update dialog footer');
