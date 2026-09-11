@@ -7489,6 +7489,15 @@ async function saveAvailability(){
    delivery failures, unmatched-pool overflow). Match: exactly ONE active candidate by email
    (incl. bookingAltEmail) or normalized full name. Never overwrites a DIFFERENT existing
    upcoming booking. Throttled to one Cal.com pull per 10 minutes. */
+/* A booking this candidate has already USED (session completed, no-show recorded, missed-meeting
+   rebook sent) must never be re-attached. Those paths delete calBookingId along with the rest of
+   the booking, and the Cal.com backfill below tests "already on file" by that id alone - so the
+   same booking, still accepted on Cal.com and inside the 2-hour grace, came straight back as one
+   "the webhook never delivered". Live victim: Minnie Terry r160, Sep 3 - interview run and
+   consumed, backfilled again minutes later, then the booking reconcile read that ghost interview
+   as her current booking and moved her from Onboarding booked back down to Interview booked
+   (rule 2), after which the worker refused every onboarding booking she made. Last 5 ids only. */
+function _rememberConsumedBooking(st){if(st&&st.calBookingId){const u=String(st.calBookingId);st.consumedBookingIds=(Array.isArray(st.consumedBookingIds)?st.consumedBookingIds:[]).filter(x=>x!==u).concat(u).slice(-5);}}
 async function _backfillCalBookings(){
   try{
     const tok=(SETTINGS.config||{}).ziToken||'';if(!tok)return;
@@ -7513,7 +7522,7 @@ async function _backfillCalBookings(){
       if(_wsOpenOn(cand.excelRow))continue; /* workspace open — saveW would clobber; next pull */
       cand.st=cand.st||{};
       if(cand.st.__ajCorrupt)continue; /* corrupt cell — nothing may write over it (rule 5) */
-      if(cand.st.calBookingId===b.uid)continue; /* already on file */
+      if(cand.st.calBookingId===b.uid)continue; /* already on file */ if(b.uid&&(cand.st.consumedBookingIds||[]).indexOf(String(b.uid))>=0)continue; /* already USED - see _rememberConsumedBooking */
       const hasOtherUpcoming=cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
       if(hasOtherUpcoming)continue; /* a different live booking is already tracked — manual call */
       const hay=String((b.title||'')+' '+(b.eventTypeSlug||'')).toLowerCase();
@@ -9022,6 +9031,13 @@ function _missingAppCerts(c){
 function _yardstikFormFilled(c){
   const ys=(c&&c.st&&c.st.yardstik)||null;
   if(!ys)return false;
+  /* A verdict on file means the intake form was done - there is no report to judge otherwise.
+     markBgManuallyClear (race repair) and the third-party check field record CLEAR as tpCheck alone,
+     with reportId still null and status still created when the webhook was missed, so this said
+     not filled and _bgFormBlocks went on warning (T-60) and cancelling (T-30) that interview over a
+     form Yardstik had already turned into a clear report. A re-order resets tpCheck to pending and
+     replaces the BG fields, decision included, so this cannot outlive the check it describes. */
+  if(c.st.tpCheck==='clear'||c.st.tpCheck==='flag'||ys.decision)return true;
   return !!(ys.reportId||/report|complete|clear|consider/i.test(ys.status||''));
 }
 /* ---- Interview cert-gate helpers ------------------------------------------------
@@ -9343,16 +9359,21 @@ function action(c){
       const why=(_miss.length?_miss.length+' cert'+(_miss.length===1?'':'s')+' missing':'')+(_miss.length&&!_form?' + ':'')+(!_form?'BG form not completed':'');
       /* Fresh certs arrived (certsReadyReview) → the cross-check action below outranks the
          warning/cancel path: never cancel on a candidate whose documents are in, unreviewed. */
-      if(_missing&&_mins<=30&&!c.st.certsReadyReview){
+      /* Same windows as the tick: cancel only while the interview is still ahead and not already
+         auto-cancelled for this booking; warn only between T-60 and T-30. The cancel card ran for the
+         whole -30..30 window, so after the tick cancelled it the board offered a cancel Cal.com would
+         refuse, and a started interview was offered one too (hiding the no-show card behind it). A
+         started or cancelled interview now leaves this block. */
+      if(_missing&&_mins<=30&&_mins>0&&!_autoCancelDoneFor(c)&&!c.st.certsReadyReview){
         return{bucket:'action',timing:{txt:'\u26a0 Interview in '+Math.max(0,Math.round(_mins))+'m \u2014 '+why,pill:'pbad',date:_when},info:_info,primary:{kind:'cancelInterview',label:'\u2715 Cancel interview (Cal.com)',cls:'red'}};
       }
-      if(_missing&&_mins<=60&&!c.st.certsReadyReview){
+      if(_missing&&_mins<=60&&_mins>30&&!c.st.certsReadyReview){
         if(!_certWarnSentFor(c)){
           return{bucket:'action',timing:{txt:'\u26a0 Interview in '+Math.round(_mins)+'m \u2014 '+why,pill:'pbad',date:_when},info:_info,primary:{kind:'email-tpl',tpl:'interview_cert_warning',label:'\u26a0 Send cancellation warning',cls:'red'}};
         }
         return{bucket:'scheduled',timing:{txt:'\u26a0 Warned \u2014 certs due 30 min before the interview',pill:'pa',date:_when},info:_info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
       }
-      if(_missing&&!c.st.certsReadyReview){
+      if(_missing&&_mins>60&&!c.st.certsReadyReview){
         /* Certs not in yet and the warning window hasn't opened \u2014 WE are waiting on the
            candidate. Awaiting, never an operator hub action: the cross-check only surfaces
            once their documents actually arrive and are recorded (attachment assignment
@@ -9382,7 +9403,9 @@ function action(c){
     const _msSent=(c.st.sent||{})[_msTpl];
     const _bookDay=String(c.st.booking||'').slice(0,10);
     const _sentThisBooking=!!(_msSent&&_bookDay&&String(_msSent)>=_bookDay);
-    if(_msTpl&&_m4!=null&&_m4<=-15&&!_sentThisBooking&&!(c.st.emails||[]).some(e2=>!e2.seen)){
+    /* Not a no-show when WE cancelled it: a booking the T-30 rule auto-cancelled is not a meeting the
+       candidate missed. Per booking, like the stamp above (see _clearCancelledBooking). */
+    if(_msTpl&&_m4!=null&&_m4<=-15&&!_sentThisBooking&&c.st.autoCancelledFor!==String(c.st.booking||'')&&!(c.st.emails||[]).some(e2=>!e2.seen)){
       const _ago=-_m4<60?Math.round(-_m4)+'m ago':-_m4<2880?Math.round(-_m4/60)+'h ago':Math.round(-_m4/1440)+'d ago';
       return{bucket:'action',timing:{txt:'📵 Looks like a no-show — video call was '+_ago,pill:'pbad',date:_fmtBooking(c.st.booking)},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'noshow-rebook',stage:c.stage,label:'📵 No-show — send rebook email',cls:'red'}};
     }
@@ -10451,7 +10474,7 @@ async function markNoShow(stage){
   /* Below limit: clear booking, send rebook email, park in awaiting. The candidate's stage
      reverts to the "invite" stage so they need to rebook through the Cal.com link. */
   delete W.st.booking;delete W.st.meetingUrl;delete W.st.callPhone;
-  delete W.st.bookingKind;delete W.st.calBooking;delete W.st.calBookingId; /* the missed meeting is consumed in full — its id must not swallow a later cancel */
+  _rememberConsumedBooking(W.st);delete W.st.bookingKind;delete W.st.calBooking;delete W.st.calBookingId; /* the missed meeting is consumed in full — its id must not swallow a later cancel */
   if(stage==='Phone Screen'&&W.stage==='Screen booked'){W.stage='Screen invite';delete (W.st.sent||{}).screen_invite;}
   else if(stage==='Interview'&&W.stage==='Interview booked'){W.stage='Interview invite';delete (W.st.sent||{}).interview_invite;}
   else if(stage==='Onboarding'&&W.stage==='Onboarding booked'){W.stage='Onboarding';delete (W.st.sent||{}).onboarding;}
@@ -11395,7 +11418,7 @@ async function cancelInterviewBooking(){
   try{
     const r=await fetch(ZI_WORKER_URL+'/cal/cancel-booking',{method:'POST',headers:{'Content-Type':'application/json','X-Solura-Token':tok},body:JSON.stringify({bookingUid:W.st.calBookingId,reason:reason})});
     const j=await r.json();
-    if(j.ok){logW('\u2715 Interview cancelled via Cal.com \u2014 '+reason);await saveW(true);toast('\u2715 Cancelled \u2014 Cal.com is notifying the candidate');}
+    if(j.ok){logW('\u2715 Interview cancelled via Cal.com \u2014 '+reason);{const _to=_bookingCancelledStage(W.stage);if(_to){W.stage=_to;logW('Stage reverted to '+_to+' — awaiting a new booking');}_clearCancelledBooking(W.st,W.stage,pipeline.find(x=>x.excelRow===W.row));} /* the webhook transition, before saving - see _clearCancelledBooking */await saveW(true);toast('\u2715 Cancelled \u2014 Cal.com is notifying the candidate');}
     else toast('\u26a0 Cancel failed: '+(j.error||('Cal.com '+(j.status||'')))+(j.calcom&&j.calcom.message?(' \u2014 '+j.calcom.message):''));
   }catch(e){toast('\u26a0 Cancel failed: '+e.message);}
 }
@@ -11995,6 +12018,13 @@ async function _markReceivedCore(cand,idx,note){
       if(added.length)cand.st.log.push({t:stamp(),x:'\u2713 Certs added to profile from received item: '+added.join(', ')});
     }
   }
+  /* A resolved cert opens the cross-check whether or not the candidate is still parked - the rule
+     _doAssignment already applies. This stamp lived only inside the parked-queue drain below, so a
+     cert marked received on a candidate a booking had already released from awaiting (or with other
+     items still queued) never set it: the cert stays claimed-without-file, _missingAppCerts still
+     lists it, and with automation on the tick warned at T-60 and cancelled the interview at T-30
+     over a certificate the operator had just recorded as received. */
+  if(item.kind==='cert')cand.st.certsReadyReview=true;
   const queueEmpty=cand.st.awaitingItems.length===0;
   if(wasParked&&queueEmpty){
     delete cand.st.manualAwaiting;
@@ -12005,7 +12035,7 @@ async function _markReceivedCore(cand,idx,note){
     delete cand.st.awaitingItemsReceived;
     delete cand.st.lastAwaitingReview;delete cand.st.staleParkCalls;
     cand.st.log.push({t:stamp(),x:'\u2705 Auto-released from awaiting \u2014 all requested items received'});
-    if(item.kind==='cert')cand.st.certsReadyReview=true; /* next action: cross-check in the hub */
+    /* (certsReadyReview is stamped above, for every resolved cert) */
   }
   /* NOTE: deliberately NOT stamping lastAssignmentAt here — receiving an item is the OPPOSITE of
      a new assignment arriving; stamping it made the candidate re-surface as "New document
@@ -12853,7 +12883,7 @@ async function reallySend(tpl,advanceTo){
        re-advance the stage off the very meeting they skipped). Ball is in their court now. */
     if(/^missed_/.test(tpl)&&W.st.booking&&isFinite(Date.parse(W.st.booking))&&Date.parse(W.st.booking)<Date.now()){
       logW('📅 Missed booking consumed ('+W.st.booking+') — rebook email sent, awaiting their new time');
-      delete W.st.booking;delete W.st.meetingUrl;delete W.st.bookingKind;delete W.st.calBooking;delete W.st.calBookingId;
+      _rememberConsumedBooking(W.st);delete W.st.booking;delete W.st.meetingUrl;delete W.st.bookingKind;delete W.st.calBooking;delete W.st.calBookingId;
     }
     /* Cert-gated interview: sending the invite parks the candidate AWAITING their application-
        claimed certs (only those without files). Existing machinery handles the rest: wake on
@@ -13710,7 +13740,7 @@ async function completeQuestions(nextStage){_memGen++;applyAnswers();const sc=sc
      hasBooking wait that would then never be satisfiable. */
   if(W.st.booking&&!window._cqBridgeErr){
     logW('📅 Booking consumed ('+W.st.booking+') — session completed');
-    delete W.st.booking;delete W.st.meetingUrl;delete W.st.calBooking;delete W.st.calBookingId;delete W.st.bookingKind;
+    _rememberConsumedBooking(W.st);delete W.st.booking;delete W.st.meetingUrl;delete W.st.calBooking;delete W.st.calBookingId;delete W.st.bookingKind;
   }
   await saveW(true);toast('→ '+nextStage);
   /* fire-and-forget PDF generation for the stage we just completed */
@@ -22534,6 +22564,31 @@ async function _autoSendTpl(c,tpl,allowResend){
   c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-sent '+tpl+' (sequence automation)'});
   return true;
 }
+/* What Cal.com BOOKING_CANCELLED does to a candidate (worker handleBookingCanceled): clear the
+   booking and step a booked stage back to its invite stage. The portal cancel paths (the tick T-30
+   auto-cancel, the manual Cancel interview button) wrote the candidate straight after asking
+   Cal.com to cancel, from state that still carried the booking, racing that very webhook - so
+   whichever write landed second won. Live, germya bradley r89, Sep 7: interview auto-cancelled, no
+   webhook line survived on her record, the booking stayed, and the board then offered Cancel
+   interview for it (clicked: the cert warning went out AFTER the cancel) and, once the start time
+   had passed, No-show - send rebook email (clicked: a no-show was counted against her and missed
+   interview was sent for an interview we had cancelled). Both paths now apply the webhook
+   transition themselves before writing, so the two writes agree in either order. Stage names are
+   the worker map (host webhook vocabulary, as in markNoShow). */
+function _bookingCancelledStage(stage){return ({'Screen booked':'Screen invite','Interview booked':'Interview invite','Onboarding booked':'Onboarding'})[String(stage||'').trim()]||null;}
+function _clearCancelledBooking(st,stage,baseRow){
+  _rememberConsumedBooking(st);
+  delete st.booking;delete st.meetingUrl;delete st.calBooking;delete st.calBookingId;delete st.bookingKind;
+  /* Re-place the pointer in THEIR OWN sequence, as markNoShow does: the stage stepped back, and the
+     forward-only snap can never move a pointer back off the interview session step. */
+  try{
+    const _sq=(SETTINGS.sequences||[]).find(q=>q.id===st.sequenceId);
+    if(_sq&&typeof _classicPointerFor==='function'){
+      const _p=_classicPointerFor(Object.assign({},baseRow||{},{stage:stage,st:st}),_sq);
+      if(_p&&_p!==st.sequenceStepId){st.sequenceStepId=_p;st.sequenceHistory=(st.sequenceHistory||[]).concat({stepId:_p,at:new Date().toISOString()});}
+    }
+  }catch(e){console.warn('cancel pointer re-place:',e.message);}
+}
 async function _cancelBookingHeadless(c,reason){
   const tok=(SETTINGS.config||{}).ziToken||'';
   if(!tok||!c.st.calBookingId)return false;
@@ -22745,14 +22800,19 @@ async function _seqAutomationTick(){
       const m=minsUntil(c.st.booking),miss=_missingAppCerts(c);
       const missingAny=(miss.length||_bgFormBlocks(c))&&!c.st.certsReadyReview; /* fresh certs awaiting review → never auto-warn/cancel */
       /* T-60→T-30: auto-send the cancellation warning (once per booking). T-30→0: auto-cancel. */
-      if(m!=null&&m<=60&&m>30&&missingAny&&!_certWarnSentFor(c)){
+      /* What THIS session already did, by booking. Every refresh rebuilds the pipeline from the sheet, so
+         a stamp that was not saved - a failed write (it threw out of the whole tick), or a refresh whose
+         loadData read the sheet while the previous tick was still sending - is simply absent from the row
+         the next tick holds, and the warning or the Cal.com cancel went out again. */
+      const _tA=(window._tickActs=window._tickActs||{}),_wk='warn|'+c.excelRow+'|'+String(c.st.booking||''),_ck='cancel|'+c.excelRow+'|'+String(c.st.calBookingId||'');
+      if(m!=null&&m<=60&&m>30&&missingAny&&!_certWarnSentFor(c)&&!_tA[_wk]){
         let _warnSent=false,_warnErr='';
         try{ _warnSent=await _autoSendTpl(c,'interview_cert_warning',true); } /* _certWarnSentFor above is the per-booking gate */
         catch(e){ _warnErr=(e&&e.message)||String(e); }
-        if(_warnSent){
+        if(_warnSent){_tA[_wk]=1;
           c.st.warnedForBooking=String(c.st.booking||'');
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-sent interview cert warning (cancel at T-30)'});
-          await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+          try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);}catch(e2){console.warn('warn stamp write failed row',c.excelRow,e2.message);}
           budget--;continue; /* one action per candidate per tick */
         }
         /* THE WARNING DID NOT GO OUT. This branch had no else at all — _autoSendTpl returning false
@@ -22768,7 +22828,7 @@ async function _seqAutomationTick(){
           try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);}catch(e2){console.warn('warn-failure mark write failed row',c.excelRow,e2.message);}
         }
       }
-      if(m!=null&&m<=30&&m>0&&missingAny){
+      if(m!=null&&m<=30&&m>0&&missingAny&&!_tA[_ck]){
         const reason=miss.length?('Required certificates not received before the interview: '+miss.join(', ')):'Background-check form not completed before the interview';
         /* Say what actually happened. This log line hardcoded "warned at T-60" whether or not any
            warning was ever sent, so the record asserted a notice the candidate may never have
@@ -22776,11 +22836,17 @@ async function _seqAutomationTick(){
            can fail outright. Telling the truth about it is a bug fix; whether a missing warning
            should BLOCK the cancel is P-14, the operator's call, and is left alone. */
         const _wasWarned=_certWarnSentFor(c);
-        if(await _cancelBookingHeadless(c,reason)){
+        if(await _cancelBookingHeadless(c,reason)){_tA[_ck]=1;
           c.st.autoCancelledAt=new Date().toISOString();
           c.st.autoCancelledFor=String(c.st.booking||'');
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-cancelled interview (30-minute rule; '+(_wasWarned?'warned at T-60':'NO T-60 warning was sent')+') — '+reason});
-          await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+          /* Apply the BOOKING_CANCELLED transition before writing (see _clearCancelledBooking). */
+          try{
+            const _to=_bookingCancelledStage(c.stage);
+            if(_to){await patchRange('G'+c.excelRow,[[_to]]);c.stage=_to;c.row[6]=_to;c.st.log.push({t:stamp(),x:'Stage reverted to '+_to+' — awaiting a new booking'});}
+            _clearCancelledBooking(c.st,c.stage,c);
+            await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+          }catch(e2){console.warn('auto-cancel state write failed row',c.excelRow,e2.message);}
           budget--;continue; /* one action per candidate per tick */
         }
         /* The cancel FAILED — no worker token, a Cal.com error, a network blip — and this had no
@@ -22835,6 +22901,7 @@ async function _seqAutomationTick(){
            onto steps like this one. Same "done in reality" rule the Claude-screen branch below
            already applies to c.st.aiScreen; advancing here is the RESULT of the completed send
            (rule 1), not a button. */
+        if(window._tickActs&&window._tickActs['seq|'+c.excelRow+'|'+it.templateKey])continue; /* this session sent it; the row held here can predate that write */
         if(c.st.sent&&c.st.sent[it.templateKey]){
           _clearFail();
           const adv0=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
@@ -22851,11 +22918,11 @@ async function _seqAutomationTick(){
         if(_tickOutwardHold(c))continue;
         /* Name the actual blocker: 'email not sent' was also what an already-sent step got. */
         if(!c.email){await _stampFail('no email address on file');continue;}
-        if(await _autoSendTpl(c,it.templateKey)){
+        if(await _autoSendTpl(c,it.templateKey)){window._tickActs=window._tickActs||{};window._tickActs['seq|'+c.excelRow+'|'+it.templateKey]=1;
           _clearFail();
           const adv=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
           if(!adv.error)Object.assign(c.st,adv.partialState||{});
-          await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+          try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);}catch(e2){console.warn('sequence send stamp write failed row',c.excelRow,e2.message);}
           budget--;
         }else await _stampFail('email not sent');
       }else if(it.type==='set-stage'){
