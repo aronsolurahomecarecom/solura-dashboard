@@ -50,6 +50,27 @@ const dflt = A.fillAsmtSchedTokens(A.DEFAULT_ASMTSCHED_TEMPLATE, f);
 ok(['{date}', '{time}', '{location}', '{assessor}', '{notes}'].every(t => dflt.indexOf(t) === -1), 'built-in template has no leftover tokens');
 ok(dflt.indexOf('{dm}') > -1 && dflt.indexOf('{pt}') > -1, 'name tokens survive for the fillNames pass');
 
+// ── brand parity with Meir's lead emails (B-0911-81) ──
+{
+  const T = A.DEFAULT_ASMTSCHED_TEMPLATE;
+  ok(T.indexOf('#f5f0e8') > -1 && T.indexOf('#faf8f4') > -1, 'warm linen background + cream card (never white)');
+  ok(T.indexOf('#C59B4E') > -1 && T.indexOf('#1f3d57') > -1 && T.indexOf('#64A3D1') > -1, 'gold, deep navy, and brand blue all present');
+  ok(T.indexOf('solurahomecare.com/wp-content/uploads/2026/01/Solura.png') > -1, 'current logo URL (not the old GitHub one)');
+  ok(T.indexOf('meir.jpg') > -1 && T.indexOf('&bull; &bull; &bull;') > -1, 'signature photo + gold dot divider');
+  ok(T.indexOf('line-height:2') > -1 && T.indexOf('Georgia') > -1, 'Georgia at double line-height, reads like a letter');
+  ok(T.indexOf('License 4574HHN') > -1 && T.indexOf('815 Superior Ave E Ste 1618') > -1 && T.indexOf('www.solurahomecare.com') > -1, 'navy footer: license, address (never service areas), website');
+  ok(T.indexOf('—') === -1 && T.indexOf('—') === -1, 'NO em dashes anywhere in the copy (hard brand rule)');
+  ok(!/limited|act now|hurry|spots/i.test(T), 'no urgency or scarcity language');
+  ok(T.indexOf('reply to this email or call (216) 770-4886') > -1, 'soft reply-or-call close, no sales CTA');
+  const filled = A.fillAsmtSchedTokens(T, f);
+  ok(filled.indexOf('Your assessor:</strong> Meir Schwimer') > -1, 'assessor named in the visit box');
+  ok(filled.indexOf('A few notes for the visit') > -1 && filled.indexOf('#f2efe8') > -1, 'notes render as the brand highlight box');
+}
+// ── assessor handoff: scheduler → assessment form ──
+ok(/enginesDoc\.assessors\[String\(ri\)\]=f\.assessor/.test(html), 'scheduler saves the assessor per lead (synced doc)');
+ok(/\(enginesDoc\.assessors\|\|\{\}\)\[String\(ri\)\]/.test(html), 'openAssessment reads the scheduled assessor');
+ok(/assessor:schedAssessor,\s*\n\s*assessor_signed_name:schedAssessor/.test(html), 'form prefills BOTH assessor fields from the scheduled name');
+
 // ── source-level locks on the flow ──
 ok(/id="modal-asmt-sched"/.test(html) && /data-action="as-save"/.test(html) && /data-action="as-preview"/.test(html), 'logger modal with Save & Send + Preview');
 ok(/data-action="open-asmt-sched" data-ri/.test(html), '📅 launch button rides the Responded/Update dialog footer');

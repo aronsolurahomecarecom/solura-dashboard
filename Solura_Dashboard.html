@@ -1611,7 +1611,7 @@ var C={
              //    regular touch of cycle 4 done, beside-special #1 due now.
              //    SAFE add: every full-width writer spans A:AD and never touches AE.
 };
-var BUILD='B-0911-80';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0911-81';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2610,28 +2610,53 @@ function sumHhaHours(parsed,patient,fromIso,toIso){
  * assessor, notes) that stamps the lead, writes a Comms Log row, and —
  * unless unticked — sends a Settings-editable confirmation email to the
  * family. No tracking pixel: it's a transactional confirmation.        */
-var DEFAULT_ASMTSCHED_SUBJECT='Your in-home assessment is scheduled — {date}';
+var DEFAULT_ASMTSCHED_SUBJECT='Your in-home visit is confirmed for {date}';
+// The confirmation wears the same brand as Meir's lead emails: warm linen
+// behind a cream card, gold ribbon + logo + blue tagline, Georgia at
+// double line-height, gold dot divider, navy footer with the license line.
+// House rules honored: no em dashes, no urgency, soft reply-or-call close.
 var DEFAULT_ASMTSCHED_TEMPLATE=[
-'<div style="max-width:640px;margin:0 auto;font-family:Georgia,\'Times New Roman\',serif;color:#2a2a28">',
-'  <div style="background:#1f4d3a;color:#fff;padding:26px 30px;border-radius:10px 10px 0 0">',
-'    <div style="font-size:21px;font-weight:700;letter-spacing:.3px">Solura Home Care</div>',
-'    <div style="font-size:12px;opacity:.85;margin-top:4px">Licensed Ohio Home Care · License 4574HHN · (216) 770-4886</div>',
-'  </div>',
-'  <div style="border:1px solid #ddd;border-top:none;padding:26px 30px;border-radius:0 0 10px 10px;background:#fffdf8">',
-'    <p style="font-size:14px;line-height:1.55">Dear {dm},</p>',
-'    <p style="font-size:14px;line-height:1.55">Wonderful news — {pt}\'s in-home assessment is confirmed. Here are the details:</p>',
-'    <table style="width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:18px">',
-'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700;width:38%">Date</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{date}</td></tr>',
-'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Time</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{time}</td></tr>',
-'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Location</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{location}</td></tr>',
-'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Your assessor</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{assessor}</td></tr>',
-'    </table>',
-'    {notes}',
-'    <p style="font-size:13.5px;line-height:1.55"><b>What to expect:</b> a relaxed conversation in your home, about an hour. We\'ll talk through daily routines, safety, and what great care looks like for {pt} — nothing to prepare, though a list of current medications is helpful if handy.</p>',
-'    <p style="font-size:13.5px;line-height:1.55;margin-top:14px">Need to reschedule? Just reply to this email or call (216) 770-4886 — happy to find a better time.</p>',
-'    <p style="font-size:13.5px;margin-top:14px">Warmly,<br><b>{assessor}</b><br>Solura Home Care</p>',
-'  </div>',
-'</div>'].join('\n');
+'<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#f5f0e8">Your in-home visit is confirmed for {date}.</div>',
+'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f0e8"><tr><td align="center" style="padding:28px 12px">',
+'<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background-color:#faf8f4;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(160,140,110,0.12)">',
+'  <tr><td style="background-color:#C59B4E;height:4px;font-size:0;line-height:0">&nbsp;</td></tr>',
+'  <tr><td align="center" style="padding:30px 40px 10px"><img src="https://solurahomecare.com/wp-content/uploads/2026/01/Solura.png" width="110" alt="Solura Home Care" style="width:110px;height:auto;display:block;margin:0 auto;border:0"></td></tr>',
+'  <tr><td align="center" style="padding:0 40px 6px"><div style="font-family:Arial,sans-serif;font-size:11px;letter-spacing:0.20em;text-transform:uppercase;color:#64A3D1">Compassionate Care at Home</div></td></tr>',
+'  <tr><td style="padding:10px 60px 6px"><div style="height:1px;background-color:#C59B4E;opacity:0.4">&nbsp;</div></td></tr>',
+'  <tr><td style="padding:28px 48px 0"><p style="margin:0 0 24px;font-family:Georgia,\'Times New Roman\',serif;font-size:28px;line-height:36px;color:#1f3d57">Hi {dm},</p></td></tr>',
+'  <tr><td style="padding:0 48px"><p style="margin:0 0 22px;font-family:Georgia,\'Times New Roman\',serif;font-size:17px;line-height:2;color:#3d4348">Wonderful news, the in-home visit for {pt} is officially on the calendar. Here is everything for the day, all in one place.</p></td></tr>',
+'  <tr><td style="padding:0 48px 6px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2efe8;border-radius:10px"><tr><td style="padding:22px 24px">',
+'    <p style="margin:0 0 10px;font-family:Arial,sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#C59B4E;font-weight:bold">Your visit</p>',
+'    <p style="margin:0;font-family:Georgia,\'Times New Roman\',serif;font-size:16px;line-height:2;color:#3d4348">',
+'      <strong style="color:#1f3d57">Date:</strong> {date}<br>',
+'      <strong style="color:#1f3d57">Time:</strong> {time}<br>',
+'      <strong style="color:#1f3d57">Location:</strong> {location}<br>',
+'      <strong style="color:#1f3d57">Your assessor:</strong> {assessor}',
+'    </p>',
+'  </td></tr></table></td></tr>',
+'  <tr><td style="padding:6px 48px">{notes}</td></tr>',
+'  <tr><td align="center" style="padding:2px 48px"><span style="font-size:16px;letter-spacing:14px;color:#C59B4E">&bull; &bull; &bull;</span></td></tr>',
+'  <tr><td style="padding:6px 48px 0"><p style="margin:0 0 22px;font-family:Georgia,\'Times New Roman\',serif;font-size:17px;line-height:2;color:#3d4348">The visit itself is relaxed, usually about an hour at the kitchen table. We will talk through daily routines, safety around the home, and what wonderful care should look like for {pt}. There is nothing to prepare, though a list of current medications is helpful if you have one handy.</p></td></tr>',
+'  <tr><td style="padding:0 48px 8px"><p style="margin:0 0 8px;font-family:Georgia,\'Times New Roman\',serif;font-size:17px;line-height:2;color:#3d4348">If anything changes, or the time stops working for your family, just reply to this email or call (216) 770-4886 and we will find a better one. We are looking forward to meeting you.</p></td></tr>',
+'  <tr><td style="padding:14px 48px 30px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #e4ded4"><tr><td style="padding-top:22px">',
+'    <p style="margin:0 0 14px;font-family:Georgia,\'Times New Roman\',serif;font-size:17px;line-height:1.6;color:#3d4348;font-style:italic">Warmly,</p>',
+'    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>',
+'      <td valign="middle" style="padding-right:18px"><img src="https://aronsolurahomecarecom.github.io/solura-dashboard/meir.jpg" width="66" height="66" alt="{assessor}" style="width:66px;height:66px;border-radius:50%;display:block;border:2.5px solid #C59B4E"></td>',
+'      <td valign="middle">',
+'        <p style="margin:0;font-family:Georgia,\'Times New Roman\',serif;font-size:19px;color:#1f3d57;font-weight:bold">{assessor}</p>',
+'        <p style="margin:3px 0 0;font-family:Arial,sans-serif;font-size:13px;color:#C59B4E;font-weight:bold;letter-spacing:0.03em">Solura Home Care</p>',
+'        <p style="margin:6px 0 0;font-family:Arial,sans-serif;font-size:13px;line-height:1.6;color:#7a7f86">(216) 770-4886<br><a href="mailto:meir@solurahomecare.com" style="color:#64A3D1;text-decoration:none">meir@solurahomecare.com</a></p>',
+'      </td>',
+'    </tr></table>',
+'  </td></tr></table></td></tr>',
+'  <tr><td style="background-color:#1f3d57;padding:22px 40px;border-radius:0 0 16px 16px"><p style="margin:0;font-family:Arial,sans-serif;font-size:12px;line-height:1.9;color:#c2cfdb;text-align:center">',
+'    <span style="color:#C59B4E;font-weight:bold;letter-spacing:0.08em">SOLURA HOME CARE</span><br>',
+'    Licensed Ohio Home Care Agency, License 4574HHN<br>',
+'    815 Superior Ave E Ste 1618, Cleveland OH 44114<br>',
+'    <a href="https://www.solurahomecare.com" style="color:#64A3D1;text-decoration:none">www.solurahomecare.com</a>',
+'  </p></td></tr>',
+'</table>',
+'</td></tr></table>'].join('\n');
 function asmtSchedCfg(){
   return {subject:String(cfg('asmtSchedSubject')||'').trim()||DEFAULT_ASMTSCHED_SUBJECT,
     template:String(cfg('asmtSchedTemplate')||'').trim()||DEFAULT_ASMTSCHED_TEMPLATE};
@@ -2646,8 +2671,10 @@ function fillAsmtSchedTokens(tpl,f){
   f=f||{};
   var notesBlock='';
   if(String(f.notes||'').trim()){
-    notesBlock='<div style="background:#f6f1e6;border:1px solid #e4ddcf;border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.5;margin:0 0 14px">'
-      +'<b>A few notes for the visit</b><br>'+escapeHtml(String(f.notes)).replace(/\n/g,'<br>')+'</div>';
+    notesBlock='<div style="background-color:#f2efe8;border-radius:10px;padding:18px 24px;margin:0 0 6px">'
+      +'<p style="margin:0 0 8px;font-family:Arial,sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#C59B4E;font-weight:bold">A few notes for the visit</p>'
+      +'<p style="margin:0;font-family:Georgia,\'Times New Roman\',serif;font-size:16px;line-height:1.9;color:#3d4348">'
+      +escapeHtml(String(f.notes)).replace(/\n/g,'<br>')+'</p></div>';
   }
   return String(tpl||'')
     .replace(/\{date\}/gi,invPrettyDate(f.date))
@@ -2716,9 +2743,17 @@ async function asSave(){
     var exNotes=String(r[C.NT]||'').trim();
     u[C.NT]=exNotes?(stamp+'\n\n'+exNotes):stamp;
     await writeRow(ri,u);
-    // The assessment TIME gates the queue: due-now flips at that clock time
+    // The assessment TIME gates the queue, and the ASSESSOR carries into
+    // the in-home assessment form (🏥 Start Assessment prefills from it).
     try{
-      if(f.time){followUpTimes()[String(ri)]=f.time;saveEnginesDoc().catch(function(){});}
+      var docDirty=false;
+      if(f.time){followUpTimes()[String(ri)]=f.time;docDirty=true;}
+      if(f.assessor){
+        enginesDoc.assessors=enginesDoc.assessors||{};
+        enginesDoc.assessors[String(ri)]=f.assessor;
+        docDirty=true;
+      }
+      if(docDirty)saveEnginesDoc().catch(function(){});
     }catch(_){}
     var sent=false;
     if(wantEmail){
@@ -11255,6 +11290,13 @@ function openAssessment(ri){
   // and pre-select them in Section 3.
   var preConds=parseConditionList(r[C.MC]);
   // Pre-fill what we know from the lead row
+  // The assessor named when the assessment was SCHEDULED (📅 logger)
+  // pre-fills the form — falls back to Meir when none was logged.
+  var schedAssessor='Meir Schwimer';
+  try{
+    var sa=(enginesDoc.assessors||{})[String(ri)];
+    if(sa&&String(sa).trim())schedAssessor=String(sa).trim();
+  }catch(_){}
   asmtState={
     ri:ri,
     section:0,
@@ -11264,8 +11306,8 @@ function openAssessment(ri){
       visit_date_label:ds(localToday()),
       client_full_legal:String(r[C.NM]||'').trim(),
       phone_cell:String(r[C.PH]||'').trim(),
-      assessor:'Meir Schwimer',
-      assessor_signed_name:'Meir Schwimer',
+      assessor:schedAssessor,
+      assessor_signed_name:schedAssessor,
       assessor_agency:'Solura Home Care',
       conditions_selected:preConds.slice()
     }
