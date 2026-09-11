@@ -749,6 +749,32 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
   <div class="done-pop-inner" id="done-pop-inner"></div>
 </div>
 
+<!-- 📅 Assessment-scheduled logger — stamps the lead + optional confirmation email -->
+<div class="modal" id="modal-asmt-sched">
+  <div class="mbox" style="max-width:600px">
+    <div class="mhead"><div class="mtitle">📅 Log Scheduled Assessment</div><button class="mclose" data-action="close-modal" data-mid="modal-asmt-sched">✕</button></div>
+    <div class="mbody">
+      <div id="as-lead" style="font-size:12.5px;color:var(--mid);margin-bottom:12px"></div>
+      <div class="la-grid g3" style="margin-bottom:10px">
+        <div class="la-f"><label>Date</label><input type="date" id="as-date"></div>
+        <div class="la-f"><label>Time</label><input type="time" id="as-time"></div>
+        <div class="la-f"><label>Assessor</label><input type="text" id="as-assessor" value="Meir Schwimer"></div>
+      </div>
+      <div class="la-f" style="margin-bottom:10px"><label>Location</label><input type="text" id="as-location" placeholder="Client's home — street address"></div>
+      <div class="la-f" style="margin-bottom:10px"><label>Notes (go on the email and the lead's record)</label><textarea id="as-notes" rows="3" placeholder="Who will be present, parking, documents worth having handy…"></textarea></div>
+      <label class="st-check" style="margin-bottom:8px;display:block"><input type="checkbox" id="as-send-email" checked> 📧 Send the family a confirmation email on save (template editable in ⚙ Settings → Email)</label>
+      <div class="la-f" style="margin-bottom:12px"><label>Send to</label><input type="email" id="as-to"></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="as-out" style="flex:1;font-size:11.5px;white-space:pre-wrap"></span>
+        <button data-action="as-preview" style="padding:9px 14px;background:none;color:var(--mid);border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">👁 Preview</button>
+        <button data-action="as-save" style="padding:9px 18px;background:linear-gradient(135deg,#1f4d3a,#153627);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">✓ Save &amp; Send</button>
+        <span id="as-spin" style="display:none"><div class="mspin"></div></span>
+      </div>
+      <div style="font-size:10.5px;color:var(--soft);margin-top:8px">Saving sets the status to Assessment Scheduled (the 🏥 Start Assessment button appears on the lead), moves Follow-Up to the assessment date, prepends a 📅 note, and writes a Comms Log row.</div>
+    </div>
+  </div>
+</div>
+
 <!-- 🧾 Invoice modal — on-service clients, sends from the billing mailbox -->
 <div class="modal" id="modal-invoice">
   <div class="mbox" style="max-width:560px">
@@ -1171,6 +1197,13 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <section class="st-sec" id="st-sec-email" hidden>
         <h3 class="st-h">Email</h3>
         <div class="st-field">
+          <label class="ee-lbl">📅 Assessment-confirmation subject (blank = built-in)</label>
+          <input type="text" class="ee-inp" data-cfg="asmtSchedSubject" placeholder="Your in-home assessment is scheduled — {date}">
+          <label class="ee-lbl" style="margin-top:8px">📅 Assessment-confirmation email (blank = built-in) · Tokens: <code>{date}</code> <code>{time}</code> <code>{location}</code> <code>{assessor}</code> <code>{notes}</code> <code>{dm}</code> <code>{pt}</code> <code>{rel}</code> <code>{ptrel}</code></label>
+          <textarea class="ee-tpl" rows="7" data-cfg="asmtSchedTemplate" placeholder="Leave blank to use the built-in branded confirmation."></textarea>
+          <div style="font-size:10.5px;color:var(--soft);margin-top:4px">Sent when you log a scheduled assessment (📅 button in the Responded / Update dialogs). {notes} renders as a styled box and vanishes when empty.</div>
+        </div>
+        <div class="st-field">
           <label class="ee-lbl">Message-size ceiling (adaptive)</label>
           <div style="font-size:13px;color:var(--mid)">Current: <strong id="es-emailcap"></strong>. Shrinks automatically if Exchange rejects a send.
             <button data-action="es-reset-emailcap" class="st-btn-ghost" style="margin-left:8px;padding:5px 11px;font-size:11px">Reset to 35MB</button>
@@ -1578,7 +1611,7 @@ var C={
              //    regular touch of cycle 4 done, beside-special #1 due now.
              //    SAFE add: every full-width writer spans A:AD and never touches AE.
 };
-var BUILD='B-0907-79';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0911-80';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2573,7 +2606,144 @@ function sumHhaHours(parsed,patient,fromIso,toIso){
   return {hours:Math.round(total*100)/100,visits:visits,
     names:Object.keys(namesSeen).map(function(k){return namesSeen[k];})};
 }
+/* 📅 Assessment-scheduled logger: one small form (date, time, location,
+ * assessor, notes) that stamps the lead, writes a Comms Log row, and —
+ * unless unticked — sends a Settings-editable confirmation email to the
+ * family. No tracking pixel: it's a transactional confirmation.        */
+var DEFAULT_ASMTSCHED_SUBJECT='Your in-home assessment is scheduled — {date}';
+var DEFAULT_ASMTSCHED_TEMPLATE=[
+'<div style="max-width:640px;margin:0 auto;font-family:Georgia,\'Times New Roman\',serif;color:#2a2a28">',
+'  <div style="background:#1f4d3a;color:#fff;padding:26px 30px;border-radius:10px 10px 0 0">',
+'    <div style="font-size:21px;font-weight:700;letter-spacing:.3px">Solura Home Care</div>',
+'    <div style="font-size:12px;opacity:.85;margin-top:4px">Licensed Ohio Home Care · License 4574HHN · (216) 770-4886</div>',
+'  </div>',
+'  <div style="border:1px solid #ddd;border-top:none;padding:26px 30px;border-radius:0 0 10px 10px;background:#fffdf8">',
+'    <p style="font-size:14px;line-height:1.55">Dear {dm},</p>',
+'    <p style="font-size:14px;line-height:1.55">Wonderful news — {pt}\'s in-home assessment is confirmed. Here are the details:</p>',
+'    <table style="width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:18px">',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700;width:38%">Date</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{date}</td></tr>',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Time</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{time}</td></tr>',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Location</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{location}</td></tr>',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Your assessor</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{assessor}</td></tr>',
+'    </table>',
+'    {notes}',
+'    <p style="font-size:13.5px;line-height:1.55"><b>What to expect:</b> a relaxed conversation in your home, about an hour. We\'ll talk through daily routines, safety, and what great care looks like for {pt} — nothing to prepare, though a list of current medications is helpful if handy.</p>',
+'    <p style="font-size:13.5px;line-height:1.55;margin-top:14px">Need to reschedule? Just reply to this email or call (216) 770-4886 — happy to find a better time.</p>',
+'    <p style="font-size:13.5px;margin-top:14px">Warmly,<br><b>{assessor}</b><br>Solura Home Care</p>',
+'  </div>',
+'</div>'].join('\n');
+function asmtSchedCfg(){
+  return {subject:String(cfg('asmtSchedSubject')||'').trim()||DEFAULT_ASMTSCHED_SUBJECT,
+    template:String(cfg('asmtSchedTemplate')||'').trim()||DEFAULT_ASMTSCHED_TEMPLATE};
+}
+function asmtPrettyTime(t){
+  var m=String(t||'').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if(!m)return String(t||'').trim();
+  var h=parseInt(m[1],10),ap=h>=12?'PM':'AM',h12=h%12;if(h12===0)h12=12;
+  return h12+':'+m[2]+' '+ap;
+}
+function fillAsmtSchedTokens(tpl,f){
+  f=f||{};
+  var notesBlock='';
+  if(String(f.notes||'').trim()){
+    notesBlock='<div style="background:#f6f1e6;border:1px solid #e4ddcf;border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.5;margin:0 0 14px">'
+      +'<b>A few notes for the visit</b><br>'+escapeHtml(String(f.notes)).replace(/\n/g,'<br>')+'</div>';
+  }
+  return String(tpl||'')
+    .replace(/\{date\}/gi,invPrettyDate(f.date))
+    .replace(/\{time\}/gi,asmtPrettyTime(f.time)||'We\'ll confirm the time shortly')
+    .replace(/\{location\}/gi,escapeHtml(String(f.location||'Your home')))
+    .replace(/\{assessor\}/gi,escapeHtml(String(f.assessor||'The Solura team')))
+    .replace(/\{notes\}/gi,notesBlock);
+}
 /* 🧾 INVOICING — END */
+/* 📅 Assessment-scheduled logger runtime */
+var _asRi=-1;
+function openAsmtSched(ri){
+  _asRi=ri;
+  var r=rows[ri]||[];
+  var nm=String(r[C.NM]||'').trim(),dm=String(r[C.DM]||'').trim();
+  el('as-lead').textContent='For '+(nm||dm||'this lead')+(dm&&nm&&dm.toLowerCase()!==nm.toLowerCase()?(' — contact: '+dm):'');
+  el('as-date').value='';el('as-time').value='';
+  el('as-assessor').value='Meir Schwimer';
+  el('as-location').value='';el('as-notes').value='';
+  el('as-to').value=String(r[C.EM]||'').trim();
+  el('as-send-email').checked=!!String(r[C.EM]||'').trim();
+  el('as-out').textContent='';
+  el('modal-asmt-sched').classList.add('open');
+}
+function asFields(){
+  return {date:String(el('as-date').value||'').trim(),time:String(el('as-time').value||'').trim(),
+    assessor:String(el('as-assessor').value||'').trim(),location:String(el('as-location').value||'').trim(),
+    notes:String(el('as-notes').value||'').trim()};
+}
+function asBuildEmail(){
+  var ac=asmtSchedCfg(),f=asFields(),names=getNames(_asRi);
+  return {to:String(el('as-to').value||'').trim(),
+    subject:fillNames(fillAsmtSchedTokens(ac.subject,f),names),
+    html:fillNames(fillAsmtSchedTokens(ac.template,f),names),fields:f};
+}
+function asPreview(){
+  if(_asRi<0)return;
+  var em=asBuildEmail();
+  var blob=new Blob(['<!doctype html><html><head><meta charset="utf-8"><title>'+escapeHtml(em.subject)+'</title></head><body style="margin:20px;background:#eee">'+em.html+'</body></html>'],{type:'text/html'});
+  var url=URL.createObjectURL(blob);
+  window.open(url,'_blank');
+  setTimeout(function(){URL.revokeObjectURL(url);},60000);
+}
+async function asSave(){
+  if(_asRi<0)return;
+  var out=el('as-out'),spin=el('as-spin');
+  var f=asFields();
+  if(!f.date){out.style.color='var(--red)';out.textContent='✗ Pick the assessment date.';return;}
+  var wantEmail=el('as-send-email').checked;
+  var em=asBuildEmail();
+  if(wantEmail&&(!em.to||em.to.indexOf('@')<1)){out.style.color='var(--red)';out.textContent='✗ Enter a valid email — or untick the confirmation to log without sending.';return;}
+  if(spin)spin.style.display='inline-flex';
+  out.style.color='var(--mid)';out.textContent=wantEmail?'Saving + sending…':'Saving…';
+  try{
+    var ri=_asRi,r=rows[ri]||[];
+    var when=invPrettyDate(f.date)+(f.time?(' at '+asmtPrettyTime(f.time)):'');
+    var detail='Assessment scheduled — '+when
+      +(f.location?(' @ '+f.location):'')
+      +(f.assessor?(' · assessor: '+f.assessor):'')
+      +(f.notes?(' · '+f.notes):'');
+    var u={};
+    u[C.ST]='Assessment Scheduled'; // unlocks the 🏥 Start Assessment primary
+    u[C.NF]=f.date;
+    u[C.LC]=fd(localToday());
+    var stamp='📅 ['+new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+'] '+detail;
+    var exNotes=String(r[C.NT]||'').trim();
+    u[C.NT]=exNotes?(stamp+'\n\n'+exNotes):stamp;
+    await writeRow(ri,u);
+    // The assessment TIME gates the queue: due-now flips at that clock time
+    try{
+      if(f.time){followUpTimes()[String(ri)]=f.time;saveEnginesDoc().catch(function(){});}
+    }catch(_){}
+    var sent=false;
+    if(wantEmail){
+      var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:{
+        subject:em.subject,body:{contentType:'HTML',content:em.html},
+        toRecipients:[{emailAddress:{address:em.to}}]},saveToSentItems:true})});
+      if(!(res.ok||res.status===202)){
+        var ee=await res.json().catch(function(){return{};});
+        throw new Error('Saved to the sheet, but the email failed: '+(ee.error?ee.error.message:res.status));
+      }
+      sent=true;
+    }
+    logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
+      contact:sent?em.to:'',subject:sent?em.subject:'Assessment scheduled',
+      preview:detail,outcome:'assessment-scheduled'}));
+    el('modal-asmt-sched').classList.remove('open');
+    toast(sent?('📅 Assessment logged — confirmation sent to '+em.to):'📅 Assessment logged');
+    _asRi=-1;
+    try{await buildUI();}catch(_){}
+  }catch(e){
+    out.style.color='var(--red)';out.textContent='✗ '+e.message;
+  }finally{
+    if(spin)spin.style.display='none';
+  }
+}
 var _invRi=-1,_invAmountTouched=false,_invDiscounts=[],_invAtts=[];
 function renderInvDiscounts(){
   var host=el('inv-discounts');if(!host)return;
@@ -4332,6 +4502,7 @@ function openEp(ri,mode,opts){
   html+='<div class="la-foot">'
     +'<button class="save" data-action="save-ep" data-ri="'+ri+'" data-mode="'+mode+'">Save to Sheet</button>'
     +'<button class="cancel" data-action="close-ep" data-ri="'+ri+'">Cancel</button>'
+    +'<button type="button" class="cancel" style="margin-left:auto" data-action="open-asmt-sched" data-ri="'+ri+'" title="Log a scheduled in-home assessment and send the family a confirmation">\ud83d\udcc5 Assessment scheduled\u2026</button>'
     +'<div class="saving" id="spin-'+ri+'"><div class="mspin"></div> Saving\u2026</div>'
     +'</div>';
   bodyEl.innerHTML=html;
@@ -5663,6 +5834,11 @@ function renderConfigInputs(){
       :k==='invoiceSubject'?DEFAULT_INVOICE_SUBJECT
       :k==='invoiceTemplate'?DEFAULT_INVOICE_TEMPLATE
       :'1001';
+  });
+  // Same treatment for the assessment-confirmation email
+  document.querySelectorAll('[data-cfg="asmtSchedSubject"],[data-cfg="asmtSchedTemplate"]').forEach(function(inp){
+    if(String(inp.value||'').trim())return;
+    inp.value=inp.dataset.cfg==='asmtSchedSubject'?DEFAULT_ASMTSCHED_SUBJECT:DEFAULT_ASMTSCHED_TEMPLATE;
   });
   // API key is device-local only — deliberately NOT in the synced config
   var ck=el('claude-key');
@@ -12367,6 +12543,19 @@ function onClick(ev){
       break;
     case 'open-invoice':
       openInvoice(parseInt(t.dataset.ri,10));
+      break;
+    case 'open-asmt-sched':
+      (function(){
+        var ri9=parseInt(t.dataset.ri,10);
+        el('modal-log-action').classList.remove('open'); // it launches from Responded/Update
+        openAsmtSched(ri9);
+      })();
+      break;
+    case 'as-preview':
+      asPreview();
+      break;
+    case 'as-save':
+      asSave();
       break;
     case 'inv-add-disc':
       _invDiscounts.push({label:'',value:''});
