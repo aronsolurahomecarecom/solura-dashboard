@@ -130,5 +130,10 @@ ok(/function slaChip\(ri\)/.test(html) && /t9\.track!=='C'\)return ''/.test(html
 ok(/id="modal-loss"/.test(html) && /Recipient refused/.test(html) && /openLossReason\(ri\)/.test(html), 'loss-reason picker fires when a lead goes lost; Recipient refused is a choice');
 ok(/isExcluded\(u\[C\.ST\]\)&&!isExcluded\(_prevSt\)/.test(html), 'loss picker only on the transition INTO a lost status');
 
+// ── in-app install/download (B-0914-87) ──
+ok((html.match(/data-action="trk-install"/g) || []).length === 3 && (html.match(/data-action="trk-download"/g) || []).length === 3, 'Settings offers Install + Download for all three tracks');
+ok(/importEnginePackage\(new File\(\[txt\],n\+'\.solura-engine\.json'/.test(html), 'Install routes through the normal import path (same validation + overwrite guards)');
+ok(/fetch\('engines\/'\+n\+'\.solura-engine\.json',\{cache:'no-store'\}/.test(html), 'packages fetched fresh from the deployed site, never a stale cache');
+
 console.log('\nTracks: ' + PASS + ' passed, ' + FAIL + ' failed');
 process.exit(FAIL ? 1 : 0);

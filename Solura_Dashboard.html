@@ -1217,6 +1217,19 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <button data-action="es-export-all" class="st-btn-ghost">📤 Export all</button>
         </div>
         <div id="es-import-out" style="font-size:12px;line-height:1.6;margin:-16px 0 20px;white-space:pre-line"></div>
+        <div style="border:1.5px dashed var(--border);border-radius:12px;padding:14px 16px;margin-bottom:26px">
+          <div style="font-size:12.5px;font-weight:700;margin-bottom:4px">🅰🅱🅲 Track engines (ship with the dashboard)</div>
+          <div style="font-size:11.5px;color:var(--soft);margin-bottom:10px">Who-is-asking sequences: A self-inquiry · B spouse · C adult child. Install adds them here directly; Download saves the package file.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button data-action="trk-install" data-n="track-a-self" class="st-btn-ghost">⬇ Install A — Self</button>
+            <button data-action="trk-install" data-n="track-b-spouse" class="st-btn-ghost">⬇ Install B — Spouse</button>
+            <button data-action="trk-install" data-n="track-c-adult-child" class="st-btn-ghost">⬇ Install C — Adult child</button>
+            <span style="flex-basis:100%"></span>
+            <button data-action="trk-download" data-n="track-a-self" class="st-btn-ghost" style="font-size:11px;padding:5px 10px">💾 Download A</button>
+            <button data-action="trk-download" data-n="track-b-spouse" class="st-btn-ghost" style="font-size:11px;padding:5px 10px">💾 Download B</button>
+            <button data-action="trk-download" data-n="track-c-adult-child" class="st-btn-ghost" style="font-size:11px;padding:5px 10px">💾 Download C</button>
+          </div>
+        </div>
         <h4 class="st-h2">Engine assignments by source</h4>
         <p class="st-p">Leads whose Source matches a rule use that engine; everyone else uses the default. Match is case-insensitive partial text. <b>🧪 To A/B test whole sequences:</b> hit <b>＋ A/B track</b> on a rule and pick a second (or third) engine — new leads from that source rotate evenly across the tracks, every touch is stamped with its engine, and 📊 → 🔀 Sequence tracks shows which approach wins after a few weeks.</p>
         <div id="es-assign-list" style="margin-bottom:8px"></div>
@@ -1666,7 +1679,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0914-86';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0914-87';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -13128,6 +13141,42 @@ function onClick(ev){
       break;
     case 'open-invoice':
       openInvoice(parseInt(t.dataset.ri,10));
+      break;
+    case 'trk-install':
+      // Fetch the package that ships with the site and run it through the
+      // normal import path — same validation, same feedback, same guards.
+      (function(){
+        var n=t.dataset.n;
+        var out=el('es-import-out');
+        if(out){out.style.color='var(--mid)';out.textContent='Fetching '+n+'…';}
+        fetch('engines/'+n+'.solura-engine.json',{cache:'no-store'}).then(function(r){
+          if(!r.ok)throw new Error('HTTP '+r.status+' — the site may still be deploying; try again in a minute.');
+          return r.text();
+        }).then(function(txt){
+          return importEnginePackage(new File([txt],n+'.solura-engine.json',{type:'application/json'}));
+        }).catch(function(e){
+          if(out){out.style.color='var(--red)';out.textContent='✗ Install failed: '+e.message;}
+        });
+      })();
+      break;
+    case 'trk-download':
+      (function(){
+        var n=t.dataset.n;
+        fetch('engines/'+n+'.solura-engine.json',{cache:'no-store'}).then(function(r){
+          if(!r.ok)throw new Error('HTTP '+r.status);
+          return r.blob();
+        }).then(function(bl){
+          var a=document.createElement('a');
+          a.href=URL.createObjectURL(bl);
+          a.download=n+'.solura-engine.json';
+          document.body.appendChild(a);a.click();
+          setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},400);
+          toast('💾 '+n+'.solura-engine.json downloaded');
+        }).catch(function(e){
+          showErr('Download failed: '+e.message);
+          toast('⚠ Download failed — see the error bar');
+        });
+      })();
       break;
     case 'open-retrack':
       _rtRi=parseInt(t.dataset.ri,10);
