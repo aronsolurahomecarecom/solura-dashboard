@@ -20011,7 +20011,10 @@ function _docGatesTable(c){
 /* Catch-all: every submitted answer NOT already covered by an APP_SECTIONS field — raw
    form answers plus operator custom questions (column AI) — so nothing the candidate
    entered is invisible in the workspace or the application PDF. */
-function _extraAnswerRows(c){
+/* skipIds: fq- ids a sibling block on the same document is already rendering (see renderDocTemplate).
+   The built-in application template carries {application_table} AND {custom_answers}, so without this
+   a custom answer would print twice - once here under its raw id, once there under its real label. */
+function _extraAnswerRows(c,skipIds){
   const covered=new Set();
   (typeof APP_SECTIONS!=='undefined'?APP_SECTIONS:[]).forEach(sec=>sec.fields.forEach(f=>{
     const m=/^st\.formAnswers\.(\w+)$/.exec(f.path||'');if(m)covered.add(m[1]);
@@ -20045,12 +20048,13 @@ function _extraAnswerRows(c){
        there) — only fq- ids are actual application form answers. Without this filter,
        every screened candidate showed rows like "rel1 — 4" labeled as application data. */
     if(!/^fq-/.test(String(k)))return;
+    if(skipIds&&skipIds.has(String(k)))return; /* printed by {custom_answers} on this document */
     const v=custom[k];if(v==null||v==='')return;
     rows.push([String(k).replace(/^fq-/,'').replace(/[-_]/g,' '),Array.isArray(v)?v.join(', '):String(v)]);
   });
   return rows;
 }
-function _docApplicationTable(c){
+function _docApplicationTable(c,skipIds){
   if(typeof APP_SECTIONS==='undefined')return '';
   const main=APP_SECTIONS.map(sec=>{
     if(sec.title==='Identity')return '';
@@ -20060,7 +20064,7 @@ function _docApplicationTable(c){
     }).join('');
     return '<h3>'+esc(sec.title)+'</h3><table class="kv">'+rows+'</table>';
   }).join('');
-  const extra=_extraAnswerRows(c);
+  const extra=_extraAnswerRows(c,skipIds);
   const extraHtml=extra.length?'<h3>Other answers</h3><table class="kv">'+extra.map(r=>'<tr><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td></tr>').join('')+'</table>':'';
   return main+extraHtml;
 }
@@ -20089,6 +20093,13 @@ function _docQAHtml(c,stage){
     return '<div class="qa"><div class="q">'+esc(q.q)+'</div>'+line+'</div>';
   }).join('');
 }
+/* The form config that actually applies to this candidate: their job's own form when the job
+   package carries one (the worker resolves it the same way when it serves and scores the form),
+   otherwise the global form. */
+function _docEffectiveFc(c){
+  const _jb=(typeof _jobFor==='function'&&c&&c.st)?_jobFor(c):null;
+  return (_jb&&SETTINGS.jobFormConfigs&&SETTINGS.jobFormConfigs[_jb.id])||SETTINGS.formConfig||null;
+}
 function _docCustomAnswers(c){
   /* A job package can carry its OWN application form (SETTINGS.jobFormConfigs[jobId]) - the worker
      serves it and scores against it, and every other reader in the portal goes through the
@@ -20096,8 +20107,7 @@ function _docCustomAnswers(c){
      job's form matched nothing here and its answer appeared in no document at all. Same two shapes
      as _extraAnswerRows: the document paths carry an answers object, a pipeline candidate carries
      those answers in column AI. */
-  const _jb=(typeof _jobFor==='function'&&c&&c.st)?_jobFor(c):null;
-  const fc=(_jb&&SETTINGS.jobFormConfigs&&SETTINGS.jobFormConfigs[_jb.id])||SETTINGS.formConfig;
+  const fc=_docEffectiveFc(c);
   if(!fc||!Array.isArray(fc.questions))return '';
   let answers=(c&&c.answers)||null;
   if(!answers){const _r=(c&&Array.isArray(c.row))?c.row:null;try{answers=JSON.parse((_r&&_r[34])||'{}')||{};}catch(e){answers={};}}
@@ -20130,9 +20140,16 @@ function _docScoresBlock(c){
 function renderDocTemplate(key,c){
   c=c||{};
   const st=c.st||{};
-  const body=_docTplFor(key).b
+  const _tplBody=_docTplFor(key).b;
+  /* When this template prints {custom_answers} too, the application table must not repeat those
+     same answers under their raw ids. Only ids the effective form config still defines are skipped -
+     an answer to a question since deleted has nowhere else to appear and stays in the table. */
+  const _skipIds=/\{custom_answers\}/.test(_tplBody)
+    ? new Set(((_docEffectiveFc(c)||{}).questions||[]).filter(q=>q&&/^fq-/.test(q.id)).map(q=>String(q.id)))
+    : null;
+  const body=_tplBody
     .replace(/\{gates_table\}/g,_docGatesTable(c))
-    .replace(/\{application_table\}/g,_docApplicationTable(c))
+    .replace(/\{application_table\}/g,_docApplicationTable(c,_skipIds))
     .replace(/\{employers_table\}/g,_docEmployersTable(c))
     .replace(/\{refs_table\}/g,_docRefsTable(c))
     .replace(/\{qa_phone_screen\}/g,_docQAHtml(c,'Phone Screen'))
