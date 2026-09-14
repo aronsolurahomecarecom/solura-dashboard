@@ -1666,7 +1666,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0914-85';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0914-86';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2073,6 +2073,21 @@ function validateEngine(e){
 // Engines document — loaded from OneDrive, seeded with the default.
 var enginesDoc={engines:[DEFAULT_ENGINE],defaultEngineId:'solura-default',assignments:[]};
 var ENGINES={}; // id → compiled
+/* 🛡 OVERWRITE GUARD (post-incident, B-0914-86). The catastrophic failure:
+ * loadEnginesDoc fails once (network blip) → enginesDoc stays the embedded
+ * default seed → ANY background save then uploads that near-empty seed
+ * OVER the real Solura_Engines.json: custom engines deleted, every lead's
+ * assignment gone, their positions reinterpreted against the wrong
+ * sequence. From now on saveEnginesDoc REFUSES to write unless this
+ * session actually loaded the real doc (a 404 first-run counts as loaded).
+ * Recovery for a wiped doc: OneDrive → Solura_Engines.json → Version
+ * history → restore the version from before the wipe.                  */
+// (_enginesDocLoaded/_loadedEngineCount are declared inside the ENGSAVE
+// slice below so the save guard is testable; hoisting makes them usable here.)
+var _fallbackDefaultId=null;
+function effectiveDefaultId(){
+  return (_fallbackDefaultId&&ENGINES[_fallbackDefaultId])?_fallbackDefaultId:enginesDoc.defaultEngineId;
+}
 function applyEnginesDoc(){
   ENGINES={};
   var ok=0;
@@ -2081,11 +2096,15 @@ function applyEnginesDoc(){
     catch(err){console.warn('Engine "'+(e&&e.id)+'" failed to compile — skipped:',err.message);}
   });
   if(!ok||!ENGINES[enginesDoc.defaultEngineId]){
-    // Hard fallback: embedded default, today's exact behavior.
+    // Hard RUNTIME fallback: embedded default. Deliberately does NOT
+    // mutate enginesDoc.defaultEngineId — a temporary compile failure
+    // must never be persisted into the saved doc.
     ENGINES['solura-default']=compileEngine(DEFAULT_ENGINE);
-    enginesDoc.defaultEngineId='solura-default';
+    _fallbackDefaultId='solura-default';
+  }else{
+    _fallbackDefaultId=null;
   }
-  SEQ=ENGINES[enginesDoc.defaultEngineId].seq;
+  SEQ=ENGINES[effectiveDefaultId()].seq;
 }
 // A rule can carry SEVERAL engines (A/B testing of whole sequences): the
 // same source rotates its leads evenly across the listed tracks. Legacy
@@ -2114,7 +2133,7 @@ function resolveEngineIdWithRules(ri,rules){
       return ids[ri%ids.length];
     }
   }
-  return enginesDoc.defaultEngineId;
+  return effectiveDefaultId();
 }
 function engineOverrides(){
   enginesDoc.config=enginesDoc.config||{};
@@ -2211,7 +2230,7 @@ function allRuleMatchedLeads(){
     if(isOffSequence(i)&&!isExcluded(r[C.ST]))continue;
     var ov=engineOverrides()[String(i)];
     var claimed=(ov&&ENGINES[ov])||statusRuleMatches(i)||
-      resolveEngineIdWithRules(i,enginesDoc.assignments||[])!==enginesDoc.defaultEngineId;
+      resolveEngineIdWithRules(i,enginesDoc.assignments||[])!==effectiveDefaultId();
     if(claimed)out.push({ri:i,engineId:engineIdFor(i)});
   }
   return out;
@@ -2239,23 +2258,57 @@ async function backfillAssignments(changed){
     if(i%5===4)toast('Backfilling… '+(i+1)+' / '+changed.length);
   }
 }
-function engineFor(ri){return ENGINES[engineIdFor(ri)]||ENGINES[enginesDoc.defaultEngineId];}
+function engineFor(ri){return ENGINES[engineIdFor(ri)]||ENGINES[effectiveDefaultId()];}
 function seqFor(ri){return engineFor(ri).seq;}
 
 async function loadEnginesDoc(){
   try{
     var r=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/content');
-    if(r.status===404){applyEnginesDoc();return;} // first run — embedded default
-    if(!r.ok){applyEnginesDoc();return;}
+    if(r.status===404){
+      // Genuinely no doc yet (first run) — safe to create one later.
+      _enginesDocLoaded=true;_loadedEngineCount=0;
+      applyEnginesDoc();return;
+    }
+    if(!r.ok){
+      // The doc EXISTS but we could not read it — engines are READ-ONLY
+      // this session, or the fallback seed would overwrite the real file.
+      applyEnginesDoc();
+      showErr('⚠ Engines config could not load (HTTP '+r.status+'). Running on the built-in sequence, and all engine/settings saves are BLOCKED this session to protect your real config. Reload to try again.');
+      return;
+    }
     var j=await r.json();
-    if(j&&j.engines&&j.engines.length){enginesDoc=j;_lastEnginesBody=JSON.stringify(enginesDoc,null,2);}
+    if(j&&j.engines&&j.engines.length){
+      enginesDoc=j;
+      _lastEnginesBody=JSON.stringify(enginesDoc,null,2);
+      _enginesDocLoaded=true;
+      _loadedEngineCount=j.engines.length;
+    }else{
+      // Parsed but empty/garbled — same read-only protection.
+      showErr('⚠ Engines config file looks empty or damaged. Saves are blocked this session — restore it from OneDrive → Solura_Engines.json → Version history.');
+    }
     applyEnginesDoc();
     applyConfig();
-  }catch(e){console.warn('Engines load failed — using embedded default:',e.message);applyEnginesDoc();}
+  }catch(e){
+    applyEnginesDoc();
+    showErr('⚠ Engines config failed to load ('+e.message+'). Running on the built-in sequence; engine/settings saves are BLOCKED this session so nothing can overwrite your real config. Reload to try again.');
+  }
 }
 /* ⚡PERF-ENGSAVE — BEGIN (sliced by tests/perf.test.mjs) */
 var _lastEnginesBody=null;
+var _enginesDocLoaded=false,_loadedEngineCount=0;
 async function saveEnginesDoc(){
+  // 🛡 The overwrite guard: never write unless THIS session successfully
+  // loaded the real doc. Without this, one failed load turns every
+  // background save into "replace the real config with the built-in seed".
+  if(!_enginesDocLoaded){
+    throw new Error('Engines config was never loaded this session — save refused to protect your real config. Reload the page; if this keeps happening, restore Solura_Engines.json from OneDrive version history.');
+  }
+  // Second lock: a healthy session should never shrink the doc down to
+  // JUST the embedded default. That shape is the wipe signature.
+  var el9=(enginesDoc.engines||[]);
+  if(_loadedEngineCount>1&&el9.length===1&&el9[0]&&el9[0].id==='solura-default'){
+    throw new Error('Refusing to save: this would replace '+_loadedEngineCount+' engines with only the built-in default (the wipe signature). Reload the page.');
+  }
   var body=JSON.stringify(enginesDoc,null,2);
   // ⚡ Skip the upload when nothing actually changed since the last
   // successful save — settings toggles that resave identical config used
@@ -3867,6 +3920,9 @@ function engineTriggerPending(ri){
 // first so the queue renders truthfully, sheet write in the background).
 var _skipSweepAt=0;
 function autoSkipHardWindows(){
+  // Never run write-back heuristics while engines are a fallback — the
+  // leads' positions would be interpreted against the wrong sequences.
+  if(!_enginesDocLoaded||_fallbackDefaultId)return;
   if(Date.now()-_skipSweepAt<60000)return;
   _skipSweepAt=Date.now();
   for(var i=DATA_START;i<rows.length;i++){
@@ -4343,6 +4399,10 @@ function p2DayFromSheet(ri){
 }
 async function autoExpirePhase2(){
   var fixes=[];
+  // Same protection as autoSkipHardWindows: with the engines doc missing,
+  // EVERY lead looks like a default-engine lead and this heuristic would
+  // rewrite step positions en masse against the wrong sequence.
+  if(!_enginesDocLoaded||_fallbackDefaultId)return fixes;
   for(var i=DATA_START;i<rows.length;i++){
     var r=rows[i];
     if(!r)continue;
@@ -9831,7 +9891,7 @@ function openRestartSeq(ri){
 function renderRestartBody(){
   var ri=_restartRi;
   var engId=_restartEngId;
-  var eng=ENGINES[engId]||ENGINES[enginesDoc.defaultEngineId];
+  var eng=ENGINES[engId]||ENGINES[effectiveDefaultId()];
   var sq=eng.seq;
   var seen={},choices=[];
   sq.forEach(function(st,idx){

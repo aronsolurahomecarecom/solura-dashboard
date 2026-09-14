@@ -132,9 +132,20 @@ function makeWriteRow(fetchLog, opts = {}) {
   let applied = 0, chunked = 0;
   const gfetchStub = async (url, o) => { puts.push(url); return { ok: true, status: 200, json: async () => ({}) }; };
   const mk = new Function('GR', 'ENGINE_FILE', 'gfetch', 'enginesDoc', 'applyEnginesDoc', 'putEnginesContentChunked',
-    slice('ENGSAVE') + '\nreturn {saveEnginesDoc,setDoc:function(d){enginesDoc=d;}};');
+    slice('ENGSAVE') + '\nreturn {saveEnginesDoc,setDoc:function(d){enginesDoc=d;},markLoaded:function(n){_enginesDocLoaded=true;_loadedEngineCount=n;}};');
   const doc = { engines: [{ id: 'e1' }], assignments: [] };
   const s = mk(GR, 'Solura_Engines.json', gfetchStub, doc, () => { applied++; }, async () => { chunked++; });
+
+  // 🛡 overwrite guard: an unloaded session may NEVER save
+  let guarded = false;
+  try { await s.saveEnginesDoc(); } catch (ge) { guarded = /never loaded this session/.test(ge.message); }
+  ok(guarded && puts.length === 0, 'save REFUSED while the doc was never loaded (the wipe protection)');
+  s.markLoaded(3);
+  doc.engines = [{ id: 'solura-default' }];
+  let wipeGuard = false;
+  try { await s.saveEnginesDoc(); } catch (ge) { wipeGuard = /wipe signature/.test(ge.message); }
+  ok(wipeGuard && puts.length === 0, 'save REFUSED when it would shrink 3 engines to just the built-in default');
+  doc.engines = [{ id: 'e1' }];
 
   await s.saveEnginesDoc();
   ok(puts.length === 1 && applied === 1, 'first save uploads');
@@ -145,6 +156,16 @@ function makeWriteRow(fetchLog, opts = {}) {
   await s.saveEnginesDoc();
   ok(puts.length === 2, 'a real change uploads again');
   ok(chunked === 0, 'small doc never took the chunked path');
+}
+
+// ══ 🛡 overwrite-guard wiring (B-0914-86 incident fixes) ══════════════════
+{
+  ok(/_enginesDocLoaded=true;\s*\n\s*_loadedEngineCount=j\.engines\.length;/.test(html), 'a successful load arms saving with the real engine count');
+  ok(/r\.status===404\)\{\s*\n\s*\/\/ Genuinely no doc yet/.test(html), 'first-run 404 still allows creating the doc');
+  ok((html.match(/saves are BLOCKED this session/gi) || []).length >= 2, 'failed loads announce read-only mode LOUDLY, not in the console');
+  ok(/if\(!_enginesDocLoaded\|\|_fallbackDefaultId\)return fixes;/.test(html), 'autoExpirePhase2 never rewrites leads against fallback engines');
+  ok(/if\(!_enginesDocLoaded\|\|_fallbackDefaultId\)return;/.test(html), 'autoSkipHardWindows never runs against fallback engines');
+  ok(/_fallbackDefaultId='solura-default';/.test(html) && !/enginesDoc\.defaultEngineId='solura-default'/.test(html), 'compile fallback is runtime-only — never persisted into the saved doc');
 }
 
 // ══ D. source-level locks ═════════════════════════════════════════════════
