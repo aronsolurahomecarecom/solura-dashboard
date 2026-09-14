@@ -1179,6 +1179,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div class="la-f" style="margin-bottom:10px"><label>Email subject</label><input type="text" data-cfg="invoiceSubject"></div>
         <label class="ee-lbl">Invoice template (HTML — edits save with the Save bar)</label>
         <textarea data-cfg="invoiceTemplate" rows="12" style="width:100%;font-family:monospace;font-size:11.5px"></textarea>
+        <button data-action="st-restore-tpl" data-kind="inv" class="st-btn-ghost" style="padding:6px 12px;font-size:11.5px;margin-top:6px">↺ Restore built-in template</button>
         <p class="st-p" style="font-size:11px;margin-top:6px">Tokens: <code>{invno}</code> <code>{period}</code> <code>{from}</code> <code>{to}</code> <code>{hours}</code> <code>{rate}</code> <code>{subtotal}</code> <code>{discount}</code> <code>{discountrow}</code> <code>{amount}</code> <code>{due}</code> <code>{date}</code> <code>{notes}</code> — plus <code>{dm}</code>/<code>{pt}</code>/<code>{rel}</code>/<code>{ptrel}</code> per client. <code>{notes}</code> renders as a highlighted block, or disappears when empty. Clear the box to go back to the built-in template.</p>
       </section>
       <section class="st-sec" id="st-sec-engines">
@@ -1217,7 +1218,10 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <input type="text" class="ee-inp" data-cfg="asmtSchedSubject" placeholder="Your in-home assessment is scheduled — {date}">
           <label class="ee-lbl" style="margin-top:8px">📅 Assessment-confirmation email (blank = built-in) · Tokens: <code>{date}</code> <code>{time}</code> <code>{location}</code> <code>{assessor}</code> <code>{notes}</code> <code>{dm}</code> <code>{pt}</code> <code>{rel}</code> <code>{ptrel}</code></label>
           <textarea class="ee-tpl" rows="7" data-cfg="asmtSchedTemplate" placeholder="Leave blank to use the built-in branded confirmation."></textarea>
-          <div style="font-size:10.5px;color:var(--soft);margin-top:4px">Sent when you log a scheduled assessment (📅 button in the Responded / Update dialogs). {notes} renders as a styled box and vanishes when empty.</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+            <button data-action="st-restore-tpl" data-kind="asmt" class="st-btn-ghost" style="padding:6px 12px;font-size:11.5px">↺ Restore built-in template</button>
+            <span style="font-size:10.5px;color:var(--soft)">Sent when you log a scheduled assessment (📅 in the Responded / Update dialogs). {notes} renders as a styled box and vanishes when empty.</span>
+          </div>
         </div>
         <div class="st-field">
           <label class="ee-lbl">Message-size ceiling (adaptive)</label>
@@ -1627,7 +1631,7 @@ var C={
              //    regular touch of cycle 4 done, beside-special #1 due now.
              //    SAFE add: every full-width writer spans A:AD and never touches AE.
 };
-var BUILD='B-0911-83';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0914-84';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -12672,6 +12676,24 @@ function onClick(ev){
       unassignEngineFromRule(t.dataset.eid,parseInt(t.dataset.ridx,10));
       break;
     case 'trk-test': testTrackerConnection(); break;
+    case 'st-restore-tpl':
+      // ↺ One-click undo for a wiped/mangled email template: clears the
+      // stored override (blank = built-in wins at send time) and refills
+      // the boxes with the built-in so what you see is what will send.
+      (function(){
+        var kind=t.dataset.kind;
+        var pairs=kind==='asmt'
+          ?[['asmtSchedSubject',DEFAULT_ASMTSCHED_SUBJECT],['asmtSchedTemplate',DEFAULT_ASMTSCHED_TEMPLATE]]
+          :[['invoiceSubject',DEFAULT_INVOICE_SUBJECT],['invoiceTemplate',DEFAULT_INVOICE_TEMPLATE]];
+        pairs.forEach(function(p){
+          setCfg(p[0],'');
+          var inp=document.querySelector('[data-cfg="'+p[0]+'"]');
+          if(inp)inp.value=p[1];
+        });
+        stMarkDirty();
+        toast('↺ Built-in template restored — hit Save to make it stick');
+      })();
+      break;
     case 'es-reset-emailcap':
       try{sessionStorage.removeItem('emailMsgCap');}catch(_){}
       EMAIL_MSG_ATTACH_CAP=35*1024*1024;

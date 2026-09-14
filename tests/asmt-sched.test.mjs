@@ -106,6 +106,11 @@ ok(/serializeConditionList\(_alConds\), \/\/ AC/.test(html), 'picked conditions 
 ok(/_alConds=\[\];\s*\n\s*var acs=el\('al-cond-search'\)/.test(html), 'selection resets every time the form opens');
 ok(/_alConds\.indexOf\(c\.k\)>-1\|\|\(q&&match\(c\)\)/.test(html), 'long-tail conditions surface via search and never vanish once selected');
 
+// ── ↺ template restore (B-0914-84) ──
+ok((html.match(/data-action="st-restore-tpl"/g) || []).length === 2, 'restore buttons on BOTH the assessment and invoice templates');
+ok(/\[\['asmtSchedSubject',DEFAULT_ASMTSCHED_SUBJECT\],\['asmtSchedTemplate',DEFAULT_ASMTSCHED_TEMPLATE\]\]/.test(html), 'assessment restore clears the override and refills with the built-in');
+ok(/setCfg\(p\[0\],''\)/.test(html) && /stMarkDirty\(\)/.test(html), 'restore stages a blank override so the built-in wins at send time');
+
 // ── source-level locks on the flow ──
 ok(/id="modal-asmt-sched"/.test(html) && /data-action="as-save"/.test(html) && /data-action="as-preview"/.test(html), 'logger modal with Save & Send + Preview');
 ok(/data-action="open-asmt-sched" data-ri/.test(html), '📅 launch button rides the Responded/Update dialog footer');
