@@ -141,7 +141,7 @@ ok(/SendAsDenied|ErrorSendAs/.test(html), 'Send As denial gets the plain-languag
 ok(/outcome:'invoice-sent'/.test(html), 'invoice sends land in the Comms Log');
 ok(/setCfg\('invoiceNextNo',cur9\+1\)/.test(html), 'invoice counter advances after a successful send');
 ok(/isOnService\(l\.status\)/.test(html) && /data-action="open-invoice"/.test(html), 'invoice button gated on On Service leads');
-ok((html.match(/\+inv;/g) || []).length === 3, 'button rides all three button-row layouts');
+ok((html.match(/\+inv(?:;|\b)/g) || []).length >= 3, 'invoice button rides the button-row layouts (trigger button may prepend to it)');
 ok(/id="st-sec-invoicing" hidden/.test(html) && /data-cfg="invoiceTemplate"/.test(html), 'Settings → Invoicing is its own tab section (hidden until selected)');
 ok(/data-sec="invoicing">🧾 Invoicing<\/button>/.test(html), 'Invoicing has its own nav button in Settings');
 ok(!/trackingPixelHtml\(_invRi/.test(html) && !/_trkPx/.test(src), 'invoices carry no tracking pixel');

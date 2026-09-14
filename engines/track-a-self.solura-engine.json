@@ -1,0 +1,72 @@
+{
+  "format": "solura-engine",
+  "formatVersion": 1,
+  "build": "B-0901",
+  "schema": {
+    "doc": "Track A: the self-inquirer. ~1 in 10 inquiries. She deliberated privately for months; the inquiry is the LAST step of her process, not the first. Long latency, short window. Top barrier is worry the task will not get done properly (practical, answerable), not dignity. Wants under five options; the day-5 email offers exactly two and a recommendation. Phone beats digital, physical mail is underused, nurture is MONTHLY because weekly reads as harassment.",
+    "anchors": "onDay = days from lead arrival (Date Added). after = gap from previous completion. Phase 1 steps are manual (action cadence); their T+offsets are pacing guidance in the step text.",
+    "windows": "window [startHour, endHour] decimal. hard:true means NO ROLLOVER: if the window closes on the due day the step is SKIPPED and logged, never moved to tomorrow. Only the day-1-to-5 block carries hard windows.",
+    "cond": "cond:'unanswered' runs the step only if the log shows no answer yet; once the lead engages the step auto-skips.",
+    "writes": "Every advance writes Last Contact, Method, Next Follow-Up, the T mirror label (of the NEXT step) and appends to the log."
+  },
+  "routing": [
+    {"rule": 1, "track": "A", "conf": "high", "test": "relationship matches self/myself/i am the patient"},
+    {"rule": 4, "track": "A", "conf": "med", "test": "contact name equals patient name (classic false positive: a wife sharing surname and landline - confirm on the first call)"}
+  ],
+  "engine": {
+    "id": "track-a-self",
+    "name": "Track A — Self-Inquiry",
+    "phases": [
+      {"name": "First Contact (same day)", "cadence": "action", "steps": [
+        {"id": "A-01", "icon": "📞", "text": "Opening call — right now (T+0)", "type": "call",
+         "template": "Script A.open: Warm, unhurried, respectful. She called us; thank her for it. One question only: what would a good week at home look like? Offer the in-home visit as a conversation, not a sales step. Never rush her off the phone."},
+        {"id": "A-02", "icon": "📞", "text": "Voicemail 1 (if unanswered)", "type": "call", "cond": "unanswered",
+         "template": "Script A.vm1: Name, agency, one sentence: you reached out about care at home and I wanted to say hello personally. I will try again, and my direct number is (216) 770-4886. Slow, clear, number twice."},
+        {"id": "A-03", "icon": "💬", "text": "Text (T+2m, if unanswered)", "type": "sms", "cond": "unanswered",
+         "template": "Hi {dm}, this is Meir Schwimer with Solura Home Care here in Cleveland. You reached out about care at home. No rush at all, I will try you again a little later. If calling is easier for you, I am at (216) 770-4886."},
+        {"id": "A-04", "icon": "📞", "text": "Second call (T+2.5h, if unanswered)", "type": "call", "cond": "unanswered",
+         "template": "Script A.open again. Mid-morning or early afternoon only. If no answer, no voicemail this time."}
+      ]},
+      {"name": "First Week (mornings only)", "cadence": "interval", "interval": {"entries": [
+        {"id": "A-05", "onDay": 1, "window": [9.5, 11], "hard": true, "type": "call", "text": "Day 1 morning call",
+         "template": "Script A.open. Mornings are her best hours; respect the window absolutely."},
+        {"id": "A-06", "onDay": 1, "window": [9, 16], "hard": true, "type": "mail", "text": "Mail the introduction letter",
+         "template": "Brief A.p2.letter: one page, large type, Georgia. Who we are, license 4574HHN, what a first visit looks like, her name written in. Physical mail lands with this generation; it sits on the counter."},
+        {"id": "A-07", "onDay": 2, "window": [9.5, 11], "hard": true, "type": "call", "text": "Day 2 morning call", "template": "Script A.open."},
+        {"id": "A-08", "onDay": 4, "window": [9.5, 11], "hard": true, "type": "call", "text": "Day 4 call — voicemail 2 if unanswered",
+         "template": "Script A.vm2: mention the letter is on its way or arrived, one practical reassurance (same caregiver every visit), number twice."},
+        {"id": "A-09", "onDay": 5, "window": [9, 12], "hard": true, "type": "email", "subject": "Two ways we could help at home",
+         "text": "Day 5 email — exactly two options",
+         "template": "Brief A.p2.options: leadType decision-support, register self-inquiry. EXACTLY two options with a plain recommendation, never a menu. Adults her age want fewer options for healthcare than for anything else; the APFM advisor just handed her a list, our job is to narrow it. Practical specifics answer her real worry: will the task be done properly. License line in footer."}
+      ]}},
+      {"name": "Gentle Close", "cadence": "interval", "interval": {"entries": [
+        {"id": "A-10", "onDay": 8, "window": [9.5, 11], "type": "call", "text": "Day 8 morning call", "template": "Script A.open. Advisory window, not hard."},
+        {"id": "A-11", "onDay": 12, "window": [9.5, 11], "type": "call", "text": "Day 12 closing call",
+         "template": "Script A.close: name where she is kindly. Some folks are ready now, some want to sit with it. Both are fine. Ask permission to check in monthly; permission converts the nurture from pestering into a promise kept."}
+      ]}},
+      {"name": "Re-Engagement Letter", "cadence": "interval", "interval": {"entries": [
+        {"id": "A-12", "onDay": 40, "window": [9, 16], "type": "mail", "text": "Day 40 re-engagement letter (manual — waits for Done)",
+         "template": "Brief A.p4.reengage: warm, zero pressure, seasonal if natural. One new practical fact about staying independent at home. Handwritten envelope."}
+      ]}},
+      {"name": "Monthly Nurture (forever)", "cadence": "interval", "interval": {
+        "forever": true, "every": {"days": 30}, "rotate": ["mail", "call"],
+        "text": "Monthly nurture — mail and call alternate",
+        "template": "Brief A.p5.nurture: leadType long-term-nurture, register self-inquiry. Soft italic close, no button. Monthly because weekly reads as harassment to a private deliberator. One useful thought per touch, never a pitch."
+      }}
+    ]
+  },
+  "templates": {
+    "A.p1.text": {"channel": "sms", "verbatim": true},
+    "A.p2.letter": {"channel": "mail", "leadType": "decision-support", "register": "self-inquiry", "length": "one page", "noButton": true, "footerLicense": true},
+    "A.p2.options": {"channel": "email", "leadType": "decision-support", "register": "self-inquiry", "cta": "Call Me: (216) 770-4886", "softClose": true, "footerLicense": true, "length": "short", "brief": "Exactly two options plus a recommendation. Practical operational specifics."},
+    "A.p4.reengage": {"channel": "mail", "leadType": "warm-scheduled", "register": "self-inquiry", "noButton": true},
+    "A.p5.nurture": {"channel": "rotate", "leadType": "long-term-nurture", "register": "self-inquiry", "noButton": true, "softClose": true}
+  },
+  "scripts": {
+    "A.open": "Thank her for reaching out. One question: what would a good week at home look like? Offer the visit as a conversation.",
+    "A.vm1": "Name, agency, one warm sentence, number twice, slow.",
+    "A.vm2": "Reference the letter, one practical reassurance, number twice.",
+    "A.close": "Name where she is kindly; ask permission for monthly check-ins."
+  },
+  "notes": ["Zero windows at or after 17:00 anywhere on this track.", "Exactly one SMS step: A-03.", "Nurture interval: 30 days."]
+}

@@ -1,0 +1,90 @@
+{
+  "format": "solura-engine",
+  "formatVersion": 1,
+  "build": "B-0901",
+  "schema": {
+    "doc": "Track C: the adult child. The volume track and the router default. 2-3 agencies received this same lead at the same moment: answering inside an hour makes us ~7x more likely to qualify than one hour later, >60x versus a day later, and roughly half of competitors do not answer a web inquiry within two hours. Speed is the entire game. Correct the archetype: 76% of family caregivers live with the parent or within 20 minutes (APFM: 83% within a 30-minute drive). Build for the LOCAL daughter who works full time: early-morning and evening windows, not business hours. Price goes in writing on day zero because she must defend the number to a sibling (money is the top sibling conflict at 36%). The day-2 two-document email is the differentiator: the buyer is not the user, 55% of families say the parent resists, and that argument must reach the mother in a form the daughter can leave on a counter. Everything past day 14 is loss recovery: two thirds of families secure care within 60 days.",
+    "sla": "First dial within 5 MINUTES of arrival, measured in seconds via the AI arrival timestamp. The red chip applies to Track C only.",
+    "gap": "Solura_For_Your_Siblings.pdf and Solura_For_Your_Mother.pdf do not exist yet; C-07 fires without them. Building them is a separate task and Meir knows."
+  },
+  "routing": [
+    {"rule": 3, "track": "C", "conf": "high", "test": "relationship matches son/daughter/child/parent/in-law/niece/nephew"},
+    {"rule": 8, "track": "C", "conf": "med", "test": "surname differs from patient"},
+    {"rule": 9, "track": "C", "conf": "low", "test": "default - fast on the wrong track costs nothing, slow costs the lead"}
+  ],
+  "sla": {"minutes": 5, "measuredIn": "seconds", "appliesTo": "C only"},
+  "pricing": {"policy": "Rate in writing on day zero (C-03). She has to defend the number to a sibling; hiding it loses the comparison by default."},
+  "engine": {
+    "id": "track-c-adult-child",
+    "name": "Track C — Adult Child",
+    "phases": [
+      {"name": "Speed Burst (first hours)", "cadence": "action", "steps": [
+        {"id": "C-01", "icon": "📞", "text": "Opening call — NOW (SLA: 5 minutes)", "type": "call",
+         "template": "Script C.open: she filled a form minutes ago and is still at a screen. Be first and be brief: what is going on with your {ptrel}, what does help need to look like, when can we visit? Offer today or tomorrow."},
+        {"id": "C-02", "icon": "💬", "text": "Text (T+1m, if unanswered)", "type": "sms", "cond": "unanswered",
+         "template": "Hi {dm}, Meir Schwimer at Solura Home Care. I just saw your note about care for {pt} and I tried you. If a call is bad right now, text me a good time. (216) 770-4886"},
+        {"id": "C-03", "icon": "📧", "text": "Rate email (T+15m, if unanswered)", "type": "email", "cond": "unanswered",
+         "subject": "Our rates, in writing, for {pt}",
+         "template": "Brief C.p1.rate: leadType shopping-around, register family-inquiry. THE RATE IN WRITING plus what it includes, three sentences of who we are, the license line. She is comparing agencies tonight and defending the number to a sibling; make both easy."},
+        {"id": "C-04", "icon": "📞", "text": "Second call (T+2h, if unanswered)", "type": "call", "cond": "unanswered", "template": "Script C.open."},
+        {"id": "C-05", "icon": "📞", "text": "Evening call + voicemail 6-8pm (if unanswered)", "type": "call", "cond": "unanswered",
+         "template": "Script C.vm1: after-work window. Name, agency, saw your note about {pt}, we sent our rate so you have it in writing, number twice."}
+      ]},
+      {"name": "First Ten Days (working-daughter windows)", "cadence": "interval", "interval": {"entries": [
+        {"id": "C-06", "onDay": 1, "window": [8, 9], "hard": true, "type": "call", "text": "Day 1 early call (before work)", "template": "Script C.open."},
+        {"id": "C-07", "onDay": 2, "window": [8, 18], "hard": true, "type": "email", "subject": "Two pages for the two hardest conversations",
+         "text": "Day 2 two-document email",
+         "template": "Brief C.p2.docs: leadType decision-support, register family-inquiry. Carries Solura_For_Your_Siblings.pdf and Solura_For_Your_Mother.pdf (NOT BUILT YET, fires without them). The buyer is not the user: give her the printable argument to leave on the counter. License line."},
+        {"id": "C-08", "onDay": 3, "window": [12, 13], "hard": true, "type": "call", "text": "Day 3 lunch call", "template": "Script C.open. Lunch window for the office worker."},
+        {"id": "C-09", "onDay": 4, "window": [8, 18], "hard": true, "type": "email", "subject": "When a parent says no to help",
+         "text": "Day 4 convince-Mom email",
+         "template": "Brief C.p2.mom: 55% of families hit parent resistance. What works: starting tiny, framing help as for the HOUSE, a caregiver introduced as a housekeeper first. Warm, practical, zero fear."},
+        {"id": "C-10", "onDay": 6, "window": [18, 20], "hard": true, "type": "call", "text": "Day 6 evening family call",
+         "template": "Script C.family: evenings are when siblings talk. Offer a three-way call or a visit when a brother or sister can join."},
+        {"id": "C-11", "onDay": 6, "window": [9, 11], "hard": true, "type": "call", "cond": "unanswered", "text": "Saturday morning call (weekend catch, if still unanswered)",
+         "template": "Script C.open. Weekend window for the lead the workweek never reaches. (Fires on the Saturday nearest day 6.)"},
+        {"id": "C-12", "onDay": 8, "window": [8, 9], "hard": true, "type": "call", "text": "Day 8 early call", "template": "Script C.open."},
+        {"id": "C-13", "onDay": 10, "window": [18, 20], "hard": true, "type": "call", "text": "Day 10 evening call", "template": "Script C.open."}
+      ]}},
+      {"name": "Decision Support", "cadence": "interval", "interval": {"entries": [
+        {"id": "C-14", "onDay": 14, "type": "email", "subject": "Ways families cover the cost",
+         "text": "Day 14 income-options email",
+         "template": "Brief C.p3.income: leadType decision-support. VA benefits, LTC insurance, Ohio programs, tax angles. Plain, numbered, license line."}
+      ]}},
+      {"name": "Re-Engagement", "cadence": "interval", "interval": {"entries": [
+        {"id": "C-15", "onDay": 21, "type": "call", "text": "Day 21 re-engage: call, then VM, then text (manual, waits for Done)",
+         "template": "Brief C.p4.reengage: one combined touch, warm not chasing. Many families are mid-comparison right here; ask what would make the decision easier."}
+      ]}},
+      {"name": "Loss Recovery", "cadence": "interval", "interval": {"entries": [
+        {"id": "C-16", "onDay": 30, "type": "email", "subject": "Still here when the timing is right",
+         "text": "Day 30 email", "template": "Brief C.p3.d30: leadType warm-scheduled. Two thirds of families have secured care by day 60; this is recovery of the third that has not. One useful thing, soft close."},
+        {"id": "C-17", "onDay": 45, "window": [18, 20], "type": "call", "text": "Day 45 evening call", "template": "Script C.warm: no agenda, how is {pt} doing?"},
+        {"id": "C-18", "onDay": 60, "type": "email", "subject": "A note for the long haul",
+         "text": "Day 60 email", "template": "Brief C.p3.d60: leadType long-term-nurture tone. If another agency is in place: gracious, door open, keep our number. If nothing is: smallest possible first step."}
+      ]}},
+      {"name": "Quarterly Nurture (forever)", "cadence": "interval", "interval": {
+        "forever": true, "every": {"days": 90}, "type": "email",
+        "text": "Quarterly nurture email",
+        "template": "Brief C.p5.nurture: leadType long-term-nurture, register family-inquiry. Soft italic close, no button. Quarterly: her situation changes on hospital discharges and family visits, not weeks."
+      }}
+    ]
+  },
+  "templates": {
+    "C.p1.text": {"channel": "sms", "verbatim": true},
+    "C.p1.rate": {"channel": "email", "leadType": "shopping-around", "register": "family-inquiry", "footerLicense": true, "length": "short", "brief": "Rate in writing, day zero."},
+    "C.p2.docs": {"channel": "email", "leadType": "decision-support", "register": "family-inquiry", "footerLicense": true, "attach": ["Solura_For_Your_Siblings.pdf", "Solura_For_Your_Mother.pdf"], "brief": "Attachments not built yet - step fires without them."},
+    "C.p2.mom": {"channel": "email", "leadType": "overwhelmed-caregiver", "register": "family-inquiry", "length": "medium"},
+    "C.p3.income": {"channel": "email", "leadType": "decision-support", "register": "family-inquiry", "footerLicense": true},
+    "C.p4.reengage": {"channel": "rotate", "leadType": "avoidant", "register": "family-inquiry"},
+    "C.p3.d30": {"channel": "email", "leadType": "warm-scheduled", "register": "family-inquiry", "softClose": true},
+    "C.p3.d60": {"channel": "email", "leadType": "long-term-nurture", "register": "family-inquiry", "noButton": true, "softClose": true},
+    "C.p5.nurture": {"channel": "email", "leadType": "long-term-nurture", "register": "family-inquiry", "noButton": true, "softClose": true}
+  },
+  "scripts": {
+    "C.open": "Be first, be brief: what is going on, what does help look like, when can we visit. Offer today or tomorrow.",
+    "C.vm1": "After-work VM: saw your note, rate already in your inbox, number twice.",
+    "C.family": "Evenings are when siblings talk; offer a three-way call.",
+    "C.warm": "No agenda. How is the parent doing?"
+  },
+  "notes": ["At least two evening (18-20) windows: C-10, C-13, C-17.", "SLA: red at 5 minutes with step_idx 0.", "Nurture interval: 90 days.", "No competitor attacks, no fear-based falls framing (linter enforces)."]
+}

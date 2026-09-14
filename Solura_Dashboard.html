@@ -749,6 +749,31 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
   <div class="done-pop-inner" id="done-pop-inner"></div>
 </div>
 
+<!-- 🅰🅱🅲 Retrack — the first call is when the track gets corrected -->
+<div class="modal" id="modal-retrack">
+  <div class="mbox" style="max-width:440px">
+    <div class="mhead"><div class="mtitle">Who is asking?</div><button class="mclose" data-action="close-modal" data-mid="modal-retrack">✕</button></div>
+    <div class="mbody">
+      <div style="font-size:12.5px;color:var(--mid);margin-bottom:14px;line-height:1.5">The track drives the whole cadence. Pick what you learned on the call:</div>
+      <button data-action="retrack-pick" data-letter="A" style="display:block;width:100%;text-align:left;padding:12px 14px;margin-bottom:8px;border:1.5px solid var(--border);border-radius:10px;background:none;font-family:inherit;cursor:pointer"><b>A — Asking for themselves</b><br><span style="font-size:11.5px;color:var(--soft)">Fewer touches, phone, mornings, monthly nurture</span></button>
+      <button data-action="retrack-pick" data-letter="B" style="display:block;width:100%;text-align:left;padding:12px 14px;margin-bottom:8px;border:1.5px solid var(--border);border-radius:10px;background:none;font-family:inherit;cursor:pointer"><b>B — Spouse asking for a partner</b><br><span style="font-size:11.5px;color:var(--soft)">Long tail, task-based questions, hospital trigger armed</span></button>
+      <button data-action="retrack-pick" data-letter="C" style="display:block;width:100%;text-align:left;padding:12px 14px;border:1.5px solid var(--border);border-radius:10px;background:none;font-family:inherit;cursor:pointer"><b>C — Adult child asking for a parent</b><br><span style="font-size:11.5px;color:var(--soft)">Speed track: price in writing day zero, evening windows</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- 📉 Loss reason — why did we lose them? (AH; "Recipient refused" is the number nobody measures) -->
+<div class="modal" id="modal-loss">
+  <div class="mbox" style="max-width:420px">
+    <div class="mhead"><div class="mtitle">Why was this lead lost?</div><button class="mclose" data-action="close-modal" data-mid="modal-loss">✕</button></div>
+    <div class="mbody">
+      <div style="font-size:12px;color:var(--mid);margin-bottom:12px;line-height:1.5">One tap — this builds the loss-reason numbers nobody in the industry publishes.</div>
+      <div id="loss-btns" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+      <button data-action="close-modal" data-mid="modal-loss" style="margin-top:10px;padding:8px 12px;background:none;border:none;color:var(--soft);font-size:11.5px;cursor:pointer;font-family:inherit">Skip for now</button>
+    </div>
+  </div>
+</div>
+
 <!-- 📅 Assessment-scheduled logger — stamps the lead + optional confirmation email -->
 <div class="modal" id="modal-asmt-sched">
   <div class="mbox" style="max-width:600px">
@@ -1627,11 +1652,21 @@ var C={
   NUR_OV:27, // AB nurture_weekday_override  (NEW — blank or 0-6)
   MC:28,     // AC mentioned_conditions  (NEW — comma-separated condition keys)
   UNSUB:29,  // AD Unsubscribed — ISO timestamp from Resend newsletter opt-out, or empty
-  NCY:30     // AE nurture_cycle — "3" = 3 nurture touches done; "3.1" = mid-cycle,
+  NCY:30,    // AE nurture_cycle — "3" = 3 nurture touches done; "3.1" = mid-cycle,
              //    regular touch of cycle 4 done, beside-special #1 due now.
              //    SAFE add: every full-width writer spans A:AD and never touches AE.
+  // ── Track system (B-0914-85, from the outreach-research handoff). The
+  // handoff wanted these at AD/AE — those are TAKEN (Unsubscribed, nurture
+  // cycle), so they live at AF+ instead. Full-width A:AD writers never
+  // touch them.
+  TRK:31,    // AF track — "C·high" / "B·med" / "A·low": who is asking
+             //    (A self / B spouse / C adult child) + router confidence
+  TGA:32,    // AG trigger_at — Track B only: last hospital/fall trigger fire (ISO)
+  LOSS:33,   // AH loss_reason — why a lost lead was lost (Recipient refused, …)
+  ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
+             //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0914-84';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0914-85';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -1707,8 +1742,8 @@ var SLOT_WINDOWS={
   pm:{call:[15,21],sms:[14,22],email:[14,22]}
 };
 var SLOT_LABEL={am:'AM',mid:'Midday',pm:'PM'};
-function typeIcon(t){return t==='call'?'📞':t==='email'?'📧':'💬';}
-function typeWord(t){return t==='call'?'Call':t==='email'?'Email':'Text';}
+function typeIcon(t){return t==='call'?'📞':t==='email'?'📧':t==='mail'?'📮':'💬';}
+function typeWord(t){return t==='call'?'Call':t==='email'?'Email':t==='mail'?'Mail':'Text';}
 
 /* ⚡ENGINE-GAPS — BEGIN (sliced by tests/engine-gaps.test.mjs) */
 /* Custom-gap cadence: a wait expressed in years/months/weeks/days, freely
@@ -1750,6 +1785,86 @@ function gapLabel(g){
   if(g.weeks)parts.push(g.weeks+(g.weeks!==1?' wks':' wk'));
   if(g.days)parts.push(g.days+(g.days!==1?' days':' day'));
   return parts.join(' + ')||'0 days';
+}
+/* 🅰🅱🅲 Track system (outreach-research handoff, spec build B-0901).
+ * WHO IS ASKING predicts behavior better than temperature or source:
+ *  A self-inquirer  — deliberated for months; fewer touches, phone,
+ *                     mornings, monthly nurture. Over-contacting = blocked.
+ *  B spouse         — 35.3 hrs/wk of care, understates everything, 55%
+ *                     have no other family. Longest tail + the hospital/
+ *                     fall trigger (the 30 days post-hospitalization is
+ *                     when "I can still manage" collapses).
+ *  C adult child    — 2-3 agencies got the same lead; <1h response ≈ 7x
+ *                     qualify odds. Speed is the whole game; local
+ *                     daughter working full-time, NOT the long-distance
+ *                     archetype (76% live within 20 min).
+ * Tracks are ENGINES (track-a-self / track-b-spouse / track-c-adult-child)
+ * — the existing phase machine walks them; nothing was rebuilt.        */
+var TRACK_ENGINE_IDS={A:'track-a-self',B:'track-b-spouse',C:'track-c-adult-child'};
+// Router: first match wins. Rule 4 is medium, not high — a wife sharing a
+// landline and surname is the classic false positive for A. Default is C
+// on purpose: fast-but-wrong-track costs nothing, slow costs the lead.
+function routeTrackPure(f){
+  f=f||{};
+  var rel=String(f.rel||'').toLowerCase();
+  var nm=String(f.clientName||'').trim().toLowerCase().replace(/\s+/g,' ');
+  var dm=String(f.dm||'').trim().toLowerCase().replace(/\s+/g,' ');
+  if(/\b(self|myself|i am the (patient|one))\b/i.test(rel))return {track:'A',conf:'high',rule:1};
+  if(/\b(spouse|husband|wife|partner)\b/i.test(rel))return {track:'B',conf:'high',rule:2};
+  if(/\b(son|daughter|child|father|mother|mom|dad|parent|in-?law|niece|nephew)\b/i.test(rel))return {track:'C',conf:'high',rule:3};
+  if(nm&&dm&&nm===dm)return {track:'A',conf:'med',rule:4};
+  var sn=nm.split(' ').pop(),sd=dm.split(' ').pop();
+  if(nm&&dm&&sn&&sn===sd)return {track:'B',conf:'med',rule:5};
+  if(nm&&dm&&sn!==sd)return {track:'C',conf:'med',rule:8};
+  return {track:'C',conf:'low',rule:9};
+}
+function parseTrack(cell){
+  var m=String(cell||'').trim().match(/^([ABC])(?:·(high|med|low))?/i);
+  if(!m)return null;
+  return {track:m[1].toUpperCase(),conf:(m[2]||'high').toLowerCase()};
+}
+// Track B trigger: the only thing allowed to preempt a scheduled step.
+var TRACK_B_TRIGGER={pattern:'\\b(hospital|hospitaliz|admitted|ER\\b|emergency room|surger(y|ies)|operation|procedure|rehab|discharge|fell|fall|broke (her|his)|fracture)\\b',flags:'i',cooldownDays:3};
+function triggerMatches(text,trig){
+  trig=trig||TRACK_B_TRIGGER;
+  try{return new RegExp(trig.pattern,trig.flags).test(String(text||''));}catch(_){return false;}
+}
+function triggerCoolingDown(lastIso,nowTs,trig){
+  trig=trig||TRACK_B_TRIGGER;
+  if(!lastIso)return false;
+  var last=new Date(lastIso).getTime();
+  if(isNaN(last))return false;
+  return ((nowTs||Date.now())-last)<(trig.cooldownDays||3)*86400000;
+}
+// Copy linter: forbidden patterns as {pattern,flags} data so they survive
+// JSON. Universal brand rules + per-track additions from the research.
+var COPY_FORBIDDEN={
+  universal:[
+    {pattern:'[\\u2014\\u2013]',flags:'',why:'em/en dash'},
+    {pattern:'(tried (to reach|calling|reaching)( you)?|called you \\d|\\d+ (times|attempts))',flags:'i',why:'counting missed calls'},
+    {pattern:'\\bjust (following up|checking in)\\b',flags:'i',why:'filler follow-up'},
+    {pattern:'\\b(limited (spots|availability)|act now|don\\u2019t wait|dont wait|before it\\u2019s too late|hurry)\\b',flags:'i',why:'urgency/scarcity'},
+    {pattern:'\\bfeel free to reach out\\b',flags:'i',why:'marketing filler'},
+    {pattern:'\\b(owner[- ](run|operated|led)|founder[- ]reviewed|my agency)\\b',flags:'i',why:'ownership claim'},
+    {pattern:'\\bserving (beachwood|cleveland heights|westlake)\\b',flags:'i',why:'service areas in footer'}
+  ],
+  B:[
+    {pattern:'\\brespite\\b',flags:'i',why:'reads end-stage to a spouse'},
+    {pattern:'\\bexhaust(ed|ing|ion)\\b',flags:'i',why:'never screen a spouse on feelings'},
+    {pattern:'keep(s|ing)? (him|her) home longer',flags:'i',why:'unsupported claim'}
+  ],
+  C:[
+    {pattern:'\\b(unlike other agencies|competitors)\\b',flags:'i',why:'competitor attack'},
+    {pattern:'\\b(dangerous|before (she|he) falls again|tragedy)\\b',flags:'i',why:'fear-based falls framing'}
+  ]
+};
+function lintCopy(text,track){
+  var out=[];
+  var sets=COPY_FORBIDDEN.universal.concat(COPY_FORBIDDEN[track]||[]);
+  sets.forEach(function(p){
+    try{if(new RegExp(p.pattern,p.flags).test(String(text||'')))out.push(p.why);}catch(_){}
+  });
+  return out;
 }
 /* ★ Special touches inside a sticky forever phase: extra steps that come in
  * on a chosen touch number (optionally repeating every N touches) and play
@@ -1793,7 +1908,18 @@ function nurtureParts(base,rawNcy){
     if(sp.mode==='replace'){if(!rep)rep=sp;}
     else beside.push(sp);
   });
-  var parts=[rep?mkSpecialAction(base,rep,cycle):base];
+  var main=rep?mkSpecialAction(base,rep,cycle):base;
+  // Rotating nurture (e.g. ['mail','call']): the regular touch alternates
+  // its channel by cycle. A replacement special still wins outright.
+  if(!rep&&base.rotate&&base.rotate.length){
+    var ty9=base.rotate[(cycle-1)%base.rotate.length];
+    if(ty9!==main.type){
+      var cl9={};Object.keys(base).forEach(function(k){cl9[k]=base[k];});
+      cl9.type=ty9;cl9.icon=typeIcon(ty9);
+      main=cl9;
+    }
+  }
+  var parts=[main];
   beside.forEach(function(sp){parts.push(mkSpecialAction(base,sp,cycle));});
   if(p>=parts.length)p=parts.length-1; // config shrank mid-cycle — clamp
   return {cycle:cycle,partsDone:p,parts:parts};
@@ -1808,10 +1934,11 @@ function compileEngine(e){
       var steps=p.steps||[];
       if(!steps.length)throw new Error('Action phase "'+phName+'" has no steps');
       steps.forEach(function(s){
-        seq.push({ph:ph,icon:s.icon||(s.type==='call'?'📞':s.type==='email'?'📧':'💬'),
+        seq.push({ph:ph,icon:s.icon||typeIcon(s.type||'sms'),
           text:s.text||'(untitled)',type:s.type||'sms',trigger:'action',
           lbl:'Phase '+ph,cadence:'action',phName:phName,template:s.template||'',subject:s.subject||'',
-          at:parseTimeStr(s.time),atStr:s.time||''});
+          at:parseTimeStr(s.time),atStr:s.time||'',
+          cond:s.cond==='unanswered'?'unanswered':null,stepId:s.id||''});
       });
     }else if(p.cadence==='daily'){
       var d0=p.daily||{};
@@ -1889,25 +2016,44 @@ function compileEngine(e){
       if(iv0.forever){
         var gF=normGap(iv0.every);
         if(gapIsZero(gF))throw new Error('Forever phase "'+phName+'" needs a non-zero repeat gap');
-        seq.push({ph:ph,icon:typeIcon(iv0.type||'sms'),
-          text:iv0.text||('Nurture — every '+gapLabel(gF)),type:iv0.type||'sms',
+        var rot=null;
+        if(Array.isArray(iv0.rotate)&&iv0.rotate.length>1){
+          rot=iv0.rotate.map(String);
+          rot.forEach(function(ty){if(ty!=='call'&&ty!=='sms'&&ty!=='email'&&ty!=='mail')throw new Error('Bad rotate type "'+ty+'" in "'+phName+'"');});
+        }
+        seq.push({ph:ph,icon:typeIcon((rot&&rot[0])||iv0.type||'sms'),
+          text:iv0.text||('Nurture — every '+gapLabel(gF)),type:(rot&&rot[0])||iv0.type||'sms',
           trigger:'time',lbl:'Phase '+ph,cadence:'interval',sticky:true,phName:phName,
-          gap:gF,template:iv0.template||'',subject:iv0.subject||'',
+          gap:gF,rotate:rot,template:iv0.template||'',subject:iv0.subject||'',
           at:parseTimeStr(iv0.time),atStr:iv0.time||'',
           specials:normSpecials(iv0.specials,phName)});
       }else{
         var ents=iv0.entries||[];
         if(!ents.length)throw new Error('Interval phase "'+phName+'" has no entries');
         ents.forEach(function(en,eni){
-          var gE=normGap(en.after);
-          if(gapIsZero(gE))throw new Error('Follow-up '+(eni+1)+' of "'+phName+'" needs a wait time');
-          if(en.type&&en.type!=='call'&&en.type!=='sms'&&en.type!=='email')
+          // Two anchors: `after` = gap since the PREVIOUS completion;
+          // `onDay` = day N counted from LEAD ARRIVAL (handoff "lead"
+          // anchor) — a whole track's timed spine can hang off day zero.
+          var hasOnDay=(en.onDay!=null&&en.onDay!=='');
+          var gE=hasOnDay?null:normGap(en.after);
+          if(!hasOnDay&&gapIsZero(gE))throw new Error('Follow-up '+(eni+1)+' of "'+phName+'" needs a wait time (after) or a day number (onDay)');
+          if(en.type&&en.type!=='call'&&en.type!=='sms'&&en.type!=='email'&&en.type!=='mail')
             throw new Error('Bad type "'+en.type+'" in interval phase "'+phName+'"');
+          var win=null;
+          if(Array.isArray(en.window)&&en.window.length===2){
+            win=[parseFloat(en.window[0]),parseFloat(en.window[1])];
+            if(isNaN(win[0])||isNaN(win[1])||win[1]<=win[0])throw new Error('Bad window on follow-up '+(eni+1)+' of "'+phName+'"');
+          }
+          if(en.hard&&!win)throw new Error('hard needs a window on follow-up '+(eni+1)+' of "'+phName+'"');
+          var whenLbl=hasOnDay?('Day '+parseInt(en.onDay,10)):('+'+gapLabel(gE));
           seq.push({ph:ph,icon:typeIcon(en.type||'sms'),
-            text:en.text||('Follow-up after '+gapLabel(gE)),type:en.type||'sms',
-            trigger:'time',lbl:'Phase '+ph+' · +'+gapLabel(gE),cadence:'interval',
-            phName:phName,gap:gE,template:en.template||'',subject:en.subject||'',
-            at:parseTimeStr(en.time),atStr:en.time||''});
+            text:en.text||(hasOnDay?('Day '+parseInt(en.onDay,10)+' '+typeWord(en.type||'sms')):('Follow-up after '+gapLabel(gE))),
+            type:en.type||'sms',
+            trigger:'time',lbl:'Phase '+ph+' · '+whenLbl,cadence:'interval',
+            phName:phName,gap:gE,onDay:hasOnDay?parseInt(en.onDay,10):null,
+            window:win,hard:!!(en.hard&&win),cond:en.cond==='unanswered'?'unanswered':null,
+            template:en.template||'',subject:en.subject||'',
+            at:parseTimeStr(en.time),atStr:en.time||'',stepId:en.id||''});
         });
       }
     }else{
@@ -1915,7 +2061,9 @@ function compileEngine(e){
     }
   });
   if(!seq.length)throw new Error('Engine compiled to zero steps');
-  return {id:e.id,name:e.name||e.id,json:e,seq:seq};
+  // trigger (Track B): {pattern,flags,cooldownDays,text} — evaluated by the
+  // runtime against notes; preempts but never consumes the scheduled step.
+  return {id:e.id,name:e.name||e.id,json:e,seq:seq,trigger:e.trigger||null};
 }
 /* ⚡ENGINE-GAPS — END */
 function validateEngine(e){
@@ -1972,6 +2120,29 @@ function engineOverrides(){
   enginesDoc.config=enginesDoc.config||{};
   enginesDoc.config.engineOverrides=enginesDoc.config.engineOverrides||{};
   return enginesDoc.config.engineOverrides;
+}
+function trackOf(ri){return parseTrack((rows[ri]||[])[C.TRK]);}
+// Re-route after a live call: stamps AF, resets the walk (step 0, fresh
+// anchor, T label, due today), logs the change, and points the lead's
+// engine override at the track engine when it's imported.
+async function setTrack(ri,letter,conf,opts){
+  opts=opts||{};
+  var engId=TRACK_ENGINE_IDS[letter];
+  var sq=(ENGINES[engId]||{}).seq;
+  var u={};
+  u[C.TRK]=letter+'·'+(conf||'high');
+  if(opts.reset!==false){
+    u[C.STEP]=0;
+    u[C.STEP_AT]=new Date().toISOString();
+    u[C.NF]=fd(localToday());
+    if(sq)u[C.SQ]=stepLabel(0,sq);
+    u[C.SL]=appendLogStr(String((rows[ri]||[])[C.SL]||''),'Track → '+letter+' ('+(conf||'manual')+')','');
+  }
+  await writeRow(ri,u);
+  if(ENGINES[engId]){
+    engineOverrides()[String(ri)]=engId;
+    try{await saveEnginesDoc();}catch(_){}
+  }
 }
 function engineIdFor(ri){
   // Per-lead override (set when restarting onto a specific engine) beats rules.
@@ -2743,6 +2914,17 @@ function fillAsmtSchedTokens(tpl,f){
     .replace(/\{notes\}/gi,notesBlock);
 }
 /* 🧾 INVOICING — END */
+/* 🅰🅱🅲 retrack + loss-reason runtime */
+var _rtRi=-1,_lossRi=-1;
+var LOSS_REASONS=['Recipient refused','Cost','Chose another agency','Need resolved','Moved to facility','Unreachable','Other'];
+function openLossReason(ri){
+  _lossRi=ri;
+  var host=el('loss-btns');
+  if(host)host.innerHTML=LOSS_REASONS.map(function(v){
+    return '<button data-action="loss-pick" data-v="'+escapeHtml(v)+'" style="padding:10px 8px;border:1.5px solid var(--border);border-radius:9px;background:none;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">'+escapeHtml(v)+'</button>';
+  }).join('');
+  el('modal-loss').classList.add('open');
+}
 /* 📅 Assessment-scheduled logger runtime */
 var _asRi=-1;
 function openAsmtSched(ri){
@@ -3209,12 +3391,17 @@ async function loadData(){
     var ws=wb.Sheets['Lead Tracker'];
     if(!ws)throw new Error('Sheet "Lead Tracker" not found');
     rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-    // One-shot: label the AE column the nurture-cycle counter lives in
-    // (idempotent — only fires while the header cell is still blank).
+    // One-shot: label the added columns (idempotent — only fires while a
+    // header cell is still blank).
     try{
-      if(rows[3]&&!String(rows[3][C.NCY]||'').trim()){
-        var hU={};hU[C.NCY]='Nurture Cycle';
-        writeRow(3,hU).catch(function(){});
+      var hU={};
+      if(rows[3]){
+        if(!String(rows[3][C.NCY]||'').trim())hU[C.NCY]='Nurture Cycle';
+        if(!String(rows[3][C.TRK]||'').trim())hU[C.TRK]='Track';
+        if(!String(rows[3][C.TGA]||'').trim())hU[C.TGA]='Trigger At';
+        if(!String(rows[3][C.LOSS]||'').trim())hU[C.LOSS]='Loss Reason';
+        if(!String(rows[3][C.ARR]||'').trim())hU[C.ARR]='Arrived At';
+        if(Object.keys(hU).length)writeRow(3,hU).catch(function(){});
       }
     }catch(_){}
     lastLoadAt=new Date();
@@ -3660,6 +3847,58 @@ function getStepDoneAt(ri){
 }
 function isOffSequence(ri){return getStep(ri)===STEP_OFF_SEQUENCE;}
 
+// "Nobody has answered yet" — evaluated against the sequence log (col U),
+// per the handoff contract. On-sequence leads who truly engaged usually go
+// off-sequence anyway; this catches the logged-but-still-on cases.
+function leadHasAnswered(ri){
+  return /\b(replied|talked|connected|responded|answered)\b/i.test(String((rows[ri]||[])[C.SL]||''));
+}
+// 🚨 Track B trigger pending?
+function engineTriggerPending(ri){
+  var eng=engineFor(ri);
+  if(!eng||!eng.trigger)return false;
+  var r=rows[ri]||[];
+  if(isUnsubscribed(ri)||isOffSequence(ri)||isActive(r[C.ST])||isExcluded(r[C.ST]))return false;
+  if(!triggerMatches(String(r[C.NT]||''),eng.trigger))return false;
+  return !triggerCoolingDown(String(r[C.TGA]||''),Date.now(),eng.trigger);
+}
+// Hard-window steps whose window has closed are SKIPPED, not rolled over.
+// This sweep advances leads past every consecutive skipped step (memory
+// first so the queue renders truthfully, sheet write in the background).
+var _skipSweepAt=0;
+function autoSkipHardWindows(){
+  if(Date.now()-_skipSweepAt<60000)return;
+  _skipSweepAt=Date.now();
+  for(var i=DATA_START;i<rows.length;i++){
+    var r=rows[i];if(!r)continue;
+    if(!String(r[C.NM]||r[C.DM]||'').trim())continue;
+    try{
+      if(isOffSequence(i)||isActive(r[C.ST])||isExcludedLead(i)||isUnsubscribed(i))continue;
+    }catch(_){continue;}
+    var guard=0;
+    while(guard++<25){
+      var w=null;try{w=whenToShowCore(i);}catch(_){break;}
+      if(!w||w.bucket!=='skipped')break;
+      var step=getStep(i);if(step<0)step=0;
+      var sq=seqFor(i);
+      if(step>=sq.length-1)break; // final step never auto-skips into the void
+      var cur=sq[step],next=step+1,na=sq[next];
+      var u={};
+      u[C.STEP]=next;
+      u[C.STEP_AT]=new Date().toISOString();
+      u[C.SQ]=stepLabel(next,sq);
+      u[C.SL]=appendLogStr(String(r[C.SL]||''),(cur&&cur.text?cur.text:'step')+' — skipped ('+(w.reason||'window closed')+')','');
+      if(na&&na.cadence==='interval'&&na.onDay!=null){
+        var arr9=pd(r[C.DA])||localToday();
+        u[C.NF]=fd(addDays(new Date(arr9.getFullYear(),arr9.getMonth(),arr9.getDate()),na.onDay));
+      }else if(na&&na.gap){
+        u[C.NF]=fd(addGap(localToday(),na.gap));
+      }
+      Object.keys(u).forEach(function(k){var ci=parseInt(k,10);while(r.length<=ci)r.push('');r[ci]=u[ci];});
+      writeRow(i,u).catch(function(){});
+    }
+  }
+}
 // The lead's base sticky step (null when not parked on one)
 function nurtureBaseStep(ri){
   var step=getStep(ri);
@@ -3808,6 +4047,11 @@ function whenToShowCore(ri){
   if(!action)return {bucket:'hidden'};
   var today=localToday();
 
+  // 🚨 Engine trigger (Track B): a hospital/fall mention in the notes
+  // preempts the scheduled step, same day. It never consumes the step —
+  // completion stamps AG and logs, step_idx stays put.
+  try{if(engineTriggerPending(ri))return {bucket:'now',at:today,trig:true};}catch(_){}
+
   // Mid-cycle nurture: a beside-special queued behind today's completed
   // regular touch is due RIGHT NOW (still time-gated by the wrapper).
   if(action.sticky){
@@ -3852,15 +4096,42 @@ function whenToShowCore(ri){
     return {bucket:'now',at:today};
   }
 
-  // Custom-gap cadence (sticky or finite) — due = previous completion + gap.
-  // Anchored on STEP_AT like the every-N-weeks nurture; a lead with no
-  // anchor yet is due today.
+  // Custom-gap cadence — two anchors: `gap` counts from the previous
+  // completion (STEP_AT); `onDay` counts from LEAD ARRIVAL (Date Added).
+  // Hard-window steps SKIP when their window closes — never roll to
+  // tomorrow (that no-rollover rule is what stops a morning-only track
+  // from dialing a 79-year-old at 8pm). autoSkipHardWindows() advances
+  // past 'skipped' states in the background.
   if(action.cadence==='interval'){
-    var doneG=getStepDoneAt(ri);
-    var dueG=doneG?addGap(doneG,action.gap):today;
+    var dueG;
+    if(action.onDay!=null&&!action.sticky){
+      var arrG=pd(r[C.DA])||getStepDoneAt(ri)||today;
+      dueG=addDays(new Date(arrG.getFullYear(),arrG.getMonth(),arrG.getDate()),action.onDay);
+    }else{
+      var doneG=getStepDoneAt(ri);
+      dueG=doneG?addGap(doneG,action.gap):today;
+    }
+    if(action.cond==='unanswered'&&leadHasAnswered(ri))
+      return {bucket:'skipped',at:dueG,reason:'lead answered'};
     var diffG=daysBetween(dueG,today);
-    if(diffG<0)return {bucket:'overdue',at:dueG};
-    if(diffG===0)return {bucket:'now',at:dueG};
+    if(diffG<0){
+      if(action.hard)return {bucket:'skipped',at:dueG,reason:'window closed'};
+      return {bucket:'overdue',at:dueG};
+    }
+    if(diffG===0){
+      if(action.window){
+        var hW=nowDecimalHour();
+        if(hW<action.window[0]){
+          var openW=new Date(today.getFullYear(),today.getMonth(),today.getDate(),Math.floor(action.window[0]),Math.round((action.window[0]%1)*60));
+          return {bucket:'later',at:openW};
+        }
+        if(hW>=action.window[1]){
+          if(action.hard)return {bucket:'skipped',at:dueG,reason:'window closed'};
+          return {bucket:'overdue',at:dueG};
+        }
+      }
+      return {bucket:'now',at:dueG};
+    }
     if(diffG<=7)return {bucket:'week',at:dueG};
     return {bucket:'future',at:dueG};
   }
@@ -3953,7 +4224,7 @@ function stepLabel(step,seqOpt){
   if(a.ph===4&&a.cadence==='action')return 'Phase 4 — Re-Engagement';
   if(a.cadence==='weekly'&&a.sticky)return 'Phase '+a.ph+' — Long-Term Nurture';
   if(a.cadence==='interval'&&a.sticky)return 'Phase '+a.ph+' — Long-Term Nurture (every '+gapLabel(a.gap)+')';
-  if(a.cadence==='interval')return 'Phase '+a.ph+' — Timed Follow-Up (+'+gapLabel(a.gap)+')';
+  if(a.cadence==='interval')return 'Phase '+a.ph+' — Timed Follow-Up ('+(a.onDay!=null?('Day '+a.onDay):('+'+gapLabel(a.gap)))+')';
   return 'Phase '+a.ph+' — '+(a.phName||'')+(a.text?(' ('+a.text+')'):'');
 }
 
@@ -4035,7 +4306,10 @@ function advanceLead(ri,methodUsed){
   }
   // Entering a custom-gap step: Follow-Up shows its actual due date so the
   // sheet never looks stale while a long wait (a month, a year) runs down.
-  if(nextAction&&nextAction.cadence==='interval'&&nextAction.gap){
+  if(nextAction&&nextAction.cadence==='interval'&&nextAction.onDay!=null){
+    var arrA=pd((rows[ri]||[])[C.DA])||t;
+    u[C.NF]=fd(addDays(new Date(arrA.getFullYear(),arrA.getMonth(),arrA.getDate()),nextAction.onDay));
+  }else if(nextAction&&nextAction.cadence==='interval'&&nextAction.gap){
     u[C.NF]=fd(addGap(t,nextAction.gap));
   }
   // All other completions: engine does not touch NF.
@@ -4152,6 +4426,8 @@ function flushNurtureHeals(fixes){
 async function buildUI(){
   // Run auto-expire before bucketing (writes to sheet; may take a moment)
   try{await autoExpirePhase2();}catch(e){console.warn('autoExpirePhase2:',e.message);}
+  // Hard-window no-rollover: advance past steps whose window closed
+  try{autoSkipHardWindows();}catch(e){console.warn('autoSkip:',e.message);}
   // Heal stale nurture follow-ups (memory now, sheet async — see above)
   // Nurture NF auto-heal retired (Meir, Aug 31 2026): the historical drift
   // it repaired is fully cleaned up; the machinery stays available for a
@@ -4357,7 +4633,7 @@ function renderRows(leads){
     return '<tr class="dr '+bd+(drawerRi===l.ri?' sel':'')+'" data-action="open-drawer" data-ri="'+l.ri+'" id="row-'+l.ri+'">'
       +'<td><div class="tn">'+escapeHtml(l.name)+inboxBadgeHtml(l.email)+'</div>'+dmHtml+'</td>'
       +'<td>'+phoneHtml+emailHtml+'</td>'
-      +'<td>'+sbadge(l.status)+'</td>'
+      +'<td>'+sbadge(l.status)+trackBadge(l.ri)+slaChip(l.ri)+'</td>'
       +'<td>'+pill+'<div style="font-size:11px;color:var(--soft);margin-top:3px">'+escapeHtml(l.fuStr)+'</div></td>'
       +'<td>'+seqHtml+'</td>'
       +'<td data-action="ignore-cell" style="width:190px;padding:8px">'+btns+'</td>'
@@ -4365,10 +4641,39 @@ function renderRows(leads){
   }).join('');
 }
 
+// Track badge: letter chip, dimmed + "?" when the router wasn't sure —
+// medium/low confidence is Meir's cue to confirm in the first 30 seconds.
+function trackBadge(ri){
+  var t9=trackOf(ri);
+  if(!t9)return '';
+  var col=t9.track==='A'?'#8B6500':t9.track==='B'?'#1f3d57':'#4a7a33';
+  var dim=t9.conf==='high'?'':';opacity:.55';
+  return ' <span class="pill" data-action="open-retrack" data-ri="'+ri+'" style="background:'+col+';color:#fff;cursor:pointer'+dim+'" title="Track '+t9.track+' ('+(t9.track==='A'?'self-inquiry':t9.track==='B'?'spouse':'adult child')+') · '+t9.conf+' confidence — click to change">'+t9.track+(t9.conf!=='high'?'?':'')+'</span>';
+}
+// Track C speed-to-lead: red until the first dial. Sub-5-minute precision
+// only exists for dashboard-added leads (AI arrival timestamp); sheet
+// leads carry a date, not a time, so those go red for the whole first day.
+function slaChip(ri){
+  var t9=trackOf(ri);
+  if(!t9||t9.track!=='C')return '';
+  var r=rows[ri]||[];
+  if(getStep(ri)>0||String(r[C.LC]||'').trim())return '';
+  var arr=r[C.ARR]?new Date(r[C.ARR]):null;
+  if(arr&&isNaN(arr))arr=null;
+  var da=pd(r[C.DA]);
+  if(!arr&&(!da||daysBetween(da,localToday())!==0))return '';
+  var mins=arr?Math.round((Date.now()-arr.getTime())/60000):null;
+  if(mins!=null&&mins<5)return ' <span class="pill" style="background:#E78B29;color:#fff" title="Track C: first dial within 5 minutes">⚡ '+mins+'m</span>';
+  return ' <span class="pill" style="background:#c0392b;color:#fff" title="Track C SLA breached — 2-3 agencies got this lead at the same moment">⚡ CALL NOW'+(mins!=null?(' · '+mins+'m'):'')+'</span>';
+}
 function buildButtons(l){
   var ri=l.ri;
   // On-service clients: the invoice button rides every button row
   var inv=isOnService(l.status)?'<button class="btn-sm bg-cream" data-action="open-invoice" data-ri="'+ri+'" title="Send invoice from the billing mailbox">🧾</button>':'';
+  // 🚨 Track B trigger call preempts everything visually
+  try{
+    if(engineTriggerPending(ri))inv='<button class="btn-sm" style="background:#c0392b;color:#fff" data-action="trigger-done" data-ri="'+ri+'" title="Hospital/fall mention in the notes — same-day call. Completing it does NOT advance the sequence.">🚨 Trigger call</button>'+inv;
+  }catch(_){}
   // Assessment Scheduled: show prominent assessment-start button in place of
   // the usual primary. Falls through to normal handling otherwise.
   if(l.active && String(l.status||'').toLowerCase().indexOf('assessment scheduled')>-1){
@@ -4808,6 +5113,7 @@ async function saveEp(ri,mode){
       if(fPrev!==(ftv||''))saveEnginesDoc().catch(function(){});
     }
     if(!Object.keys(u).length){closeEp(ri);return;}
+    var _prevSt=String((rows[ri]||[])[C.ST]||'');
     // ⚡ Optimistic save: the local cache takes the new values NOW and the
     // screen repaints instantly; the Graph write finishes in the background.
     // If that write fails we say so loudly and reload the sheet, so the
@@ -4840,6 +5146,12 @@ async function saveEp(ri,mode){
     // do the same.
     if(mode==='update'&&u[C.ST]&&/responded/i.test(u[C.ST])){
       openConditionsPicker(ri,{fromResponded:true});
+    }
+    // 📉 A lead moving INTO a lost/excluded status gets the one-tap
+    // loss-reason picker — "Recipient refused" is the number that tells
+    // Meir whether the convince-Mom assets work.
+    if(u[C.ST]&&isExcluded(u[C.ST])&&!isExcluded(_prevSt)){
+      openLossReason(ri);
     }
   }catch(e){
     showErr(e.message);
@@ -9589,6 +9901,8 @@ async function saveAddLead(){
   if(!name){toast('Client name is required');return;}
   var v=function(id){return String(((el(id)||{}).value||'')).trim();};
   var todayStr=fd(localToday());
+  // 🅰🅱🅲 Route on ingest: who is asking decides the cadence
+  var _alRoute=routeTrackPure({rel:v('al-rel'),clientName:name,dm:v('al-dm')});
   var vals=[
     '',                    // A  Lead #
     todayStr,              // B  Date Added
@@ -9619,7 +9933,12 @@ async function saveAddLead(){
     '',                    // AA step_done_at
     '',                    // AB nurture_weekday_override
     serializeConditionList(_alConds), // AC mentioned_conditions — picked right on the form
-    ''                     // AD Unsubscribed
+    '',                    // AD Unsubscribed
+    '',                    // AE Nurture Cycle
+    _alRoute.track+'·'+_alRoute.conf, // AF Track — router verdict on ingest
+    '',                    // AG Trigger At
+    '',                    // AH Loss Reason
+    new Date().toISOString() // AI Arrived At — seconds-precision for SLA + time-to-first-dial
   ];
   // First truly-empty data row — NOT rows.length. SheetJS's used range often
   // includes trailing formatted-but-empty rows, which made portal-added leads
@@ -9629,7 +9948,7 @@ async function saveAddLead(){
   var spin=el('al-spin');if(spin)spin.style.display='inline-flex';
   try{
     var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
-    var res=await gfetch(base+"/range(address='A"+exRow+":AD"+exRow+"')",{
+    var res=await gfetch(base+"/range(address='A"+exRow+":AI"+exRow+"')",{
       method:'PATCH',
       body:JSON.stringify({values:[vals]})
     });
@@ -9638,8 +9957,13 @@ async function saveAddLead(){
       throw new Error(e.error?e.error.message:('Write failed: '+res.status));
     }
     rows[ri]=vals.slice();     // local cache in sync (at the exact row written)
+    // Point the lead at its track engine when the track engines are imported
+    try{
+      var tEng=TRACK_ENGINE_IDS[_alRoute.track];
+      if(ENGINES[tEng]){engineOverrides()[String(ri)]=tEng;saveEnginesDoc().catch(function(){});}
+    }catch(_){}
     closeModal('modal-addlead');
-    toast('\u2713 '+name+' added \u2014 Phase 1 starts now');
+    toast('\u2713 '+name+' added \u2014 Track '+_alRoute.track+' ('+_alRoute.conf+'), Phase 1 starts now');
     await buildUI();
     // Surface the new lead: scroll to its row and flash it
     setTimeout(function(){
@@ -12744,6 +13068,47 @@ function onClick(ev){
       break;
     case 'open-invoice':
       openInvoice(parseInt(t.dataset.ri,10));
+      break;
+    case 'open-retrack':
+      _rtRi=parseInt(t.dataset.ri,10);
+      el('modal-retrack').classList.add('open');
+      break;
+    case 'retrack-pick':
+      (function(){
+        var ri9=_rtRi;if(ri9<0)return;
+        var letter=t.dataset.letter;
+        el('modal-retrack').classList.remove('open');
+        var reset=confirm('Restart at step 1 of Track '+letter+'? OK = restart (right after the first call this is what you want). Cancel = keep the current position, just change the label.');
+        setTrack(ri9,letter,'high',{reset:reset}).then(function(){
+          toast('Track → '+letter+(reset?' — restarted at step 1':''));
+          buildUI();
+        }).catch(function(e){showErr('Retrack failed: '+e.message);});
+        _rtRi=-1;
+      })();
+      break;
+    case 'loss-pick':
+      (function(){
+        var ri9=_lossRi;if(ri9<0)return;
+        var u9={};u9[C.LOSS]=t.dataset.v;
+        el('modal-loss').classList.remove('open');
+        writeRow(ri9,u9).then(function(){toast('Loss reason recorded: '+t.dataset.v);})
+          .catch(function(e){showErr('Loss reason failed: '+e.message);});
+        _lossRi=-1;
+      })();
+      break;
+    case 'trigger-done':
+      (function(){
+        var ri9=parseInt(t.dataset.ri,10);
+        if(!confirm('Log the same-day trigger call as done? The scheduled step stays exactly where it is.'))return;
+        var r9=rows[ri9]||[];
+        var u9={};
+        u9[C.TGA]=new Date().toISOString();
+        u9[C.LC]=fd(localToday());
+        u9[C.MT]='Call';
+        u9[C.SL]=appendLogStr(String(r9[C.SL]||''),'B! trigger call — same day','Call');
+        writeRow(ri9,u9).then(function(){toast('🚨 Trigger call logged — sequence position unchanged');buildUI();})
+          .catch(function(e){showErr('Trigger log failed: '+e.message);});
+      })();
       break;
     case 'open-asmt-sched':
       (function(){

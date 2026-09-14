@@ -1,0 +1,86 @@
+{
+  "format": "solura-engine",
+  "formatVersion": 1,
+  "build": "B-0901",
+  "schema": {
+    "doc": "Track B: the spouse. She does 35.3 hrs/wk of care (adult child: 20.9), uses paid help less than any caregiver type (24%), and ~55% have no other family support: if we go quiet nobody in her life re-raises this. She UNDERSTATES everything: spousal caregivers score lower on burden instruments while doing 1.7x the hours, so never screen on feelings. Burden predicts placement (HR 1.73); depression does not (HR 1.00). Ask about tasks and nights, not mood. Entry is through the HOUSE, never through him: bathing and toileting violate spousal identity, which is exactly why she refuses to hand them off first. Cost is 9% of the objection; 'I can still manage' is 80%, so discounting does nothing. Trials dose at 8 weeks because burden only drops after 14+ days of service.",
+    "trigger": "The hospital/fall trigger below is the single highest-value signal in the system: the 30 days after a partner is hospitalized is when 'I can still manage' collapses, and Medicare home health ending makes it a financial cliff on the same day. It PREEMPTS the scheduled step and never consumes it; completing it stamps AG, not step_idx. 3-day cooldown.",
+    "review": "Benefit figures in B.p3.money are current as of the Dec 2025 VA COLA and Jan 2026 federal spousal-impoverishment standards. REVIEW BY 2027-01. Stale Aid and Attendance numbers circulate in Cleveland marketing; do not add to that."
+  },
+  "routing": [
+    {"rule": 2, "track": "B", "conf": "high", "test": "relationship matches spouse/husband/wife/partner"},
+    {"rule": 5, "track": "B", "conf": "med", "test": "same surname as patient"}
+  ],
+  "engine": {
+    "id": "track-b-spouse",
+    "name": "Track B — Spouse",
+    "trigger": {
+      "pattern": "\\b(hospital|hospitaliz|admitted|ER\\b|emergency room|surger(y|ies)|operation|procedure|rehab|discharge|fell|fall|broke (her|his)|fracture)\\b",
+      "flags": "i",
+      "cooldownDays": 3,
+      "text": "B! · Trigger call, same day",
+      "script": "Script B.trigger: lead with the practical cliff, gently. Coming home from the hospital is when everything lands at once. Offer a hand for THIS WEEK: the first nights home are the hard ones. No commitment framing."
+    },
+    "phases": [
+      {"name": "First Contact (same day)", "cadence": "action", "steps": [
+        {"id": "B-01", "icon": "📞", "text": "Opening call — right now (T+0)", "type": "call",
+         "template": "Script B.open: ask about the WEEK, not about him and not about her feelings. What do the nights look like? Who helps on the hard days? She will understate; listen for tasks and hours."},
+        {"id": "B-02", "icon": "📞", "text": "Voicemail 1 (if unanswered)", "type": "call", "cond": "unanswered",
+         "template": "Script B.vm1: name, agency, one sentence about being a local resource for households caring for a partner, number twice."},
+        {"id": "B-03", "icon": "💬", "text": "Evening text 6-8pm (if unanswered)", "type": "sms", "cond": "unanswered",
+         "template": "Hi {dm}, Meir Schwimer with Solura Home Care in Cleveland. You reached out about care for your {rel}. Evenings can be the busiest time in a caring household, so no need to reply tonight. I am at (216) 770-4886 whenever a quiet moment comes."}
+      ]},
+      {"name": "First Week (task-first)", "cadence": "interval", "interval": {"entries": [
+        {"id": "B-04", "onDay": 1, "window": [10, 11], "hard": true, "type": "call", "text": "Day 1 call", "template": "Script B.open."},
+        {"id": "B-05", "onDay": 1, "window": [10, 13], "hard": true, "type": "email", "subject": "Hello from Solura, here in Cleveland",
+         "text": "Day 1 hello email",
+         "template": "Brief B.p2.hello: leadType overwhelmed-caregiver, register family-inquiry. Introduce Solura small-by-design. One idea only: help is for the HOUSEHOLD, not a verdict on her caregiving."},
+        {"id": "B-06", "onDay": 2, "window": [10, 11], "hard": true, "type": "call", "text": "Day 2 call — tasks",
+         "template": "Script B.tasks: walk one ordinary day. Which single task would she hand off first if it were invisible? Laundry and meals are acceptable answers; bathing never is, do not suggest it."},
+        {"id": "B-07", "onDay": 3, "window": [16, 17], "hard": true, "type": "call", "text": "Day 3 late-afternoon call", "template": "Script B.tasks continued. Late afternoon catches the pre-dinner low."},
+        {"id": "B-08", "onDay": 4, "window": [9, 17], "hard": true, "type": "email", "subject": "The part of the house that helps",
+         "text": "Day 4 house email",
+         "template": "Brief B.p2.house: entry through the HOUSE. Housekeeping, meals, errands, a second pair of hands. Never mention personal care for him."},
+        {"id": "B-09", "onDay": 6, "window": [10, 11], "hard": true, "type": "call", "text": "Day 6 ownership call",
+         "template": "Script B.ownership: she stays in charge. Our caregiver works her list her way. Offer the 8-week rhythm: real relief takes a few weeks to feel, which is why short trials disappoint."}
+      ]}},
+      {"name": "The Long Middle", "cadence": "interval", "interval": {"entries": [
+        {"id": "B-10", "onDay": 10, "window": [9, 17], "type": "email", "subject": "What help costs, honestly",
+         "text": "Day 10 money email",
+         "template": "Brief B.p3.money: plain numbers, VA Aid and Attendance and Ohio Medicaid spousal-impoverishment protections at current figures (REVIEW BY 2027-01). Frame as protecting the household, never as discount."},
+        {"id": "B-11", "onDay": 14, "type": "call", "text": "Day 14 call", "template": "Script B.money: any questions on the numbers; offer to walk the VA form together."},
+        {"id": "B-12", "onDay": 21, "type": "call", "text": "Day 21 warm call", "template": "Script B.warm: no agenda. How were the nights this week?"},
+        {"id": "B-13", "onDay": 35, "type": "mail", "text": "Day 35 letter",
+         "template": "Brief B.p3.letter: one page. The staying-power fact, stated softly: supporting the caring partner is what keeps couples together at home, with a median of many extra months in the research. Handwritten envelope."}
+      ]}},
+      {"name": "Re-Engagement", "cadence": "interval", "interval": {"entries": [
+        {"id": "B-14", "onDay": 42, "type": "call", "text": "Day 42 re-engage: call, then VM, then text (manual, waits for Done)",
+         "template": "Brief B.p4.reengage: one combined touch. Call; if unanswered leave the VM and send the short text version. Door stays open, monthly from here."}
+      ]}},
+      {"name": "Nurture every 3 weeks (forever)", "cadence": "interval", "interval": {
+        "forever": true, "every": {"days": 21}, "rotate": ["call", "email"],
+        "text": "3-week nurture — call and email alternate",
+        "template": "Brief B.p5.nurture: leadType long-term-nurture, register family-inquiry. Soft close, no button. She has the longest tail in the system and nobody else will re-raise this; the trigger watches for the hospital moment in between."
+      }}
+    ]
+  },
+  "templates": {
+    "B.p1.text": {"channel": "sms", "verbatim": true},
+    "B.p2.hello": {"channel": "email", "leadType": "overwhelmed-caregiver", "register": "family-inquiry", "cta": "Call Me: (216) 770-4886", "length": "short"},
+    "B.p2.house": {"channel": "email", "leadType": "overwhelmed-caregiver", "register": "family-inquiry", "cta": "Call Me: (216) 770-4886", "length": "short"},
+    "B.p3.money": {"channel": "email", "leadType": "decision-support", "register": "family-inquiry", "footerLicense": true, "attach": [], "length": "medium", "brief": "Benefit figures carry a review date."},
+    "B.p3.letter": {"channel": "mail", "leadType": "warm-scheduled", "register": "family-inquiry", "noButton": true},
+    "B.p4.reengage": {"channel": "rotate", "leadType": "avoidant", "register": "family-inquiry"},
+    "B.p5.nurture": {"channel": "rotate", "leadType": "long-term-nurture", "register": "family-inquiry", "noButton": true, "softClose": true}
+  },
+  "scripts": {
+    "B.open": "Ask about the week, not the feelings. Nights and tasks.",
+    "B.vm1": "Local resource for households caring for a partner. Number twice.",
+    "B.tasks": "Walk one ordinary day; find the first invisible task to hand off.",
+    "B.ownership": "She stays in charge; our caregiver works her list. 8-week rhythm.",
+    "B.money": "Walk the numbers; offer to do the VA form together.",
+    "B.warm": "No agenda. How were the nights?",
+    "B.trigger": "Post-hospital: practical cliff, help for THIS WEEK, no commitment framing."
+  },
+  "notes": ["Never the word respite, never exhausted, never keeps-him-home-longer claims (linter enforces).", "Nurture interval: 21 days.", "Trigger: preempts, never consumes; 3-day cooldown in AG."]
+}

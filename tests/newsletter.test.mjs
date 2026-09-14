@@ -15,7 +15,7 @@ const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: 
 
 /* ── source-level regression locks ── */
 ok(/UNSUB:29,?\s*\/\/ AD/.test(html), 'column map: UNSUB at 0-based index 29 = AD');
-ok(html.includes('":AD"+exRow'), 'saveAddLead writes the full A:AD row');
+ok(html.includes('":AI"+exRow'), 'saveAddLead writes the full A:AI row (track columns included since B-0914-85)');
 ok(html.includes(':AD"+(ri+1)'), 'voice-agent lead creation writes A:AD');
 ok(html.includes('c2<30'), 'firstEmptyDataRow scans all 30 columns');
 ok(/function advanceLead\(ri,methodUsed\)\{\s*\n\s*if\(isUnsubscribed\(ri\)\)return null;/.test(html), 'advanceLead refuses unsubscribed leads');

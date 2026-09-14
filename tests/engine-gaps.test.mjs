@@ -165,7 +165,8 @@ ok(/rel:String\(r\[C\.REL\]\|\|''\)\.trim\(\)\.toLowerCase\(\)/.test(html), 'get
 ok((html.match(/\{dm\}\/\{pt\}\/\{rel\} fill/g) || []).length >= 10, 'editor hints mention {rel} everywhere templates are written');
 
 // ── source-level locks on scheduling + UI wiring ──
-ok(/cadence==='interval'\)\{\s*\n\s*var doneG=getStepDoneAt/.test(html), 'whenToShow schedules interval steps from last completion + gap');
+ok(/var doneG=getStepDoneAt\(ri\);\s*\n\s*dueG=doneG\?addGap\(doneG,action\.gap\):today;/.test(html), 'whenToShow schedules gap-anchored interval steps from last completion');
+ok(/action\.onDay!=null&&!action\.sticky/.test(html) && /pd\(r\[C\.DA\]\)/.test(html), 'whenToShow anchors onDay steps to lead arrival (Date Added)');
 ok(/if\(cur\.gap\)\{u\[C\.NF\]=fd\(addGap\(t,cur\.gap\)\);\}/.test(html), 'sticky advance uses the gap for the next Follow-Up date');
 ok(/nextAction\.cadence==='interval'&&nextAction\.gap/.test(html), 'entering a gap step stamps NF with its real due date');
 ok(/step\.gap\?gapDaysApprox\(step\.gap\)/.test(html), 'fresh sticky enrollment backdates by the gap (first touch due today)');
