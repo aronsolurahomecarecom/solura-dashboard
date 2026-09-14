@@ -7114,7 +7114,20 @@ async function signIn(){const p=await genPKCE();sessionStorage.setItem('hpkce_v'
 function signOut(){closeWorkbookSession();sessionStorage.removeItem('ht');sessionStorage.removeItem('hpkce_v');localStorage.removeItem('hr');tok='';driveId='';itemId='';pipeline=[];setConn(false);}
 async function refreshToken(){const rt=localStorage.getItem('hr');if(!rt)return false;
   try{const r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:SCOPES})});
-    const j=await r.json();if(j.access_token){tok=j.access_token;sessionStorage.setItem('ht',tok);if(j.refresh_token)localStorage.setItem('hr',j.refresh_token);return true;}}catch(e){}localStorage.removeItem('hr');return false;}
+    const j=await r.json().catch(()=>({}));
+    if(j.access_token){tok=j.access_token;sessionStorage.setItem('ht',tok);if(j.refresh_token)localStorage.setItem('hr',j.refresh_token);return true;}
+    /* THE REFRESH TOKEN IS THE WHOLE SESSION - it is the only thing that lets the portal come back
+       silently after the hour-long access token dies, and without it the board, the inbox poll and the
+       automation robot all stop until a person clicks Sign in. This used to delete it on ANY failure:
+       the catch swallowed a dropped wifi, a sleeping laptop, an AAD 429 or 503, even an unreadable
+       error page, and then fell through to the same removeItem as a genuine rejection. One blip while
+       a stale access token was being refreshed and a 90-day sign-in was gone for good. Drop it only
+       when AAD ANSWERS and says the token itself is no longer usable; anything else is evidence about
+       the network, not about the token, so keep it and let the next attempt (or a reload) retry. A dead
+       token kept by mistake costs one wasted request per 401 and is overwritten by the next sign-in. */
+    if(r.status>=400&&r.status<500&&/invalid_grant|invalid_client|unauthorized_client|interaction_required|consent_required/i.test(String(j.error||'')))localStorage.removeItem('hr');
+  }catch(e){/* network/offline/parse - says nothing about the token; keep it */}
+  return false;}
 async function handleAuthCallback(){const code=new URLSearchParams(location.search).get('code');if(!code)return false;history.replaceState({},'',REDIRECT);
   const ver=sessionStorage.getItem('hpkce_v');if(!ver){toast('Sign-in expired — try again');return true;}
   try{const r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:CLIENT_ID,code:code,redirect_uri:REDIRECT,grant_type:'authorization_code',code_verifier:ver})});
@@ -20015,7 +20028,18 @@ function _extraAnswerRows(c){
     const v=fa[k];if(v==null||v==='')return;
     rows.push([k.replace(/([A-Z])/g,' $1').replace(/^./,ch=>ch.toUpperCase()),Array.isArray(v)?v.join(', '):String(v)]);
   });
-  let custom={};try{custom=JSON.parse((c&&c.row&&c.row[34])||'{}')||{};}catch(e){}
+  /* TWO SHAPES OF CANDIDATE REACH THIS FUNCTION and only one of them has a row ARRAY. The
+     workspace card passes a real pipeline candidate (c.row = the sheet row, c.row[34] = column AI).
+     Every document path builds its own object instead - printDocSheet, the template preview and the
+     doc-template editor all pass `row:W.row`, which is the excel row NUMBER - so c.row[34] was
+     undefined, JSON.parse('{}') returned nothing, and the custom-question loop below was dead. The
+     printed and uploaded application sheet has never carried a single custom form answer, though the
+     header above promises it. Accept either shape. */
+  let _rowArr=(c&&Array.isArray(c.row))?c.row:null;
+  if(!_rowArr&&c&&typeof c.row==='number'&&typeof pipeline!=='undefined'&&Array.isArray(pipeline)){
+    const _pc=pipeline.find(x=>x.excelRow===c.row);_rowArr=(_pc&&_pc.row)||null;
+  }
+  let custom={};try{custom=JSON.parse((_rowArr&&_rowArr[34])||'{}')||{};}catch(e){}
   Object.keys(custom).forEach(k=>{
     /* Column AI ALSO holds the operator's QBANK scoring answers (saveW writes W.answers
        there) — only fq- ids are actual application form answers. Without this filter,
@@ -20066,9 +20090,18 @@ function _docQAHtml(c,stage){
   }).join('');
 }
 function _docCustomAnswers(c){
-  const fc=SETTINGS.formConfig;
+  /* A job package can carry its OWN application form (SETTINGS.jobFormConfigs[jobId]) - the worker
+     serves it and scores against it, and every other reader in the portal goes through the
+     scope-aware _fc(). This one read the global form only, so a question that exists solely on the
+     job's form matched nothing here and its answer appeared in no document at all. Same two shapes
+     as _extraAnswerRows: the document paths carry an answers object, a pipeline candidate carries
+     those answers in column AI. */
+  const _jb=(typeof _jobFor==='function'&&c&&c.st)?_jobFor(c):null;
+  const fc=(_jb&&SETTINGS.jobFormConfigs&&SETTINGS.jobFormConfigs[_jb.id])||SETTINGS.formConfig;
   if(!fc||!Array.isArray(fc.questions))return '';
-  const answers=(c&&c.answers)||{};
+  let answers=(c&&c.answers)||null;
+  if(!answers){const _r=(c&&Array.isArray(c.row))?c.row:null;try{answers=JSON.parse((_r&&_r[34])||'{}')||{};}catch(e){answers={};}}
+  answers=answers||{};
   const customs=fc.questions.filter(q=>q&&/^fq-/.test(q.id));
   const rows=customs.map(q=>{
     const a=answers[q.id];
@@ -20080,7 +20113,12 @@ function _docCustomAnswers(c){
 }
 function _docScoresBlock(c){
   try{
-    if(typeof W!=='undefined'&&W&&c&&W.row===c.row){
+    /* W.row is an excel row NUMBER; a pipeline candidate carries that number in excelRow and an array
+       in row, so this test failed for every auto-uploaded stage document and the scores block silently
+       rendered empty. Still fails closed - empty unless this IS the open candidate, since scoreW() can
+       only score the workspace. */
+    const _cRow=(c&&typeof c.excelRow==='number')?c.excelRow:(c?c.row:null);
+    if(typeof W!=='undefined'&&W&&c&&_cRow!=null&&W.row===_cRow){
       const sc=scoreW();
       return '<table class="kv"><tr><td>Quality (Q)</td><td>'+sc.qScore+' / 100</td></tr><tr><td>Retention (R)</td><td>'+sc.rScore+' / 100</td></tr><tr><td>Band</td><td>'+esc(sc.dec.band||'—')+'</td></tr></table>';
     }
@@ -20840,8 +20878,13 @@ function _jobOpenModal(id){
   document.getElementById('modal').classList.add('open');
   /* Working copy of the job's links for individual add/remove — committed on Save. */
   window._jobDraftLinks=(j.id?_jobLinks(j):[]).map(l2=>{
-    const sl=(SETTINGS.config&&SETTINGS.config.sourceLinks||[]).find(x=>x.code===l2.code)||{};
-    return {platform:l2.platform,code:l2.code,wage:l2.wage||'',method:l2.method||sl.method||'',notes:l2.notes||sl.notes||''};
+    /* ONLY what the operator typed for this link. The source-link row's method and notes are values
+       syncLink COMPUTED ('Job: <name>', the job's own notes), so pre-filling the boxes from them made
+       the next Save store them as explicit per-link overrides: rename the job and its links go on
+       advertising the old name forever, and the disown cleanup - which only clears a label the
+       operator never set - stops firing. wage already worked this way, and the placeholders already
+       show what the job supplies by default. */
+    return {platform:l2.platform,code:l2.code,wage:l2.wage||'',method:l2.method||'',notes:l2.notes||''};
   });
   _jobRenderLinks();
 }
@@ -20888,7 +20931,7 @@ function _jobRemovePlatform(i){
 }
 function _jobSave(){
   const g=i=>((document.getElementById(i)||{}).value||'').trim();
-  const name=g('job-name');if(!name){toast('Job name required');return;}
+  const name=g('job-name');if(!name){toast('Job name required');return false;} /* false = nothing saved (see _jobSaveIfModalOpen) */
   SETTINGS.jobs=SETTINGS.jobs||[];
   SETTINGS.config=SETTINGS.config||{};SETTINGS.config.sourceLinks=SETTINGS.config.sourceLinks||[];
   SETTINGS.sequenceAssignments=SETTINGS.sequenceAssignments||[];
@@ -20989,7 +21032,11 @@ function _jobSave(){
     };
     toast('✉ Custom confirmation created — open it from the job to edit');
   }else if(confPick==='__GLOBAL__'&&SETTINGS.jobConfirmEmails[j.id]){
-    delete SETTINGS.jobConfirmEmails[j.id];
+    /* Undo does not cover jobConfirmEmails or jobFormConfigs (see _pushUndoSnapshot), so this delete
+       is final. It used to happen silently on Save - one mis-click in a two-option dropdown while
+       editing something else, and the job's written confirmation email was gone under a toast that
+       said nothing about it. */
+    if(confirm('Switch "'+(j.name||'this job')+'" back to the standard confirmation email?\n\nIts custom subject and body are deleted and cannot be undone.'))delete SETTINGS.jobConfirmEmails[j.id];
   }
   /* Application form binding: custom → clone the global as the starting shape on first
      pick (edit via the job's 📋 button); back to global → the custom config is dropped. */
@@ -20999,18 +21046,35 @@ function _jobSave(){
     const prevScope=window._fcJobScope;window._fcJobScope=j.id;_fc();window._fcJobScope=prevScope||null;
     toast('📋 Custom form created — open it from the job to customize');
   }else if(formPick==='__GLOBAL__'&&SETTINGS.jobFormConfigs[j.id]){
-    delete SETTINGS.jobFormConfigs[j.id];
-    /* If the form editor was scoped to this job, drop the scope too — a later _fc() call
-       would silently re-create the config we just deleted. */
-    if(window._fcJobScope===j.id)window._fcJobScope=null;
+    /* Same finality as the confirmation email above, with far more inside it: the job's own sections,
+       labels, required stars, scoring maps and gates, deleted silently on Save until now. */
+    if(confirm('Switch "'+(j.name||'this job')+'" back to the global application form?\n\nIts custom form - sections, labels, scoring and gates - is deleted and cannot be undone.')){
+      delete SETTINGS.jobFormConfigs[j.id];
+      /* If the form editor was scoped to this job, drop the scope too — a later _fc() call
+         would silently re-create the config we just deleted. */
+      if(window._fcJobScope===j.id)window._fcJobScope=null;
+    }
   }
   markSettingsDirty();closeModal();renderSettings();
   toast('🧳 Job saved — '+j.links.length+' link'+(j.links.length===1?'':'s')+' ('+j.links.map(l2=>l2.platform).join(', ')+')');
+  return true;
+}
+/* The job modal's fields are written ONLY by _jobSave. The three 'open this in the editor' buttons
+   inside the modal used to close it without saving, so pay, ZIP, notes, requirements and any link
+   added in that sitting were discarded silently the moment the operator went to look at the sequence
+   or the form. Save first when the modal is actually open on THIS job; the same handlers are also
+   reachable from the job list, where there is nothing to preserve and the fields do not exist. */
+function _jobSaveIfModalOpen(id){
+  const el=document.getElementById('job-id');
+  if(!el||el.value!==id)return true;
+  return _jobSave()!==false;
 }
 /* Per-job confirmation email editor — subject + plaintext body with the same placeholders
    the worker substitutes: {first} {name} {job} {pay} {refLink} {refCode}. */
 function _jobEditConfirm(id){
   const j=(SETTINGS.jobs||[]).find(x=>x.id===id);if(!j){toast('Job not found');return;}
+  if(!_jobSaveIfModalOpen(id))return;
+  if(!((SETTINGS.jobConfirmEmails||{})[j.id])){toast('This job now uses the standard confirmation');return;}
   const t=(SETTINGS.jobConfirmEmails||{})[j.id]||{s:'',b:''};
   document.getElementById('m-title').textContent='✉ Confirmation email — '+j.name;
   document.getElementById('m-body').innerHTML=`
@@ -21041,6 +21105,8 @@ function _jobSaveConfirm(id){
 function _jobEditForm(id){
   const j=(SETTINGS.jobs||[]).find(x=>x.id===id);
   if(!j){toast('Job not found');return;}
+  if(!_jobSaveIfModalOpen(id))return;
+  if(!((SETTINGS.jobFormConfigs||{})[j.id])){toast('This job now uses the global application form');return;}
   window._fcJobScope=j.id;
   closeModal();
   setSettingsSection('formconfig');
@@ -21049,7 +21115,9 @@ function _jobEditForm(id){
    after posting; changes take effect live for that job's candidates on the next render. */
 function _jobEditSeq(id){
   const j=(SETTINGS.jobs||[]).find(x=>x.id===id);
-  if(!j||!j.sequenceId){toast('This job uses the portal default sequence');return;}
+  if(!j){toast('Job not found');return;}
+  if(!_jobSaveIfModalOpen(id))return; /* a sequence just picked in the modal is committed by that save */
+  if(!j.sequenceId){toast('This job uses the portal default sequence');return;}
   window._seqJumpTo=j.sequenceId;
   closeModal();
   setSettingsSection('seqengine2');
