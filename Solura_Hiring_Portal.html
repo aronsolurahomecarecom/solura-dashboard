@@ -3862,6 +3862,10 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
     var triggerList = opts.triggerList || [];
     var stageList = opts.stageList || [];
     var hubsList = opts.hubsList || [];
+    // Source codes the HOST owns elsewhere (job packages). Their assignment rows render
+    // read-only: the editor hands the whole assignments array back on save, so an edit or a
+    // delete here silently unbound a posted job link with no change on the job card.
+    var lockedCodes = opts.lockedAssignmentCodes || [];
     if (state.sequences.length) state.selSeqId = (opts.selectedId && findSequence(state.sequences, opts.selectedId)) ? opts.selectedId : state.sequences[0].id; // host can deep-link a sequence (e.g. "edit this job's sequence")
 
     function selected() {
@@ -4550,6 +4554,15 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
 
       state.assignments.forEach(function (a, i) {
         if (!a || !a.match || a.match.default === true) return;
+        if (a.match.sourceCode && lockedCodes.indexOf(a.match.sourceCode) >= 0) {
+          var owned = findSequence(state.sequences, a.sequenceId);
+          frag.appendChild(el('div', { 'class': 'sqb3-row' }, [
+            el('code', { text: a.match.sourceCode }),
+            el('span', { text: '→ ' + ((owned && owned.name) || a.sequenceId || '—') }),
+            el('span', { 'class': 'sqb3-muted', text: '🧳 managed by job' })
+          ]));
+          return;
+        }
         frag.appendChild(el('div', { 'class': 'sqb3-row' }, [
           el('input', { type: 'text', value: a.match.sourceCode || '', placeholder: 'source code', style: 'width:80px', onchange: function (e) { a.match.sourceCode = e.target.value.trim(); state.dirty = true; } }),
           el('span', { text: '→' }),
@@ -7857,13 +7870,32 @@ async function saveSettings(){
     }
   }
   /* Push undo snapshot BEFORE the write so we can step back if we want */
-  _pushUndoSnapshot('save');
+  const _snap=_pushUndoSnapshot('save');
   const result=await _saveSettingsInternal();
+  /* _saveSettingsInternal REFUSES more often than it writes: the provenance gate (a degraded
+     load) and the looks-like-defaults guard each return a status carrying no tier flag at all.
+     Everything below used to run regardless, so a refusal still (a) left a snapshot in the undo
+     list describing a state that was never persisted — restoring it re-applies and re-saves
+     edits the portal had just declined to write — and (b) re-based _settingsBaseline onto the
+     unsaved memory, and that baseline IS the diff preview's record of what the file holds. Once
+     re-based, every later diff is computed against changes the file never received, so the
+     preview under-reports and the 4-change threshold stops firing: on a degraded session the
+     operator is shown two fields while twenty sit unwritten. A write that did not happen must
+     move neither. */
+  const _wrote=!!(result&&(result.workerFile||result.localStorage));
   /* A completed save means memory and file agree again — the cancel latch has nothing left
      to protect. */
-  if(result&&(result.workerFile||result.localStorage))window._settingsSaveCancelled=false;
-  /* Update the baseline snapshot so the NEXT save shows a diff against this state */
-  window._settingsBaseline=_deepClone(SETTINGS);
+  if(_wrote)window._settingsSaveCancelled=false;
+  if(_wrote){
+    /* Update the baseline snapshot so the NEXT save shows a diff against this state */
+    window._settingsBaseline=_deepClone(SETTINGS);
+  }else if(_snap&&Array.isArray(SETTINGS._undoHistory)){
+    /* Remove by IDENTITY, not shift(): direct callers (addAdmin, saveTemplate, importSettings…)
+       are not serialized by _settingsSaveInFlight, so another save's snapshot can be unshifted
+       on top of this one while we await. */
+    const _si=SETTINGS._undoHistory.indexOf(_snap);
+    if(_si>=0)SETTINGS._undoHistory.splice(_si,1);
+  }
   return result;
 }
 function _prefsMeta(){
@@ -7907,6 +7939,9 @@ function _pushUndoSnapshot(reason){
   SETTINGS._undoHistory.unshift(snap);
   const depth=_prefsMeta().undoHistoryDepth;
   if(SETTINGS._undoHistory.length>depth)SETTINGS._undoHistory=SETTINGS._undoHistory.slice(0,depth);
+  /* Returned so the caller can withdraw it by identity if the write it was taken for is
+     refused — an undo entry must only ever describe a state that reached storage. */
+  return snap;
 }
 /* Compute a shallow-ish diff between two config-shaped objects. Returns a flat list of
    {path, before, after} entries. Only shows paths that changed. Used by the save-preview modal. */
@@ -20712,6 +20747,53 @@ function _jobFor(c){
   if(!code)return null;
   return (SETTINGS.jobs||[]).find(j=>(j.links||[]).some(l=>l.code===code)||j.code===code)||null;
 }
+/* Every source code owned by a job package. Rule 8: job packages are the single control
+   surface for their links, so anything editing sequenceAssignments wholesale has to know
+   which rows it does not own. */
+function _jobOwnedCodes(){
+  const out=[];
+  (Array.isArray(SETTINGS.jobs)?SETTINGS.jobs:[]).forEach(j=>{
+    if(!j)return;
+    _jobLinks(j).forEach(l=>{if(l&&l.code&&out.indexOf(l.code)<0)out.push(l.code);});
+  });
+  return out;
+}
+/* JOBS ARE THE OWNER OF RECORD for their links' sequence rules. The sequence editor clones
+   SETTINGS.sequenceAssignments at mount and hands the WHOLE array back on save, and its
+   inspector lists job-owned source rules exactly like hand-made ones — an editable code box,
+   a sequence dropdown and a × button — with nothing saying they belong to a job. Deleting one
+   there (it reads as a stray rule) or retyping its code dropped the job's binding with no
+   change to the job card behind it: resolveSequenceFor then matched nothing for that code and
+   every new applicant from that posted link was captured by the ★default instead of the job's
+   flow, silently, until somebody happened to re-save the job. Re-assert the jobs' own rules
+   over whatever the builder returned. Only codes a job owns are touched — hand-made rules for
+   raw source links are none of this function's business. A job naming a sequence that no
+   longer exists is left exactly as-is and reported: deleting the sequence was a deliberate
+   operator act, and guessing a replacement binding is what tag-for-life (rule 6) forbids. */
+function _reassertJobAssignments(){
+  const jobs=Array.isArray(SETTINGS.jobs)?SETTINGS.jobs:[];
+  const restored=[],orphans=[];
+  if(!jobs.length)return {restored,orphans};
+  SETTINGS.sequenceAssignments=Array.isArray(SETTINGS.sequenceAssignments)?SETTINGS.sequenceAssignments:[];
+  const seqIds=(SETTINGS.sequences||[]).map(s=>s&&s.id);
+  jobs.forEach(j=>{
+    if(!j)return;
+    const active=j.active!==false;
+    if(j.sequenceId&&seqIds.indexOf(j.sequenceId)<0){orphans.push(j.name||j.id);return;}
+    /* Same rule as _jobSave's syncLink: a bound sequence on an ACTIVE job gets exactly one
+       rule per link; an inactive job or a job with no sequence gets none. */
+    const want=(active&&j.sequenceId)?j.sequenceId:null;
+    _jobLinks(j).forEach(lk=>{
+      if(!lk||!lk.code)return;
+      const have=SETTINGS.sequenceAssignments.filter(a=>a&&a.match&&a.match.sourceCode===lk.code);
+      if(want?(have.length===1&&have[0].sequenceId===want):!have.length)return;
+      SETTINGS.sequenceAssignments=SETTINGS.sequenceAssignments.filter(a=>!(a&&a.match&&a.match.sourceCode===lk.code));
+      if(want)SETTINGS.sequenceAssignments.push({match:{sourceCode:lk.code},sequenceId:want});
+      restored.push((j.name||j.id)+' · '+lk.code);
+    });
+  });
+  return {restored,orphans};
+}
 /* Legacy single-code jobs → links[] (idempotent). */
 function _jobLinks(j){
   if(!j.links||!j.links.length)j.links=j.code?[{code:j.code,platform:'General'}]:[];
@@ -24028,6 +24110,9 @@ function _mountSeqEditorV2(){
     selectedId:_jump||undefined, /* job cards deep-link their sequence here */
     sequences:SETTINGS.sequences,
     assignments:SETTINGS.sequenceAssignments,
+    /* Rule 8 — the inspector renders these source rules read-only with "managed by job",
+       so the job card stays the only place their binding can be changed. */
+    lockedAssignmentCodes:_jobOwnedCodes(),
     packs:SETTINGS.actionPacks,
     templatesList:_seqTemplatesList(),
     triggerList:_seqTriggerList(),
@@ -24039,9 +24124,14 @@ function _mountSeqEditorV2(){
       if(payload&&Array.isArray(payload.sequences))SETTINGS.sequences=_dedupSequences(payload.sequences);
       if(payload&&Array.isArray(payload.assignments))SETTINGS.sequenceAssignments=payload.assignments;
       if(payload&&Array.isArray(payload.packs))SETTINGS.actionPacks=payload.packs;
+      /* The whole assignments array just came back from a UI that does not own the job rows.
+         Jobs are the owner of record (rule 8) — re-assert theirs before any of this persists. */
+      const _ja=_reassertJobAssignments();
       _initEmailTriggers(); /* new custom templates get <key>Sent triggers immediately */
       markSettingsDirty();
       toast('✓ Sequences saved');
+      if(_ja.restored.length)setTimeout(()=>toast('🧳 Job link rule'+(_ja.restored.length===1?'':'s')+' restored from the job card — change these on the job, not here: '+_ja.restored.slice(0,3).join(', ')+(_ja.restored.length>3?' +'+(_ja.restored.length-3)+' more':'')),0);
+      else if(_ja.orphans.length)setTimeout(()=>toast('⚠ Job'+(_ja.orphans.length===1?'':'s')+' still naming a deleted sequence — open the job card and pick a new one: '+_ja.orphans.slice(0,3).join(', ')),0);
     }
   });
 }
