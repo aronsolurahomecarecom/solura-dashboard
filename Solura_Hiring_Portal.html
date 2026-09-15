@@ -7531,7 +7531,7 @@ async function _backfillCalBookings(){
       const byName=norm(b.attendeeName)?pipeline.filter(c=>norm(c.name)===norm(b.attendeeName)):[];
       if(byEmail.length===1)cand=byEmail[0];
       else if(byName.length===1)cand=byName[0];
-      if(!cand||cand.stage==='Hired'||cand.stage==='Declined')continue;
+      if(!cand||_isTerminalStage(cand.stage))continue; /* Withdrawn too — every other background pass uses _isTerminalStage */
       if(_wsOpenOn(cand.excelRow))continue; /* workspace open — saveW would clobber; next pull */
       cand.st=cand.st||{};
       if(cand.st.__ajCorrupt)continue; /* corrupt cell — nothing may write over it (rule 5) */
@@ -7592,7 +7592,7 @@ async function _autoLinkUnmatchedBookings(){
     if(byEmail.length===1)cand=byEmail[0];
     else if(byName.length===1)cand=byName[0];
     const hasUpcoming=cand&&cand.st&&cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
-    if(!cand||cand.stage==='Hired'||cand.stage==='Declined'||hasUpcoming||_wsOpenOn(cand.excelRow)){keep.push(u);continue;}
+    if(!cand||_isTerminalStage(cand.stage)||hasUpcoming||_wsOpenOn(cand.excelRow)){keep.push(u);continue;}
     if(cand.st&&cand.st.__ajCorrupt){keep.push(u);continue;} /* rule 5 — never write over a corrupt cell */
     try{
       cand.st=cand.st||{};
@@ -7812,6 +7812,14 @@ async function saveSettings(){
      - Snapshot into undo history so this change can be stepped back.
      - Then invoke _saveSettingsInternal() which writes to localStorage + worker + AL1. */
   const prefs=_prefsMeta();
+  /* The cancel latch (set below) was read only by the pagehide flush. Cancelling leaves the
+     rejected edits in SETTINGS and _settingsDirty set, so the next markSettingsDirty from anywhere
+     outside Settings (heal chain, ~60 handlers) skipped the view-gated diff modal and autosaved
+     exactly what the operator declined — then cleared the latch. Outside Settings a latched save
+     writes nothing; inside Settings it goes back through the diff preview. */
+  if(window._settingsSaveCancelled&&!(typeof view!=='undefined'&&view==='settings')){
+    return {cancelled:true,latched:true};
+  }
   /* Calm mode: the diff preview only interrupts for BIGGER saves (4+ settings changing at
      once — the "did I really mean to change all that" case). One-or-two-field edits save
      straight through; the autosave pill still shows Saved. "Don't ask again this session"
@@ -7985,7 +7993,13 @@ async function _saveSettingsInternal(){
      say where its settings came from must not write them anywhere. */
   const _loadSrc=(window._lastSettingsLoadStatus||{}).source||'unloaded';
   const _primaryEmpty=(window._lastSettingsLoadStatus||{}).primaryEmpty===true;
-  if(_loadSrc!=='workerFile'&&!_primaryEmpty){
+  /* The empty-primary carve-out holds ONLY for a session with nothing to lose (source 'defaults').
+     loadSettings sets primaryEmpty and then FALLS THROUGH to AL1/cache, so '!_primaryEmpty' alone
+     opened the gate for a session running on the July-frozen AL1 copy (zero sequences) — and the
+     deployed worker answers 200-{} when its own Graph read is throttled, so one throttled request
+     at page load plus the heal chain's autosave wrote that copy over Solura_Settings.json (rule 7).
+     A truly empty file with a fallback copy now stays refused; recover it by hand, never silently. */
+  if(_loadSrc!=='workerFile'&&!(_primaryEmpty&&_loadSrc==='defaults')){
     status.errors.push('Refused: settings were loaded from the '+_loadSrc+' fallback, not the primary file — saving would overwrite newer settings with this stale copy. Reload the portal once the worker is reachable.');
     window._lastSettingsSaveStatus=status;
     /* Nearly every caller — saveTemplate, saveScript, importSettings, addAdmin, seqSave, the
@@ -20487,7 +20501,7 @@ function _sourceLinkStats(){
   const byCode={};
   links.forEach(l=>{byCode[l.code]={link:l,applied:0,screened:0,hired:0};});
   /* Also bucket candidates with a code that doesn't map (deleted link) */
-  const orphan={link:null,applied:0,screened:0,hired:0};
+  const orphan={link:null,orphan:true,applied:0,screened:0,hired:0};
   const nocode={link:null,applied:0,screened:0,hired:0};
   const SCREENED_STAGES=new Set(['Screen booked','Ask references','Verify employers','References','Interview invite','Interview booked','Offer','Onboarding','Onboarding booked','Hired']);
   (pipeline||[]).forEach(c=>{
@@ -20585,7 +20599,9 @@ function renderSettingsSourceLinks(){
 /* Note about applied candidates whose src code doesn't match any link on record. Usually means
    a link was deleted after receiving applications. */
 function orphan_or_nocode_note(stats){
-  const orphan=stats.find(s=>!s.link&&s.applied>0);
+  /* Two link-less buckets exist (orphan code / no code at all), sorted by size — match the
+     orphan one explicitly, or manual adds were reported as "deleted tracking codes". */
+  const orphan=stats.find(s=>s.orphan&&s.applied>0);
   if(!orphan)return '';
   return `<div class="wscard" style="border-color:#DECF9F;background:#FBF7EE">
     <h3 style="color:#8B6500">\u26A0 Orphaned tracking codes</h3>
@@ -20739,6 +20755,10 @@ function _jobMissingReqs(c,job){
    stamped + logged, once. REVIEW policy is handled as an action row (see action()). */
 async function _jobRequirementsPass(){
   try{
+    /* Rule 7, same guard as _seqV3RepairPass (8705): off a fallback load SETTINGS.jobs/sequences/
+       sequenceAssignments may be stale, and this pass re-points sequenceId in bulk and stamps
+       jobReqRouted so the move is never re-evaluated. A degraded session routes nobody. */
+    if(((window._lastSettingsLoadStatus||{}).source)!=='workerFile')return;
     const _myPipe=pipeline; /* abort if a fresher load swaps the board mid-pass */
     const defId=window.SeqBuilderV3?window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[]):null;
     const defSeq=(SETTINGS.sequences||[]).find(s=>s.id===defId);
@@ -20813,10 +20833,16 @@ async function _jobReqDecide(r,choice){
      reached AJ, and for 'generic' the reassignment never ran either. Sibling pass
      _jobRequirementsPass already wraps its write. */
   try{
-    await _seqCommitState(c,{});
-    if(choice==='generic'){
-      const defId=window.SeqBuilderV3?window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[]):null;
-      if(defId&&defId!==c.st.sequenceId)await _seqAssignTo(c.excelRow,defId);
+    /* Reassign FIRST: _seqAssignTo commits the whole state (decision + log ride along) in one
+       write. Committing the decision first and reassigning second persisted jobReqDecision even
+       when the reassignment then failed, so the row vanished on the next load with the
+       candidate still on the job's sequence. */
+    const defId=(choice==='generic'&&window.SeqBuilderV3)?window.SeqBuilderV3.getDefaultSequenceId(SETTINGS.sequenceAssignments||[]):null;
+    if(defId&&defId!==c.st.sequenceId){
+      await _seqAssignTo(c.excelRow,defId);
+      if(c.st.sequenceId!==defId)throw new Error('default sequence not found');
+    }else{
+      await _seqCommitState(c,{});
     }
   }catch(e){
     delete c.st.jobReqDecision;   /* nothing persisted — let the row come back and be decided again */
