@@ -20,7 +20,7 @@ let CFG = {};
 const cfgStub = k => CFG[k];
 const escapeHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const mk = new Function('cfg', 'lc', 'escapeHtml',
-  src + '\nreturn {DEFAULT_ASMTSCHED_SUBJECT,DEFAULT_ASMTSCHED_TEMPLATE,asmtSchedCfg,asmtPrettyTime,fillAsmtSchedTokens,buildAssessmentIcs,icsEsc};');
+  src + '\nreturn {DEFAULT_ASMTSCHED_SUBJECT,DEFAULT_ASMTSCHED_TEMPLATE,asmtSchedCfg,asmtPrettyTime,fillAsmtSchedTokens,buildAssessmentIcs,icsEsc,htmlHasVisibleText};');
 const A = mk(cfgStub, s => String(s || '').toLowerCase(), escapeHtml);
 
 // ── time prettifier ──
@@ -71,6 +71,18 @@ ok(/enginesDoc\.assessors\[String\(ri\)\]=f\.assessor/.test(html), 'scheduler sa
 ok(/\(enginesDoc\.assessors\|\|\{\}\)\[String\(ri\)\]/.test(html), 'openAssessment reads the scheduled assessor');
 ok(/assessor:schedAssessor,\s*\n\s*assessor_signed_name:schedAssessor/.test(html), 'form prefills BOTH assessor fields from the scheduled name');
 
+// ── 🕳 never send an empty confirmation (B-0915-89) ──
+// A restored engines doc can resurrect a mangled template override that
+// renders as NOTHING; the send path must fall back to the built-in.
+ok(A.htmlHasVisibleText('<p>Hi Karen</p>') && A.htmlHasVisibleText('plain text'), 'real content counts as visible');
+ok(!A.htmlHasVisibleText('') && !A.htmlHasVisibleText('   '), 'blank is blank');
+ok(!A.htmlHasVisibleText('<div><p>&nbsp;</p><table><tr><td> </td></tr></table></div>'), 'tag-only skeletons render nothing → treated as empty');
+ok(!A.htmlHasVisibleText('<style>.x{color:red}</style><script>var a=1;</script>'), 'style/script bodies are not visible text');
+ok(A.htmlHasVisibleText(A.DEFAULT_ASMTSCHED_TEMPLATE), 'the built-in template is definitely visible');
+ok(/if\(!htmlHasVisibleText\(html\)\)\{\s*\n\s*html=fillNames\(fillAsmtSchedTokens\(DEFAULT_ASMTSCHED_TEMPLATE/.test(html), 'asBuildEmail swaps a blank-rendering template for the built-in');
+ok(/usedFallback\)doneMsg\+=/.test(html) && /↺ Restore in ⚙ Settings → Email/.test(html), 'the fallback is announced with the fix path, never silent');
+ok(/if\(!String\(subj\|\|''\)\.trim\(\)\)subj=/.test(html), 'a blank subject falls back too');
+
 // ── 📆 calendar invite (B-0911-82) ──
 {
   const cf = { date: '2026-09-15', time: '14:30', location: '123 Superior Ave, Cleveland', assessor: 'Meir Schwimer', notes: 'Dog on premises' };
@@ -95,10 +107,17 @@ ok(/assessor:schedAssessor,\s*\n\s*assessor_signed_name:schedAssessor/.test(html
 }
 ok(/Calendars\.ReadWrite offline_access/.test(html) && (html.match(/Calendars\.ReadWrite/g) || []).length === 2, 'Calendars.ReadWrite added to BOTH the login and refresh scopes');
 ok(/gfetch\(GR\+'\/me\/events',\{method:'POST'/.test(html), 'native Outlook event created via Graph');
-ok(/attendees=\[\{emailAddress:\{address:em\.to/.test(html), 'family added as attendee → Exchange sends the real invite');
-ok(/contentType:'text\/calendar'/.test(html), 'fallback .ics attaches to the confirmation email');
-ok(/sign out and back in once to enable full Outlook invites/.test(html), 'fallback explains how to unlock native invites');
+// MERGED design (B-0915-89): ONE email — the confirmation carries the .ics;
+// Meir's event has NO attendees so Exchange never sends a second email.
+{
+  const sv = html.slice(html.indexOf('async function asSave'), html.indexOf('async function asSave') + 8000);
+  ok(sv.indexOf('ev.attendees') === -1 && sv.indexOf('attendees=[{') === -1, 'the Outlook event carries NO attendees (no second invite email)');
+  ok(/contentType:'text\/calendar'/.test(sv), 'the .ics invite rides the confirmation email itself');
+  ok(sv.indexOf("calNote='invite attached'") > -1, 'invite always attaches when the email goes out');
+  ok(/calendar event skipped — sign out and back in once to enable it/.test(sv), 'a missing Calendars scope degrades gracefully, invite still delivered');
+}
 ok(/id="as-cal" checked/.test(html) && /id="as-dur"/.test(html), 'invite toggle (default on) + duration picker in the modal');
+ok(/one email; they tap Add to calendar/.test(html), 'modal label describes the merged single-email behavior');
 
 // ── conditions on the add-lead form (B-0911-83) ──
 ok(/id="al-cond-grid"/.test(html) && /id="al-cond-search"/.test(html), 'add-lead form carries the conditions picker + search');

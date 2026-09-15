@@ -789,7 +789,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <div class="la-f" style="margin-bottom:10px"><label>Notes (go on the email and the lead's record)</label><textarea id="as-notes" rows="3" placeholder="Who will be present, parking, documents worth having handy…"></textarea></div>
       <label class="st-check" style="margin-bottom:8px;display:block"><input type="checkbox" id="as-send-email" checked> 📧 Send the family a confirmation email on save (template editable in ⚙ Settings → Email)</label>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-        <label class="st-check" style="margin:0"><input type="checkbox" id="as-cal" checked> 📆 Calendar invite — on your Outlook calendar, with an Accept/Decline invite to the family</label>
+        <label class="st-check" style="margin:0"><input type="checkbox" id="as-cal" checked> 📆 Calendar invite — attached to the confirmation email (one email; they tap Add to calendar) + a quiet event on your Outlook calendar</label>
         <span style="font-size:11.5px;color:var(--soft)">Length:</span>
         <select id="as-dur" class="ee-inp" style="width:auto;padding:5px 8px;font-size:12px">
           <option value="30">30 min</option><option value="45">45 min</option>
@@ -1666,7 +1666,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0914-88';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0915-89';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2944,6 +2944,17 @@ function asmtSchedCfg(){
   return {subject:String(cfg('asmtSchedSubject')||'').trim()||DEFAULT_ASMTSCHED_SUBJECT,
     template:String(cfg('asmtSchedTemplate')||'').trim()||DEFAULT_ASMTSCHED_TEMPLATE};
 }
+// Does this HTML actually SHOW anything? A saved template can be non-empty
+// bytes yet render as nothing (a mangled fragment, tags with no text) —
+// and a stored override beats the built-in, so without this check a
+// blank confirmation could reach a family.
+function htmlHasVisibleText(s){
+  return String(s||'')
+    .replace(/<(style|script)[\s\S]*?<\/\1>/gi,' ')
+    .replace(/<[^>]*>/g,' ')
+    .replace(/&nbsp;/gi,' ')
+    .trim().length>0;
+}
 function asmtPrettyTime(t){
   var m=String(t||'').trim().match(/^(\d{1,2}):(\d{2})$/);
   if(!m)return String(t||'').trim();
@@ -3002,9 +3013,17 @@ function asFields(){
 }
 function asBuildEmail(){
   var ac=asmtSchedCfg(),f=asFields(),names=getNames(_asRi);
-  return {to:String(el('as-to').value||'').trim(),
-    subject:fillNames(fillAsmtSchedTokens(ac.subject,f),names),
-    html:fillNames(fillAsmtSchedTokens(ac.template,f),names),fields:f};
+  var html=fillNames(fillAsmtSchedTokens(ac.template,f),names);
+  // A restored/mangled saved template can render as NOTHING. Never send
+  // an empty confirmation — fall back to the built-in and flag it.
+  var usedFallback=false;
+  if(!htmlHasVisibleText(html)){
+    html=fillNames(fillAsmtSchedTokens(DEFAULT_ASMTSCHED_TEMPLATE,f),names);
+    usedFallback=true;
+  }
+  var subj=fillNames(fillAsmtSchedTokens(ac.subject,f),names);
+  if(!String(subj||'').trim())subj=fillNames(fillAsmtSchedTokens(DEFAULT_ASMTSCHED_SUBJECT,f),names);
+  return {to:String(el('as-to').value||'').trim(),subject:subj,html:html,fields:f,usedFallback:usedFallback};
 }
 function asPreview(){
   if(_asRi<0)return;
@@ -3051,16 +3070,24 @@ async function asSave(){
       }
       if(docDirty)saveEnginesDoc().catch(function(){});
     }catch(_){}
-    // 📆 Calendar invite: an Outlook-native event first (lands on Meir's
-    // calendar; Exchange emails the family a real Accept/Decline invite).
-    // Missing Calendars scope (or any failure) → a standards .ics rides
-    // the confirmation email instead, so an invite always goes out.
+    // 📆 Calendar invite — MERGED with the confirmation: ONE email reaches
+    // the family. The branded confirmation carries a standards .ics
+    // (Add-to-calendar in Gmail/Outlook/Apple), and Meir's own Outlook
+    // gets a quiet event with NO attendees — Exchange must never send a
+    // second, separate invite email.
     var wantCal=!!(el('as-cal')&&el('as-cal').checked)&&!!f.time;
     var calDur=parseInt((el('as-dur')||{}).value,10)||60;
-    var calMode='off',icsAtt=null;
+    var calNote='',icsAtt=null;
     var dmName=String(r[C.DM]||r[C.NM]||'').trim();
     var ptName=String(r[C.NM]||'').trim();
     if(wantCal){
+      var built=buildAssessmentIcs(f,{to:em.to,attendeeName:dmName,duration:calDur,
+        summary:'In-home assessment — Solura Home Care'});
+      if(built&&wantEmail){
+        icsAtt={'@odata.type':'#microsoft.graph.fileAttachment',name:built.fileName,
+          contentType:'text/calendar',contentBytes:btoa(unescape(encodeURIComponent(built.ics)))};
+        calNote='invite attached';
+      }
       try{
         var tzName='America/New_York';
         try{tzName=Intl.DateTimeFormat().resolvedOptions().timeZone||tzName;}catch(_){}
@@ -3074,18 +3101,11 @@ async function asSave(){
           end:{dateTime:locIso(enD),timeZone:tzName},
           location:{displayName:f.location||'Client home'},
           isReminderOn:true,reminderMinutesBeforeStart:60};
-        if(em.to&&em.to.indexOf('@')>0)ev.attendees=[{emailAddress:{address:em.to,name:dmName||em.to},type:'required'}];
         var er=await gfetch(GR+'/me/events',{method:'POST',body:JSON.stringify(ev)});
         if(!er.ok)throw new Error('event '+er.status);
-        calMode='event';
+        calNote+=(calNote?' · ':'')+'on your calendar';
       }catch(calErr){
-        var built=buildAssessmentIcs(f,{to:em.to,attendeeName:dmName,duration:calDur,
-          summary:'In-home assessment — Solura Home Care'});
-        if(built&&wantEmail){
-          icsAtt={'@odata.type':'#microsoft.graph.fileAttachment',name:built.fileName,
-            contentType:'text/calendar',contentBytes:btoa(unescape(encodeURIComponent(built.ics)))};
-          calMode='ics';
-        }else calMode='fail';
+        calNote+=(calNote?' · ':'')+'calendar event skipped — sign out and back in once to enable it';
       }
     }
     var sent=false;
@@ -3102,13 +3122,12 @@ async function asSave(){
     }
     logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
       contact:sent?em.to:'',subject:sent?em.subject:'Assessment scheduled',
-      preview:detail+(calMode==='event'?' · Outlook invite sent':calMode==='ics'?' · .ics invite attached':''),
+      preview:detail+(calNote?(' · '+calNote):''),
       outcome:'assessment-scheduled'}));
     el('modal-asmt-sched').classList.remove('open');
     var doneMsg=sent?('📅 Assessment logged — confirmation sent to '+em.to):'📅 Assessment logged';
-    if(calMode==='event')doneMsg+=' · 📆 on your calendar, invite sent';
-    else if(calMode==='ics')doneMsg+=' · 📆 invite attached as .ics (sign out and back in once to enable full Outlook invites)';
-    else if(calMode==='fail')doneMsg+=' · ⚠ calendar invite could not be created';
+    if(calNote)doneMsg+=' · 📆 '+calNote;
+    if(em.usedFallback)doneMsg+=' · ⚠ your saved email template was blank, so the built-in was used — fix it via ↺ Restore in ⚙ Settings → Email';
     toast(doneMsg);
     _asRi=-1;
     try{await buildUI();}catch(_){}
