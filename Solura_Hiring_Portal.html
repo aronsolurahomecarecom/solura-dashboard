@@ -7751,6 +7751,7 @@ let _settingsDirty=false;
 let _settingsSaveTimeout=null;
 let _settingsSaveInFlight=false;
 let _settingsLoadComplete=false;  /* flipped to true at end of loadSettings */
+let _settingsDirtyGen=0;          /* bumped by markSettingsDirty; see _runAutoSave */
 
 function markSettingsDirty(){
   if(!_settingsLoadComplete){
@@ -7760,6 +7761,9 @@ function markSettingsDirty(){
     return;
   }
   _settingsDirty=true;
+  /* Bumped on every edit so _runAutoSave can tell whether the save it just awaited actually
+     covered the edits that are outstanding NOW — the POST body is serialized before the await. */
+  _settingsDirtyGen++;
   _updateAutosaveStatus('dirty');
   if(_settingsSaveTimeout)clearTimeout(_settingsSaveTimeout);
   _settingsSaveTimeout=setTimeout(_runAutoSave,700);
@@ -7774,6 +7778,13 @@ async function _runAutoSave(){
   _settingsSaveInFlight=true;
   _updateAutosaveStatus('saving');
   try{
+    /* Captured BEFORE the save: _saveSettingsInternal serializes the POST body and then awaits the
+       network, so any edit made while that request is in flight is NOT in the file it returns
+       success for. Clearing _settingsDirty unconditionally marked that edit clean. markSettingsDirty
+       had already scheduled another pass 700ms out, so it normally recovers — but close the tab
+       inside that window and the pagehide flush sees !_settingsDirty and returns without writing,
+       under a green "✓ Saved" pill. */
+    const _gen=_settingsDirtyGen;
     const status=await saveSettings();
     /* Declining the diff preview is a CHOICE, not a failure. {cancelled:true} carries neither
        tier flag nor an errors array, so it fell to the else below and painted "✗ Save failed /
@@ -7782,7 +7793,7 @@ async function _runAutoSave(){
     if(status&&status.cancelled){
       _updateAutosaveStatus('dirty');
     }else if(status&&status.workerFile){
-      _settingsDirty=false;
+      if(_gen===_settingsDirtyGen)_settingsDirty=false; /* nothing was edited while we awaited */
       _updateAutosaveStatus('saved');
     }else if(status&&status.localStorage){
       _updateAutosaveStatus('local-only',(status.errors||[])[0]||'');
@@ -8097,9 +8108,21 @@ async function _saveSettingsInternal(){
        made the whole OR true for a pure-defaults object — the guard has now been dead three
        times over (admins:[] was truthy, then _savedAt was read after being stamped, now this).
        Everything left is either absent from the defaults or genuinely operator-entered. */
+    /* ziToken was removed from this clause — the FOURTH time the guard has been poisoned, and the
+       only time it mattered. The guard is this gate's sole backstop for the empty-primary carve-out
+       above, and that carve-out is unreachable WITHOUT a token: load.primaryEmpty is only ever set
+       inside loadSettings' `if(tok)` branch, and loadSettings then copies that same token from
+       localStorage into SETTINGS.config.ziToken before stamping the load status. So in the one
+       state the backstop exists for — worker answered 200-{} while its own Graph read was
+       throttled, AL1 unreadable for the same reason, no browser cache — the clause was guaranteed
+       true and the guard could never fire. Module defaults plus a freshly minted classic-flow then
+       go to the worker file, to localStorage AND (they serialize small) to the AL1 mirror: every
+       template, job, sequence and admin lost in one pass, all three tiers at once. A worker token
+       is a connection credential this code path injects itself; it is not evidence that a human
+       ever configured anything, which is the only question this guard asks. */
     (SETTINGS.config&&((SETTINGS.config.admins&&SETTINGS.config.admins.length)||
       SETTINGS.config.vr||SETTINGS.config.bandThresholds||SETTINGS.config.qualityWeights||SETTINGS.config.retentionWeights||
-      SETTINGS.config.customQuestions||SETTINGS.config.fastTrackEnabled!==undefined||SETTINGS.config.ziToken||
+      SETTINGS.config.customQuestions||SETTINGS.config.fastTrackEnabled!==undefined||
       SETTINGS.config.calScreenUrl||SETTINGS.config.calInterviewUrl||SETTINGS.config.yardstikVerifyPackageId))||
     (SETTINGS.scoringWeights)||
     (SETTINGS.flow&&SETTINGS.flow.custom&&SETTINGS.flow.custom.length)||
@@ -8140,12 +8163,21 @@ async function _saveSettingsInternal(){
       });
       if(r.ok){
         const data=await r.json();
-        status.workerFile=true;
         status.workerFileBytes=data.bytes||0;
         /* Sanity check — bytes returned should roughly match what we sent. JSON.stringify pretty-
            prints with 2-space indent on the worker side, so allow ±50% tolerance. */
+        /* workerFile is set AFTER this check, not before it. It used to be set first, so a write
+           this code had just PROVEN was truncated still reported workerFile:true — and every
+           reader takes that flag as "the primary file is now correct": _runAutoSave paints the
+           green "✓ Saved to SharePoint" pill and clears _settingsDirty (removing the pagehide
+           flush's last chance to retry), and saveSettings re-bases _settingsBaseline and clears
+           the cancel latch on it. The truncation was recorded only in status.errors, which every
+           one of those readers ignores. A file that did not receive what was sent is a failed
+           file save; localStorage still holds the real copy, and the toast below now fires. */
         if(data.bytes&&data.bytes<json.length*0.5){
           status.errors.push('File save truncated: sent '+json.length+' chars but file has '+data.bytes+' bytes');
+        }else{
+          status.workerFile=true;
         }
       }else{
         const t=await r.text().catch(()=>'');
@@ -8727,6 +8759,22 @@ async function _seqV3RepairPass(){
       const cur=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
       const ptrOk=!!(cur&&(cur.steps||[]).some(s=>s.id===c.st.sequenceStepId));
       if(c.st.sequenceId&&ptrOk)continue; /* healthy on ANY sequence — tag-for-life stands */
+      /* A DEGRADED SETTINGS LOAD IS NOT EVIDENCE ABOUT AN ADOPTED CANDIDATE AT ALL (rules 6 + 7).
+         Reaching here means the settings this session holds disagree with the candidate's cell —
+         either their sequence is missing from SETTINGS.sequences, or it is there without the step
+         their pointer names. Both readings are equally consistent with the settings being a
+         FALLBACK tier: the worker GET was skipped or failed, the AL1 mirror is unreadable or
+         months stale (it has been frozen since July), no localStorage (a fresh or private window).
+         Rule 7 refuses to SAVE settings from such a session; this is the same principle applied to
+         candidate rows, and it has to sit ABOVE the re-place branch, not below it. Below it, the
+         guard covered only the sequence-was-deleted move — while the branch it did not cover is
+         the one that fires on the commoner shape: a stale copy carries the sequence with its OLD
+         step ids, so every live candidate on it fails the pointer test at once and the pass
+         rewrites the whole cohort's pointer from the stale copy, one AJ write each, on every
+         30-second refresh, with no operator action anywhere. The unadopted case stays alive below:
+         adopting a brand-new candidate is additive and reassignable, whereas rewriting an existing
+         tag destroys it in the cell and the sheet cannot give it back. */
+      if(c.st.sequenceId&&((window._lastSettingsLoadStatus||{}).source!=='workerFile'))continue;
       /* TAG-FOR-LIFE, REPAIR-IN-PLACE: a dangling pointer on a still-existing sequence is a
          POINTER problem, not a sequence problem (step edits/re-imports mint new step ids).
          Re-place stage-matched WITHIN their own sequence; never move them to the default —
@@ -8751,19 +8799,10 @@ async function _seqV3RepairPass(){
       }catch(e){}
       if(!dest.steps.some(s=>s.kind==='stage'&&s.stage&&s.stage.setStage===c.stage))continue; /* target has no stage step for their stage — leave alone */
       const wasAdopted=!!c.st.sequenceId;
-      /* A DEGRADED SETTINGS LOAD IS NOT EVIDENCE THAT THEIR SEQUENCE WAS DELETED (rules 6 + 7).
-         Reaching here with wasAdopted means SETTINGS.sequences has no entry for c.st.sequenceId —
-         which is true both when the operator really deleted it and when the settings this session
-         is holding are a fallback tier: the worker GET was skipped or failed, the AL1 mirror is
-         unreadable or months stale, no localStorage (a fresh or private window). In that state the
-         whole cohort of any sequence missing from the fallback copy gets rewritten onto the
-         ★default, one AJ write each, and their ORIGINAL sequenceId is overwritten in the cell — not
-         recoverable from the sheet. That is precisely the mass "candidates randomly switch
-         sequences" incident this pass's own comments were written to stop. Rule 7 already refuses to
-         SAVE settings from a degraded load; this is the same principle applied to candidate rows.
-         The unadopted case below is left alive: adopting a brand-new candidate is additive and the
-         operator can reassign, whereas a move destroys the tag. */
-      if(wasAdopted&&((window._lastSettingsLoadStatus||{}).source!=='workerFile'))continue;
+      /* The degraded-load guard for adopted candidates is HOISTED above the re-place branch (it
+         used to live here, where it covered only this move). wasAdopted implies c.st.sequenceId,
+         so anything still reaching this line on a fallback tier is unadopted — and adopting is
+         additive, so it stays allowed. */
       const ptr=_classicPointerFor(c,dest);
       if(!ptr)continue;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧬 '+(wasAdopted?'Sequence was deleted — moved onto':'Adopted')+' "'+dest.name+'" — pointer '+ptr});
@@ -24248,11 +24287,25 @@ async function _restoreUndoSnapshot(idx){
     if(snap.settings.scoringWeights)SETTINGS.scoringWeights=_deepClone(snap.settings.scoringWeights);
   }
   const _rs=await _saveSettingsInternal();
+  const _rsWrote=!!(_rs&&(_rs.workerFile||_rs.localStorage));
   /* Same rule as saveSettings: once memory and file agree the cancel latch has nothing left to
      protect; left set, it held (and warned on) every later save made outside Settings. */
-  if(_rs&&(_rs.workerFile||_rs.localStorage))window._settingsSaveCancelled=false;
-  window._settingsBaseline=_deepClone(SETTINGS);
-  toast('\u2713 Restored');
+  if(_rsWrote)window._settingsSaveCancelled=false;
+  /* And the same rule for the two things a REFUSED write must not move. _saveSettingsInternal
+     refuses on a degraded load and on the looks-like-defaults guard, and this caller reaches it
+     directly, so nothing else checks. Re-basing the baseline poisons every later diff preview
+     (it is the record of what the FILE holds); toasting "\u2713 Restored" over a write that never
+     happened is worse \u2014 the panel repaints with the restored values, so the operator has every
+     reason to believe the old settings are back, and the refusal's own warning is deferred and
+     throttled to once per 10s. The restored values ARE in memory; only storage refused. */
+  if(_rsWrote){
+    window._settingsBaseline=_deepClone(SETTINGS);
+    toast('\u2713 Restored');
+  }else{
+    /* Leave it dirty so the pagehide flush and the next markSettingsDirty can still carry it. */
+    _settingsDirty=true;_settingsDirtyGen++;
+    toast('\u26a0 Restored on screen only \u2014 the save was refused ('+(((_rs&&_rs.errors)||[])[0]||'unknown reason')+'). Nothing was written; reload to discard.');
+  }
   renderSettings();
 }
 
