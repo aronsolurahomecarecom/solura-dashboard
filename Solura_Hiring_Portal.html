@@ -7818,7 +7818,16 @@ async function saveSettings(){
      exactly what the operator declined — then cleared the latch. Outside Settings a latched save
      writes nothing; inside Settings it goes back through the diff preview. */
   if(window._settingsSaveCancelled&&!(typeof view!=='undefined'&&view==='settings')){
-    return {cancelled:true,latched:true};
+    /* Held — but never SILENTLY. Direct callers outside Settings discard this status: saveAdd's
+       new "Other" source and adAddCustom's new cert/skill looked saved, were never written, and
+       were gone on reload, with nothing on screen saying so. Re-assert after the caller's own
+       toast has painted (same pattern as the provenance refusal), throttled for background saves. */
+    const _ln=Date.now();
+    if(!window._latchWarnAt||_ln-window._latchWarnAt>10000){
+      window._latchWarnAt=_ln;
+      setTimeout(()=>toast('⏸ Settings NOT saved — a settings change you cancelled is still pending. Make any edit in Settings to review it again, or reload to discard it.'),0);
+    }
+    return {cancelled:true,latched:true,errors:['Held: a settings change was cancelled in the save preview and is still pending']};
   }
   /* Calm mode: the diff preview only interrupts for BIGGER saves (4+ settings changing at
      once — the "did I really mean to change all that" case). One-or-two-field edits save
@@ -7840,6 +7849,9 @@ async function saveSettings(){
            real save clears it. */
         window._settingsSaveCancelled=true;
         toast('Save cancelled');
+        /* Callers toast their own success right after awaiting us (importSettings says
+           "✓ Settings imported" with the import held in memory and nothing written). */
+        setTimeout(()=>toast('Save cancelled — nothing was written'),0);
         return {cancelled:true};
       }
     }
@@ -24145,7 +24157,10 @@ async function _restoreUndoSnapshot(idx){
     if(snap.settings.flow)SETTINGS.flow=_deepClone(snap.settings.flow);
     if(snap.settings.scoringWeights)SETTINGS.scoringWeights=_deepClone(snap.settings.scoringWeights);
   }
-  await _saveSettingsInternal();
+  const _rs=await _saveSettingsInternal();
+  /* Same rule as saveSettings: once memory and file agree the cancel latch has nothing left to
+     protect; left set, it held (and warned on) every later save made outside Settings. */
+  if(_rs&&(_rs.workerFile||_rs.localStorage))window._settingsSaveCancelled=false;
   window._settingsBaseline=_deepClone(SETTINGS);
   toast('\u2713 Restored');
   renderSettings();
