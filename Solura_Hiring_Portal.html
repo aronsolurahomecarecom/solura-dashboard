@@ -15948,7 +15948,7 @@ async function markCurrentEmailUnread(){
     pipeline.forEach(c=>{
       const e=(c.st.emails||[]).find(x=>x.id===id);
       if(e&&e.seen){
-        delete e.seen;delete e.seenAt;
+        delete e.seen;delete e.seenAt;_mirrorUnseenToW(c.excelRow,id);
         patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(err=>console.warn('unmark persist:',err.message));
       }
     });
@@ -15966,6 +15966,21 @@ async function markCurrentEmailUnread(){
    with an unread reply: read the reply, take one action in the workspace, and the candidate is
    pinned to "✉ Open new email" and unreachable by automation forever. Mirror the flag across.
    (Same deep-copy clobber class as the lastAwaitingReview mirror in openWorkspace.) */
+/* The mirror image, and the same clobber: "mark unread" is the operator saying "I am not done with
+   this one" — it clears seen on c.st and writes AJ, but the OPEN workspace still holds seen:true from
+   its deep copy, and the board's 'open-email' primary opens the workspace FIRST and the email second,
+   so the operator is always already inside it. One save afterwards (a note, a gate, a stage move)
+   writes the stale seen:true back over AJ and rebuilds the card from it — the deliberate flag is gone
+   from the sheet and from memory, the row drops off '✉ Open new email', and the robot's outward hold
+   releases. markAllRead and openEmailDetail have mirrored since f76d2b5; this direction never did. */
+function _mirrorUnseenToW(excelRow,messageId){
+  try{
+    if(!messageId)return; /* same id-less-record trap as the seen mirror */
+    if(!W||W.row!==excelRow||!W.st||!Array.isArray(W.st.emails))return;
+    const we=W.st.emails.find(x=>x&&x.id===messageId);
+    if(we){delete we.seen;delete we.seenAt;}
+  }catch(e){console.warn('unseen mirror:',e.message);}
+}
 function _mirrorSeenToW(excelRow,messageId,seenAt){
   try{
     /* A handful of stored records carry no id (6 of 2,103 live). Matching on undefined would
