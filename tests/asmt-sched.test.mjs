@@ -130,6 +130,47 @@ ok((html.match(/data-action="st-restore-tpl"/g) || []).length === 2, 'restore bu
 ok(/\[\['asmtSchedSubject',DEFAULT_ASMTSCHED_SUBJECT\],\['asmtSchedTemplate',DEFAULT_ASMTSCHED_TEMPLATE\]\]/.test(html), 'assessment restore clears the override and refills with the built-in');
 ok(/setCfg\(p\[0\],''\)/.test(html) && /stMarkDirty\(\)/.test(html), 'restore stages a blank override so the built-in wins at send time');
 
+// ── 🏥 in-assessment: age auto-calc + repeated-question prefill (B-0916-90) ──
+{
+  const pb = html.indexOf('/* ⚡ASMT-PREFILL — BEGIN');
+  const pe = html.indexOf('/* ⚡ASMT-PREFILL — END */');
+  ok(pb > -1 && pe > -1, 'ASMT-PREFILL markers present');
+  const psrc = html.slice(html.indexOf('*/', pb) + 2, pe);
+  const st = { data: {}, pre: {} };
+  const mkP = new Function('localToday', 'asmtState', 'asmtGet',
+    psrc + '\nreturn {asmtAgeFromDob,ASMT_PREFILL,asmtApplyPrefills};');
+  const P = mkP(() => new Date(2026, 8, 16), st, k => st.data[k] || '');
+  ok(P.asmtAgeFromDob('1941-09-16') === '85' && P.asmtAgeFromDob('1941-09-17') === '84', 'age exact around the birthday (85 on the day, 84 the day before it)');
+  ok(P.asmtAgeFromDob('1950-01-01') === '76' && P.asmtAgeFromDob('') === '' && P.asmtAgeFromDob('junk') === '', 'age math + junk-in-nothing-out');
+  st.data = { dob: '1941-06-01', primary_language: 'Yiddish', food_prefs: 'Kosher only', ec1_name: 'Karen Gold', ec1_rel: 'Daughter', visit_date_label: '2026-09-16', client_full_legal: 'Miriam Gold', legal_docs: ['Healthcare Power of Attorney'], sleep_pattern: ['Wakes frequently'], sleep_notes: 'worse after 2am' };
+  st.pre = {};
+  const sec = { fields: [
+    { t: 'text', k: 'age' }, { t: 'text', k: 'home_languages' }, { t: 'textarea', k: 'dietary_prefs' },
+    { t: 'text', k: 'primary_caregiver' }, { t: 'text', k: 'poa_name' }, { t: 'text', k: 'client_signed_name' },
+    { t: 'text', k: 'client_sign_date' }, { t: 'text', k: 'sleep_issues' }, { t: 'text', k: 'client_relationship' }
+  ]};
+  P.asmtApplyPrefills(sec);
+  ok(st.data.age === '85' && st.pre.age === true, 'age prefills from DOB, marked auto-filled');
+  ok(st.data.home_languages === 'Yiddish' && st.data.dietary_prefs === 'Kosher only', 'language + dietary answers carry forward');
+  ok(st.data.primary_caregiver === 'Karen Gold (Daughter)', 'caregiver composite = contact name (relationship)');
+  ok(st.data.poa_name === 'Karen Gold', 'POA name fills ONLY because POA was checked in legal docs');
+  ok(st.data.client_signed_name === 'Miriam Gold' && st.data.client_sign_date === '2026-09-16' && st.data.client_relationship === 'Daughter', 'signature page pre-signed with earlier answers');
+  ok(st.data.sleep_issues === 'Wakes frequently · worse after 2am', 'sleep issues merge the concern pattern + notes');
+  st.data.home_languages = 'English and Yiddish';
+  P.asmtApplyPrefills(sec);
+  ok(st.data.home_languages === 'English and Yiddish', 'a typed answer is NEVER overwritten by a prefill');
+  const st2 = { data: { legal_docs: ['Neither / Unknown'], ec1_name: 'Karen' }, pre: {} };
+  const P2 = mkP(() => new Date(2026, 8, 16), st2, k => st2.data[k] || '');
+  P2.asmtApplyPrefills({ fields: [{ t: 'text', k: 'poa_name' }] });
+  ok(!st2.data.poa_name, 'no POA checked → poa_name stays empty');
+}
+ok(/if\(k==='dob'\)\{/.test(html) && /asmtAgeFromDob\(e\.target\.value\)/.test(html), 'typing a DOB live-fills the age field');
+ok(/AUTO-FILLED<\/span>/.test(html) && /edit freely/.test(html), 'auto-filled fields visibly tagged and editable');
+ok(/delete asmtState\.pre\[k\];/.test(html), 'editing clears the auto-filled mark');
+ok(/attachLinks\.push\(\{name:fileObj\.name,url:attachUrl\}\)/.test(html), 'uploaded docs keep their OneDrive links');
+ok(/Uploaded documents:/.test(html) && /asmtSendIntakeEmail\(leadName,summary,docUrl,attachLinks\)/.test(html), 'doc links ride the finished-assessment email');
+ok(/cfg\('asmtIntakeTo'\)\|\|''\)\.trim\(\)\|\|'intake@solurahomecare\.com'/.test(html) && /data-cfg="asmtIntakeTo"/.test(html), 'intake recipient editable in Settings, sensible default');
+
 // ── source-level locks on the flow ──
 ok(/id="modal-asmt-sched"/.test(html) && /data-action="as-save"/.test(html) && /data-action="as-preview"/.test(html), 'logger modal with Save & Send + Preview');
 ok(/data-action="open-asmt-sched" data-ri/.test(html), '📅 launch button rides the Responded/Update dialog footer');

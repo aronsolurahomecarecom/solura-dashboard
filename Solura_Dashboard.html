@@ -1239,6 +1239,11 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <section class="st-sec" id="st-sec-email" hidden>
         <h3 class="st-h">Email</h3>
         <div class="st-field">
+          <label class="ee-lbl">🏥 Finished-assessment email goes to (blank = intake@solurahomecare.com)</label>
+          <input type="email" class="ee-inp" data-cfg="asmtIntakeTo" placeholder="intake@solurahomecare.com">
+          <div style="font-size:10.5px;color:var(--soft);margin-top:4px">The summary sent when you hit Finish on an in-home assessment — with the document link and any uploaded files (medication lists etc.).</div>
+        </div>
+        <div class="st-field">
           <label class="ee-lbl">📅 Assessment-confirmation subject (blank = built-in)</label>
           <input type="text" class="ee-inp" data-cfg="asmtSchedSubject" placeholder="Your in-home assessment is scheduled — {date}">
           <label class="ee-lbl" style="margin-top:8px">📅 Assessment-confirmation email (blank = built-in) · Tokens: <code>{date}</code> <code>{time}</code> <code>{location}</code> <code>{assessor}</code> <code>{notes}</code> <code>{dm}</code> <code>{pt}</code> <code>{rel}</code> <code>{ptrel}</code></label>
@@ -1666,7 +1671,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0915-89';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0916-90';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -11846,6 +11851,7 @@ function openAssessment(ri){
     section:0,
     pain:[{loc:'',level:'',type:'',freq:'',helps:''}],
     files:{},
+    pre:{},
     data:{
       visit_date_label:ds(localToday()),
       client_full_legal:String(r[C.NM]||'').trim(),
@@ -11866,10 +11872,59 @@ function closeAssessment(){
   el('asmt-overlay').classList.remove('open');
   var iconEl=el('asmt-fullscreen-icon');
   if(iconEl)iconEl.textContent='\u26F6';
-  asmtState={ri:-1,section:0,data:{},pain:[{loc:'',level:'',type:'',freq:'',helps:''}],files:{}};
+  asmtState={ri:-1,section:0,data:{},pain:[{loc:'',level:'',type:'',freq:'',helps:''}],files:{},pre:{}};
 }
 function asmtSet(k,v){asmtState.data[k]=v;}
 function asmtGet(k){return asmtState.data[k]||'';}
+/* ⚡ASMT-PREFILL — BEGIN (sliced by tests/asmt-sched.test.mjs) */
+// Age from DOB — exact calendar age as of today.
+function asmtAgeFromDob(dob){
+  var m=String(dob||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!m)return '';
+  var t=localToday();
+  var age=t.getFullYear()-parseInt(m[1],10);
+  if((t.getMonth()+1)<parseInt(m[2],10)||((t.getMonth()+1)===parseInt(m[2],10)&&t.getDate()<parseInt(m[3],10)))age--;
+  return (age>=0&&age<130)?String(age):'';
+}
+// The same question asked again in a later section auto-fills from the
+// earlier answer (visibly marked, freely editable). Sources are functions
+// so composites work; an answer already typed is NEVER overwritten.
+var ASMT_PREFILL={
+  age:function(){return asmtAgeFromDob(asmtGet('dob'));},
+  home_languages:function(){return asmtGet('primary_language');},
+  dietary_prefs:function(){return asmtGet('food_prefs');},
+  diet_type:function(){return asmtGet('swallow_diet');},
+  sleep_issues:function(){
+    var bits=[];
+    var p=asmtState.data.sleep_pattern;
+    if(Array.isArray(p)&&p.length)bits.push(p.join(', '));
+    if(asmtGet('sleep_notes'))bits.push(asmtGet('sleep_notes'));
+    return bits.join(' · ');
+  },
+  primary_caregiver:function(){
+    var n=asmtGet('ec1_name'),rl=asmtGet('ec1_rel');
+    return n?(n+(rl?(' ('+rl+')'):'')):'';
+  },
+  poa_name:function(){
+    var ld=asmtState.data.legal_docs;
+    return (Array.isArray(ld)&&ld.some(function(x){return /power of attorney/i.test(x);}))?asmtGet('ec1_name'):'';
+  },
+  client_signed_name:function(){return asmtGet('client_full_legal')||asmtGet('client_preferred');},
+  client_relationship:function(){return asmtGet('ec1_rel');},
+  client_sign_date:function(){return asmtGet('visit_date_label');},
+  assessor_sign_date:function(){return asmtGet('visit_date_label');}
+};
+function asmtApplyPrefills(sec){
+  asmtState.pre=asmtState.pre||{};
+  (sec.fields||[]).forEach(function(f){
+    if(!f.k||!(f.t==='text'||f.t==='textarea'))return;
+    var fn=ASMT_PREFILL[f.k];if(!fn)return;
+    if(String(asmtState.data[f.k]||'').trim())return; // typed answers win, always
+    var v='';try{v=String(fn()||'').trim();}catch(_){}
+    if(v){asmtState.data[f.k]=v;asmtState.pre[f.k]=true;}
+  });
+}
+/* ⚡ASMT-PREFILL — END */
 function asmtPendingFile(k){return (asmtState.files||{})[k]||null;}
 function asmtSetFile(k,file){
   if(!asmtState.files)asmtState.files={};
@@ -11905,6 +11960,8 @@ function asmtSetGrid(k,row,col){
 function renderAsmt(){
   var sec=ASMT_SCHEMA[asmtState.section];
   if(!sec)return;
+  // Repeated questions answered earlier arrive pre-filled (marked, editable)
+  try{asmtApplyPrefills(sec);}catch(_){}
   var leadName='';
   if(asmtState.ri>-1){
     var r=rows[asmtState.ri]||[];
@@ -11940,8 +11997,9 @@ function renderAsmtField(f){
   if(f.t==='text'){
     var type=f.type||'text';
     var cls='asmt-field'+(f.wide?' asmt-wide':'');
-    return '<div class="'+cls+'"><label>'+escapeHtml(f.label)+'</label>'
-      +'<input type="'+type+'" data-asmt-k="'+f.k+'" value="'+escapeHtml(asmtGet(f.k))+'"></div>';
+    var pre=!!(asmtState.pre&&asmtState.pre[f.k]);
+    return '<div class="'+cls+'"><label>'+escapeHtml(f.label)+(pre?' <span style="font-size:9px;color:#8B6500;font-weight:800;letter-spacing:.05em">AUTO-FILLED</span>':'')+'</label>'
+      +'<input type="'+type+'" data-asmt-k="'+f.k+'"'+(pre?' style="background:#fbf4e2" title="Auto-filled from an earlier answer — edit freely"':'')+' value="'+escapeHtml(asmtGet(f.k))+'"></div>';
   }
   if(f.t==='textarea'){
     var rows=f.rows||3;
@@ -11957,8 +12015,9 @@ function renderAsmtField(f){
         +(pending?'<button type="button" class="asmt-attach-clear" data-asmt-attach-clear="'+f.attach+'" title="Remove file">\u00D7</button>':'')
         +'</div>';
     }
-    return '<div class="asmt-field asmt-wide"><label>'+escapeHtml(f.label)+'</label>'
-      +'<textarea data-asmt-k="'+f.k+'" rows="'+rows+'">'+escapeHtml(asmtGet(f.k))+'</textarea>'
+    var preTa=!!(asmtState.pre&&asmtState.pre[f.k]);
+    return '<div class="asmt-field asmt-wide"><label>'+escapeHtml(f.label)+(preTa?' <span style="font-size:9px;color:#8B6500;font-weight:800;letter-spacing:.05em">AUTO-FILLED</span>':'')+'</label>'
+      +'<textarea data-asmt-k="'+f.k+'" rows="'+rows+'"'+(preTa?' style="background:#fbf4e2" title="Auto-filled from an earlier answer — edit freely"':'')+'>'+escapeHtml(asmtGet(f.k))+'</textarea>'
       +attachHtml
       +'</div>';
   }
@@ -12094,7 +12153,23 @@ function renderAsmtField(f){
 function bindAsmtFieldHandlers(){
   // Plain text/textarea/input
   $$('[data-asmt-k]',el('asmt-body-inner')).forEach(function(inp){
-    inp.addEventListener('input',function(e){asmtSet(e.target.dataset.asmtK,e.target.value);});
+    inp.addEventListener('input',function(e){
+      var k=e.target.dataset.asmtK;
+      asmtSet(k,e.target.value);
+      // Editing an auto-filled field makes it a real answer
+      if(asmtState.pre)delete asmtState.pre[k];
+      e.target.style.background='';
+      // DOB → live age (marked auto-filled, still editable)
+      if(k==='dob'){
+        var ag=asmtAgeFromDob(e.target.value);
+        if(ag){
+          asmtState.data.age=ag;
+          (asmtState.pre=asmtState.pre||{}).age=true;
+          var ai=document.querySelector('[data-asmt-k="age"]');
+          if(ai){ai.value=ag;ai.style.background='#fbf4e2';}
+        }
+      }
+    });
   });
   // Single choice pills
   $$('[data-asmt-choice-k]',el('asmt-body-inner')).forEach(function(b){
@@ -12539,17 +12614,24 @@ async function asmtUploadToOneDrive(blob,filename,leadName){
   return j.webUrl||'';
 }
 
-// Send the intake notification email via Outlook Graph
-async function asmtSendIntakeEmail(leadName,summary,docUrl){
+// Send the intake notification email via Outlook Graph. Recipient is
+// editable in \u2699 Settings \u2192 Email (blank = intake@solurahomecare.com);
+// uploaded documents (medication lists etc.) ride along as OneDrive links.
+async function asmtSendIntakeEmail(leadName,summary,docUrl,attachLinks){
   var subject='In-Home Assessment Completed \u2014 '+leadName+' \u2014 '+ds(localToday());
   var bodyText=summary;
   if(docUrl)bodyText+='\n\nDocument: '+docUrl;
-  bodyText+='\n\n\u2014 Meir';
+  if(attachLinks&&attachLinks.length){
+    bodyText+='\n\nUploaded documents:';
+    attachLinks.forEach(function(a){bodyText+='\n- '+a.name+': '+a.url;});
+  }
+  bodyText+='\n\n- Meir';
+  var toAddr=String(cfg('asmtIntakeTo')||'').trim()||'intake@solurahomecare.com';
   var payload={
     message:{
       subject:subject,
       body:{contentType:'Text',content:bodyText},
-      toRecipients:[{emailAddress:{address:'intake@solurahomecare.com'}}]
+      toRecipients:[{emailAddress:{address:toAddr}}]
     },
     saveToSentItems:true
   };
@@ -12578,6 +12660,7 @@ async function asmtFinish(){
     // Upload any pending file attachments to the same Onboarding folder
     var pendingFiles=asmtState.files||{};
     var fileKeys=Object.keys(pendingFiles);
+    var attachLinks=[]; // OneDrive links ride the intake email
     for(var fi=0;fi<fileKeys.length;fi++){
       var fk=fileKeys[fi];
       var fileObj=pendingFiles[fk];
@@ -12587,7 +12670,8 @@ async function asmtFinish(){
       var origExt=(fileObj.name.match(/\.[a-zA-Z0-9]+$/)||[''])[0];
       var attachFname=fk.replace(/[^a-zA-Z0-9_-]+/g,'_')+'_'+safeName.replace(/\s+/g,'_')+'_'+stamp+origExt;
       try{
-        await asmtUploadToOneDrive(fileObj,attachFname,safeName);
+        var attachUrl=await asmtUploadToOneDrive(fileObj,attachFname,safeName);
+        if(attachUrl)attachLinks.push({name:fileObj.name,url:attachUrl});
       }catch(e){
         // Don't abort the whole flow on attachment failure — surface and continue
         console.warn('Attachment upload failed for '+fk+':',e.message);
@@ -12598,7 +12682,7 @@ async function asmtFinish(){
     if(btn)btn.textContent='Sending intake email…';
     var summary=asmtBuildEmailSummary();
     try{
-      await asmtSendIntakeEmail(leadName,summary,docUrl);
+      await asmtSendIntakeEmail(leadName,summary,docUrl,attachLinks);
     }catch(e){
       // Upload succeeded, email failed — keep the upload, surface the email error
       toast('\u2713 Uploaded to OneDrive. Email failed: '+e.message);
