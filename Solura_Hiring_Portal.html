@@ -11890,6 +11890,19 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
     if(!silent)toast('Saved');
     return true;
   }catch(e){toast('Save failed: '+e.message);console.error('saveW error:',e);return false;}}
+/* Save a SPECIFIC workspace copy, even if the operator has opened another candidate since it was
+   captured. For handlers that await the network and then write: the global W is replaced by loadW the
+   moment another candidate is opened (closeWorkspace never nulls it), so `await fetch(...)` followed by
+   `W.st.x=...; saveW()` writes the first candidate's result onto whoever is open NOW, into THEIR row.
+   saveW only reads W synchronously before its first await (row, st, gates, payloads), so pointing W at
+   the captured copy for that synchronous prefix and restoring it immediately saves exactly `w`. */
+function _saveWFor(w,silent){
+  if(!w)return Promise.resolve(false);
+  if(W===w)return saveW(silent);
+  const cur=W;W=w;let p;
+  try{p=saveW(silent);}finally{W=cur;}
+  return p;
+}
 
 /* ===================== email ===================== */
 /* BOOK_LINK is the public Cal.com URL — replace with your actual Cal.com event URL after setup.
@@ -14515,11 +14528,27 @@ function vrTier2Eval(c){
 /* Bucket + primary for the 'Verify employers' stage — the action engine calls this. While Tier-1
    facts are out at Yardstik, the candidate sits LOCKED in 'checks'; the moment Tier-1 resolves it
    flips to 'action' and the independent-reference work unlocks. */
+/* The stage a candidate leaves verification INTO, from their OWN sequence — or null when a move would
+   not be strictly forward (current stage not a stage step of their sequence, or already past the
+   verification step). Same fail-closed rule skipEmployerVerification enforces; shared by the Tier-2
+   "continue" paths, which wrote a hardcoded 'References' unconditionally even though the verify hub is
+   reachable from Offer/Onboarding/Hired (and 'References' is not a stage in every sequence). */
+function _stageAfterVerify(c){
+  if(!c)return null;
+  const stages=(typeof _seqStagesFor==='function')?_seqStagesFor(c):[];
+  const i=stages.indexOf('Verify employers'),here=stages.indexOf(c.stage);
+  const next=(i>=0&&stages[i+1])?stages[i+1]:null;
+  return (next&&here>=0&&here<=i)?next:null;
+}
 function vrAction(c,info){
   vrInit(c.st);const cfg=vrCfg();const tier=c.st.vr.tier||1;
   if(tier>=2){
     const t2=vrTier2Eval(c);
-    if(t2.done)return{bucket:'action',timing:_dn('Independent refs done → candidate refs','pnew'),info,primary:{kind:'advance-stage',advanceTo:'References',label:'→ Candidate references →',cls:'grn'}};
+    if(t2.done){
+      const _nx=_stageAfterVerify(c);
+      if(_nx)return{bucket:'action',timing:_dn('Independent refs done → '+_nx,'pnew'),info,primary:{kind:'advance-stage',advanceTo:_nx,label:'→ '+_nx+' →',cls:'grn'}};
+      return{bucket:'action',timing:_dn('Independent refs done','pnew'),info,primary:{kind:'verify',label:'Open independent reference hub',cls:'grn'}};
+    }
     const lbl=t2.next?('Call supervisor @ '+(t2.next.name||'employer')):'Find a supervisor';
     return{bucket:'action',timing:_dn(lbl+' ('+t2.reached+'/'+t2.need+')','pa'),info,primary:{kind:'verify',label:'Open independent reference hub',cls:'sky'}};
   }
@@ -14534,7 +14563,12 @@ function vrAction(c,info){
     const emp=c.st.employers||[];
     const unresolved=emp.filter(e=>e&&(e.name||'').trim()&&!e.v);
     const allOutAtYardstik=unresolved.length>0&&unresolved.every(e=>e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running'));
-    if(cfg.t1Source==='yardstik'||allOutAtYardstik)return{bucket:'checks',timing:_dn('Verifying employment (Yardstik) '+t1.resolved+'/'+t1.total,'psoft'),info,primary:{kind:'lock',label:'🔒 Awaiting verification',cls:'lock'}};
+    /* The lock is justified ONLY by work actually out at Yardstik. `cfg.t1Source==='yardstik'` used to
+       lock on its own, so with that setting every candidate at Verify employers carrying an employer with
+       no verdict sat in Checks behind "🔒 Awaiting verification" even when NO order had been placed —
+       nothing orders automatically, so nothing would ever release them (rule 4's shape: a waiting
+       bucket with nothing that will execute). Unordered employers now surface the hub, where Order is. */
+    if(allOutAtYardstik)return{bucket:'checks',timing:_dn('Verifying employment (Yardstik) '+t1.resolved+'/'+t1.total,'psoft'),info,primary:{kind:'lock',label:'🔒 Awaiting verification',cls:'lock'}};
     return{bucket:'action',timing:_dn('Verify employers '+t1.resolved+'/'+t1.total,'pnew'),info,primary:{kind:'verify',label:'Continue verification',cls:'sky'}};
   }
   if(t1.state==='disqualify')return{bucket:'action',timing:_dn(t1.pct+'% unable to verify — disqualify','pr2'),info,primary:{kind:'verify',label:'Review — verification failed',cls:'red'}};
@@ -14572,7 +14606,19 @@ function vrSupAttempt(i){
 function vrSupReached(i){const e=W.st.employers[i];if(!e)return;e.t2status='reached';saveW(true);renderWorkspace();}
 function vrSupReset(i){const e=W.st.employers[i];if(!e)return;e.t2status='';e.t2n=0;saveW(true);renderWorkspace();}
 function vrSetRehire(i,val){const e=W.st.employers[i];if(!e)return;e.rehire=val;saveW(true);renderWorkspace();}
-function vrT2Advance(){advanceWS('References','Independent references complete');}
+async function vrT2Advance(){
+  if(!W)return;
+  /* Was advanceWS('References',…) unconditionally: the hub opens from any stage, so a candidate already at
+     Offer/Onboarding/Hired was DEMOTED to 'References' by one click (rule 2), and 'References' is host
+     vocabulary a sequence need not contain (rule 3). Move forward within their own sequence or not at all. */
+  const nx=_stageAfterVerify({st:W.st,stage:W.stage});
+  if(nx)return advanceWS(nx,'Independent references complete');
+  W.st.vr=W.st.vr||{};W.st.vr.t2DoneAt=new Date().toISOString();
+  logW('✓ Independent references complete — stage left as '+W.stage);
+  await saveW(true);
+  toast('✓ Independent references complete — stage left as '+W.stage);
+  renderWorkspace();
+}
 function vrDisqualify(){if(confirm('Disqualify — employment could not be verified?'))quickDecline(W.row);} /* W.row, not W.excelRow — the latter is undefined and only worked because loadW(undefined) returns early */
 
 /* Three-tier verification + reference hub (replaces the old flat verify list). */
@@ -14628,7 +14674,7 @@ function verifyBlock(){
   if(!emp.length){
     return `<div class="wscard" id="ws-verify"><h3>Verify past employers</h3>${skipBar}${header}`+
       emptyCard('🏢','No past employers on file','+ add employer',"W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:'',source:'manual'});renderWorkspace()")+
-      `<div class="brow" style="margin-top:6px"><button class="btn-primary bg-grn" onclick="advanceWS('References','Skipped employer verify')" style="flex:0 0 auto;padding:8px 14px">Skip → candidate references →</button></div></div>`;
+      `<div class="brow" style="margin-top:6px"><button class="btn-primary bg-grn" onclick="skipEmployerVerification()" style="flex:0 0 auto;padding:8px 14px" title="Waive the check (logged) and move forward within this candidate's own sequence">Skip verification →</button></div></div>`;
   }
   if(tier>=2)return `<div class="wscard" id="ws-verify"><h3>Independent references</h3>${skipBar}${header}${vrTier2View(emp,cfg)}</div>`;
   return `<div class="wscard" id="ws-verify"><h3>Verify past employers</h3>${skipBar}${header}${vrTier1View(emp,cfg)}</div>`;
@@ -14707,7 +14753,7 @@ function vrTier1View(emp,cfg){
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <input value="${esc(e.phone||'')}" placeholder="Phone" oninput="W.st.employers[${i}].phone=this.value;renderWorkspace()" onblur="saveW(true)" style="flex:1;min-width:120px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">
         ${findPhone}${callBtn}${logBtn}${attemptN}${yPill}${vBtns}
-        <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;flex:0 0 auto" onclick="if(confirm('Remove this employer?')){W.st.employers.splice(${i},1);saveW(true);renderWorkspace();}">×</button>
+        <button class="btn-sm" style="color:var(--red);border:1px solid var(--red);background:#fff;cursor:pointer;flex:0 0 auto" onclick="if(confirm('Remove this employer?')){_removeEmployer(${i});saveW(true);renderWorkspace();}">×</button>
       </div>
       ${denied}
       ${verifiedPanel}
@@ -14820,6 +14866,17 @@ function _reconcileOne(c,empIdx){
     push('rehire','—','not eligible for rehire','noRehire');
   }
   return D;
+}
+/* Remove employer i from the open workspace AND the index-keyed discrepancy record. A bare splice left
+   the removed employer's findings in st.discrepancies and st.reconcilePenalty — scoreRow keeps subtracting
+   that penalty (it can push a candidate into the decline band) — and shifted every later finding onto the
+   wrong employer's card, since discrepancies are keyed by empIdx. */
+function _removeEmployer(i){
+  if(!W||!Array.isArray(W.st.employers))return;
+  W.st.employers.splice(i,1);
+  if(!Array.isArray(W.st.discrepancies))return;
+  W.st.discrepancies=W.st.discrepancies.filter(d=>d.empIdx!==i).map(d=>(d.empIdx>i?Object.assign({},d,{empIdx:d.empIdx-1}):d));
+  W.st.reconcilePenalty=W.st.discrepancies.reduce((s,d)=>s+(d.penalty||0),0);
 }
 /* Recompute discrepancies for the FULL candidate (all employers + top-level claims). Called any
    time verified data changes on any employer. Also handles cross-employer facts like longest tenure. */
@@ -15335,16 +15392,23 @@ async function _orderYardstikGo(packageId){
   const tok=(SETTINGS.config||{}).ziToken||'';
   const accountId=SETTINGS.config.yardstikAccountId;
   if(!packageId){toast('No package selected');return;}
+  /* Capture the candidate BEFORE awaiting the worker (several seconds of Yardstik + Graph calls). The
+     modal is already closed, so the operator is free to open the next candidate meanwhile; writing the
+     result through the global W then replaced THAT candidate's BG object with this order, reset their
+     tpCheck to pending (re-locking the offer gate, arming the T-60/T-30 BG-form gate on their interview)
+     and saved it to their row. */
+  const w=W;
+  if(!w){toast('No candidate open');return;}
   toast('🛡 Ordering Yardstik check…');
   try{
     const r=await fetch(ZI_WORKER_URL+'/yardstik/order',{
       method:'POST',
       headers:{'Content-Type':'application/json','X-Solura-Token':tok},
       body:JSON.stringify({
-        candidateEmail:W.email,
-        candidateName:W.name,
-        candidatePhone:W.phone||'',
-        excelRow:W.row,
+        candidateEmail:w.email,
+        candidateName:w.name,
+        candidatePhone:w.phone||'',
+        excelRow:w.row,
         accountId:accountId,
         packageId:packageId
       })
@@ -15362,16 +15426,16 @@ async function _orderYardstikGo(packageId){
        of the VERIFICATION report — the exact bug that filter was added to fix. Live: 19 rows carry
        verify state and 6 sit at Verify employers with an expired/absent BG check, which is exactly
        the population a re-order targets. */
-    const _pvY=W.st.yardstik||{};
-    W.st.yardstik={candidateId:data.candidateId,invitationId:data.invitationId,reportId:data.reportId,status:'created',applyUrl:data.applyUrl,orderedAt:new Date().toISOString(),packageId:packageId};
-    ['verifyReportId','verifyPackageId','verifyOrderedAt'].forEach(k=>{if(_pvY[k])W.st.yardstik[k]=_pvY[k];});
-    W.st.tpCheck='pending';
-    logW('🛡 Yardstik check ordered ('+packageId+') · candidate '+String(data.candidateId||'').slice(0,8)+'…');
-    await saveW(true);
-    toast('✓ Yardstik check ordered — '+esc(W.email)+' will get the intake email shortly');
+    const _pvY=w.st.yardstik||{};
+    w.st.yardstik={candidateId:data.candidateId,invitationId:data.invitationId,reportId:data.reportId,status:'created',applyUrl:data.applyUrl,orderedAt:new Date().toISOString(),packageId:packageId};
+    ['verifyReportId','verifyPackageId','verifyOrderedAt'].forEach(k=>{if(_pvY[k])w.st.yardstik[k]=_pvY[k];});
+    w.st.tpCheck='pending';
+    w.st.log=w.st.log||[];w.st.log.push({t:stamp(),x:'🛡 Yardstik check ordered ('+packageId+') · candidate '+String(data.candidateId||'').slice(0,8)+'…'});
+    await _saveWFor(w,true);
+    toast('✓ Yardstik check ordered — '+esc(w.email)+' will get the intake email shortly');
     /* Completing the order IS what advances a yardstik sequence step. */
-    await _seqAdvanceIfIntent(W.row,it=>it.type==='integration'&&it.provider==='yardstik'&&/order_check|order-check/.test(it.action||''),'background check ordered');
-    renderWorkspace();
+    await _seqAdvanceIfIntent(w.row,it=>it.type==='integration'&&it.provider==='yardstik'&&/order_check|order-check/.test(it.action||''),'background check ordered');
+    if(W===w)renderWorkspace();
   }catch(e){toast('✗ Order failed: '+e.message);}
 }
 
@@ -15397,16 +15461,22 @@ async function orderYardstikVerification(){
   const targets=(W.st.employers||[]).filter(e=>e&&(e.name||'').trim()&&!e.v&&!(e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running')));
   if(!targets.length){toast('No unresolved employers to verify');return;}
   if(!confirm('Order Yardstik employment verification for '+targets.length+' employer'+(targets.length===1?'':'s')+'?\n\nYardstik will contact each and report back per-employer; results auto-populate the verdicts below.'))return;
+  /* Same capture as _orderYardstikGo: after the await, the global W may be the NEXT candidate the
+     operator opened. Writing through it put this order's verifyReportId/verifyPackageId onto that
+     person (whose refreshYardstik then filters their own reports against a foreign id) and left THIS
+     candidate with no record of a billable order and no employer marked in flight - so the Order
+     button came straight back for a second, duplicate charge. `targets` are this copy's own objects. */
+  const w=W;
   toast('🛡 Ordering employment verification…');
   try{
     const r=await fetch(ZI_WORKER_URL+'/yardstik/order',{
       method:'POST',
       headers:{'Content-Type':'application/json','X-Solura-Token':tok},
       body:JSON.stringify({
-        candidateEmail:W.email,
-        candidateName:W.name,
-        candidatePhone:W.phone||'',
-        excelRow:W.row,
+        candidateEmail:w.email,
+        candidateName:w.name,
+        candidatePhone:w.phone||'',
+        excelRow:w.row,
         accountId:accountId,
         verifyPackageId:verifyPackageId,
         verifyOnly:true,
@@ -15417,17 +15487,17 @@ async function orderYardstikVerification(){
     if(!r.ok){toast('✗ Order failed: '+(data.error||r.status));return;}
     /* Mark each ordered employer as Yardstik-in-flight. Persist verify state alongside any
        existing W.st.yardstik (BG-check state untouched). */
-    W.st.yardstik=W.st.yardstik||{};
-    W.st.yardstik.verifyReportId=data.verifyReportId||W.st.yardstik.verifyReportId||null;
-    W.st.yardstik.verifyPackageId=verifyPackageId;
-    W.st.yardstik.verifyOrderedAt=new Date().toISOString();
-    targets.forEach(t=>{const emp=W.st.employers.find(e=>e===t);if(emp){emp.ySrc='yardstik';emp.yStatus='ordered';}});
-    logW('🔍 Employment verification ordered · '+targets.length+' employer'+(targets.length===1?'':'s'));
-    await saveW(true);
+    w.st.yardstik=w.st.yardstik||{};
+    w.st.yardstik.verifyReportId=data.verifyReportId||w.st.yardstik.verifyReportId||null;
+    w.st.yardstik.verifyPackageId=verifyPackageId;
+    w.st.yardstik.verifyOrderedAt=new Date().toISOString();
+    targets.forEach(t=>{const emp=(w.st.employers||[]).find(e=>e===t);if(emp){emp.ySrc='yardstik';emp.yStatus='ordered';}});
+    w.st.log=w.st.log||[];w.st.log.push({t:stamp(),x:'🔍 Employment verification ordered · '+targets.length+' employer'+(targets.length===1?'':'s')});
+    await _saveWFor(w,true);
     toast('✓ Verification ordered for '+targets.length+' employer'+(targets.length===1?'':'s'));
     /* Sequences that include a verification step advance when the order completes. */
-    await _seqAdvanceIfIntent(W.row,it=>it.type==='integration'&&it.provider==='yardstik'&&/verification/.test(it.action||''),'employment verification ordered');
-    renderWorkspace();
+    await _seqAdvanceIfIntent(w.row,it=>it.type==='integration'&&it.provider==='yardstik'&&/verification/.test(it.action||''),'employment verification ordered');
+    if(W===w)renderWorkspace();
   }catch(e){toast('✗ Order failed: '+e.message);}
 }
 
@@ -15884,7 +15954,12 @@ async function revertBgOverride(gateKey){
 }
 
 async function refreshYardstik(){
-  if(!W.st.yardstik||!(W.st.yardstik.reportId||W.st.yardstik.candidateId)){toast('No Yardstik order on file');return;}
+  /* Captured before the awaits below (up to two worker round-trips): the operator can open another
+     candidate meanwhile, and writing through the global W put THIS report's status/tpCheck/decisionRequired
+     onto that person and saved it to their row (a flag re-locks their offer; a clear unlocks it). */
+  const w=W;if(!w)return;
+  const _logTo=(o,x)=>{o.st.log=o.st.log||[];o.st.log.push({t:stamp(),x:x});};
+  if(!w.st.yardstik||!(w.st.yardstik.reportId||w.st.yardstik.candidateId)){toast('No Yardstik order on file');return;}
   const tok=(SETTINGS.config||{}).ziToken||'';
   if(!tok){toast('Set internal worker token first');return;}
   toast('🔄 Refreshing…');
@@ -15892,25 +15967,25 @@ async function refreshYardstik(){
     /* No report id yet (Yardstik creates the report only after the candidate finishes the
        intake, and the webhook may not have delivered it) — resolve the newest report from
        the candidate id via the v8 normalized endpoint and BACKFILL the id. */
-    if(!W.st.yardstik.reportId&&W.st.yardstik.candidateId){
-      const rl=await fetch(ZI_WORKER_URL+'/yardstik/report-status?candidateId='+encodeURIComponent(W.st.yardstik.candidateId),{headers:{'X-Solura-Token':tok}});
+    if(!w.st.yardstik.reportId&&w.st.yardstik.candidateId){
+      const rl=await fetch(ZI_WORKER_URL+'/yardstik/report-status?candidateId='+encodeURIComponent(w.st.yardstik.candidateId),{headers:{'X-Solura-Token':tok}});
       const jl=await rl.json().catch(()=>({}));
       /* Exclude the EMPLOYMENT-VERIFICATION report (and its package) — "newest report on the
          candidate" used to grab it and fabricate a BG verdict from a verification result. */
-      const _vRid=W.st.yardstik.verifyReportId,_vPkg=W.st.yardstik.verifyPackageId;
+      const _vRid=w.st.yardstik.verifyReportId,_vPkg=w.st.yardstik.verifyPackageId;
       const reps=((jl&&Array.isArray(jl.reports))?jl.reports.filter(x=>x&&x.id):[])
         .filter(x=>x.id!==_vRid&&!(_vPkg&&(x.packageId===_vPkg||x.package_id===_vPkg)));
       if(!reps.length){toast((jl&&jl.error)?('Yardstik: '+jl.error):'Yardstik has no background-check report yet for this candidate — they likely have not finished the intake form');return;}
       reps.sort((a,b)=>String(b.completedAt||b.createdAt||'').localeCompare(String(a.completedAt||a.createdAt||'')));
-      W.st.yardstik.reportId=reps[0].id;
-      logW('Yardstik report id resolved from the candidate: '+String(reps[0].id).slice(0,8)+'...');
+      w.st.yardstik.reportId=reps[0].id;
+      _logTo(w,'Yardstik report id resolved from the candidate: '+String(reps[0].id).slice(0,8)+'...');
     }
-    const r=await fetch(ZI_WORKER_URL+'/yardstik/status?reportId='+encodeURIComponent(W.st.yardstik.reportId),{headers:{'X-Solura-Token':tok}});
+    const r=await fetch(ZI_WORKER_URL+'/yardstik/status?reportId='+encodeURIComponent(w.st.yardstik.reportId),{headers:{'X-Solura-Token':tok}});
     const data=await r.json();
     if(!r.ok){toast('✗ Refresh failed: '+(data.error||r.status));return;}
-    W.st.yardstik.status=data.status||W.st.yardstik.status;
-    W.st.yardstik.lastUpdate=new Date().toISOString();
-    if(data.reportUrl)W.st.yardstik.reportUrl=data.reportUrl;
+    w.st.yardstik.status=data.status||w.st.yardstik.status;
+    w.st.yardstik.lastUpdate=new Date().toISOString();
+    if(data.reportUrl)w.st.yardstik.reportUrl=data.reportUrl;
     /* Map status to tpCheck — and settle decisionRequired in the SAME two families, exactly as
        the worker's webhook branch does. This refresh used to write status+tpCheck and leave
        decisionRequired untouched, so a report Yardstik itself later resolved kept the "needs a
@@ -15923,25 +15998,25 @@ async function refreshYardstik(){
        refresh would otherwise revert the decision and re-lock the offer hard gate. */
     const _ysClean=['clear','proceed','pass'].includes(data.status);
     const _ysFlag=['consider','pre_adverse','ys_qa_review','final_adverse','fail'].includes(data.status);
-    const _ysAdj=(W.st.yardstik&&W.st.yardstik.decision)||'';
+    const _ysAdj=(w.st.yardstik&&w.st.yardstik.decision)||'';
     let _adjHeld=false;
     if(_ysClean){
-      const _was=W.st.tpCheck,_wasReq=!!W.st.yardstik.decisionRequired;
-      W.st.tpCheck='clear';W.st.yardstik.decisionRequired=false;
-      if(_was!=='clear'||_wasReq)logW('🛡 Yardstik status refreshed → '+data.status+' · check CLEAR');
+      const _was=w.st.tpCheck,_wasReq=!!w.st.yardstik.decisionRequired;
+      w.st.tpCheck='clear';w.st.yardstik.decisionRequired=false;
+      if(_was!=='clear'||_wasReq)_logTo(w,'🛡 Yardstik status refreshed → '+data.status+' · check CLEAR');
     }else if(_ysFlag&&!_ysAdj){
-      const _was=W.st.tpCheck,_wasReq=!!W.st.yardstik.decisionRequired;
-      W.st.tpCheck='flag';W.st.yardstik.decisionRequired=true;
-      if(_was!=='flag'||!_wasReq)logW('⚠ Yardstik status refreshed → '+data.status+' · needs a manual decision');
+      const _was=w.st.tpCheck,_wasReq=!!w.st.yardstik.decisionRequired;
+      w.st.tpCheck='flag';w.st.yardstik.decisionRequired=true;
+      if(_was!=='flag'||!_wasReq)_logTo(w,'⚠ Yardstik status refreshed → '+data.status+' · needs a manual decision');
     }else if(_ysFlag&&_ysAdj){
       /* Leave tpCheck and decisionRequired exactly as the adjudication left them. No log line:
          a refresh can be clicked repeatedly and this branch would otherwise grow the log toward
          the 32k AJ cap for no new information. The toast below says it instead. */
       _adjHeld=true;
     }
-    await saveW(true);
+    await _saveWFor(w,true);
     toast('✓ Status: '+data.status+(_adjHeld?(' — your '+String(_ysAdj).toUpperCase()+' decision stands (Yardstik is not told about adjudications)'):''));
-    renderWorkspace();
+    if(W===w)renderWorkspace();
   }catch(e){toast('✗ Refresh failed: '+e.message);}
 }
 function setRegistryResult(key,field,val){W.st.registryChecks=W.st.registryChecks||{};W.st.registryChecks[key]=W.st.registryChecks[key]||{};W.st.registryChecks[key][field]=val;if(field==='status')saveW(true);}
@@ -21750,6 +21825,7 @@ async function restoreYardstikReportId(excelRow){
   const inp=document.getElementById('race-repair-rpt-'+excelRow);
   const reportId=(inp&&inp.value||'').trim();
   if(!reportId){toast('Paste the Yardstik report ID first');return;}
+  if(c.st&&c.st.yardstik&&c.st.yardstik.verifyReportId===reportId){toast('That is the EMPLOYMENT-VERIFICATION report — paste the background-check report ID');return;}
   const tok=(SETTINGS.config||{}).ziToken||'';
   if(!tok){toast('Set internal worker token first');return;}
   c.st=c.st||{};
@@ -21776,8 +21852,15 @@ async function restoreYardstikReportId(excelRow){
     c.st.yardstik.status=data.status;
     c.st.yardstik.lastUpdate=new Date().toISOString();
     if(data.reportUrl)c.st.yardstik.reportUrl=data.reportUrl;
-    if(['clear','proceed','pass'].includes(data.status))c.st.tpCheck='clear';
-    else if(['consider','pre_adverse','ys_qa_review','final_adverse','fail'].includes(data.status))c.st.tpCheck='flag';
+    /* Same two families as refreshYardstik, INCLUDING decisionRequired and the adjudication precedence.
+       This twin set tpCheck='flag' alone: openBgDecisionModal is reachable only from the bg-decision
+       primary, which requires decisionRequired, so a re-linked flagged report locked the offer with no
+       Decide button anywhere (only the raw 3rd-party dropdown, which records no note/decider). */
+    const _adj=c.st.yardstik.decision||'';
+    if(['clear','proceed','pass'].includes(data.status)){c.st.tpCheck='clear';c.st.yardstik.decisionRequired=false;}
+    else if(['consider','pre_adverse','ys_qa_review','final_adverse','fail'].includes(data.status)){
+      if(!_adj){c.st.tpCheck='flag';c.st.yardstik.decisionRequired=true;}
+    }
     else c.st.tpCheck='pending';
   }else{
     /* Worker call failed — still persist the re-link so the user isn't stuck. */
