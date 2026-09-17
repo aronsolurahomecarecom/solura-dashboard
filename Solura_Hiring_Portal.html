@@ -11521,6 +11521,10 @@ function setFocusedHub(kind){
 /* Cancel the current Cal.com booking from the portal (worker → Cal.com API → webhook). */
 async function cancelInterviewBooking(){
   if(!W||!W.st.calBookingId){toast('No Cal.com booking id on file for this candidate');return;}
+  /* Captured before the Cal.com round-trip: opening another candidate during it replaced the global W, and
+     the success branch then reverted THAT person's booked stage, deleted THEIR booking/calBookingId/meetingUrl
+     and saved it to their row, while this candidate kept a booking Cal.com had just cancelled. */
+  const w=W;
   const missing=_missingAppCerts(W);
   const reason=prompt('Cancellation reason (Cal.com sends it to the candidate):',
     missing.length?('Required certificates not received before the interview: '+missing.join(', ')):'Background-check form not completed before the interview');
@@ -11529,9 +11533,10 @@ async function cancelInterviewBooking(){
   const tok=(SETTINGS.config||{}).ziToken||'';
   if(!tok){toast('Set the internal worker token first (Settings → 🔌 Integrations)');return;}
   try{
-    const r=await fetch(ZI_WORKER_URL+'/cal/cancel-booking',{method:'POST',headers:{'Content-Type':'application/json','X-Solura-Token':tok},body:JSON.stringify({bookingUid:W.st.calBookingId,reason:reason})});
+    const r=await fetch(ZI_WORKER_URL+'/cal/cancel-booking',{method:'POST',headers:{'Content-Type':'application/json','X-Solura-Token':tok},body:JSON.stringify({bookingUid:w.st.calBookingId,reason:reason})});
     const j=await r.json();
-    if(j.ok){logW('\u2715 Interview cancelled via Cal.com \u2014 '+reason);{const _to=_bookingCancelledStage(W.stage);if(_to){W.stage=_to;logW('Stage reverted to '+_to+' — awaiting a new booking');}_clearCancelledBooking(W.st,W.stage,pipeline.find(x=>x.excelRow===W.row));} /* the webhook transition, before saving - see _clearCancelledBooking */await saveW(true);toast('\u2715 Cancelled \u2014 Cal.com is notifying the candidate');}
+    const _logTo=x=>{w.st.log=w.st.log||[];w.st.log.push({t:stamp(),x:x});};
+    if(j.ok){_logTo('\u2715 Interview cancelled via Cal.com \u2014 '+reason);{const _to=_bookingCancelledStage(w.stage);if(_to){w.stage=_to;_logTo('Stage reverted to '+_to+' — awaiting a new booking');}_clearCancelledBooking(w.st,w.stage,pipeline.find(x=>x.excelRow===w.row));} /* the webhook transition, before saving - see _clearCancelledBooking */await _saveWFor(w,true);toast('\u2715 Cancelled \u2014 Cal.com is notifying the candidate');}
     else toast('\u26a0 Cancel failed: '+(j.error||('Cal.com '+(j.status||'')))+(j.calcom&&j.calcom.message?(' \u2014 '+j.calcom.message):''));
   }catch(e){toast('\u26a0 Cancel failed: '+e.message);}
 }
@@ -15906,6 +15911,7 @@ async function requestCredentialRenewal(id){
 
 async function applyBgOverride(gateKey,newValue,labelEsc){
   if(!W)return;
+  const w=W; /* the gate PATCH is awaited before the log + save: a switch meanwhile logged and saved the wrong candidate while this one's override stamp was never persisted */
   W.st.bgOverrides=W.st.bgOverrides||{};
   /* Stash the original (candidate-claimed) value so a Revert button can restore it. */
   const origKey='_orig'+gateKey.charAt(0).toUpperCase()+gateKey.slice(1);
@@ -15917,11 +15923,11 @@ async function applyBgOverride(gateKey,newValue,labelEsc){
      original answer is preserved on st.bgOverrides._origXx. */
   W.gates[gateKey]=newValue;
   const colMap={wa:'H',cr:'I',bg:'J',tr:'K',av:'L'};
-  await patchRange(colMap[gateKey]+W.row,[[newValue]]);
-  logW('🛡 Applied BG override — '+(labelEsc||gateKey)+' → '+newValue+' (was '+W.st.bgOverrides[origKey]+')');
-  await saveW(true);
+  await patchRange(colMap[gateKey]+w.row,[[newValue]]);
+  w.st.log=w.st.log||[];w.st.log.push({t:stamp(),x:'🛡 Applied BG override — '+(labelEsc||gateKey)+' → '+newValue+' (was '+w.st.bgOverrides[origKey]+')'});
+  await _saveWFor(w,true);
   toast('✓ Override applied to gate "'+gateKey+'"');
-  renderWorkspace();
+  if(W===w)renderWorkspace();
   render();
 }
 
@@ -15938,6 +15944,7 @@ async function dismissBgConflict(gateKey){
 
 async function revertBgOverride(gateKey){
   if(!W||!W.st.bgOverrides)return;
+  const w=W; /* see applyBgOverride */
   const origKey='_orig'+gateKey.charAt(0).toUpperCase()+gateKey.slice(1);
   const orig=W.st.bgOverrides[origKey]||'';
   delete W.st.bgOverrides[gateKey];
@@ -15945,11 +15952,11 @@ async function revertBgOverride(gateKey){
   /* Restore the original gate value */
   W.gates[gateKey]=orig;
   const colMap={wa:'H',cr:'I',bg:'J',tr:'K',av:'L'};
-  await patchRange(colMap[gateKey]+W.row,[[orig]]);
-  logW('↺ Reverted BG override on "'+gateKey+'" — restored candidate\'s claim ('+orig+')');
-  await saveW(true);
+  await patchRange(colMap[gateKey]+w.row,[[orig]]);
+  w.st.log=w.st.log||[];w.st.log.push({t:stamp(),x:'↺ Reverted BG override on "'+gateKey+'" — restored candidate\'s claim ('+orig+')'});
+  await _saveWFor(w,true);
   toast('Override reverted');
-  renderWorkspace();
+  if(W===w)renderWorkspace();
   render();
 }
 
@@ -17707,26 +17714,31 @@ function generateActivityLogPdf(c){
    modal already render it). The worker's webhook auto-captures new completions; this button
    covers reports that completed before that existed or whose webhook never arrived. */
 async function _pullYardstikReport(){
-  if(!W||!W.st.yardstik||!(W.st.yardstik.reportId||W.st.yardstik.candidateId)){toast('No Yardstik order on file');return;}
+  /* Captured before the awaits: the worker fetch + PDF download + SharePoint folder/PUT take seconds, and
+     W.name / W.st were read AFTER them. Opening another candidate meanwhile filed THIS candidate's
+     background-check report into THAT person's SharePoint onboarding folder and stamped its link on their
+     record - a criminal-history document on the wrong person's file. */
+  const w=W;
+  if(!w||!w.st.yardstik||!(w.st.yardstik.reportId||w.st.yardstik.candidateId)){toast('No Yardstik order on file');return;}
   const wtok=(SETTINGS.config||{}).ziToken||'';
   if(!wtok){toast('Set the internal worker token first (Settings → 🔌 Integrations)');return;}
   toast('📥 Pulling the report from Yardstik…');
   try{
-    const qs='reportId='+encodeURIComponent(W.st.yardstik.reportId||'')+(W.st.yardstik.candidateId?'&candidateId='+encodeURIComponent(W.st.yardstik.candidateId):'');
+    const qs='reportId='+encodeURIComponent(w.st.yardstik.reportId||'')+(w.st.yardstik.candidateId?'&candidateId='+encodeURIComponent(w.st.yardstik.candidateId):'');
     const r=await fetch(ZI_WORKER_URL+'/yardstik/report-pdf?'+qs,{headers:{'X-Solura-Token':wtok}});
     if(!r.ok||(r.headers.get('Content-Type')||'').indexOf('pdf')<0){
       const j=await r.json().catch(()=>({}));
       throw new Error(j.error||('HTTP '+r.status));
     }
     const blob=await r.blob();
-    const fileName='background-report-'+((W.st.tpCheck||'')==='clear'?'CLEAR':((W.st.tpCheck||'')==='flag'?'FLAG':'RESULT'))+'-'+today()+'.pdf';
-    const uploaded=await uploadPdfToOnboarding(W.name,fileName,blob);
-    W.st.yardstik.reportPdfUrl=(uploaded&&uploaded.webUrl)||'';
-    W.st.yardstik.reportPdfFile=fileName;
-    logW('📥 Yardstik report pulled into SharePoint — '+fileName);
-    await saveW(true);
+    const fileName='background-report-'+((w.st.tpCheck||'')==='clear'?'CLEAR':((w.st.tpCheck||'')==='flag'?'FLAG':'RESULT'))+'-'+today()+'.pdf';
+    const uploaded=await uploadPdfToOnboarding(w.name,fileName,blob);
+    w.st.yardstik.reportPdfUrl=(uploaded&&uploaded.webUrl)||'';
+    w.st.yardstik.reportPdfFile=fileName;
+    w.st.log=w.st.log||[];w.st.log.push({t:stamp(),x:'📥 Yardstik report pulled into SharePoint — '+fileName});
+    await _saveWFor(w,true);
     toast('✓ Report filed in the onboarding folder');
-    renderWorkspace();
+    if(W===w)renderWorkspace();
   }catch(e){toast('✗ Could not pull the report: '+e.message);}
 }
 async function uploadPdfToOnboarding(candidateName,fileName,blob){
