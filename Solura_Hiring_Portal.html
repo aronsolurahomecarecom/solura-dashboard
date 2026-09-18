@@ -12658,6 +12658,10 @@ function emailModal(tpl,subj,body,advanceTo){
   document.getElementById('mbox').style.maxWidth='780px';
   /* Reset the pending-attachments collection on each open. */
   window._emailAttachments=[];
+  /* A renewal composer closed without sending left its one-shot stamp hook armed: the NEXT send to
+     anyone stamped that credential and logged "Renewal request sent" onto whoever was open. Every
+     composer open disarms it; requestCredentialRenewal re-arms it right after its own doEmail. */
+  window._credRenewalStampHook=null;
   const showParkOpt=!['park_awaiting','missing','reject'].includes(tpl)&&!(W.st&&W.st.manualAwaiting);
 
   /* #2 — "Ask about missing stuff" bundle for the 'missing' template. Detects three types of gaps
@@ -12965,7 +12969,13 @@ function _renderAttachList(){
 }
 function _fmtSize(n){if(n<1024)return n+' B';if(n<1024*1024)return Math.round(n/1024)+' KB';return (n/(1024*1024)).toFixed(1)+' MB';}
 async function reallySend(tpl,advanceTo){
-  if(!W.email){toast('No email on file');return;}
+  if(!W||!W.email){toast('No email on file');return;}
+  /* The copy this send belongs to. Everything after the Graph send used to read the global W — but
+     the composer's ✕ stays live while "Sending…" spins (seconds with attachments), and one board click
+     after closing it runs loadW(other). The sent flags, the email record, the park, the sequence
+     advance and — for a rejection — stage 'Declined' then landed on THAT candidate and were saved to
+     their row, while this one kept no record the email went out. */
+  const w=W;
   advanceTo=_tplAdvanceTo(tpl,advanceTo); /* a rejection ALWAYS closes the candidate — regardless of which entry point opened the composer */
   /* Substitute any placeholders in subject/body BEFORE sending. This makes the placeholder
      buttons work even for free-typed text that includes tokens like {first} or {appLink}. */
@@ -12996,11 +13006,22 @@ async function reallySend(tpl,advanceTo){
     toast('🔒 Offer locked — the Yardstik check must be CLEAR first (current: '+((W&&W.st&&W.st.tpCheck)||'not run')+')');
     return;
   }
+  /* Read this composer's checkboxes NOW: after the await #modal may hold another dialog. */
+  const _parkChecked=!!(document.getElementById('e-park')||{}).checked;
+  const _msCerts=Array.from(document.querySelectorAll('.ms-cert-cb:checked')).map(cb=>cb.getAttribute('data-cert')).filter(Boolean);
+  const _msResume=!!(document.getElementById('ms-resume-cb')||{}).checked;
+  const _msAvail=!!(document.getElementById('ms-avail-cb')||{}).checked;
+  const _watchFor=(typeof _readWatchForPicker==='function')?_readWatchForPicker('esend'):[];
   const b=document.getElementById('sendbtn');b.disabled=true;b.innerHTML='<span class="spin"></span> Sending…';
   try{
     /* Every composer email ships in the branded shell (unless already shelled / a full HTML doc). */
     body=_soluraShell(body);
-    await sendMailViaGraph(W.email,subj,body,isHtml,atts);
+    await sendMailViaGraph(w.email,subj,body,isHtml,atts);
+    /* From here to saveW's first await everything is synchronous: point W at w for that stretch
+       (logW, _missingAppCerts, the sequence bridge and saveW all read W) and restore it after. */
+    const _curW=W;W=w;
+    let _saveP,_fromStageForPdf,_seqStageFrom=null;
+    try{
     W.st.sent=W.st.sent||{};W.st.sent[tpl]=today();
     if(tpl==='interview_cert_warning')W.st.warnedForBooking=String(W.st.booking||''); /* warning is per booking — a reschedule re-arms it */
     /* Alias: a missed-stage rebook email IS functionally the rebook invite. If the user hits
@@ -13075,9 +13096,9 @@ async function reallySend(tpl,advanceTo){
        reply). Resume becomes a plain resume awaiting item. Availability becomes an 'other' item
        with name 'availability'. */
     if(tpl==='missing'){
-      const certsAsked=Array.from(document.querySelectorAll('.ms-cert-cb:checked')).map(cb=>cb.getAttribute('data-cert')).filter(Boolean);
-      const wantResume=!!document.getElementById('ms-resume-cb')&&document.getElementById('ms-resume-cb').checked;
-      const wantAvail=!!document.getElementById('ms-avail-cb')&&document.getElementById('ms-avail-cb').checked;
+      const certsAsked=_msCerts;
+      const wantResume=_msResume;
+      const wantAvail=_msAvail;
       if(certsAsked.length)_pushAwait({kind:'cert_question',certsAsked,name:certsAsked.join(', ')});
       if(wantResume)_pushAwait({kind:'resume'});
       if(wantAvail)_pushAwait({kind:'other',name:'availability'});
@@ -13087,7 +13108,7 @@ async function reallySend(tpl,advanceTo){
     }
     /* #5: For any template, read from the composer's watch-for picker so users can queue extra
        awaiting items alongside the send (e.g. send an offer email AND queue a bg_consent watch). */
-    const pickedFromWatchFor=(typeof _readWatchForPicker==='function')?_readWatchForPicker('esend'):[];
+    const pickedFromWatchFor=_watchFor;
     pickedFromWatchFor.forEach(_pushAwait);
     /* Renewal request: queue an awaiting item for that specific credential */
     if(tpl==='request_updated_credential'&&W.__credential){
@@ -13099,8 +13120,7 @@ async function reallySend(tpl,advanceTo){
        missing-info request — the candidate must reply with the missing data before we proceed,
        so parking is the right default (the user can manually resume from awaiting after they reply
        OR will auto-resume when their email arrives). */
-    const parkCheckbox=document.getElementById('e-park');
-    if((parkCheckbox&&parkCheckbox.checked)||tpl==='missing'||tpl==='request_resume'){
+    if(_parkChecked||tpl==='missing'||tpl==='request_resume'){
       W.st.manualAwaiting=true;
       W.st.awaitingSince=new Date().toISOString();
       W.st.awaitingItemsInitialCount=(W.st.awaitingItems||[]).length;
@@ -13113,7 +13133,6 @@ async function reallySend(tpl,advanceTo){
        advanceTo) so one Send click still moves the stage exactly like the legacy engine did.
        Fail-closed: any mismatch (different template, not on an email step, engine error)
        advances nothing — the card just re-offers the send. */
-    let _seqStageFrom=null;
     try{
       if(W.st.sequenceId&&window.SeqBuilderV3&&typeof _seqTriggerEval==='function'){
         const _sq=(SETTINGS.sequences||[]).find(q=>q.id===W.st.sequenceId);
@@ -13159,25 +13178,31 @@ async function reallySend(tpl,advanceTo){
         }
       }
     }catch(_se){console.warn('seq post-send advance:',_se);}
-    const _fromStageForPdf=W.stage;
+    _fromStageForPdf=W.stage;
     if(advanceTo){W.stage=advanceTo;if(advanceTo==='Screen invite'||advanceTo==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();logW('Advanced to '+advanceTo);if(advanceTo==='Declined'&&W.st.declineHint)delete W.st.declineHint;}
-    await saveW(true);closeModal();toast('Email sent — watching for delivery');
+    _saveP=saveW(true);
+    }finally{W=_curW;}
+    await _saveP;
+    /* Close only THIS composer — if it was dismissed and another dialog opened meanwhile, leave that one. */
+    if(document.getElementById('sendbtn')===b)closeModal();
+    toast('Email sent — watching for delivery');
     /* Auto-save stage report on advance via email-send (e.g., Applied → Screen invite triggers
        application snapshot save). Skip when no advance happened. */
     if(advanceTo&&advanceTo!==_fromStageForPdf){
-      autoUploadStageReport(W,_fromStageForPdf).catch(e=>console.warn('Stage PDF auto-upload:',e.message));
-    }else if(_seqStageFrom&&_seqStageFrom!==W.stage){
+      autoUploadStageReport(w,_fromStageForPdf).catch(e=>console.warn('Stage PDF auto-upload:',e.message));
+    }else if(_seqStageFrom&&_seqStageFrom!==w.stage){
       /* Sequence-driven stage move (set-stage folded into the send) — same snapshot rule. */
-      autoUploadStageReport(W,_seqStageFrom).catch(e=>console.warn('Stage PDF auto-upload:',e.message));
+      autoUploadStageReport(w,_seqStageFrom).catch(e=>console.warn('Stage PDF auto-upload:',e.message));
     }
-    /* If this send was a renewal request, stamp lastRenewalRequestedAt on the credential. */
-    if(typeof window._credRenewalStampHook==='function')window._credRenewalStampHook(true);
-    watchForBounce(W.email,W.row);
+    /* If this send was a renewal request, stamp lastRenewalRequestedAt on the credential. Only the
+       renewal template: the preset switcher can turn that composer into any other send. */
+    if(tpl==='request_updated_credential'&&typeof window._credRenewalStampHook==='function')window._credRenewalStampHook(true,w);
+    watchForBounce(w.email,w.row);
     /* Re-render the pipeline immediately so the candidate moves to their new bucket
        (e.g., Applied without résumé → Awaiting once request_resume is sent). Without this,
        the bucket move only became visible on the next 60s background refresh. */
     render();
-    if(wsRow===W.row)renderWorkspace();
+    if(W===w&&wsRow===w.row)renderWorkspace();
   }catch(e){toast('Send failed: '+e.message);b.disabled=false;b.innerHTML='✉ Send via Outlook';}
 }
 function closeModal(){
@@ -15899,13 +15924,17 @@ async function requestCredentialRenewal(id){
      itself, so we set up a one-shot hook: when the modal closes after a send, stamp the field. */
   const origCloseEmail=window.closeEmailModal;
   let stamped=false;
-  window._credRenewalStampHook=async function(sent){
-    if(stamped||!sent)return;stamped=true;
-    c.lastRenewalRequestedAt=new Date().toISOString();
-    logW('📅 Renewal request sent for '+c.name);
-    await saveW(true);
-    delete W.__credential;
-    window._credRenewalStampHook=null;
+  const w0=W,credId=c.id,credName=c.name;
+  window._credRenewalStampHook=function(sent,w){
+    if(stamped||!sent)return;
+    w=w||W;
+    if(!w||w.row!==w0.row)return; /* the send was for someone else — never stamp across candidates */
+    stamped=true;window._credRenewalStampHook=null;
+    const cc=(w.st.credentials||[]).find(x=>x.id===credId);
+    if(cc)cc.lastRenewalRequestedAt=new Date().toISOString();
+    w.st.log=w.st.log||[];w.st.log.push({t:stamp(),x:'📅 Renewal request sent for '+credName});
+    delete w.__credential;
+    return _saveWFor(w,true);
   };
 }
 
