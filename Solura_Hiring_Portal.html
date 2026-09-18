@@ -7445,7 +7445,9 @@ function watchForBounce(recipient,candidateRow){
                loadW replaces W wholesale, so notes, gates and answers typed in the 60 seconds
                since the send were silently destroyed. Mirror the bounce line into the open
                workspace instead - their edits survive, and so does the line. */
-            if(wsRow===row&&W&&W.st){W.st.log=(W.st.log||[]).concat(_bounceLine);renderWorkspace();}
+            /* Mirror whenever W holds this row (a composer opened from a board button has W loaded with
+               no workspace — its save would drop the line); re-render only a workspace really open. */
+            if(W&&W.row===row&&W.st){W.st.log=(W.st.log||[]).concat(_bounceLine);if(wsRow===row)renderWorkspace();}
           }catch(e){}
         }
       }
@@ -11175,6 +11177,9 @@ function _toggleNudgeList(){
    local email entry with a 'local-' id the inbox poll reconciles, activity log, AJ persist). */
 async function _sendNudgeHeadless(c){
   if(!c||!c.email)throw new Error('no email on file');
+  /* Refuse BEFORE sending: _stCell refuses a corrupt row after the email is already out, leaving no
+     record of it — so the same candidate is offered (or batch-sent) the nudge again and again. */
+  if(c.st&&c.st.__ajCorrupt)throw new Error('stored data corrupted — restore the row first');
   const tpl=_nudgeTplFor(c.stage);
   if(!tpl)throw new Error('no nudge template for '+c.stage);
   const t=getEffectiveTemplate(tpl,c);
@@ -11207,7 +11212,10 @@ async function nudgeAll(){
   const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timed out')),ms))]);
   let sent=0,failed=0;
   try{
-    for(const c of cands){
+    for(const c0 of cands){
+      /* The live card, not the one captured at click — the loop outlives backgroundRefresh's 30s
+         pipeline swap, and _sendNudgeHeadless writes its card's whole state to the cell. */
+      const c=pipeline.find(x=>x.excelRow===c0.excelRow)||c0;
       try{ await withTimeout(_sendNudgeHeadless(c),20000); sent++; }
       catch(e){ failed++; console.warn('Nudge failed for',c.name,e&&e.message); }
       setP('Nudging\u2026 '+(sent+failed)+' / '+cands.length+(failed?' \u00b7 '+failed+' failed':''));
@@ -12117,6 +12125,10 @@ async function _markReceivedCore(cand,idx,note){
   const items=cand.st.awaitingItems||[];
   const item=items[idx];
   if(!item)return false;
+  /* Everything below mutates cand.st before the write; on a refused (_stCell) or failed write the
+     board showed the item received and the candidate released, with no error, until the next load
+     silently put it all back. Keep the pre-change copy so a failure can be undone honestly. */
+  const _before=JSON.stringify(cand.st);
   const wasParked=!!cand.st.manualAwaiting;
   cand.st.awaitingItems=items.filter((_,i)=>i!==idx);
   cand.st.awaitingItemsReceived=(cand.st.awaitingItemsReceived||0)+1;
@@ -12171,7 +12183,14 @@ async function _markReceivedCore(cand,idx,note){
   /* NOTE: deliberately NOT stamping lastAssignmentAt here — receiving an item is the OPPOSITE of
      a new assignment arriving; stamping it made the candidate re-surface as "New document
      assigned" right after you marked something received. */
-  await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
+  try{await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);}
+  catch(e){
+    const restored=JSON.parse(_before);
+    if(W&&W.st===cand.st)W.st=restored;
+    cand.st=restored;
+    toast('✗ Not saved — nothing was marked received: '+e.message);
+    return false;
+  }
   /* If the workspace is showing this candidate as a separate object, keep it in sync. */
   if(W&&W.row===cand.excelRow&&W.st!==cand.st)W.st=cand.st;
   /* Refresh the UI so the profile change is visible immediately (#4: "doesn't update the profile"). */
@@ -12199,7 +12218,7 @@ async function markAwaitingReceivedWS(idx){
   const item=_cItems[ridx];if(!item)return;
   const note=prompt('Mark "'+_awaitingItemLabel(item)+'" received.\nOptional \u2014 note what they sent / where it went (availability saved, SSN on file, form done\u2026):','');
   if(note===null)return;
-  await _markReceivedCore(cand,ridx,note.trim());
+  if(!(await _markReceivedCore(cand,ridx,note.trim())))return;
   toast('\u2713 '+_awaitingItemLabel(item)+' received');
   renderWorkspace();
   render();
@@ -12292,9 +12311,14 @@ async function recordCertAnswer(row,idx){
   /* Auto-advance to Screen invite when all required minimums are met. The Decline path doesn't
      auto-fire \u2014 it surfaces as a red primary action in the workspace (the user confirms it). */
   let advancedTo=null;
-  if(missingRequired.length===0&&cand.stage==='Applied'){
-    cand.st.log.push({t:stamp(),x:'\u2192 Auto-advanced to Screen invite \u2014 all required certs accounted for'});
-    advancedTo='Screen invite';
+  /* The stage after Applied in the candidate's OWN sequence (rule 3) \u2014 not a hardcoded 'Screen invite'
+     that a custom sequence may not have. No next stage there \u2192 no move. */
+  const _ownStages=(typeof _seqStagesFor==='function')?_seqStagesFor(cand):[];
+  const _hereI=_ownStages.indexOf(cand.stage);
+  const _nextOwn=(_hereI>=0&&_ownStages[_hereI+1])?_ownStages[_hereI+1]:null;
+  if(missingRequired.length===0&&cand.stage==='Applied'&&_nextOwn){
+    cand.st.log.push({t:stamp(),x:'\u2192 Auto-advanced to '+_nextOwn+' \u2014 all required certs accounted for'});
+    advancedTo=_nextOwn;
   }else if(missingRequired.length){
     /* Mark for decline so the action engine surfaces it. We use cand.st.declineHint which the
        action engine picks up to generate a red 'Send rejection' primary CTA. */
@@ -12303,12 +12327,15 @@ async function recordCertAnswer(row,idx){
   }
   /* Persist: stage column (G) if changed, plus full state to AJ. */
   try{
+    /* Serialize FIRST: _stCell refuses a corrupt/oversized row, and that refusal used to come after
+       column G had already moved \u2014 stage advanced, state (claim, drained item, release) never saved. */
+    const _ajJson=_stCell(cand.st);
     if(advancedTo){
       await patchRange('G'+cand.excelRow,[[advancedTo]]);
       cand.stage=advancedTo;cand.row[6]=advancedTo;  /* memory only once column G took it */
     }
-    await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
-    toast(advancedTo?'\u2713 Recorded \u2014 advanced to Screen invite':(missingRequired.length?'\u2713 Recorded \u2014 decline suggested':'\u2713 Recorded'));
+    await patchRange('AJ'+cand.excelRow,[[_ajJson]]);
+    toast(advancedTo?'\u2713 Recorded \u2014 advanced to '+advancedTo:(missingRequired.length?'\u2713 Recorded \u2014 decline suggested':'\u2713 Recorded'));
     /* saveW does not merely serialize W.st — it REBUILDS the pipeline card from the row it writes,
        so anything written to cand.st and not mirrored here is thrown away by the operator's next Save.
        This handler is reached from the email reader, which the action engine opens via openWorkspace(r)
@@ -12330,7 +12357,7 @@ async function markAwaitingReceivedFromEmail(row,idx){
   const item=(cand.st.awaitingItems||[])[idx];if(!item)return;
   const note=prompt('Mark "'+_awaitingItemLabel(item)+'" received.\nOptional \u2014 note what they sent / where it went:','');
   if(note===null)return;
-  await _markReceivedCore(cand,idx,note.trim());
+  if(!(await _markReceivedCore(cand,idx,note.trim())))return;
   toast('\u2713 '+_awaitingItemLabel(item)+' received');
   _renderEmailAwait(_currentEmailMsgId);  /* refresh the buttons — item is gone now */
   if(W&&W.row===row)renderWorkspace();
@@ -16339,11 +16366,19 @@ function closeEmailDetail(){
 function replyToCurrentEmail(){
   const msg=_currentEmailMsgId&&_emailCache[_currentEmailMsgId];
   if(!msg){toast('No message loaded');return;}
-  if(!W){
+  /* Reply to the candidate who OWNS this message. The composer addresses W.email, and W is simply the
+     last candidate loaded — so a reader showing A's email while W held B (the reader re-opened by an
+     attachment assignment finishing after the operator moved on) quoted A's message to B. */
+  const _mid=_currentEmailMsgId;
+  const _hasMsg=c=>!!(c&&c.st&&(c.st.emails||[]).some(e=>e&&e.id===_mid));
+  if(!_hasMsg(W)){
     const fromAddr=((msg.from||{}).emailAddress||{}).address||'';
-    const candidate=pipeline.find(c=>(c.email||'').toLowerCase()===fromAddr.toLowerCase());
-    if(candidate)loadW(candidate.excelRow);
-    else{toast('Could not find candidate for this email');return;}
+    const owner=pipeline.find(_hasMsg)||pipeline.find(c=>fromAddr&&(c.email||'').toLowerCase()===fromAddr.toLowerCase());
+    if(owner&&!(W&&W.row===owner.excelRow)){
+      /* Never swap W out from under a workspace open on someone else — its buttons act on W. */
+      if(wsRow!=null&&wsRow!==owner.excelRow){toast('This email is from '+owner.name+' — close the open workspace first, then reply');return;}
+      loadW(owner.excelRow);
+    }else if(!owner&&!W){toast('Could not find candidate for this email');return;}
   }
   const subj=msg.subject||'';
   const replySubj=/^re:/i.test(subj)?subj:'Re: '+subj;
@@ -16791,8 +16826,11 @@ async function _doAssignment(messageId,attIdx,cand,item){
        the cert missing while the uploaded file sat orphaned in the candidate's folder. Same mirror
        idiom as _markReceivedCore. */
     if(W&&W.row===cand.excelRow){if(W.st!==cand.st)W.st=cand.st;renderWorkspace();}
-    /* Refresh the email detail to update the awaiting badge + buttons */
-    openEmailDetail(messageId);
+    /* Refresh the email detail to update the awaiting badge + buttons — only if the reader is still
+       open on THIS message. The upload takes seconds; re-opening it after the operator closed it popped
+       this candidate's email back up over whatever they had moved on to. */
+    {const _em=document.getElementById('email-modal');
+     if(_em&&_em.classList.contains('open')&&_currentEmailMsgId===messageId)openEmailDetail(messageId);}
     /* Refresh pipeline so action engine picks up the fulfillment */
     render();
   }catch(e){
@@ -16807,8 +16845,12 @@ async function saveAttachment(messageId,attIdx,row){
   const btn=document.getElementById('att-btn-'+attIdx);btn.disabled=true;btn.textContent='Saving…';
   try{
     /* File to the EMAIL'S candidate — never whichever workspace happens to be open. */
-    const ownerC=(row!==null&&row!==undefined&&typeof pipeline!=='undefined')?pipeline.find(c=>c.excelRow===row):null;
-    const candidateName=(ownerC&&ownerC.name)||(W?W.name:'');
+    /* No row passed → find the candidate holding this message; fall back to W only when W itself holds
+       it. A bare W fallback filed the attachment into whoever was loaded last. */
+    const _ownsMsg=c=>!!(c&&c.st&&(c.st.emails||[]).some(e=>e&&e.id===messageId));
+    const ownerC=((row!==null&&row!==undefined&&typeof pipeline!=='undefined')?pipeline.find(c=>c.excelRow===row):null)
+      ||pipeline.find(_ownsMsg)||(_ownsMsg(W)?pipeline.find(c=>c.excelRow===W.row):null)||null;
+    const candidateName=(ownerC&&ownerC.name)||'';
     if(!candidateName){toast('No candidate context');btn.disabled=false;btn.textContent='Just save';return;}
     const folder='caregivers/'+safeFileName(candidateName)+'/onboarding';
     await ensureFolderPath(folder);
@@ -16976,19 +17018,32 @@ async function _pollMergeFreshAJ(excelRow, mutated){
   try{
     const sid=await getWorkbookSession();const h=sid?{'workbook-session-id':sid}:{};
     const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+"/range(address='AJ"+excelRow+"')?$select=values",{headers:h});
-    if(!r.ok)return mutated;
+    /* null = "could not see the current cell — do NOT write this pass". Returning `mutated` here
+       (as these paths did) turned a throttled read into exactly the blind overwrite this function
+       exists to prevent: the poll's in-memory copy — minutes old when it comes from the Inbox tab —
+       went over the whole cell, erasing a booking or Yardstik result a webhook had just written.
+       And an unparseable cell is a CORRUPT cell: writing over it cements the wipe (rule 5). */
+    if(!r.ok)return null;
     const vals=(await r.json()).values||[[]];
     const raw=vals[0]&&vals[0][0];
-    if(!raw)return mutated;
+    if(!raw)return mutated; /* genuinely empty cell — nothing on it to lose */
     let fresh;
-    try{fresh=JSON.parse(raw);}catch(e){return mutated;}
-    if(!fresh||typeof fresh!=='object')return mutated;
+    try{fresh=JSON.parse(raw);}catch(e){return null;}
+    if(!fresh||typeof fresh!=='object')return null;
     /* Overlay the small set of fields the poll is allowed to change. Everything else (st.booking,
        st.yardstik, st.tpCheck, st.credentials, st.refs, st.employers, …) comes from fresh. */
     const merged=Object.assign({},fresh);
     if(Array.isArray(mutated.emails))merged.emails=mutated.emails;
     if(mutated.hasResume===true)merged.hasResume=true;
-    if(Array.isArray(mutated.log))merged.log=mutated.log;
+    /* Log: keep the CELL's log and append only the poll's own new lines (it adds at most one per row
+       per pass, at the tail). Replacing it with the in-memory copy dropped every line a webhook or
+       another tab wrote since that copy was loaded. */
+    if(Array.isArray(mutated.log)){
+      const _fl=Array.isArray(fresh.log)?fresh.log:[];
+      const _k=l=>l&&(String(l.t)+'|'+String(l.x));
+      const _have=new Set(_fl.map(_k));
+      merged.log=_fl.concat(mutated.log.slice(-3).filter(l=>l&&!_have.has(_k(l))));
+    }
     /* Awaiting fields: only carry over the *deletions* the poll did (e.g. resume detected →
        cleared manualAwaiting). If mutated has them missing and fresh has them present, honor the
        deletion intent. If mutated has them present, take fresh's (poll didn't touch them). */
@@ -16999,11 +17054,12 @@ async function _pollMergeFreshAJ(excelRow, mutated){
         delete merged[k];
       }
     });
-    if(Array.isArray(mutated.awaitingItems))merged.awaitingItems=mutated.awaitingItems;
+    /* awaitingItems deliberately NOT overlaid: the poll never changes them, so carrying the in-memory
+       copy over could only revert someone else's newer change (a drained item came back). */
     return merged;
   }catch(e){
     console.warn('pollMergeFreshAJ row',excelRow,'failed:',e.message);
-    return mutated; /* fall back to the original behavior — better than crashing the poll */
+    return null; /* skip this row this pass — never write blind */
   }
 }
 
@@ -17141,6 +17197,7 @@ async function pollInboxForCandidateEmails(opts){
        version-history restore. Telling the operator to try a save that is guaranteed to be refused
        sends them at the one row where a bypass would cement the wipe. */
     let corruptSkipCount=0;
+    let readSkipCount=0; /* fresh re-read failed → row deliberately not written this pass */
     for(const [row,c] of changedRows){
       try{
         /* A corrupt cell must NEVER be written over. pState hands back a default-shaped ghost
@@ -17153,6 +17210,7 @@ async function pollInboxForCandidateEmails(opts){
         const sanitized=sanitizeState(c.st);
         /* Race protector: re-read AJ now, overlay only the fields the poll touched. */
         const merged=await _pollMergeFreshAJ(row, sanitized);
+        if(!merged){readSkipCount++;console.warn('Poll: row',row,'- could not re-read AJ (or it no longer parses); not writing this pass');continue;}
         /* THE chokepoint (design rule 5). This was a raw JSON.stringify behind a hand-rolled
            32,000 test that SKIPPED the write rather than trimming - so a candidate over the
            line silently stopped recording inbound mail, and nothing here had _stCell's
@@ -17162,6 +17220,11 @@ async function pollInboxForCandidateEmails(opts){
         /* Adopt the merged state in memory so the next poll sees fresh server fields too. */
         c.st=merged;
         if(c.row)c.row[35]=json; /* row cache must not keep the pre-write length */
+        /* An open workspace (or composer/reader) on this candidate holds a loadW deep copy: its next
+           saveW would write the pre-poll state back — the new reply, the résumé flag, the un-park all
+           gone — and the watermark has already moved past that message. Same mirror as every other
+           background writer. */
+        if(W&&W.row===row&&W.st!==c.st)W.st=c.st;
       }catch(e){writeFailCount++;console.warn('Poll write row',row,'failed:',e.message);}
       if((c.st.emails||[]).some(e=>e.direction==='in'&&!e.seen))inboundCount++;
     }
@@ -17175,7 +17238,14 @@ async function pollInboxForCandidateEmails(opts){
        is the right scope — it describes what THIS browser has ingested. A failed Sent Items scan
        does not hold it back: outbound copies are already recorded locally at send time, so that
        scan only reconciles ids, and freezing the mark would make every later poll walk 8 pages. */
-    _setMailWatermark(_scanStart);
+    /* ...but only when every matched row was actually written. A row skipped for a failed re-read
+       or a failed write keeps its new mail only in memory; the next loadData drops it, and with the
+       mark already advanced the next pass stops at page 1 (~33h) — anything older was lost for good.
+       Holding the mark lets the next pass walk back to it (still capped at MAIL_SCAN_PAGES). Corrupt
+       rows do NOT hold it: they stay corrupt until a manual restore, and holding would walk the
+       capped pages every minute until then. */
+    if(!readSkipCount&&!writeFailCount)_setMailWatermark(_scanStart);
+    else console.warn('Poll: watermark held —',readSkipCount,'row(s) skipped,',writeFailCount,'write failure(s); next pass re-scans');
     /* Successful poll — reset failure tracking + clear any sticky indicator */
     if(_pollFailCount>0){_pollFailCount=0;_pollLastError='';_updatePollIndicator();}
   }catch(e){
@@ -18254,15 +18324,27 @@ async function sendMassEmail(){
         recipientRecord.subject=subj.slice(0,140);
         await withTimeout(sendMailViaGraph(c.email,subj,body,isHtml,[]),20000);
         sent++;recipientRecord.success=true;
-        c.st.emails=c.st.emails||[];
-        c.st.emails.unshift({id:'mass-'+Date.now()+'-'+sent,direction:'out',subject:subj.slice(0,140),preview:body.slice(0,200),to:c.email,received:new Date().toISOString(),seen:true,blastId:blastId,blastSubject:subj.slice(0,80)});
-        if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
-        /* Push a log entry so the candidate's idle-days counter resets. Without this, the mass-emailed
-           candidates stay in the nudge strip until their NEXT reply, because computeIdleDays reads
-           the log tail. */
-        c.st.log=c.st.log||[];
-        c.st.log.push({t:stamp(),x:'✉ Mass email sent: '+(subj||'').slice(0,60)});
-        patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(e=>{});
+        /* Record on the CURRENT card, not the one captured when Send was clicked: a blast runs for
+           minutes, backgroundRefresh replaces `pipeline` every 30s, and writing the click-time copy put
+           that stale state over the whole cell — erasing a booking a webhook wrote mid-blast. */
+        const lc=pipeline.find(x=>x.excelRow===c.excelRow)||c;
+        try{
+          lc.st.emails=lc.st.emails||[];
+          lc.st.emails.unshift({id:'mass-'+Date.now()+'-'+sent,direction:'out',subject:subj.slice(0,140),preview:body.slice(0,200),to:c.email,received:new Date().toISOString(),seen:true,blastId:blastId,blastSubject:subj.slice(0,80)});
+          if(lc.st.emails.length>40)lc.st.emails=lc.st.emails.slice(0,40);
+          /* Push a log entry so the candidate's idle-days counter resets. Without this, the mass-emailed
+             candidates stay in the nudge strip until their NEXT reply, because computeIdleDays reads
+             the log tail. */
+          lc.st.log=lc.st.log||[];
+          lc.st.log.push({t:stamp(),x:'✉ Mass email sent: '+(subj||'').slice(0,60)});
+          /* An open workspace/composer on them would otherwise save its pre-blast copy back over this. */
+          if(W&&W.row===lc.excelRow&&W.st!==lc.st)W.st=lc.st;
+          patchRange('AJ'+lc.excelRow,[[_stCell(lc.st)]]).catch(e=>console.warn('Mass send record write failed row',lc.excelRow,e.message));
+        }catch(recErr){
+          /* The email DID go out — a refused record write (corrupt/oversized row) must not also count
+             it as failed. The blast record in settings still lists them as sent. */
+          console.warn('Mass send: sent to',c.email,'but the record was not saved:',recErr.message);
+        }
       }catch(e){
         failed++;recipientRecord.error=e.message;if(!firstError)firstError=e.message;
         console.warn('Mass send failed for '+c.email+':',e.message);
