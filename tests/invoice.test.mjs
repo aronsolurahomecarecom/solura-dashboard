@@ -18,7 +18,7 @@ const src = html.slice(html.indexOf('*/', b) + 2, e);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cfgStore = {};
 const mk = new Function('cfg', 'lc', 'escapeHtml',
-  src + '\nreturn {DEFAULT_INVOICE_FROM,DEFAULT_INVOICE_SUBJECT,DEFAULT_INVOICE_TEMPLATE,invoiceCfg,isOnService,fmtMoney,invPrettyDate,fillInvoiceTokens,resolveDiscount,resolveDiscounts,hhaNameMatch,hhaParseDate,hhaParseHours,parseHhaSheet,sumHhaHours};');
+  src + '\nreturn {DEFAULT_INVOICE_FROM,DEFAULT_INVOICE_SUBJECT,DEFAULT_INVOICE_TEMPLATE,invoiceCfg,isOnService,fmtMoney,invPrettyDate,fillInvoiceTokens,resolveDiscount,resolveDiscounts,hhaNameMatch,hhaParseDate,hhaParseHours,hhaParseMoney,parseHhaSheet,sumHhaHours};');
 const I = mk(k => cfgStore[k], v => String(v || '').toLowerCase().trim(), esc);
 
 // ── status gate ──
@@ -130,6 +130,39 @@ ok(/_invAtts=\[\];_invDiscounts=\[\];/.test(html) && /_invDiscounts=\[\];_invAtt
   ok(fr.hours === 22.5, 'Excel time cells convert (0.1875+0.25+0.5 days = 4.5+6+12 = 22.5 hours)');
   ok(I.parseHhaSheet([['just', 'random'], ['data', 1]]) === null, 'file without recognizable headers refused, not misread');
 }
+// ── HHAX Batch Detail Report shape (B-0922-91, from Meir's real export) ──
+{
+  // Mirrors the real file: banner rows, sparse spacer columns, header on
+  // row 3, H:MM billed hours, OT/TT hour columns AFTER Billed Hours,
+  // dollar amounts, a Total row, Last-First names with trailing spaces.
+  const detail = [
+    ['', '', '', '', '', '', 'Batch Detail Report', '', '', '', '', '', '', '', '', '', '', '', 'Page 2 of 2', '', ''],
+    ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'Report Date:  9/22/2026 2:31', '', '', '', ''],
+    [],
+    ['Sr. No.', '', 'Invoice Number', 'Patient Name', '', 'Admission ID', '', 'Visit Date', 'Service Code', 'Caregiver  Name', 'Caregiver Code', 'Employee ID', 'Billed Hours', 'OT Hours', '', 'TT Hours', '', 'Total units', '', 'Billed Amount', 'IVR'],
+    ['1', '', '600002', 'Rivera Gloria ', '', 'NVS-1', '', '09/07/2026', 'HHA Hourly', 'Smith A ', 'NVS-9', '', '07:00', '', '', '', '', '7', '', '$210.00', ''],
+    ['2', '', '600002', 'Rivera Gloria ', '', 'NVS-1', '', '09/09/2026', 'HHA Hourly', 'Smith A ', 'NVS-9', '', '06:45', '', '', '', '', '6.75', '', '$202.50', 'IO'],
+    ['3', '', '600002', 'Rivera Gloria ', '', 'NVS-1', '', '09/20/2026', 'HHA Hourly', 'Jones B ', 'NVS-8', '', '03:00', '', '', '', '', '3', '', '$90.00', 'I'],
+    ['4', '', '600002', 'Okafor Sam ', '', 'NVS-2', '', '09/08/2026', 'HHA Hourly', 'Jones B ', 'NVS-8', '', '05:00', '', '', '', '', '5', '', '$150.00', ''],
+    ['', '', 'Total', '', '', '', '', '', '', '', '', '', '21:45', ' ', '', ' ', '', '', '', '$652.50', 'IO: 2']
+  ];
+  const bp = I.parseHhaSheet(detail);
+  ok(bp && bp.rows.length === 4, 'header found on row 3 past the banner; Total row skipped');
+  const br = I.sumHhaHours(bp, 'Gloria Rivera', '2026-09-01', '2026-09-14');
+  ok(br.visits === 2 && br.hours === 13.75, 'Billed Hours column wins over OT/TT; H:MM sums (7 + 6:45)');
+  ok(br.amount === 412.5 && br.rate === 30, 'Billed Amount column read; uniform $30/hr rate derived');
+  const cover = [['Batch Number:', '', '', '127518', '', 'Batch Date:', '09/22/2026'], ['Total Amount:', '', '', '$2,310.00', '', 'Total Hours:', '77:00']];
+  ok(I.parseHhaSheet(cover) === null, 'the Header & Filter cover sheet is not mistaken for the table');
+  const mixed = I.sumHhaHours(I.parseHhaSheet([
+    ['Patient Name', 'Visit Date', 'Billed Hours', 'Billed Amount'],
+    ['Rivera Gloria', '09/07/2026', '02:00', '$60.00'],
+    ['Rivera Gloria', '09/08/2026', '02:00', '$75.00']
+  ]), 'Gloria Rivera', '', '');
+  ok(mixed.hours === 4 && mixed.rate === null, 'non-uniform per-visit pricing → hours fill, rate stays untouched');
+  ok(I.hhaParseMoney('$1,210.50') === 1210.5 && I.hhaParseMoney('') === null, 'currency parsing');
+}
+ok(/for\(var shi=0;shi<wb\.SheetNames\.length;shi\+\+\)/.test(html), 'import scans EVERY sheet (Batch Detail puts the table on sheet 2)');
+ok(/res\.rate&&!String\(el\('inv-rate'\)\.value\|\|''\)\.trim\(\)/.test(html), 'derived rate fills the rate field only when it is empty');
 ok(/id="inv-hha-file"/.test(html) && /inv-hha-pull/.test(html), 'HHA pull button + file input wired on the invoice');
 ok(/sumHhaHours\(parsed,patient/.test(html) && /invRecalcAmount\(\)/.test(html), 'matched hours fill the field and recalc the amount');
 ok(/Names in the file:/.test(html), 'no-match case explains itself with the names it saw');

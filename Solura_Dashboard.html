@@ -1671,7 +1671,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0916-90';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0922-91';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -2806,15 +2806,25 @@ function hhaParseHours(v){
   var n=parseFloat(s.replace(/[^\d.]/g,''));
   return isNaN(n)?null:n;
 }
+function hhaParseMoney(v){
+  if(typeof v==='number')return v;
+  var s=String(v||'').trim();
+  if(!/\d/.test(s))return null;
+  var n=parseFloat(s.replace(/[$,]/g,''));
+  return isNaN(n)?null:n;
+}
 function parseHhaSheet(aoa){
   for(var hi=0;hi<Math.min(aoa.length,25);hi++){
     var row=aoa[hi]||[];
-    var nameCi=-1,dateCi=-1,hrsCi=-1;
+    var nameCi=-1,dateCi=-1,hrsCi=-1,amtCi=-1;
     row.forEach(function(c,ci){
       var h=hhaNorm(c);
       if(nameCi<0&&/(patient|client|member)/.test(h)&&/name/.test(h))nameCi=ci;
-      if(dateCi<0&&/date/.test(h))dateCi=ci;
+      // "Visit Date" preferred over "Report Date"-style preamble columns
+      if(dateCi<0&&/date/.test(h)&&!/report/.test(h))dateCi=ci;
+      // "Billed Hours" wins over OT/TT Hours by first-match order
       if(hrsCi<0&&/(hour|duration)/.test(h))hrsCi=ci;
+      if(amtCi<0&&/amount/.test(h))amtCi=ci;
     });
     if(nameCi<0)row.forEach(function(c,ci){if(nameCi<0&&hhaNorm(c)==='name')nameCi=ci;});
     if(nameCi>-1&&hrsCi>-1){
@@ -2826,7 +2836,8 @@ function parseHhaSheet(aoa){
         var isNum=typeof rr[hrsCi]==='number';
         if(isNum){numCount++;if(rr[hrsCi]>0&&rr[hrsCi]<1)fracCount++;}
         out.push({name:String(rr[nameCi]),date:dateCi>-1?hhaParseDate(rr[dateCi]):null,
-          hours:hv,rawNum:isNum?rr[hrsCi]:null});
+          hours:hv,rawNum:isNum?rr[hrsCi]:null,
+          amount:amtCi>-1?hhaParseMoney(rr[amtCi]):null});
       }
       // A column where most numeric values sit under 1 is Excel TIME cells
       // (fractions of a day) — convert; a real 0.75-hour entry in a normal
@@ -2840,9 +2851,9 @@ function parseHhaSheet(aoa){
   return null;
 }
 function sumHhaHours(parsed,patient,fromIso,toIso){
-  if(!parsed||!parsed.rows.length)return {hours:0,visits:0,names:[]};
+  if(!parsed||!parsed.rows.length)return {hours:0,visits:0,names:[],amount:0,rate:null};
   var from=fromIso?hhaParseDate(fromIso):null,to=toIso?hhaParseDate(toIso):null;
-  var total=0,visits=0,namesSeen={};
+  var total=0,visits=0,namesSeen={},matched=[];
   parsed.rows.forEach(function(o){
     if(o.name.trim())namesSeen[hhaNorm(o.name)]=o.name.trim();
     if(!hhaNameMatch(o.name,patient))return;
@@ -2850,10 +2861,22 @@ function sumHhaHours(parsed,patient,fromIso,toIso){
       if(from&&o.date<from)return;
       if(to&&o.date>to)return;
     }
-    total+=o.hours;visits++;
+    total+=o.hours;visits++;matched.push(o);
   });
+  // The billed amounts also encode the RATE: when every visit prices at
+  // amount = hours × one uniform rate (to the cent), surface that rate so
+  // the invoice fills itself completely.
+  var amt=0,amtRows=0;
+  matched.forEach(function(o){if(o.amount!=null){amt+=o.amount;amtRows++;}});
+  var rate=null;
+  if(visits>0&&amtRows===visits&&total>0){
+    var cand=Math.round(amt/total*100)/100;
+    var uniform=matched.every(function(o){return Math.abs(o.amount-o.hours*cand)<=0.51;});
+    if(uniform&&cand>0)rate=cand;
+  }
   return {hours:Math.round(total*100)/100,visits:visits,
-    names:Object.keys(namesSeen).map(function(k){return namesSeen[k];})};
+    names:Object.keys(namesSeen).map(function(k){return namesSeen[k];}),
+    amount:Math.round(amt*100)/100,rate:rate};
 }
 /* 📅 Assessment-scheduled logger: one small form (date, time, location,
  * assessor, notes) that stamps the lead, writes a Comms Log row, and —
@@ -7164,17 +7187,28 @@ document.addEventListener('change',function(ev){
       fr.onload=function(){
         try{
           var wb=XLSX.read(fr.result,{type:'array',cellDates:true});
-          var ws=wb.Sheets[wb.SheetNames[0]];
-          var aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-          var parsed=parseHhaSheet(aoa);
-          if(!parsed)throw new Error('No column headers found — the file needs a patient/client name column and an hours or duration column.');
+          // HHAX reports often put a cover page on sheet 1 and the visit
+          // table on sheet 2 (Batch Detail Report does exactly this) —
+          // scan EVERY sheet and take the one with the real table.
+          var parsed=null,bestRows=0;
+          for(var shi=0;shi<wb.SheetNames.length;shi++){
+            var aoa=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[shi]],{header:1,defval:''});
+            var p2=parseHhaSheet(aoa);
+            if(p2&&p2.rows.length>bestRows){parsed=p2;bestRows=p2.rows.length;}
+          }
+          if(!parsed)throw new Error('No visit table found on any sheet — the file needs a patient/client name column and an hours or duration column.');
           var r=rows[_invRi]||[];
           var patient=String(r[C.NM]||r[C.DM]||'').trim();
           var res=sumHhaHours(parsed,patient,el('inv-from-date').value,el('inv-to-date').value);
           if(res.visits>0){
             el('inv-hours').value=String(res.hours);
+            var rateFilled=false;
+            if(res.rate&&!String(el('inv-rate').value||'').trim()){
+              el('inv-rate').value=String(res.rate);
+              rateFilled=true;
+            }
             invRecalcAmount();
-            if(out){out.style.color='var(--grn)';out.textContent='✓ '+res.visits+' visit'+(res.visits!==1?'s':'')+' for '+patient+' in the service period → '+res.hours+' hours (filled below — adjust freely).';}
+            if(out){out.style.color='var(--grn)';out.textContent='✓ '+res.visits+' visit'+(res.visits!==1?'s':'')+' for '+patient+' in the service period → '+res.hours+' hours'+(rateFilled?(' at '+fmtMoney(res.rate)+'/hr — both filled below, adjust freely.'):' (filled below — adjust freely).');}
           }else{
             var sample=res.names.slice(0,6).join(', ');
             if(out){out.style.color='var(--red)';out.textContent='✗ No visits matched "'+patient+'" in that period. Names in the file: '+(sample||'(none found)')+(res.names.length>6?'…':'')+'. Check the service-period dates, or that this export covers this client.';}
