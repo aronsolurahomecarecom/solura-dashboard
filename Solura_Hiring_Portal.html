@@ -7611,7 +7611,7 @@ async function _autoLinkUnmatchedBookings(){
     if(cand.st&&cand.st.__ajCorrupt){keep.push(u);continue;} /* rule 5 — never write over a corrupt cell */
     try{
       cand.st=cand.st||{};
-      cand.st.booking=u.start;
+      cand.st.booking=_bookingLocal(u.start);
       cand.st.bookingSource='auto-link';
       cand.st.bookingReceivedAt=new Date().toISOString();
       if(u.bookingId)cand.st.calBookingId=u.bookingId;
@@ -8938,6 +8938,20 @@ async function refreshRow(excelRow){
 
 /* ===================== date helpers ===================== */
 function today(){return new Date().toISOString().slice(0,10);}
+/* st.booking is Cleveland wall-clock time, "YYYY-MM-DDTHH:mm" with no zone: that is what the worker
+   writes (localTimeForBooking) so .slice(0,10) is the meeting's LOCAL day. Three portal writers (the
+   manual time modal, the unmatched-pool link, the auto-link pass) stored a UTC "…Z" string instead,
+   and every booking-day test compared a local day against today(), which is the UTC date. From 8pm
+   Eastern (7pm in winter) a call later tonight fell through both tests to a false "Booking time
+   unknown" action card, tomorrow's call read "Today", and a UTC-stored evening booking was shown
+   under the next day. These two keep the booking vocabulary local; today() itself stays UTC
+   because st.sent/due stamps and file names are all written in it. */
+function _bookingLocal(v){
+  const s=String(v||'');if(!/(Z|[+-]\d\d:?\d\d)$/i.test(s))return s;
+  const d=new Date(s);if(isNaN(d.getTime()))return s;
+  try{return d.toLocaleString('sv-SE',{timeZone:'America/New_York'}).replace(' ','T').slice(0,16);}catch(e){return s;}
+}
+function _todayLocal(){try{return new Date().toLocaleDateString('sv-SE',{timeZone:'America/New_York'});}catch(e){return today();}}
 function fmtDay(d){if(!d)return'';const x=new Date(d.length<=10?d+'T00:00':d);return x.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});}
 function fmtTime(dt){if(!dt)return'';return new Date(dt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}
 function fmtDayLong(d){const x=new Date(d+'T00:00');return x.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});}
@@ -9073,8 +9087,8 @@ const TRIGGERS={
   noBooking:        c => !(c.st&&c.st.booking),
   bookingImminent:  c => {const m=c.st&&c.st.booking?minsUntil(c.st.booking):null;return m!=null&&m<=5&&m>-150;},
   bookingOverdue:   c => {const m=c.st&&c.st.booking?minsUntil(c.st.booking):null;return m!=null&&m<=-150;},
-  bookingToday:     c => {const d=c.st&&c.st.booking?c.st.booking.slice(0,10):null;return d===today();},
-  bookingFuture:    c => {const d=c.st&&c.st.booking?c.st.booking.slice(0,10):null;return d&&d>today();},
+  bookingToday:     c => {const d=c.st&&c.st.booking?_bookingLocal(c.st.booking).slice(0,10):null;return d===_todayLocal();},
+  bookingFuture:    c => {const d=c.st&&c.st.booking?_bookingLocal(c.st.booking).slice(0,10):null;return d&&d>_todayLocal();},
 
   /* Workflow milestones */
   screenDone:       c => !!(c.st&&c.st.screenAnsweredAt),
@@ -9409,7 +9423,7 @@ function sequenceAction(c,info){
 function _sequenceBookingStage(c,cfg,info){
   const st=c.st;
   const m=st.booking?minsUntil(st.booking):null;
-  const d=st.booking?st.booking.slice(0,10):null;
+  const d=st.booking?_bookingLocal(st.booking).slice(0,10):null;
   const baseAction={kind:'questions',stage:cfg.questionsStage,nextStage:cfg.nextStageOnRun,cls:'sky'};
   if(m!=null&&m<=5&&m>-150){
     const cd=m>0?Math.ceil(m)+'m':'now';
@@ -9418,8 +9432,8 @@ function _sequenceBookingStage(c,cfg,info){
   if(m!=null&&m<=-150){
     return{bucket:'action',timing:_dn('Overdue call — log result','pr2',fmtTime(st.booking)),info,primary:Object.assign({},baseAction,{label:cfg.runLabel||'Run'})};
   }
-  if(d===today())return{bucket:'scheduled',timing:_dn('Today','pg',fmtTime(st.booking)),info,primary:Object.assign({},baseAction,{label:cfg.prepLabel||'Prep'})};
-  if(d&&d>today())return{bucket:'scheduled',timing:_dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking)),info,primary:Object.assign({},baseAction,{label:cfg.prepLabel||'Prep'})};
+  if(d===_todayLocal())return{bucket:'scheduled',timing:_dn('Today','pg',fmtTime(st.booking)),info,primary:Object.assign({},baseAction,{label:cfg.prepLabel||'Prep'})};
+  if(d&&d>_todayLocal())return{bucket:'scheduled',timing:_dn('Scheduled','pg',fmtDay(d)+' '+fmtTime(st.booking)),info,primary:Object.assign({},baseAction,{label:cfg.prepLabel||'Prep'})};
   return{bucket:'action',timing:_dn('Booking time unknown','pa',''),info,primary:Object.assign({},baseAction,{label:cfg.runLabel||'Run'})};
 }
 
@@ -12084,7 +12098,7 @@ async function _saveManualBookingTime(){
   const local=new Date(inp.value);
   if(isNaN(local.getTime())){toast('Invalid date');return;}
   const iso=local.toISOString();
-  W.st.booking=iso;
+  W.st.booking=_bookingLocal(iso);
   W.st.bookingSource='manual';
   const advanceMap={'Screen invite':'Screen booked','Interview invite':'Interview booked','Onboarding':'Onboarding booked'};
   if(advanceMap[W.stage]){
@@ -18103,7 +18117,7 @@ async function commitLinkBooking(candidateExcelRow){
     const proceed=confirm('This candidate already has a booking on '+new Date(cand.st.booking).toLocaleString()+'.\n\nOverwrite with the new booking on '+new Date(u.start).toLocaleString()+'?');
     if(!proceed)return;
   }
-  cand.st.booking=u.start;
+  cand.st.booking=_bookingLocal(u.start);
   cand.st.bookingSource='manual-link';
   /* Preserve the original booking email as a hint for future reconciliation. */
   if(u.email)cand.st.bookingAltEmail=u.email;
