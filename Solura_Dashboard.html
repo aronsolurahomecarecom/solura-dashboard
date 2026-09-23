@@ -753,6 +753,30 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
   <div class="done-pop-inner" id="done-pop-inner"></div>
 </div>
 
+<!-- ✏ PDF fill-in marker — click the rendered page to place fields -->
+<div class="modal" id="modal-pdfmark">
+  <div class="mbox" style="max-width:720px">
+    <div class="mhead"><div class="mtitle" id="pm-title">✏ Mark fill-ins</div><button class="mclose" data-action="close-modal" data-mid="modal-pdfmark">✕</button></div>
+    <div class="mbody">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <select id="pm-token" class="ee-inp" style="width:auto"></select>
+        <input id="pm-custom" class="ee-inp" placeholder="…or type custom text (tokens allowed)" style="flex:1;min-width:150px">
+        <span style="font-size:11px;color:var(--soft)">Size</span>
+        <select id="pm-size" class="ee-inp" style="width:auto"><option>9</option><option selected>11</option><option>13</option><option>16</option><option>20</option></select>
+        <button type="button" class="ee-mini" data-action="pm-prev">◀</button>
+        <span id="pm-page" style="font-size:11.5px;font-weight:700">1 / 1</span>
+        <button type="button" class="ee-mini" data-action="pm-next">▶</button>
+      </div>
+      <div style="font-size:10.5px;color:var(--soft);margin-bottom:6px">Pick a fill-in above (or type custom text), then <b>click on the page</b> where it should print. Click a placed chip to remove it. The custom box wins when it has text.</div>
+      <div id="pm-canvas-wrap" style="position:relative;border:1.5px solid var(--border);border-radius:8px;overflow:hidden;cursor:crosshair;background:#f4f2ee"><canvas id="pm-canvas"></canvas></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+        <span id="pm-out" style="flex:1;font-size:11.5px;color:var(--soft)"></span>
+        <button data-action="pm-save" style="padding:9px 18px;background:linear-gradient(135deg,var(--gold),#D4920F);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">✓ Save fill-ins</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- 📑 Preset-email editor -->
 <div class="modal" id="modal-ep">
   <div class="mbox" style="max-width:640px">
@@ -761,6 +785,8 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <div class="la-f" style="margin-bottom:10px"><label>Name (what the button in the composer says)</label><input type="text" id="ep-name" placeholder="e.g. Rate sheet, Welcome packet, VA benefits info"></div>
       <div class="la-f" style="margin-bottom:10px"><label>Subject</label><input type="text" id="ep-subject" placeholder="e.g. Our rates for {pt}, in writing"></div>
       <div class="la-f" style="margin-bottom:10px"><label>Body (plain text — {dm} {pt} {rel} {ptrel} and prefill {key} tokens fill per lead)</label><textarea id="ep-body" rows="9" style="width:100%;font-size:12.5px;line-height:1.5"></textarea></div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--soft);margin-bottom:6px">📎 Attach fillable PDFs (generated fresh per lead on every run)</div>
+      <div id="ep-pdfs" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--soft);margin-bottom:6px">Shows for (comma-separated, blank = everyone)</div>
       <div class="la-grid g3" style="margin-bottom:12px">
         <div class="la-f"><label>Stages</label><input type="text" id="ep-statuses" list="ep-status-list" placeholder="e.g. Cold, On Service"><datalist id="ep-status-list"></datalist></div>
@@ -1278,6 +1304,11 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
             <input id="ef-val" placeholder="value — e.g. 30" class="ee-inp" style="flex:1;min-width:160px">
             <button data-action="ef-add" class="st-btn-ghost">＋ Add prefill</button>
           </div>
+          <h4 class="st-h2" style="margin-top:18px">📎 Fillable PDFs</h4>
+          <p class="st-p">Upload a PDF, hit ✏ Mark, and click where each fill-in should print — names, dates, prefills, or custom text. Attach it to any preset in the preset editor: every run generates a fresh copy filled for <b>that lead</b> and attaches it to the email. As many PDFs and fill-ins as you like.</p>
+          <div id="pdft-list" style="margin-bottom:8px"></div>
+          <input type="file" id="pdft-file" accept="application/pdf,.pdf" style="display:none">
+          <button data-action="pdft-upload" class="st-btn-ghost">📤 Upload a PDF</button>
         </div>
         <div class="st-field">
           <label class="ee-lbl">🏥 Finished-assessment email goes to (blank = intake@solurahomecare.com)</label>
@@ -1712,7 +1743,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0922-92';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0922-93';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3102,7 +3133,76 @@ function presetMatch(p,ctx){
 function splitCommaList(s){
   return String(s||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
 }
+/* 📎 Fillable PDFs: uploaded once, marked once (click where each fill-in
+ * prints), then generated fresh per lead every time a preset that carries
+ * them runs. Fields store PERCENT coordinates (top-left origin) so they
+ * survive any render scale; pdf-lib draws bottom-left, hence the flip. */
+function pdfTemplates(){enginesDoc.pdfTemplates=enginesDoc.pdfTemplates||[];return enginesDoc.pdfTemplates;}
+function pdfFieldXY(f,pageW,pageH){
+  var fx=Math.max(0,Math.min(1,parseFloat(f.x)||0));
+  var fy=Math.max(0,Math.min(1,parseFloat(f.y)||0));
+  return {x:fx*pageW,y:(1-fy)*pageH};
+}
+function pdfSafeName(tplName,leadName){
+  var a=String(tplName||'Document').replace(/[^A-Za-z0-9 _-]+/g,'').trim().replace(/\s+/g,'_')||'Document';
+  var b=String(leadName||'').replace(/[^A-Za-z0-9 _-]+/g,'').trim().replace(/\s+/g,'_');
+  return a+(b?('_'+b):'')+'.pdf';
+}
 /* ⚡PRESETS — END */
+// Lazy CDN loads — neither library costs anything until PDFs are used.
+var _libLoads={};
+function loadLibOnce(url,haveIt){
+  if(haveIt())return Promise.resolve();
+  if(_libLoads[url])return _libLoads[url];
+  _libLoads[url]=new Promise(function(res,rej){
+    var s=document.createElement('script');
+    s.src=url;
+    s.onload=function(){res();};
+    s.onerror=function(){delete _libLoads[url];rej(new Error('Could not load '+url.split('/').pop()));};
+    document.head.appendChild(s);
+  });
+  return _libLoads[url];
+}
+function ensurePdfLib(){
+  return loadLibOnce('https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',function(){return !!window.PDFLib;});
+}
+function ensurePdfJs(){
+  // The worker file loads as a NORMAL page script: pdf.js detects
+  // window.pdfjsWorker and runs everything on the main thread — no
+  // cross-origin Worker, no blob shim, nothing to wedge. Plenty fast
+  // for previewing one page at a time.
+  return loadLibOnce('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',function(){return !!window.pdfjsLib;})
+    .then(function(){
+      return loadLibOnce('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',function(){return !!window.pdfjsWorker;});
+    });
+}
+function b64ToBytes(b64){
+  var bin=atob(b64);
+  var out=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);
+  return out;
+}
+// Fill one template for one lead: every field's token resolves through the
+// same pipeline as preset text ({today} + prefills + names), then prints
+// at its marked spot. Returns base64 of the finished PDF.
+async function generateFilledPdf(tpl,ri){
+  await ensurePdfLib();
+  var doc=await PDFLib.PDFDocument.load(b64ToBytes(tpl.dataBase64));
+  var font=await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+  var pages=doc.getPages();
+  var names=getNames(ri);
+  (tpl.fields||[]).forEach(function(f){
+    var pg=pages[Math.max(0,Math.min(pages.length-1,(parseInt(f.page,10)||1)-1))];
+    var sz=pg.getSize();
+    var xy=pdfFieldXY(f,sz.width,sz.height);
+    var txt=String(f.token||'').split('{today}').join(ds(localToday()));
+    txt=fillNames(fillFacts(txt,ri),names);
+    if(!txt)return;
+    var fs=parseInt(f.size,10)||11;
+    pg.drawText(txt,{x:xy.x,y:xy.y-fs,size:fs,font:font,color:PDFLib.rgb(0.08,0.08,0.1)});
+  });
+  return await doc.saveAsBase64();
+}
 function presetsForLead(ri){
   var r=rows[ri]||[];
   var engId='',engName='';
@@ -7332,6 +7432,25 @@ document.addEventListener('change',function(ev){
       fr.readAsArrayBuffer(file);
     })();
   }
+  // 📎 Fillable-PDF template upload (Settings → Email)
+  if(t&&t.id==='pdft-file'&&t.files&&t.files.length){
+    (function(){
+      var file=t.files[0];t.value='';
+      if(file.size>1.5*1024*1024){showErr('Keep template PDFs under 1.5 MB ('+file.name+' is '+(file.size/1024/1024).toFixed(1)+' MB) — they live inside the synced config. Compress it and try again.');return;}
+      var fr=new FileReader();
+      fr.onload=function(){
+        var tp={id:'pdft-'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+          name:file.name.replace(/\.pdf$/i,''),
+          dataBase64:String(fr.result).split(',')[1],fields:[]};
+        pdfTemplates().push(tp);
+        renderEmailPresetSettings();
+        saveEnginesDoc().then(function(){toast('📎 '+tp.name+' uploaded — now hit ✏ Mark to place the fill-ins');})
+          .catch(function(e){showErr('PDF did not reach OneDrive ('+e.message+') — it will vanish on reload.');});
+        openPdfMarker(tp.id);
+      };
+      fr.readAsDataURL(file);
+    })();
+  }
   // 🧾 Invoice attachments — read as base64, chip-listed, removable
   if(t&&t.id==='inv-file'&&t.files&&t.files.length){
     Array.prototype.slice.call(t.files).forEach(function(file){
@@ -10520,6 +10639,109 @@ function emailReadAsBase64(file){
   });
 }
 
+/* ✏ PDF fill-in marker runtime */
+var _pm={tplId:null,page:1,numPages:1,doc:null,fields:[]};
+var _pmOpening=false;
+async function openPdfMarker(tplId){
+  if(_pmOpening)return; // a second click while the PDF is loading is noise
+  var tpl=pdfTemplates().find(function(x){return x.id===tplId;});
+  if(!tpl)return;
+  _pmOpening=true;
+  try{await _openPdfMarkerInner(tpl);}finally{_pmOpening=false;}
+}
+async function _openPdfMarkerInner(tpl){
+  var tplId=tpl.id;
+  // Free the previous document BEFORE resetting state
+  if(_pm&&_pm.doc){try{_pm.doc.destroy();}catch(_){}}
+  _pm={tplId:tplId,page:1,numPages:1,doc:null,fields:deepCopy(tpl.fields||[])};
+  el('pm-title').textContent='✏ Mark fill-ins — '+(tpl.name||'PDF');
+  el('pm-out').textContent='Loading the PDF…';
+  // Token menu: names + dates + every prefill key
+  var opts=[['{dm}','Contact first name {dm}'],['{pt}','Patient first name {pt}'],
+    ['{rel}','Relationship {rel}'],['{ptrel}','Patient-to-them {ptrel}'],['{today}','Today’s date {today}']];
+  Object.keys(emailFacts()).forEach(function(k){opts.push(['{'+k+'}','Prefill {'+k+'}']);});
+  el('pm-token').innerHTML=opts.map(function(o){return '<option value="'+escapeHtml(o[0])+'">'+escapeHtml(o[1])+'</option>';}).join('');
+  el('pm-custom').value='';
+  el('modal-pdfmark').classList.add('open');
+  var wrap=el('pm-canvas-wrap');
+  wrap.onclick=pmCanvasClick;
+  try{
+    await ensurePdfJs();
+    _pm.doc=await pdfjsLib.getDocument({data:b64ToBytes(tpl.dataBase64)}).promise;
+    _pm.numPages=_pm.doc.numPages;
+    await renderPmPage();
+    el('pm-out').textContent=(_pm.fields.length||'No')+' fill-in'+(_pm.fields.length!==1?'s':'')+' placed so far.';
+  }catch(e){
+    el('pm-out').textContent='✗ Could not render this PDF: '+e.message;
+  }
+}
+// Renders are STRICTLY SERIAL: pdf.js deadlocks if a render starts while
+// a cancelled one is still draining on the same page, so every request
+// simply queues behind the previous one (a 1-page render is ~50ms).
+var _pmRenderChain=Promise.resolve();
+function renderPmPage(){
+  _pmRenderChain=_pmRenderChain
+    .then(function(){return _renderPmPageNow();})
+    .catch(function(e){var o=el('pm-out');if(o)o.textContent='✗ Could not render this PDF: '+(e&&e.message||e);});
+  return _pmRenderChain;
+}
+async function _renderPmPageNow(){
+  if(!_pm.doc)return;
+  var page=await _pm.doc.getPage(_pm.page);
+  var base=page.getViewport({scale:1});
+  var scale=620/base.width;
+  var vp=page.getViewport({scale:scale});
+  // Fresh canvas node per render — a canvas poisoned by an interrupted
+  // earlier session can never block us.
+  var old=el('pm-canvas');
+  var cv=old.cloneNode(false);
+  old.parentNode.replaceChild(cv,old);
+  cv.width=Math.round(vp.width);cv.height=Math.round(vp.height);
+  await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+  el('pm-page').textContent=_pm.page+' / '+_pm.numPages;
+  // Chips for this page's fields
+  var wrap=el('pm-canvas-wrap');
+  wrap.querySelectorAll('.pm-chip').forEach(function(c){c.remove();});
+  _pm.fields.forEach(function(f,idx){
+    if((parseInt(f.page,10)||1)!==_pm.page)return;
+    var d=document.createElement('div');
+    d.className='pm-chip';
+    d.textContent=String(f.token||'').slice(0,26);
+    d.title='Click to remove';
+    d.dataset.idx=idx;
+    d.style.cssText='position:absolute;left:'+(f.x*100)+'%;top:'+(f.y*100)+'%;transform:translateY(-2px);background:rgba(197,155,78,.92);color:#fff;font-size:'+Math.max(9,Math.round((f.size||11)*(620/612)*0.9))+'px;font-weight:700;padding:1px 6px;border-radius:5px;cursor:pointer;max-width:220px;overflow:hidden;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.25)';
+    wrap.appendChild(d);
+  });
+}
+function pmCanvasClick(e){
+  var chip=e.target.closest?e.target.closest('.pm-chip'):null;
+  if(chip){
+    _pm.fields.splice(parseInt(chip.dataset.idx,10),1);
+    renderPmPage();
+    el('pm-out').textContent='Fill-in removed.';
+    return;
+  }
+  var cv=el('pm-canvas');
+  if(!cv||e.target!==cv)return;
+  var r=cv.getBoundingClientRect();
+  var x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
+  var custom=String(el('pm-custom').value||'').trim();
+  var token=custom||el('pm-token').value;
+  _pm.fields.push({page:_pm.page,x:Math.round(x*1000)/1000,y:Math.round(y*1000)/1000,
+    size:parseInt(el('pm-size').value,10)||11,token:token});
+  renderPmPage();
+  el('pm-out').textContent=_pm.fields.length+' fill-in'+(_pm.fields.length!==1?'s':'')+' placed.';
+}
+function pmSave(){
+  var tpl=pdfTemplates().find(function(x){return x.id===_pm.tplId;});
+  if(!tpl)return;
+  tpl.fields=deepCopy(_pm.fields);
+  el('modal-pdfmark').classList.remove('open');
+  renderEmailPresetSettings();
+  saveEnginesDoc().then(function(){toast('✓ '+tpl.fields.length+' fill-in'+(tpl.fields.length!==1?'s':'')+' saved on '+(tpl.name||'the PDF'));})
+    .catch(function(e){showErr('Fill-ins did not reach OneDrive ('+e.message+') — they will vanish on reload.');});
+}
+
 /* 📑 Preset management (Settings → Email) */
 var _epEditId=null;
 function renderEmailPresetSettings(){
@@ -10548,6 +10770,20 @@ function renderEmailPresetSettings(){
         +'<button class="ee-mini" style="color:var(--red)" data-action="ef-del" data-k="'+escapeHtml(k)+'">✕</button></div>';
     }).join('')||'<div style="font-size:11.5px;color:var(--soft);font-style:italic;margin-bottom:4px">No prefills yet.</div>';
   }
+  var ph=el('pdft-list');
+  if(ph){
+    var tps=pdfTemplates();
+    ph.innerHTML=tps.map(function(tp){
+      var kb=Math.max(1,Math.round((tp.dataBase64||'').length*0.75/1024));
+      var nf=(tp.fields||[]).length;
+      return '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border:1.5px solid var(--border);border-radius:10px;margin-bottom:6px">'
+        +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:700">📎 '+escapeHtml(tp.name||'PDF')+'</div>'
+        +'<div style="font-size:10.5px;color:'+(nf?'var(--soft)':'#b8860b')+'">'+kb+' KB · '+(nf?(nf+' fill-in'+(nf!==1?'s':'')):'no fill-ins yet — hit ✏ Mark')+'</div></div>'
+        +'<button class="ee-mini" data-action="pdft-mark" data-pid="'+escapeHtml(tp.id)+'" title="Mark where fill-ins print">✏ Mark</button>'
+        +'<button class="ee-mini" style="color:var(--red)" data-action="pdft-del" data-pid="'+escapeHtml(tp.id)+'">🗑</button>'
+        +'</div>';
+    }).join('')||'<div style="font-size:11.5px;color:var(--soft);font-style:italic;margin-bottom:4px">No PDFs yet.</div>';
+  }
 }
 function openPresetEditor(p){
   _epEditId=p?p.id:null;
@@ -10559,6 +10795,14 @@ function openPresetEditor(p){
   el('ep-engines').value=p?(p.engines||[]).join(', '):'';
   el('ep-sources').value=p?(p.sources||[]).join(', '):'';
   el('ep-out').textContent='';
+  var pdfHost=el('ep-pdfs');
+  if(pdfHost){
+    var tps=pdfTemplates();
+    var sel=(p&&p.pdfIds)||[];
+    pdfHost.innerHTML=tps.length?tps.map(function(tp){
+      return '<label class="st-check" style="margin:0;border:1.5px solid var(--border);border-radius:14px;padding:5px 12px"><input type="checkbox" class="ep-pdf-chk" value="'+escapeHtml(tp.id)+'"'+(sel.indexOf(tp.id)>-1?' checked':'')+'> 📎 '+escapeHtml(tp.name||'PDF')+((tp.fields||[]).length?'':' <span style="color:#b8860b">(no fill-ins yet)</span>')+'</label>';
+    }).join(''):'<span style="font-size:11px;color:var(--soft);font-style:italic">No PDFs uploaded yet — add them under 📎 Fillable PDFs below.</span>';
+  }
   var dl=function(id,vals){var d=el(id);if(d)d.innerHTML=vals.map(function(v){return '<option value="'+escapeHtml(v)+'">';}).join('');};
   try{dl('ep-status-list',allStatuses());}catch(_){}
   try{dl('ep-source-list',allSources());}catch(_){}
@@ -10577,7 +10821,8 @@ function savePresetFromEditor(){
     body:body,
     statuses:splitCommaList(el('ep-statuses').value),
     engines:splitCommaList(el('ep-engines').value),
-    sources:splitCommaList(el('ep-sources').value)
+    sources:splitCommaList(el('ep-sources').value),
+    pdfIds:Array.prototype.map.call(document.querySelectorAll('.ep-pdf-chk:checked'),function(c){return c.value;})
   };
   var ps=emailPresets();
   var idx=ps.findIndex(function(x){return x.id===p.id;});
@@ -10599,7 +10844,7 @@ function renderEmailPresetsBar(ri){
     return '<button type="button" data-action="preset-insert" data-pid="'+escapeHtml(p.id)+'" style="padding:6px 12px;background:var(--gold-pale,#fdf3dd);border:1.5px solid var(--border);border-radius:14px;font-family:inherit;font-size:11.5px;font-weight:600;cursor:pointer">📄 '+escapeHtml(p.name||'(unnamed)')+'</button>';
   }).join('');
 }
-function insertEmailPreset(pid){
+async function insertEmailPreset(pid){
   var ri=parseInt(el('modal-email').dataset.ri,10);
   if(isNaN(ri))return;
   var p=emailPresets().find(function(x){return x.id===pid;});
@@ -10612,7 +10857,27 @@ function insertEmailPreset(pid){
   if(sig)bodyText=(bodyText?bodyText+'\n\n':'')+sig;
   emailClearRawHtml({keepBody:true});
   el('email-body').innerHTML=emailPlainToHtml(bodyText);
-  toast('📄 '+(p.name||'Preset')+' loaded — edit freely, then send');
+  // 📎 Linked fillable PDFs: generate a fresh copy for THIS lead and
+  // attach — visible in the attachment list before anything sends.
+  var tps=(p.pdfIds||[]).map(function(id){
+    return pdfTemplates().find(function(x){return x.id===id;});
+  }).filter(Boolean);
+  if(tps.length){
+    toast('📎 Generating '+tps.length+' PDF'+(tps.length!==1?'s':'')+'…');
+    var leadNm=String((rows[ri]||[])[C.NM]||(rows[ri]||[])[C.DM]||'').trim();
+    for(var ti=0;ti<tps.length;ti++){
+      try{
+        var b64=await generateFilledPdf(tps[ti],ri);
+        emailAttachments.push({name:pdfSafeName(tps[ti].name,leadNm),
+          type:'application/pdf',dataBase64:b64,
+          size:Math.round(b64.length*0.75),large:false});
+      }catch(ePdf){
+        showErr('PDF "'+(tps[ti].name||'')+'" failed to generate: '+ePdf.message+' — the email is still usable without it.');
+      }
+    }
+    emailRenderAttachList();
+  }
+  toast('📄 '+(p.name||'Preset')+' loaded'+(tps.length?' with '+tps.length+' filled PDF'+(tps.length!==1?'s':''):'')+' — edit freely, then send');
 }
 function openEmail(ri,opts){
   opts=opts||{};
@@ -13483,10 +13748,38 @@ function onClick(ev){
       })();
       break;
     case 'preset-insert':
-      insertEmailPreset(t.dataset.pid);
+      Promise.resolve(insertEmailPreset(t.dataset.pid)).catch(function(eP){
+        showErr('Preset failed: '+String(eP&&eP.message||eP));
+      });
       break;
     case 'ep-new':
       openPresetEditor(null);
+      break;
+    case 'pdft-upload':
+      if(el('pdft-file'))el('pdft-file').click();
+      break;
+    case 'pdft-mark':
+      openPdfMarker(t.dataset.pid);
+      break;
+    case 'pdft-del':
+      (function(){
+        var tps=pdfTemplates();
+        var tp=tps.find(function(x){return x.id===t.dataset.pid;});
+        if(!tp||!confirm('Delete the PDF "'+(tp.name||'')+'"? Presets that attach it will simply skip it.'))return;
+        tps.splice(tps.indexOf(tp),1);
+        renderEmailPresetSettings();
+        saveEnginesDoc().then(function(){toast('✓ PDF deleted');})
+          .catch(function(e){showErr('Delete did not reach OneDrive ('+e.message+') — it will reappear on reload.');});
+      })();
+      break;
+    case 'pm-prev':
+      if(_pm.page>1){_pm.page--;renderPmPage();}
+      break;
+    case 'pm-next':
+      if(_pm.page<_pm.numPages){_pm.page++;renderPmPage();}
+      break;
+    case 'pm-save':
+      pmSave();
       break;
     case 'ep-edit':
       openPresetEditor(emailPresets().find(function(x){return x.id===t.dataset.pid;}));

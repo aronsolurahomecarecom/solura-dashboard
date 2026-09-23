@@ -16,7 +16,7 @@ if (b < 0 || e < 0) throw new Error('PRESETS markers missing');
 const src = html.slice(html.indexOf('*/', b) + 2, e);
 const doc = { config: {}, engines: [] };
 const mk = new Function('enginesDoc',
-  src + '\nreturn {emailPresets,emailFacts,leadFactsAll,leadFact,fillFacts,presetMatch,splitCommaList};');
+  src + '\nreturn {emailPresets,emailFacts,leadFactsAll,leadFact,fillFacts,presetMatch,splitCommaList,pdfTemplates,pdfFieldXY,pdfSafeName};');
 const P = mk(doc);
 
 // ── prefills: general + per-lead override ──
@@ -42,6 +42,28 @@ ok(!P.presetMatch({ statuses: ['Cold'] }, ctx), 'non-matching stage-only preset 
 ok(P.presetMatch({ statuses: ['Cold'], sources: ['APFM', 'place for mom'] }, ctx), 'ANY axis matching is enough');
 ok(!P.presetMatch({ statuses: ['Cold'] }, { status: '' }), 'blank lead status never matches an assigned preset');
 ok(JSON.stringify(P.splitCommaList(' Cold , On Service ,,')) === '["Cold","On Service"]', 'comma lists trimmed and cleaned');
+
+// ── 📎 fillable PDFs (B-0922-93) ──
+{
+  const xy = P.pdfFieldXY({ x: 0.5, y: 0.25 }, 612, 792);
+  ok(xy.x === 306 && xy.y === 594, 'percent coords map to page points, y flipped (top-left click → bottom-left PDF)');
+  const cl = P.pdfFieldXY({ x: 2, y: -1 }, 612, 792);
+  ok(cl.x === 612 && cl.y === 792, 'coordinates clamp inside the page');
+  ok(P.pdfSafeName('Service Agreement!', 'Miriam Gold') === 'Service_Agreement_Miriam_Gold.pdf', 'attachment named template + lead, filesystem-safe');
+  ok(P.pdfSafeName('', '') === 'Document.pdf', 'nameless template still gets a valid filename');
+  ok(Array.isArray(P.pdfTemplates()) && P.pdfTemplates() === P.pdfTemplates(), 'templates store in the synced doc');
+}
+ok(/id="pdft-file"/.test(html) && /data-action="pdft-upload"/.test(html) && /data-action="pdft-mark"/.test(html) && /data-action="pdft-del"/.test(html), 'upload / mark / delete PDFs in Settings');
+ok(/under 1\.5 MB/.test(html), 'oversized template PDFs refused with guidance');
+ok(/id="modal-pdfmark"/.test(html) && /id="pm-canvas"/.test(html) && /data-action="pm-save"/.test(html), 'click-to-place marker modal with save');
+ok(/function pmCanvasClick/.test(html) && /_pm\.fields\.push\(\{page:_pm\.page/.test(html), 'clicking the page places a field with page + percent coords + size + token');
+ok(/\.pm-chip'\)/.test(html.replace(/\\/g, '')) || /closest\('\.pm-chip'\)/.test(html), 'clicking a placed chip removes it');
+ok(/pdf-lib\/1\.17\.1\/pdf-lib\.min\.js/.test(html) && /pdf\.js\/3\.11\.174\/pdf\.min\.js/.test(html), 'pdf-lib + pdf.js lazy-loaded from CDN only when used');
+ok(/async function generateFilledPdf/.test(html) && /drawText\(txt/.test(html) && /embedFont\(PDFLib\.StandardFonts\.Helvetica\)/.test(html), 'generation draws resolved text into the real PDF');
+ok(/\{today\}'\)\.join\(ds\(localToday\(\)\)\)/.test(html.replace(/\\/g, '')) || /split\('\{today\}'\)/.test(html), '{today} resolves to the visit date');
+ok(/id="ep-pdfs"/.test(html) && /ep-pdf-chk:checked/.test(html), 'presets pick their PDFs via checkboxes in the editor');
+ok(/generateFilledPdf\(tps\[ti\],ri\)/.test(html) && /emailAttachments\.push\(\{name:pdfSafeName/.test(html), 'preset insert generates per-lead PDFs and attaches them');
+ok(/the email is still usable without it/.test(html), 'a failed PDF never blocks the email');
 
 // ── wiring locks ──
 ok(/id="email-presets-wrap"/.test(html) && /data-action="toggle-email-presets"/.test(html), 'folded 📑 bar lives in the composer');
