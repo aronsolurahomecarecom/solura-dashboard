@@ -694,6 +694,10 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <div id="email-unsub-banner" style="display:none;font-size:12px;font-weight:600;background:#FDECEA;border:1.5px solid #E57373;color:#B71C1C;border-radius:8px;padding:9px 12px;margin-bottom:10px"></div>
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">To</div>
       <div id="email-to" style="font-size:12px;color:var(--mid);margin-bottom:12px;padding:8px 10px;background:var(--cream);border-radius:8px"></div>
+      <div id="email-presets-wrap" style="margin-bottom:10px;display:none">
+        <button type="button" data-action="toggle-email-presets" style="width:100%;text-align:left;padding:8px 12px;background:none;border:1.5px dashed var(--border);border-radius:10px;font-family:inherit;font-size:11.5px;font-weight:700;color:var(--mid);cursor:pointer">📑 Preset emails <span id="email-presets-count"></span> <span id="email-presets-arrow" style="float:right">▸</span></button>
+        <div id="email-presets-list" style="display:none;flex-wrap:wrap;gap:6px;padding:8px;border:1.5px dashed var(--border);border-top:none;border-radius:0 0 10px 10px"></div>
+      </div>
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Subject</div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <input id="email-subj" style="flex:1;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;outline:none">
@@ -747,6 +751,29 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
 <div class="done-pop" id="done-pop">
   <div class="done-pop-arrow"></div>
   <div class="done-pop-inner" id="done-pop-inner"></div>
+</div>
+
+<!-- 📑 Preset-email editor -->
+<div class="modal" id="modal-ep">
+  <div class="mbox" style="max-width:640px">
+    <div class="mhead"><div class="mtitle" id="ep-title">📑 Preset email</div><button class="mclose" data-action="close-modal" data-mid="modal-ep">✕</button></div>
+    <div class="mbody">
+      <div class="la-f" style="margin-bottom:10px"><label>Name (what the button in the composer says)</label><input type="text" id="ep-name" placeholder="e.g. Rate sheet, Welcome packet, VA benefits info"></div>
+      <div class="la-f" style="margin-bottom:10px"><label>Subject</label><input type="text" id="ep-subject" placeholder="e.g. Our rates for {pt}, in writing"></div>
+      <div class="la-f" style="margin-bottom:10px"><label>Body (plain text — {dm} {pt} {rel} {ptrel} and prefill {key} tokens fill per lead)</label><textarea id="ep-body" rows="9" style="width:100%;font-size:12.5px;line-height:1.5"></textarea></div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--soft);margin-bottom:6px">Shows for (comma-separated, blank = everyone)</div>
+      <div class="la-grid g3" style="margin-bottom:12px">
+        <div class="la-f"><label>Stages</label><input type="text" id="ep-statuses" list="ep-status-list" placeholder="e.g. Cold, On Service"><datalist id="ep-status-list"></datalist></div>
+        <div class="la-f"><label>Sequences</label><input type="text" id="ep-engines" list="ep-engine-list" placeholder="e.g. Track C"><datalist id="ep-engine-list"></datalist></div>
+        <div class="la-f"><label>Sources</label><input type="text" id="ep-sources" list="ep-source-list" placeholder="e.g. APFM"><datalist id="ep-source-list"></datalist></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="ep-out" style="flex:1;font-size:11.5px;color:var(--red)"></span>
+        <button data-action="ep-save" style="padding:9px 18px;background:linear-gradient(135deg,var(--gold),#D4920F);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">✓ Save preset</button>
+        <button data-action="close-modal" data-mid="modal-ep" style="padding:9px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- 🅰🅱🅲 Retrack — the first call is when the track gets corrected -->
@@ -826,7 +853,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       </div>
       <div class="la-grid g2" style="margin-bottom:10px">
         <div class="la-f"><label>Hours of care</label><input type="number" min="0" step="0.5" id="inv-hours"></div>
-        <div class="la-f"><label>Hourly rate ($)</label><input type="number" min="0" step="0.01" id="inv-rate"></div>
+        <div class="la-f"><label>Hourly rate ($)</label><div style="display:flex;gap:6px"><input type="number" min="0" step="0.01" id="inv-rate" style="flex:1"><button data-action="inv-pin-rate" title="Save as this client's default rate — future invoices fill it automatically" style="padding:0 10px;background:none;border:1.5px solid var(--border);border-radius:8px;cursor:pointer;font-family:inherit">📌</button></div></div>
       </div>
       <div style="margin-bottom:10px">
         <input type="file" id="inv-hha-file" accept=".xlsx,.xls,.csv" style="display:none">
@@ -1238,6 +1265,20 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
 
       <section class="st-sec" id="st-sec-email" hidden>
         <h3 class="st-h">Email</h3>
+        <div class="st-field">
+          <h4 class="st-h2">📑 Preset emails</h4>
+          <p class="st-p">Reusable emails that appear in the composer's folded 📑 bar on every matching lead. Assign to stages, sequences, or sources — leave all empty and it shows for <b>everyone</b>. Tokens: <code>{dm}</code> <code>{pt}</code> <code>{rel}</code> <code>{ptrel}</code> plus any prefill key below as <code>{key}</code>.</p>
+          <div id="ep-list" style="margin-bottom:8px"></div>
+          <button data-action="ep-new" class="st-btn-ghost">➕ New preset</button>
+          <h4 class="st-h2" style="margin-top:18px">🔤 Prefills</h4>
+          <p class="st-p">General values usable in any preset as <code>{key}</code>. A per-lead value with the same key wins — the 📌 on the invoice saves <code>billRate</code> per client, and that rate auto-fills their invoices.</p>
+          <div id="ef-list" style="margin-bottom:8px"></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <input id="ef-key" placeholder="key — e.g. billRate" class="ee-inp" style="width:170px">
+            <input id="ef-val" placeholder="value — e.g. 30" class="ee-inp" style="flex:1;min-width:160px">
+            <button data-action="ef-add" class="st-btn-ghost">＋ Add prefill</button>
+          </div>
+        </div>
         <div class="st-field">
           <label class="ee-lbl">🏥 Finished-assessment email goes to (blank = intake@solurahomecare.com)</label>
           <input type="email" class="ee-inp" data-cfg="asmtIntakeTo" placeholder="intake@solurahomecare.com">
@@ -1671,7 +1712,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0922-91';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0922-92';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3006,6 +3047,69 @@ function fillAsmtSchedTokens(tpl,f){
     .replace(/\{notes\}/gi,notesBlock);
 }
 /* 🧾 INVOICING — END */
+/* ⚡PRESETS — BEGIN (sliced by tests/presets.test.mjs)
+ * 📑 Preset emails: user-authored reusable emails that surface in the
+ * composer's folded bar, filtered by what they're assigned to (stages,
+ * sequences, sources — none = general, shows for every lead).
+ * 🔤 Prefills: {key} tokens — general values set once in Settings, with
+ * per-lead overrides (the invoice pins billRate per client, which also
+ * auto-fills the invoice rate).                                        */
+function emailPresets(){enginesDoc.emailPresets=enginesDoc.emailPresets||[];return enginesDoc.emailPresets;}
+function emailFacts(){enginesDoc.config=enginesDoc.config||{};enginesDoc.config.emailFacts=enginesDoc.config.emailFacts||{};return enginesDoc.config.emailFacts;}
+function leadFactsAll(){enginesDoc.leadFacts=enginesDoc.leadFacts||{};return enginesDoc.leadFacts;}
+// Per-lead value wins; general prefill is the fallback.
+function leadFact(ri,key){
+  var lf=(enginesDoc.leadFacts||{})[String(ri)]||{};
+  var v=lf[key];
+  if(v==null||String(v).trim()==='')v=((enginesDoc.config||{}).emailFacts||{})[key];
+  return v==null?'':String(v);
+}
+// Replace {key} for every known prefill (general + this lead's overrides).
+// Unknown braces are left alone — {dm}/{pt}/etc. belong to fillNames.
+function fillFacts(s,ri){
+  s=String(s||'');
+  var gf=(enginesDoc.config||{}).emailFacts||{};
+  var lf=(ri!=null&&ri>=0)?(((enginesDoc.leadFacts||{})[String(ri)])||{}):{};
+  var keys={};
+  Object.keys(gf).forEach(function(k){keys[k]=1;});
+  Object.keys(lf).forEach(function(k){keys[k]=1;});
+  Object.keys(keys).forEach(function(k){
+    var v=(lf[k]!=null&&String(lf[k]).trim()!=='')?lf[k]:gf[k];
+    if(v==null)return;
+    s=s.split('{'+k+'}').join(String(v));
+  });
+  return s;
+}
+// Does a preset apply to this lead? Empty assignment = general (everyone);
+// otherwise ANY of its stage/sequence/source matches (case-insensitive
+// contains, same matching the engine assignment rules use).
+function presetMatch(p,ctx){
+  p=p||{};ctx=ctx||{};
+  var hasAny=(p.statuses&&p.statuses.length)||(p.engines&&p.engines.length)||(p.sources&&p.sources.length);
+  if(!hasAny)return true;
+  var has=function(list,val){
+    val=String(val||'').trim().toLowerCase();
+    if(!val)return false;
+    return (list||[]).some(function(m){
+      m=String(m||'').trim().toLowerCase();
+      return m&&(val===m||val.indexOf(m)>-1);
+    });
+  };
+  return has(p.statuses,ctx.status)
+    ||has(p.engines,ctx.engineId)||has(p.engines,ctx.engineName)
+    ||has(p.sources,ctx.source);
+}
+function splitCommaList(s){
+  return String(s||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+}
+/* ⚡PRESETS — END */
+function presetsForLead(ri){
+  var r=rows[ri]||[];
+  var engId='',engName='';
+  try{engId=engineIdFor(ri);engName=(ENGINES[engId]||{}).name||'';}catch(_){}
+  var ctx={status:r[C.ST],source:r[C.SO],engineId:engId,engineName:engName};
+  return emailPresets().filter(function(p){return presetMatch(p,ctx);});
+}
 /* 🅰🅱🅲 retrack + loss-reason runtime */
 var _rtRi=-1,_lossRi=-1;
 var LOSS_REASONS=['Recipient refused','Cost','Chose another agency','Need resolved','Moved to facility','Unreachable','Other'];
@@ -3208,6 +3312,12 @@ function openInvoice(ri){
   el('inv-to-date').value=ds(t);
   el('inv-due').value=ds(addDays(t,14));
   el('inv-hours').value='';el('inv-rate').value='';el('inv-amount').value='';
+  // 📌 This client's pinned rate (or the general billRate prefill) fills
+  // the rate automatically — type over it any time.
+  try{
+    var pinRate=leadFact(ri,'billRate').replace(/[^\d.]/g,'');
+    if(pinRate)el('inv-rate').value=pinRate;
+  }catch(_){}
   el('inv-notes').value='';
   el('inv-out').textContent='';
   if(el('inv-hha-out'))el('inv-hha-out').textContent='';
@@ -6403,6 +6513,7 @@ function renderConfigInputs(){
   if(ck){try{ck.value=localStorage.getItem('claudeApiKey')||(enginesDoc.config&&enginesDoc.config.claudeApiKey)||'';}catch(_){}}
   var gk=el('ghl-key');
   if(gk){try{gk.value=GHL_KEY();}catch(_){}}
+  try{renderEmailPresetSettings();}catch(_){}
   renderClaudeSections();
   renderShellPreview();
   // Newsletter audience rules: group checkboxes + live status list
@@ -10409,6 +10520,100 @@ function emailReadAsBase64(file){
   });
 }
 
+/* 📑 Preset management (Settings → Email) */
+var _epEditId=null;
+function renderEmailPresetSettings(){
+  var host=el('ep-list');
+  if(host){
+    var ps=emailPresets();
+    host.innerHTML=ps.map(function(p){
+      var applies=[];
+      if(p.statuses&&p.statuses.length)applies.push('stages: '+p.statuses.join(', '));
+      if(p.engines&&p.engines.length)applies.push('sequences: '+p.engines.join(', '));
+      if(p.sources&&p.sources.length)applies.push('sources: '+p.sources.join(', '));
+      return '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border:1.5px solid var(--border);border-radius:10px;margin-bottom:6px">'
+        +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:700">📄 '+escapeHtml(p.name||'(unnamed)')+'</div>'
+        +'<div style="font-size:10.5px;color:var(--soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(applies.join(' · ')||'shows for every lead')+'</div></div>'
+        +'<button class="ee-mini" data-action="ep-edit" data-pid="'+escapeHtml(p.id)+'">✏</button>'
+        +'<button class="ee-mini" style="color:var(--red)" data-action="ep-del" data-pid="'+escapeHtml(p.id)+'">🗑</button>'
+        +'</div>';
+    }).join('')||'<div style="font-size:11.5px;color:var(--soft);font-style:italic;margin-bottom:6px">No presets yet — build the emails you send again and again.</div>';
+  }
+  var eh=el('ef-list');
+  if(eh){
+    var facts=emailFacts();
+    eh.innerHTML=Object.keys(facts).map(function(k){
+      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:4px;font-size:12px">'
+        +'<code style="font-weight:700">{'+escapeHtml(k)+'}</code><span style="flex:1;color:var(--mid)">'+escapeHtml(String(facts[k]))+'</span>'
+        +'<button class="ee-mini" style="color:var(--red)" data-action="ef-del" data-k="'+escapeHtml(k)+'">✕</button></div>';
+    }).join('')||'<div style="font-size:11.5px;color:var(--soft);font-style:italic;margin-bottom:4px">No prefills yet.</div>';
+  }
+}
+function openPresetEditor(p){
+  _epEditId=p?p.id:null;
+  el('ep-title').textContent=p?('📑 Edit — '+(p.name||'preset')):'📑 New preset email';
+  el('ep-name').value=p?(p.name||''):'';
+  el('ep-subject').value=p?(p.subject||''):'';
+  el('ep-body').value=p?(p.body||''):'';
+  el('ep-statuses').value=p?(p.statuses||[]).join(', '):'';
+  el('ep-engines').value=p?(p.engines||[]).join(', '):'';
+  el('ep-sources').value=p?(p.sources||[]).join(', '):'';
+  el('ep-out').textContent='';
+  var dl=function(id,vals){var d=el(id);if(d)d.innerHTML=vals.map(function(v){return '<option value="'+escapeHtml(v)+'">';}).join('');};
+  try{dl('ep-status-list',allStatuses());}catch(_){}
+  try{dl('ep-source-list',allSources());}catch(_){}
+  try{dl('ep-engine-list',(enginesDoc.engines||[]).map(function(e){return e.name||e.id;}));}catch(_){}
+  el('modal-ep').classList.add('open');
+}
+function savePresetFromEditor(){
+  var name=String(el('ep-name').value||'').trim();
+  if(!name){el('ep-out').textContent='✗ Give the preset a name.';return;}
+  var body=String(el('ep-body').value||'');
+  if(!body.trim()){el('ep-out').textContent='✗ The body is empty.';return;}
+  var p={
+    id:_epEditId||('ep-'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)),
+    name:name,
+    subject:String(el('ep-subject').value||'').trim(),
+    body:body,
+    statuses:splitCommaList(el('ep-statuses').value),
+    engines:splitCommaList(el('ep-engines').value),
+    sources:splitCommaList(el('ep-sources').value)
+  };
+  var ps=emailPresets();
+  var idx=ps.findIndex(function(x){return x.id===p.id;});
+  if(idx>-1)ps[idx]=p;else ps.push(p);
+  el('modal-ep').classList.remove('open');
+  renderEmailPresetSettings();
+  saveEnginesDoc().then(function(){toast('✓ Preset saved — it now rides the composer\'s 📑 bar');})
+    .catch(function(e){showErr('Preset did not reach OneDrive ('+e.message+') — it will vanish on reload. Sign out/in and save again.');});
+}
+function renderEmailPresetsBar(ri){
+  var wrap=el('email-presets-wrap'),list=el('email-presets-list'),cnt=el('email-presets-count'),arr=el('email-presets-arrow');
+  if(!wrap||!list)return;
+  var ps=presetsForLead(ri);
+  wrap.style.display=ps.length?'block':'none';
+  if(cnt)cnt.textContent='('+ps.length+')';
+  if(arr)arr.textContent='▸';
+  list.style.display='none'; // folded by default
+  list.innerHTML=ps.map(function(p){
+    return '<button type="button" data-action="preset-insert" data-pid="'+escapeHtml(p.id)+'" style="padding:6px 12px;background:var(--gold-pale,#fdf3dd);border:1.5px solid var(--border);border-radius:14px;font-family:inherit;font-size:11.5px;font-weight:600;cursor:pointer">📄 '+escapeHtml(p.name||'(unnamed)')+'</button>';
+  }).join('');
+}
+function insertEmailPreset(pid){
+  var ri=parseInt(el('modal-email').dataset.ri,10);
+  if(isNaN(ri))return;
+  var p=emailPresets().find(function(x){return x.id===pid;});
+  if(!p)return;
+  var names=getNames(ri);
+  // Fill EVERYTHING at insert time — what you see is exactly what sends
+  el('email-subj').value=fillNames(fillFacts(p.subject||'',ri),names);
+  var bodyText=fillNames(fillFacts(p.body||'',ri),names);
+  var sig=String(cfg('emailSignature')||'').trim();
+  if(sig)bodyText=(bodyText?bodyText+'\n\n':'')+sig;
+  emailClearRawHtml({keepBody:true});
+  el('email-body').innerHTML=emailPlainToHtml(bodyText);
+  toast('📄 '+(p.name||'Preset')+' loaded — edit freely, then send');
+}
 function openEmail(ri,opts){
   opts=opts||{};
   var email=String((rows[ri]||[])[C.EM]||'').trim();
@@ -10417,6 +10622,9 @@ function openEmail(ri,opts){
   var names=getNames(ri);
   var dm=names.dm||String((rows[ri]||[])[C.NM]||'').trim().split(' ')[0];
   el('email-to').textContent=(dm||'Contact')+' <'+email+'>';
+  // 📑 Folded preset bar — only the presets assigned to this lead's
+  // stage / sequence / source (plus general ones)
+  try{renderEmailPresetsBar(ri);}catch(_){}
   el('email-subj').value=c.subject;
   // Body: plaintext template → HTML in contenteditable
   var bodyEl=el('email-body');
@@ -13265,6 +13473,70 @@ function onClick(ev){
       break;
     case 'open-invoice':
       openInvoice(parseInt(t.dataset.ri,10));
+      break;
+    case 'toggle-email-presets':
+      (function(){
+        var l9=el('email-presets-list'),a9=el('email-presets-arrow');
+        var open9=l9.style.display!=='none';
+        l9.style.display=open9?'none':'flex';
+        if(a9)a9.textContent=open9?'▸':'▾';
+      })();
+      break;
+    case 'preset-insert':
+      insertEmailPreset(t.dataset.pid);
+      break;
+    case 'ep-new':
+      openPresetEditor(null);
+      break;
+    case 'ep-edit':
+      openPresetEditor(emailPresets().find(function(x){return x.id===t.dataset.pid;}));
+      break;
+    case 'ep-save':
+      savePresetFromEditor();
+      break;
+    case 'ep-del':
+      (function(){
+        var pid=t.dataset.pid;
+        var ps=emailPresets();
+        var p9=ps.find(function(x){return x.id===pid;});
+        if(!p9||!confirm('Delete the preset "'+(p9.name||'')+'"?'))return;
+        ps.splice(ps.indexOf(p9),1);
+        renderEmailPresetSettings();
+        saveEnginesDoc().then(function(){toast('✓ Preset deleted');})
+          .catch(function(e){showErr('Delete did not reach OneDrive ('+e.message+') — it will reappear on reload.');});
+      })();
+      break;
+    case 'ef-add':
+      (function(){
+        var k=String(el('ef-key').value||'').trim().replace(/[^A-Za-z0-9_]/g,'');
+        var v=String(el('ef-val').value||'').trim();
+        if(!k||!v){toast('Prefill needs a key and a value');return;}
+        emailFacts()[k]=v;
+        el('ef-key').value='';el('ef-val').value='';
+        renderEmailPresetSettings();
+        saveEnginesDoc().then(function(){toast('✓ Prefill {'+k+'} saved');})
+          .catch(function(e){showErr('Prefill did not reach OneDrive ('+e.message+').');});
+      })();
+      break;
+    case 'ef-del':
+      (function(){
+        delete emailFacts()[t.dataset.k];
+        renderEmailPresetSettings();
+        saveEnginesDoc().catch(function(e){showErr('Remove did not reach OneDrive ('+e.message+').');});
+      })();
+      break;
+    case 'inv-pin-rate':
+      (function(){
+        var ri9=_invRi;if(ri9<0)return;
+        var rv=String((el('inv-rate')||{}).value||'').trim();
+        if(!rv){toast('Type a rate first, then pin it');return;}
+        var lf=leadFactsAll();
+        lf[String(ri9)]=lf[String(ri9)]||{};
+        lf[String(ri9)].billRate=rv;
+        var nm9=String((rows[ri9]||[])[C.NM]||(rows[ri9]||[])[C.DM]||'this client').trim();
+        saveEnginesDoc().then(function(){toast('📌 $'+rv+'/hr saved as '+nm9+'’s rate — future invoices fill it automatically');})
+          .catch(function(e){showErr('Rate pin did not reach OneDrive ('+e.message+').');});
+      })();
       break;
     case 'open-retrack':
       _rtRi=parseInt(t.dataset.ri,10);
