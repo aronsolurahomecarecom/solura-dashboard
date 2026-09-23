@@ -1743,7 +1743,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0922-93';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0923-94';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3040,9 +3040,26 @@ function buildAssessmentIcs(f,opts){
     'DESCRIPTION:In-home assessment in 1 hour','END:VALARM','END:VEVENT','END:VCALENDAR');
   return {ics:lines.join('\r\n'),fileName:'Solura_Assessment_'+String(f.date||'').replace(/-/g,'')+'.ics'};
 }
+// A stored override must EARN the right to replace the built-in: filled
+// with probe data it needs real visible text (hidden display:none blocks
+// don't count — a mangled template that is only the invisible preheader
+// line passed the old check and sent a blank email) and it must actually
+// show the assessment date. Anything less → the built-in sends instead.
+function asmtTemplateUsable(tpl){
+  try{
+    var probe=fillAsmtSchedTokens(tpl,{date:'2026-01-15',time:'10:00',location:'Probe St',assessor:'Probe Name',notes:''});
+    var s=String(probe).replace(/<[a-z][^>]*display\s*:\s*none[^>]*>[\s\S]*?<\/[a-z]+>/gi,' ');
+    var txt=s.replace(/<(style|script)[\s\S]*?<\/\1>/gi,' ')
+      .replace(/<[^>]*>/g,' ').replace(/&nbsp;/gi,' ').replace(/\s+/g,' ').trim();
+    return txt.length>=40&&txt.indexOf('Jan 15, 2026')>-1;
+  }catch(_){return false;}
+}
 function asmtSchedCfg(){
+  var tpl=String(cfg('asmtSchedTemplate')||'').trim();
+  var rejected=false;
+  if(tpl&&!asmtTemplateUsable(tpl)){tpl='';rejected=true;}
   return {subject:String(cfg('asmtSchedSubject')||'').trim()||DEFAULT_ASMTSCHED_SUBJECT,
-    template:String(cfg('asmtSchedTemplate')||'').trim()||DEFAULT_ASMTSCHED_TEMPLATE};
+    template:tpl||DEFAULT_ASMTSCHED_TEMPLATE,overrideRejected:rejected};
 }
 // Does this HTML actually SHOW anything? A saved template can be non-empty
 // bytes yet render as nothing (a mangled fragment, tags with no text) —
@@ -3246,9 +3263,10 @@ function asFields(){
 function asBuildEmail(){
   var ac=asmtSchedCfg(),f=asFields(),names=getNames(_asRi);
   var html=fillNames(fillAsmtSchedTokens(ac.template,f),names);
-  // A restored/mangled saved template can render as NOTHING. Never send
-  // an empty confirmation — fall back to the built-in and flag it.
-  var usedFallback=false;
+  // asmtSchedCfg already rejected an unusable override; this second net
+  // guards the fill output itself. Either way: a blank confirmation can
+  // never leave the building.
+  var usedFallback=!!ac.overrideRejected;
   if(!htmlHasVisibleText(html)){
     html=fillNames(fillAsmtSchedTokens(DEFAULT_ASMTSCHED_TEMPLATE,f),names);
     usedFallback=true;
@@ -6608,6 +6626,16 @@ function renderConfigInputs(){
     if(String(inp.value||'').trim())return;
     inp.value=inp.dataset.cfg==='asmtSchedSubject'?DEFAULT_ASMTSCHED_SUBJECT:DEFAULT_ASMTSCHED_TEMPLATE;
   });
+  // A broken saved template is shown loudly, not silently ignored
+  try{
+    var asT=document.querySelector('[data-cfg="asmtSchedTemplate"]');
+    if(asT){
+      var storedT=String(cfg('asmtSchedTemplate')||'').trim();
+      var badT=!!storedT&&!asmtTemplateUsable(storedT);
+      asT.style.border=badT?'2px solid #c0392b':'';
+      asT.title=badT?'This saved template renders blank (or never shows the date) — the BUILT-IN is being sent instead. Hit ↺ Restore below and Save.':'';
+    }
+  }catch(_){}
   // API key is device-local only — deliberately NOT in the synced config
   var ck=el('claude-key');
   if(ck){try{ck.value=localStorage.getItem('claudeApiKey')||(enginesDoc.config&&enginesDoc.config.claudeApiKey)||'';}catch(_){}}

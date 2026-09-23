@@ -20,7 +20,7 @@ let CFG = {};
 const cfgStub = k => CFG[k];
 const escapeHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const mk = new Function('cfg', 'lc', 'escapeHtml',
-  src + '\nreturn {DEFAULT_ASMTSCHED_SUBJECT,DEFAULT_ASMTSCHED_TEMPLATE,asmtSchedCfg,asmtPrettyTime,fillAsmtSchedTokens,buildAssessmentIcs,icsEsc,htmlHasVisibleText};');
+  src + '\nreturn {DEFAULT_ASMTSCHED_SUBJECT,DEFAULT_ASMTSCHED_TEMPLATE,asmtSchedCfg,asmtPrettyTime,fillAsmtSchedTokens,buildAssessmentIcs,icsEsc,htmlHasVisibleText,asmtTemplateUsable};');
 const A = mk(cfgStub, s => String(s || '').toLowerCase(), escapeHtml);
 
 // ── time prettifier ──
@@ -82,6 +82,26 @@ ok(A.htmlHasVisibleText(A.DEFAULT_ASMTSCHED_TEMPLATE), 'the built-in template is
 ok(/if\(!htmlHasVisibleText\(html\)\)\{\s*\n\s*html=fillNames\(fillAsmtSchedTokens\(DEFAULT_ASMTSCHED_TEMPLATE/.test(html), 'asBuildEmail swaps a blank-rendering template for the built-in');
 ok(/usedFallback\)doneMsg\+=/.test(html) && /↺ Restore in ⚙ Settings → Email/.test(html), 'the fallback is announced with the fix path, never silent');
 ok(/if\(!String\(subj\|\|''\)\.trim\(\)\)subj=/.test(html), 'a blank subject falls back too');
+
+// ── 🚫 the blank-email hole, closed for real (B-0923-94) ──
+// The old guard counted HIDDEN text: a mangled template that was only the
+// display:none preheader line passed it and sent a BLANK email.
+ok(!A.asmtTemplateUsable('<div style="display:none;max-height:0">Your in-home visit is confirmed for {date}.</div>'), 'THE bug: preheader-only template (hidden text) is now rejected');
+ok(!A.asmtTemplateUsable('<p> </p><table><tr><td>&nbsp;</td></tr></table>'), 'tag skeletons rejected');
+ok(!A.asmtTemplateUsable('<p>Hello, see you soon! This note has plenty of text but never mentions when.</p>'), 'a template that never shows the {date} is rejected (a confirmation must confirm a date)');
+ok(!A.asmtTemplateUsable(''), 'empty rejected');
+ok(A.asmtTemplateUsable(A.DEFAULT_ASMTSCHED_TEMPLATE), 'the built-in passes its own bar');
+ok(A.asmtTemplateUsable('<p>Dear {dm}, the visit for {pt} is confirmed for {date} at {time}, at {location}, with {assessor}. Reply anytime.</p>'), 'a sane custom template passes');
+CFG = { asmtSchedTemplate: '<div style="display:none">Your in-home visit is confirmed for {date}.</div>' };
+{
+  const cfg9 = A.asmtSchedCfg();
+  ok(cfg9.template === A.DEFAULT_ASMTSCHED_TEMPLATE && cfg9.overrideRejected === true, 'a broken saved override NEVER wins — the built-in sends, flagged');
+}
+CFG = { asmtSchedTemplate: '<p>Visit for {pt} confirmed {date} at {time}, {location}, with {assessor}. Call anytime.</p>' };
+ok(A.asmtSchedCfg().template.indexOf('confirmed {date}') > -1 && !A.asmtSchedCfg().overrideRejected, 'a healthy custom override still wins');
+CFG = {};
+ok(/asmtTemplateUsable\(storedT\)/.test(html) && /Hit ↺ Restore below and Save/.test(html), 'Settings shows a red border + explanation on a broken saved template');
+ok(/var usedFallback=!!ac\.overrideRejected;/.test(html), 'the send path counts a rejected override as a fallback (announced in the toast)');
 
 // ── 📆 calendar invite (B-0911-82) ──
 {
