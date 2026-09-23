@@ -14597,26 +14597,6 @@ function _stageAfterVerify(c){
   const next=(i>=0&&stages[i+1])?stages[i+1]:null;
   return (next&&here>=0&&here<=i)?next:null;
 }
-/* A Yardstik employment-verification order is DEAD once Yardstik reports the invitation/report
-   expired or canceled: the candidate never completed the intake, so no per-employer result will ever
-   come back. Employers stay yStatus 'ordered' forever (nothing flips them), so vrAction locked the
-   candidate in Checks behind "🔒 Awaiting verification" with nothing left to release it (rule 4's
-   shape), and the hub hid both the re-order button and "+ attempt" for those rows. Live 2026-09-23:
-   Debra Williams r84 / Porscha Odom r56 / Reyonna Grissom r18, expired Jul 14-28, locked ever since.
-   The expiry must be NEWER than the order, so a re-order after expiry counts as live again.
-   verifyStatus is the verify lane's own field; rows ordered before the lane split had their verify
-   events written into status/lastUpdate - read those only when no BG check was ever ordered (the same
-   BG-only evidence _bgFormBlocks uses), so a BG invitation's expiry never kills a verification. */
-function _yVerifyDead(st){
-  const ys=st&&st.yardstik;if(!ys||!ys.verifyOrderedAt)return false;
-  const dead=x=>/^(expired|canceled|cancelled)$/i.test(String(x||''));
-  const after=t=>!!t&&Date.parse(t)>=Date.parse(ys.verifyOrderedAt);
-  if(dead(ys.verifyStatus)&&(!ys.verifyLastUpdate||after(ys.verifyLastUpdate)))return true;
-  const bgOrdered=!!(ys.orderedAt||ys.packageId||ys.applyUrl);
-  return !ys.verifyStatus&&!bgOrdered&&dead(ys.status)&&after(ys.lastUpdate);
-}
-/* Employer genuinely out at Yardstik (an order that can still come back). */
-function _yInFlight(e,st){return !!(e&&e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running')&&!_yVerifyDead(st));}
 function vrAction(c,info){
   vrInit(c.st);const cfg=vrCfg();const tier=c.st.vr.tier||1;
   if(tier>=2){
@@ -14639,9 +14619,7 @@ function vrAction(c,info){
        Otherwise (manual verification, or mixed manual+yardstik) we surface 'Continue verification'. */
     const emp=c.st.employers||[];
     const unresolved=emp.filter(e=>e&&(e.name||'').trim()&&!e.v);
-    const allOutAtYardstik=unresolved.length>0&&unresolved.every(e=>_yInFlight(e,c.st));
-    if(_yVerifyDead(c.st)&&unresolved.some(e=>e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running')))
-      return{bucket:'action',timing:_dn('Yardstik verification expired — re-order or verify by phone '+t1.resolved+'/'+t1.total,'pa'),info,primary:{kind:'verify',label:'Open verify hub',cls:'gold'}};
+    const allOutAtYardstik=unresolved.length>0&&unresolved.every(e=>e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running'));
     /* The lock is justified ONLY by work actually out at Yardstik. `cfg.t1Source==='yardstik'` used to
        lock on its own, so with that setting every candidate at Verify employers carrying an employer with
        no verdict sat in Checks behind "🔒 Awaiting verification" even when NO order had been placed —
@@ -14779,8 +14757,8 @@ function vrTier1View(emp,cfg){
     /* Yardstik-in-flight row: Yardstik is verifying this employer via the verification package.
        Hide manual attempt button and show a status pill; manual buttons stay live so user can
        override anytime (matches the "manual fallback" intent when Yardstik comes back unable). */
-    const yInFlight=_yInFlight(e,W.st);
-    const yPill=(!yInFlight&&!e.v&&e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running'))?'<span class="pill psoft" style="font-size:10px" title="The Yardstik verification invitation expired before the candidate completed it">Yardstik expired → re-order or verify manually</span>':yInFlight?`<span class="pill" style="font-size:10px;padding:2px 7px;background:var(--sky-l);color:var(--sky-deep);border:1px solid var(--sky)" title="Yardstik is verifying this employer">🛡 Yardstik</span>`:(e.ySrc==='yardstik'&&e.yStatus==='unable'?'<span class="pill psoft" style="font-size:10px">Yardstik unable → manual</span>':'');
+    const yInFlight=e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running');
+    const yPill=yInFlight?`<span class="pill" style="font-size:10px;padding:2px 7px;background:var(--sky-l);color:var(--sky-deep);border:1px solid var(--sky)" title="Yardstik is verifying this employer">🛡 Yardstik</span>`:(e.ySrc==='yardstik'&&e.yStatus==='unable'?'<span class="pill psoft" style="font-size:10px">Yardstik unable → manual</span>':'');
     const vBtns=`<span class="vbtns" style="flex:0 0 auto;display:flex;gap:3px">
       <button class="ok ${e.v==='ok'?'on':''}" onclick="vset(${i},'ok')" title="Facts confirmed">clear</button>
       <button class="no ${e.v==='no'?'on':''}" onclick="vset(${i},'no')" title="Couldn't reach / confirm">unable</button>
@@ -14851,7 +14829,7 @@ function vrTier1View(emp,cfg){
      for the manual-only path. */
   const _vcfg=SETTINGS.config||{};
   const _hasVerify=!!(_vcfg.yardstikAccountId&&_vcfg.yardstikVerifyPackageId);
-  const _unresolved=emp.filter(e=>e&&(e.name||'').trim()&&!e.v&&!_yInFlight(e,W.st)).length;
+  const _unresolved=emp.filter(e=>e&&(e.name||'').trim()&&!e.v&&!(e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running'))).length;
   const _verifyBtn=(_hasVerify&&_unresolved)?`<button class="btn-sec" style="margin-top:6px;width:auto;padding:7px 13px;background:linear-gradient(135deg,#FFFCF5,#FAF6EE);border:1.5px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer;font-weight:600" onclick="orderYardstikVerification()" title="Have Yardstik verify the ${_unresolved} unresolved employer${_unresolved===1?'':'s'} via the configured verification package">🛡 Verify ${_unresolved} via Yardstik</button>`:'';
   return `${srcNote}${rows}
     <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-sec bg-cream" style="margin-top:6px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:'',source:'manual'});renderWorkspace()">+ add employer</button>${_verifyBtn}</div>
@@ -15537,7 +15515,7 @@ async function orderYardstikVerification(){
   if(!tok){toast('Set internal worker token first in Settings → 🔌 Integrations');return;}
   /* Targets: employers without a verdict AND not already Yardstik-in-flight. Manual-cleared
      rows are left alone — user already did the work, don't re-order on top of that. */
-  const targets=(W.st.employers||[]).filter(e=>e&&(e.name||'').trim()&&!e.v&&!_yInFlight(e,W.st));
+  const targets=(W.st.employers||[]).filter(e=>e&&(e.name||'').trim()&&!e.v&&!(e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running')));
   if(!targets.length){toast('No unresolved employers to verify');return;}
   if(!confirm('Order Yardstik employment verification for '+targets.length+' employer'+(targets.length===1?'':'s')+'?\n\nYardstik will contact each and report back per-employer; results auto-populate the verdicts below.'))return;
   /* Same capture as _orderYardstikGo: after the await, the global W may be the NEXT candidate the
@@ -15570,7 +15548,6 @@ async function orderYardstikVerification(){
     w.st.yardstik.verifyReportId=data.verifyReportId||w.st.yardstik.verifyReportId||null;
     w.st.yardstik.verifyPackageId=verifyPackageId;
     w.st.yardstik.verifyOrderedAt=new Date().toISOString();
-    delete w.st.yardstik.verifyStatus;delete w.st.yardstik.verifyLastUpdate;
     targets.forEach(t=>{const emp=(w.st.employers||[]).find(e=>e===t);if(emp){emp.ySrc='yardstik';emp.yStatus='ordered';}});
     w.st.log=w.st.log||[];w.st.log.push({t:stamp(),x:'🔍 Employment verification ordered · '+targets.length+' employer'+(targets.length===1?'':'s')});
     await _saveWFor(w,true);
