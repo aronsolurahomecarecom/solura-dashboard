@@ -22916,9 +22916,14 @@ async function _seqRunIntent(row,intentJson){
     return;
   }
   if(t==='cancel-booking'){
-    await _execCatalogAction(cand,{action:'cancel-booking',params:{}});
+    /* Advance only on a cancel that happened (a failed one throws), and not a second time when the
+       cancel already re-placed the pointer for the stepped-back stage (_clearCancelledBooking). */
+    const _ptr0=cand.st&&cand.st.sequenceStepId;
+    try{await _execCatalogAction(cand,{action:'cancel-booking',params:{}});}
+    catch(e){toast('🗓 '+e.message);return;}
     toast('🗓 Booking cancelled');
-    await _seqAdvance(cand);
+    if((cand.st&&cand.st.sequenceStepId)===_ptr0)await _seqAdvance(cand);
+    else{if(typeof render==='function')render();if(W&&W.row===cand.excelRow)renderWorkspace();}
     return;
   }
   if(t==='open-hub'){
@@ -23992,6 +23997,10 @@ async function _applyScoreWrites(cand,proposed,label){
 async function _execCatalogAction(cand,a){
   const p=(a&&a.params)||{};
   const id=(a&&a.action)||'';
+  /* Every branch ends in an AJ write, and _stCell refuses a corrupt row only AFTER the outward
+     effect (an email sent, a Cal.com booking cancelled) - leaving no record it happened, so the
+     step is offered and run again. Refuse before acting, as _sendNudgeHeadless does. */
+  if(cand&&cand.st&&cand.st.__ajCorrupt)throw new Error('stored data corrupted — restore the row first');
   /* Accept hyphen or underscore spellings (steps authored as claude:resume-screen must hit
      the same branch as the registry's resume_screen — \w alone rejects hyphens, which made
      these actions fall through to the "not executable" error). */
@@ -24016,10 +24025,27 @@ async function _execCatalogAction(cand,a){
     if(prov==='calcom'&&act==='cancel_booking'){
       /* Real Cal.com cancel through the worker when a booking uid is on file (Cal.com notifies
          the candidate); otherwise just clear the local booking state. */
-      const _cancelled=cand.st.calBookingId?await _cancelBookingHeadless(cand,String(p.reason||'Cancelled from sequence step')):false;
+      /* A FAILED Cal.com cancel (no worker token, Cal error, network) used to fall into the local
+         clear below: the booking vanished from the portal, the log said "no Cal.com booking id on
+         file" (false), the candidate's real Cal.com booking stayed live, and the sequence intent
+         path then advanced as if it had worked. Throw instead - packs stop, hubs toast.
+         A SUCCESSFUL one deleted only st.booking and wrote a state still carrying calBookingId /
+         meetingUrl with the stage left at "... booked", racing Cal.com's BOOKING_CANCELLED webhook
+         (last write wins) - the same race the tick T-30 and manual cancel paths close by applying
+         the webhook transition themselves first (_clearCancelledBooking). Do the same here. */
+      const _hadId=!!cand.st.calBookingId;
+      const _cancelled=_hadId?await _cancelBookingHeadless(cand,String(p.reason||'Cancelled from sequence step')):false;
+      if(_hadId&&!_cancelled)throw new Error('Cal.com did not confirm the cancellation - booking kept (check the worker token / Cal.com)');
       if(cand.st.booking||_cancelled){
         cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:_cancelled?'🗓 Booking cancelled via Cal.com (sequence step)':'🗓 Booking cleared ('+(cand.st.booking||'')+') — no Cal.com booking id on file'});
-        delete cand.st.booking;
+        const _to=_bookingCancelledStage(cand.stage);
+        if(_to){
+          await patchRange('G'+cand.excelRow,[[_to]]);
+          cand.stage=_to;cand.row[6]=_to;
+          if(W&&W.row===cand.excelRow)W.stage=_to;
+          cand.st.log.push({t:stamp(),x:'Stage reverted to '+_to+' — awaiting a new booking'});
+        }
+        _clearCancelledBooking(cand.st,cand.stage,cand);
         await _seqCommitState(cand,{});
       }
       return;
