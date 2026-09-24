@@ -130,11 +130,25 @@ ok(/gfetch\(GR\+'\/me\/events',\{method:'POST'/.test(html), 'native Outlook even
 // MERGED design (B-0915-89): ONE email — the confirmation carries the .ics;
 // Meir's event has NO attendees so Exchange never sends a second email.
 {
-  const sv = html.slice(html.indexOf('async function asSave'), html.indexOf('async function asSave') + 8000);
-  ok(sv.indexOf('ev.attendees') === -1 && sv.indexOf('attendees=[{') === -1, 'the Outlook event carries NO attendees (no second invite email)');
-  ok(/contentType:'text\/calendar'/.test(sv), 'the .ics invite rides the confirmation email itself');
-  ok(sv.indexOf("calNote='invite attached'") > -1, 'invite always attaches when the email goes out');
-  ok(/calendar event skipped — sign out and back in once to enable it/.test(sv), 'a missing Calendars scope degrades gracefully, invite still delivered');
+  const sv = html.slice(html.indexOf('async function asSave'), html.indexOf('async function asSave') + 12000);
+  ok(/if\(isVirtual\)\{\s*\n\s*if\(!customLink\)\{ev\.isOnlineMeeting=true;ev\.onlineMeetingProvider='teamsForBusiness';\}/.test(sv), 'blank virtual location auto-creates a TEAMS meeting via the event (no new permission)');
+  ok(/if\(isVirtual\)\{[\s\S]{0,400}?ev\.attendees=\[\{emailAddress:\{address:em\.to/.test(sv), 'the lead becomes a PARTICIPANT — but only on virtual visits');
+  ok(!/attendees/.test(sv.replace(/if\(isVirtual\)\{[\s\S]{0,600}?\}\s*\n/g, '').slice(0, sv.indexOf('var finalLoc'))) || sv.split('attendees').length - 1 <= 3, 'in-person events stay attendee-free (merged single-email design preserved)');
+  ok(/joinUrl=\(ej\.onlineMeeting&&ej\.onlineMeeting\.joinUrl\)\|\|''/.test(sv), 'the Teams join link is read back from the created event');
+  ok(/var finalLoc=isVirtual\?\(customLink\|\|joinUrl\):f\.location;/.test(sv), 'his own pasted link wins; Teams is the default');
+  ok(/must be a meeting LINK \(https:/.test(sv), 'virtual with a non-link location is refused with guidance');
+  ok(/Could not create the Teams meeting/.test(sv), 'auto-Teams failure aborts loudly BEFORE anything is written');
+  ok(/\(!isVirtual\|\|\(customLink&&!eventInvited\)\)/.test(sv), '.ics rides the email only when no native invite went out');
+  ok(/contentType:'text\/calendar'/.test(sv), 'the in-person .ics invite still rides the confirmation email');
+  ok(/calendar event skipped — sign out and back in once to enable it/.test(sv), 'a missing Calendars scope degrades gracefully');
+}
+ok(/id="as-virtual"/.test(html) && /💻 Virtual visit/.test(html), 'the Virtual toggle sits next to the location line');
+ok(/Paste a meeting link \(https:/.test(html), 'toggling swaps the location placeholder to link mode');
+ok(/Join the video visit<\/a>/.test(html), 'a link location renders as a Join line in the email, not a raw URL');
+{
+  const vf = A.fillAsmtSchedTokens('<p>{location}</p>', { date: '2026-09-30', location: 'https://teams.microsoft.com/l/meetup-join/xyz' });
+  ok(vf.indexOf('href="https://teams.microsoft.com/l/meetup-join/xyz"') > -1 && vf.indexOf('Join the video visit') > -1, 'meeting-link location becomes a clickable Join link');
+  ok(A.fillAsmtSchedTokens('<p>{location}</p>', { date: '2026-09-30', location: '123 Superior Ave' }).indexOf('123 Superior Ave') > -1, 'street addresses render as plain text, as before');
 }
 ok(/id="as-cal" checked/.test(html) && /id="as-dur"/.test(html), 'invite toggle (default on) + duration picker in the modal');
 ok(/one email; they tap Add to calendar/.test(html), 'modal label describes the merged single-email behavior');

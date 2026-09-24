@@ -838,7 +838,13 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div class="la-f"><label>Time</label><input type="time" id="as-time"></div>
         <div class="la-f"><label>Assessor</label><input type="text" id="as-assessor" value="Meir Schwimer"></div>
       </div>
-      <div class="la-f" style="margin-bottom:10px"><label>Location</label><input type="text" id="as-location" placeholder="Client's home — street address"></div>
+      <div class="la-f" style="margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:12px">Location
+          <label class="st-check" style="margin:0;font-size:11px;text-transform:none;letter-spacing:0"><input type="checkbox" id="as-virtual"> 💻 Virtual visit</label>
+        </label>
+        <input type="text" id="as-location" placeholder="Client's home — street address">
+        <div id="as-virtual-hint" style="display:none;font-size:10.5px;color:var(--soft);margin-top:3px">Leave blank to auto-create a <b>Microsoft Teams</b> meeting — the lead is added as a participant and gets the invite with a Join button. Or paste your own meeting link (Zoom, Meet, anything).</div>
+      </div>
       <div class="la-f" style="margin-bottom:10px"><label>Notes (go on the email and the lead's record)</label><textarea id="as-notes" rows="3" placeholder="Who will be present, parking, documents worth having handy…"></textarea></div>
       <label class="st-check" style="margin-bottom:8px;display:block"><input type="checkbox" id="as-send-email" checked> 📧 Send the family a confirmation email on save (template editable in ⚙ Settings → Email)</label>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
@@ -1743,7 +1749,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0923-94';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0924-95';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3090,7 +3096,13 @@ function fillAsmtSchedTokens(tpl,f){
   return String(tpl||'')
     .replace(/\{date\}/gi,invPrettyDate(f.date))
     .replace(/\{time\}/gi,asmtPrettyTime(f.time)||'We\'ll confirm the time shortly')
-    .replace(/\{location\}/gi,escapeHtml(String(f.location||'Your home')))
+    .replace(/\{location\}/gi,(function(){
+      var L=String(f.location||'Your home');
+      // A meeting link renders as a warm Join button-line, not a raw URL
+      return /^https?:\/\//i.test(L)
+        ?('<a href="'+escapeHtml(L)+'" style="color:#64A3D1;font-weight:700;text-decoration:underline">Join the video visit</a>')
+        :escapeHtml(L);
+    })())
     .replace(/\{assessor\}/gi,escapeHtml(String(f.assessor||'The Solura team')))
     .replace(/\{notes\}/gi,notesBlock);
 }
@@ -3250,6 +3262,9 @@ function openAsmtSched(ri){
   el('as-location').value='';el('as-notes').value='';
   el('as-to').value=String(r[C.EM]||'').trim();
   el('as-send-email').checked=!!String(r[C.EM]||'').trim();
+  if(el('as-virtual'))el('as-virtual').checked=false;
+  var vh0=el('as-virtual-hint');if(vh0)vh0.style.display='none';
+  el('as-location').placeholder='Client\'s home — street address';
   if(el('as-cal'))el('as-cal').checked=true;
   if(el('as-dur'))el('as-dur').value='60';
   el('as-out').textContent='';
@@ -3291,13 +3306,82 @@ async function asSave(){
   var wantEmail=el('as-send-email').checked;
   var em=asBuildEmail();
   if(wantEmail&&(!em.to||em.to.indexOf('@')<1)){out.style.color='var(--red)';out.textContent='✗ Enter a valid email — or untick the confirmation to log without sending.';return;}
+  // 💻 Virtual visit: the location line holds a meeting LINK (his own),
+  // or stays blank to auto-create a Teams meeting.
+  var isVirtual=!!(el('as-virtual')&&el('as-virtual').checked);
+  var wantCal=!!(el('as-cal')&&el('as-cal').checked)&&!!f.time;
+  var customLink='';
+  if(isVirtual){
+    var locRaw=String(f.location||'').trim();
+    if(locRaw){
+      if(!/^https?:\/\//i.test(locRaw)){out.style.color='var(--red)';out.textContent='✗ For a virtual visit the location must be a meeting LINK (https://…) — or leave it blank to auto-create a Teams meeting.';return;}
+      customLink=locRaw;
+    }else{
+      if(!f.time){out.style.color='var(--red)';out.textContent='✗ Auto-creating a Teams meeting needs a time.';return;}
+      if(!wantCal){out.style.color='var(--red)';out.textContent='✗ Auto-creating a Teams meeting needs the 📆 calendar toggle ON — or paste your own meeting link.';return;}
+    }
+  }
   if(spin)spin.style.display='inline-flex';
-  out.style.color='var(--mid)';out.textContent=wantEmail?'Saving + sending…':'Saving…';
+  out.style.color='var(--mid)';out.textContent=isVirtual&&!customLink?'Creating the Teams meeting…':(wantEmail?'Saving + sending…':'Saving…');
   try{
     var ri=_asRi,r=rows[ri]||[];
+    var calDur=parseInt((el('as-dur')||{}).value,10)||60;
+    var dmName=String(r[C.DM]||r[C.NM]||'').trim();
+    var ptName=String(r[C.NM]||'').trim();
+    // ── The calendar event goes FIRST: a virtual visit needs the Teams
+    // join link before the email, the sheet note, or the log exist.
+    // In-person keeps the merged design (quiet event, NO attendees, .ics
+    // rides the confirmation). Virtual adds the lead as a PARTICIPANT —
+    // Exchange sends them the native invite with the Join button, so no
+    // .ics is attached (it would duplicate).
+    var calNote='',icsAtt=null,joinUrl='',eventInvited=false;
+    if(wantCal){
+      try{
+        var tzName='America/New_York';
+        try{tzName=Intl.DateTimeFormat().resolvedOptions().timeZone||tzName;}catch(_){}
+        var stD=new Date(f.date+'T'+f.time+':00');
+        var enD=new Date(stD.getTime()+calDur*60000);
+        var pad2=function(n){return (n<10?'0':'')+n;};
+        var locIso=function(d){return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+'T'+pad2(d.getHours())+':'+pad2(d.getMinutes())+':00';};
+        var ev={subject:(isVirtual?'Virtual assessment — ':'In-home assessment — ')+(ptName||dmName||'Solura Home Care'),
+          body:{contentType:'HTML',content:'<p>'+escapeHtml('Assessment with '+(f.assessor||'Solura Home Care'))+'</p><p>Questions or reschedule: (216) 770-4886</p>'},
+          start:{dateTime:locIso(stD),timeZone:tzName},
+          end:{dateTime:locIso(enD),timeZone:tzName},
+          location:{displayName:isVirtual?(customLink||'Microsoft Teams'):(f.location||'Client home')},
+          isReminderOn:true,reminderMinutesBeforeStart:60};
+        if(isVirtual){
+          if(!customLink){ev.isOnlineMeeting=true;ev.onlineMeetingProvider='teamsForBusiness';}
+          if(em.to&&em.to.indexOf('@')>0){
+            ev.attendees=[{emailAddress:{address:em.to,name:dmName||em.to},type:'required'}];
+          }
+        }
+        var er=await gfetch(GR+'/me/events',{method:'POST',body:JSON.stringify(ev)});
+        if(!er.ok)throw new Error('event '+er.status);
+        var ej=await er.json().catch(function(){return{};});
+        joinUrl=(ej.onlineMeeting&&ej.onlineMeeting.joinUrl)||'';
+        eventInvited=!!(isVirtual&&ev.attendees);
+        if(isVirtual&&!customLink&&!joinUrl)throw new Error('Teams meeting had no join link');
+        calNote=isVirtual
+          ?((customLink?'on your calendar':'Teams meeting created')+(eventInvited?' · lead invited':''))
+          :'on your calendar';
+      }catch(calErr){
+        if(isVirtual&&!customLink){
+          throw new Error('Could not create the Teams meeting ('+calErr.message+'). Sign out and back in once (calendar permission), or paste your own meeting link.');
+        }
+        calNote='calendar event skipped — sign out and back in once to enable it';
+      }
+    }
+    var finalLoc=isVirtual?(customLink||joinUrl):f.location;
+    if(isVirtual){
+      // The resolved link becomes THE location everywhere: email, sheet
+      // note, log — and the field itself, so what he sees is what went out.
+      el('as-location').value=finalLoc;
+      f=asFields();
+      em=asBuildEmail();
+    }
     var when=invPrettyDate(f.date)+(f.time?(' at '+asmtPrettyTime(f.time)):'');
     var detail='Assessment scheduled — '+when
-      +(f.location?(' @ '+f.location):'')
+      +(finalLoc?(' @ '+(isVirtual?'💻 ':'')+finalLoc):'')
       +(f.assessor?(' · assessor: '+f.assessor):'')
       +(f.notes?(' · '+f.notes):'');
     var u={};
@@ -3320,42 +3404,16 @@ async function asSave(){
       }
       if(docDirty)saveEnginesDoc().catch(function(){});
     }catch(_){}
-    // 📆 Calendar invite — MERGED with the confirmation: ONE email reaches
-    // the family. The branded confirmation carries a standards .ics
-    // (Add-to-calendar in Gmail/Outlook/Apple), and Meir's own Outlook
-    // gets a quiet event with NO attendees — Exchange must never send a
-    // second, separate invite email.
-    var wantCal=!!(el('as-cal')&&el('as-cal').checked)&&!!f.time;
-    var calDur=parseInt((el('as-dur')||{}).value,10)||60;
-    var calNote='',icsAtt=null;
-    var dmName=String(r[C.DM]||r[C.NM]||'').trim();
-    var ptName=String(r[C.NM]||'').trim();
-    if(wantCal){
+    // .ics rides the confirmation ONLY when no native invite went out:
+    // in-person always; virtual only as the fallback for a custom link
+    // whose calendar event could not be created.
+    if(wantCal&&wantEmail&&(!isVirtual||(customLink&&!eventInvited))){
       var built=buildAssessmentIcs(f,{to:em.to,attendeeName:dmName,duration:calDur,
-        summary:'In-home assessment — Solura Home Care'});
-      if(built&&wantEmail){
+        summary:(isVirtual?'Virtual assessment':'In-home assessment')+' — Solura Home Care'});
+      if(built){
         icsAtt={'@odata.type':'#microsoft.graph.fileAttachment',name:built.fileName,
           contentType:'text/calendar',contentBytes:btoa(unescape(encodeURIComponent(built.ics)))};
-        calNote='invite attached';
-      }
-      try{
-        var tzName='America/New_York';
-        try{tzName=Intl.DateTimeFormat().resolvedOptions().timeZone||tzName;}catch(_){}
-        var stD=new Date(f.date+'T'+f.time+':00');
-        var enD=new Date(stD.getTime()+calDur*60000);
-        var pad2=function(n){return (n<10?'0':'')+n;};
-        var locIso=function(d){return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+'T'+pad2(d.getHours())+':'+pad2(d.getMinutes())+':00';};
-        var ev={subject:'In-home assessment — '+(ptName||dmName||'Solura Home Care'),
-          body:{contentType:'HTML',content:'<p>'+escapeHtml(detail)+'</p><p>Questions or reschedule: (216) 770-4886</p>'},
-          start:{dateTime:locIso(stD),timeZone:tzName},
-          end:{dateTime:locIso(enD),timeZone:tzName},
-          location:{displayName:f.location||'Client home'},
-          isReminderOn:true,reminderMinutesBeforeStart:60};
-        var er=await gfetch(GR+'/me/events',{method:'POST',body:JSON.stringify(ev)});
-        if(!er.ok)throw new Error('event '+er.status);
-        calNote+=(calNote?' · ':'')+'on your calendar';
-      }catch(calErr){
-        calNote+=(calNote?' · ':'')+'calendar event skipped — sign out and back in once to enable it';
+        calNote='invite attached'+(calNote?(' · '+calNote):'');
       }
     }
     var sent=false;
@@ -3375,7 +3433,7 @@ async function asSave(){
       preview:detail+(calNote?(' · '+calNote):''),
       outcome:'assessment-scheduled'}));
     el('modal-asmt-sched').classList.remove('open');
-    var doneMsg=sent?('📅 Assessment logged — confirmation sent to '+em.to):'📅 Assessment logged';
+    var doneMsg=(isVirtual?'💻 Virtual assessment':'📅 Assessment')+' logged'+(sent?(' — confirmation sent to '+em.to):'');
     if(calNote)doneMsg+=' · 📆 '+calNote;
     if(em.usedFallback)doneMsg+=' · ⚠ your saved email template was blank, so the built-in was used — fix it via ↺ Restore in ⚙ Settings → Email';
     toast(doneMsg);
@@ -7459,6 +7517,14 @@ document.addEventListener('change',function(ev){
       fr.onerror=function(){if(out){out.style.color='var(--red)';out.textContent='✗ Could not read the file.';}};
       fr.readAsArrayBuffer(file);
     })();
+  }
+  // 💻 Virtual-visit toggle repurposes the location line
+  if(t&&t.id==='as-virtual'){
+    var vOn=t.checked;
+    var li9=el('as-location');
+    if(li9)li9.placeholder=vOn?'Paste a meeting link (https://…) — or leave BLANK to auto-create a Teams meeting':'Client\'s home — street address';
+    var vh9=el('as-virtual-hint');
+    if(vh9)vh9.style.display=vOn?'block':'none';
   }
   // 📎 Fillable-PDF template upload (Settings → Email)
   if(t&&t.id==='pdft-file'&&t.files&&t.files.length){
