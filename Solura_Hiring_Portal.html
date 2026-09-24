@@ -16726,6 +16726,14 @@ async function _doAssignment(messageId,attIdx,cand,item){
     });
     if(!r.ok)throw new Error('Upload failed: '+r.status);
     const uploaded=await r.json();
+    /* Re-find the LIVE card: the folder check + upload take seconds, and loadData rebuilds `pipeline`
+       with new objects every 30s — the click-time card can be an orphan whose st predates whatever
+       landed since (inbox merge, tick, workspace save), and writing it back undid those. Snapshot it
+       too, so a refused write (throttle, corrupt row, size cap) restores the card instead of leaving
+       the board showing a filed credential, a drained queue and a release that never reached AJ
+       (the _markReceivedCore discipline). */
+    cand=pipeline.find(c=>c.excelRow===cand.excelRow)||cand;
+    const _before=JSON.stringify(cand.st||{});
     /* Update candidate state based on the assignment kind */
     cand.st=cand.st||{};
     if(item.kind==='resume'){
@@ -16824,7 +16832,13 @@ async function _doAssignment(messageId,attIdx,cand,item){
     cand.st.lastAssignmentAt=new Date().toISOString();
     cand.st.log=cand.st.log||[];
     cand.st.log.push({t:stamp(),x:'📎 Assigned attachment "'+att.name+'" as '+_awaitingItemLabel(item)+' — saved to '+finalName});
-    await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
+    try{await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);}
+    catch(e){
+      const restored=JSON.parse(_before);
+      if(W&&W.st===cand.st)W.st=restored;
+      cand.st=restored;
+      throw new Error('file uploaded as '+finalName+' but not recorded on the candidate — '+e.message);
+    }
     const releasedNow=wasParked&&queueEmpty;
     const remainingMsg=cand.st.awaitingItems.length?cand.st.awaitingItems.length+' awaiting item'+(cand.st.awaitingItems.length===1?'':'s')+' remaining':(releasedNow?'released from awaiting — next step ready':'all requests fulfilled');
     toast('✓ Assigned as '+_awaitingItemLabel(item)+' — '+remainingMsg);
