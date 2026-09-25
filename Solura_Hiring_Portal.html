@@ -23242,6 +23242,7 @@ function _seqAutomationPreview(){
     }
     const seq=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
     if(!seq)continue;
+    if(_seqPointerLagsStage(seq,c))continue; /* the tick skips a pointer behind column G */
     let ev;try{ev=window.SeqEngineV2.evaluate(seq,c,_seqTriggerEval);}catch(e){continue;}
     if(!ev||!ev.currentStep)continue;
     const it=(ev.intents||[])[0];if(!it)continue;
@@ -23367,6 +23368,9 @@ async function _seqAutomationTick(){
     }
     const seq=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
     if(!seq)continue;
+    /* STAGE IS TRUTH: a pointer behind column G is stale — never act from it (see
+       _seqPointerLagsStage). No stamp, no write; the next pipeline render snaps it forward. */
+    if(_seqPointerLagsStage(seq,c))continue;
     let ev;try{ev=window.SeqEngineV2.evaluate(seq,c,_seqTriggerEval);}catch(e){continue;}
     if(!ev||!ev.currentStep)continue;
     const it=(ev.intents||[])[0];if(!it)continue;
@@ -23693,6 +23697,19 @@ function _seqReachesDownstream(seq,fromId,targetId){
     }
   }
   return false;
+}
+/* Does the stored pointer LAG column G — i.e. the stage step for their current stage still lies
+   downstream of it? The same test _seqV3Action uses to snap forward. The snap only happens when a
+   row is evaluated through _seqV3Action (pipeline render), which is skipped on the calendar/active/
+   referrals views, for rows hidden by a filter, and for every row _actionC answers first (parked,
+   unread mail, Applied review, Verify employers). A webhook-written stage leaves such a row lagging,
+   and the robot must never act from it: an automate-marked set-stage behind G writes column G
+   BACKWARD (rule 2), and an automate-marked email behind G sends a step the candidate is past. */
+function _seqPointerLagsStage(seq,c){
+  if(!seq||!Array.isArray(seq.steps)||!c||!c.stage||!c.st)return false;
+  const stageStep=seq.steps.find(s2=>s2&&s2.kind==='stage'&&s2.stage&&s2.stage.setStage===c.stage);
+  const pId=c.st.sequenceStepId;
+  return !!(stageStep&&pId&&pId!==stageStep.id&&_seqReachesDownstream(seq,pId,stageStep.id));
 }
 
 function _seqV3Unadopted(){
