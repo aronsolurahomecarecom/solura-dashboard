@@ -16201,7 +16201,8 @@ async function markCurrentEmailUnread(){
       const e=(c.st.emails||[]).find(x=>x.id===id);
       if(e&&e.seen){
         delete e.seen;delete e.seenAt;_mirrorUnseenToW(c.excelRow,id);
-        patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(err=>console.warn('unmark persist:',err.message));
+        try{patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(err=>console.warn('unmark persist:',err.message));}
+        catch(err){console.warn('unmark persist refused row',c.excelRow+':',err.message);} /* same synchronous _stCell refusal as openEmailDetail */
       }
     });
     toast('✓ Marked unread in Outlook');
@@ -16259,7 +16260,12 @@ async function openEmailDetail(messageId){
       e.seenAt=stamp();
       _mirrorSeenToW(c.excelRow,messageId,e.seenAt);
       anyMarked=true;
-      patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(err=>console.warn('seen persist:',err.message));
+      /* _stCell THROWS synchronously (before patchRange's .catch can see it) for a corrupt or
+         untrimmable row - and the inbox poll puts new mail on a corrupt row's in-memory card
+         before refusing to write it. Uncaught, that aborted this whole function: the email never
+         opened. The refusal is right; it must not take the reader down with it. */
+      try{patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(err=>console.warn('seen persist:',err.message));}
+      catch(err){console.warn('seen persist refused row',c.excelRow+':',err.message);}
     }
   });
   if(anyMarked)setTimeout(()=>render(),200);
