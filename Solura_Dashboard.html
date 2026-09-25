@@ -844,7 +844,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <label class="st-check" style="margin:0;font-size:11px;text-transform:none;letter-spacing:0"><input type="checkbox" id="as-virtual"> 💻 Virtual visit</label>
         </label>
         <input type="text" id="as-location" placeholder="Client's home — street address">
-        <div id="as-virtual-hint" style="display:none;font-size:10.5px;color:var(--soft);margin-top:3px">Leave blank to auto-create a <b>Microsoft Teams</b> meeting — the lead is added as a participant and gets the invite with a Join button. Or paste your own meeting link (Zoom, Meet, anything).</div>
+        <div id="as-virtual-hint" style="display:none;font-size:10.5px;color:var(--soft);margin-top:3px">Leave blank to auto-create a <b>Microsoft Teams</b> meeting. The join link rides the confirmation email as its calendar invite (event card up top, one entry on their calendar). Or paste your own meeting link (Zoom, Meet, anything).</div>
       </div>
       <div class="la-f" style="margin-bottom:10px"><label>Notes (go on the email and the lead's record)</label><textarea id="as-notes" rows="3" placeholder="Who will be present, parking, documents worth having handy…"></textarea></div>
       <label class="st-check" style="margin-bottom:8px;display:block"><input type="checkbox" id="as-send-email" checked> 📧 Send the family a confirmation email on save (template editable in ⚙ Settings → Email)</label>
@@ -1750,7 +1750,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0925-98';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0925-99';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3039,10 +3039,13 @@ function buildAssessmentIcs(f,opts){
     'DTEND:'+icsUtc(end),
     'SUMMARY:'+icsEsc(opts.summary||'In-home assessment — Solura Home Care'),
     'LOCATION:'+icsEsc(f.location||'Your home'),
-    'DESCRIPTION:'+icsEsc('Your in-home assessment with '+(f.assessor||'Solura Home Care')
+    'DESCRIPTION:'+icsEsc('Your '+((/^https?:\/\//i.test(String(f.location||'')))?'video visit':'in-home assessment')+' with '+(f.assessor||'Solura Home Care')
       +'.'+(String(f.notes||'').trim()?('\n'+f.notes):'')+'\nQuestions or reschedule: (216) 770-4886'),
     'ORGANIZER;CN='+icsEsc(f.assessor||'Solura Home Care')+':mailto:meir@solurahomecare.com'
   ];
+  // A link location also travels as URL: — calendar apps surface a Join
+  // affordance from it.
+  if(/^https?:\/\//i.test(String(f.location||'')))lines.push('URL:'+String(f.location).trim());
   if(opts.to&&opts.to.indexOf('@')>0){
     lines.push('ATTENDEE;CN='+icsEsc(opts.attendeeName||opts.to)+';RSVP=TRUE:mailto:'+opts.to);
   }
@@ -3398,7 +3401,7 @@ async function asSave(){
     // rides the confirmation). Virtual adds the lead as a PARTICIPANT —
     // Exchange sends them the native invite with the Join button, so no
     // .ics is attached (it would duplicate).
-    var calNote='',icsAtt=null,joinUrl='',eventInvited=false,evId='',icsUidUsed='',icsSeqUsed=0;
+    var calNote='',icsAtt=null,joinUrl='',evId='',icsUidUsed='',icsSeqUsed=0;
     if(wantCal){
       try{
         var tzName='America/New_York';
@@ -3413,12 +3416,11 @@ async function asSave(){
           end:{dateTime:locIso(enD),timeZone:tzName},
           location:{displayName:isVirtual?(customLink||'Microsoft Teams'):(f.location||'Client home')},
           isReminderOn:true,reminderMinutesBeforeStart:60};
-        if(isVirtual){
-          if(!customLink){ev.isOnlineMeeting=true;ev.onlineMeetingProvider='teamsForBusiness';}
-          if(em.to&&em.to.indexOf('@')>0){
-            ev.attendees=[{emailAddress:{address:em.to,name:dmName||em.to},type:'required'}];
-          }
-        }
+        // ONE email, ONE event: the lead is never an attendee (that made
+        // Exchange send a second, bare invite that doubled the event on
+        // their calendar). The branded confirmation carries the .ics —
+        // Gmail shows its event card at the top of OUR email instead.
+        if(isVirtual&&!customLink){ev.isOnlineMeeting=true;ev.onlineMeetingProvider='teamsForBusiness';}
         var moveId=isResched?(prevA.eventId||''):'';
         if(isResched&&!moveId){
           // Pre-tracking booking: FIND the event on the old date by
@@ -3445,8 +3447,7 @@ async function asSave(){
           if(!pr9.ok)throw new Error('event move '+pr9.status);
           evId=moveId;
           joinUrl=prevA.joinUrl||'';
-          eventInvited=!!prevA.invited;
-          calNote='moved on your calendar'+(eventInvited?' · lead sent the new time':'');
+          calNote='moved on your calendar';
         }else{
           if(isResched&&moveId){
             // Mode flipped (in-person ⇄ virtual): retire the old event
@@ -3457,11 +3458,8 @@ async function asSave(){
           var ej=await er.json().catch(function(){return{};});
           evId=ej.id||'';
           joinUrl=(ej.onlineMeeting&&ej.onlineMeeting.joinUrl)||'';
-          eventInvited=!!(isVirtual&&ev.attendees);
           if(isVirtual&&!customLink&&!joinUrl)throw new Error('Teams meeting had no join link');
-          calNote=isVirtual
-            ?((customLink?'on your calendar':'Teams meeting created')+(eventInvited?' · lead invited':''))
-            :'on your calendar';
+          calNote=isVirtual&&!customLink?'Teams meeting created':'on your calendar';
         }
       }catch(calErr){
         if(isVirtual&&!customLink){
@@ -3509,10 +3507,11 @@ async function asSave(){
       }
       if(docDirty)saveEnginesDoc().catch(function(){});
     }catch(_){}
-    // .ics rides the confirmation ONLY when no native invite went out:
-    // in-person always; virtual only as the fallback for a custom link
-    // whose calendar event could not be created.
-    if(wantCal&&wantEmail&&(!isVirtual||(customLink&&!eventInvited))){
+    // The .ics rides the confirmation for BOTH modes — it is THE invite:
+    // Gmail/Outlook/Apple render the event card at the top of the branded
+    // email and add it to the calendar once. Virtual invites carry the
+    // join link as their location.
+    if(wantCal&&wantEmail){
       icsSeqUsed=isResched?(((prevA&&prevA.icsSeq)||0)+1):0;
       var built=buildAssessmentIcs(f,{to:em.to,attendeeName:dmName,duration:calDur,
         uid:(prevA&&prevA.icsUid)||null,sequence:icsSeqUsed,
@@ -3542,7 +3541,6 @@ async function asSave(){
         assessor:f.assessor,dur:calDur,
         eventId:evId||(prevA&&prevA.eventId)||'',
         joinUrl:joinUrl||(isVirtual&&prevA?(prevA.joinUrl||''):''),
-        invited:eventInvited,
         icsUid:icsUidUsed||(prevA&&prevA.icsUid)||'',
         icsSeq:icsSeqUsed||((prevA&&prevA.icsSeq)||0)};
       saveEnginesDoc().catch(function(){});

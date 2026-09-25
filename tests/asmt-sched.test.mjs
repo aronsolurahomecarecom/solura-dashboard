@@ -131,16 +131,18 @@ ok(/gfetch\(GR\+'\/me\/events',\{method:'POST'/.test(html), 'native Outlook even
 // Meir's event has NO attendees so Exchange never sends a second email.
 {
   const sv = html.slice(html.indexOf('async function asSave'), html.indexOf('async function asSave') + 12000);
-  ok(/if\(isVirtual\)\{\s*\n\s*if\(!customLink\)\{ev\.isOnlineMeeting=true;ev\.onlineMeetingProvider='teamsForBusiness';\}/.test(sv), 'blank virtual location auto-creates a TEAMS meeting via the event (no new permission)');
-  ok(/if\(isVirtual\)\{[\s\S]{0,400}?ev\.attendees=\[\{emailAddress:\{address:em\.to/.test(sv), 'the lead becomes a PARTICIPANT — but only on virtual visits');
-  ok(!/attendees/.test(sv.replace(/if\(isVirtual\)\{[\s\S]{0,600}?\}\s*\n/g, '').slice(0, sv.indexOf('var finalLoc'))) || sv.split('attendees').length - 1 <= 3, 'in-person events stay attendee-free (merged single-email design preserved)');
+  ok(/if\(isVirtual&&!customLink\)\{ev\.isOnlineMeeting=true;ev\.onlineMeetingProvider='teamsForBusiness';\}/.test(sv), 'blank virtual location auto-creates a TEAMS meeting via the event (no new permission)');
+  ok(sv.indexOf('ev.attendees') === -1 && sv.indexOf('attendees=[{') === -1, 'ONE email, ONE event: the lead is never an event attendee (no bare second invite, no duplicate calendar entry)');
+  ok(/if\(wantCal&&wantEmail\)\{/.test(sv) && /contentType:'text\/calendar'/.test(sv), 'the .ics rides the branded email for BOTH modes — it IS the invite (Gmail event card up top)');
   ok(/joinUrl=\(ej\.onlineMeeting&&ej\.onlineMeeting\.joinUrl\)\|\|''/.test(sv), 'the Teams join link is read back from the created event');
   ok(/var finalLoc=isVirtual\?\(customLink\|\|joinUrl\):f\.location;/.test(sv), 'his own pasted link wins; Teams is the default');
   ok(/must be a meeting LINK \(https:/.test(sv), 'virtual with a non-link location is refused with guidance');
   ok(/Could not create the Teams meeting/.test(sv), 'auto-Teams failure aborts loudly BEFORE anything is written');
-  ok(/\(!isVirtual\|\|\(customLink&&!eventInvited\)\)/.test(sv), '.ics rides the email only when no native invite went out');
-  ok(/contentType:'text\/calendar'/.test(sv), 'the in-person .ics invite still rides the confirmation email');
   ok(/calendar event skipped — sign out and back in once to enable it/.test(sv), 'a missing Calendars scope degrades gracefully');
+  {
+    const vics = A.buildAssessmentIcs({ date: '2026-10-01', time: '10:00', location: 'https://teams.microsoft.com/l/x/1', assessor: 'Meir Schwimer' }, { to: 'k@x.com', duration: 90 });
+    ok(vics.ics.indexOf('URL:https://teams.microsoft.com/l/x/1') > -1 && vics.ics.indexOf('video visit') > -1, 'virtual invites carry the join link as URL + say video visit');
+  }
 }
 ok(/id="as-virtual"/.test(html) && /💻 Virtual visit/.test(html), 'the Virtual toggle sits next to the location line');
 ok(/Paste a meeting link \(https:/.test(html), 'toggling swaps the location placeholder to link mode');
