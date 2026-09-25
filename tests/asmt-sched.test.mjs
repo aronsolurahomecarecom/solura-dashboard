@@ -214,9 +214,15 @@ ok(/cfg\('asmtIntakeTo'\)\|\|''\)\.trim\(\)\|\|'intake@solurahomecare\.com'/.tes
   ok(moved.ics.indexOf('UID:' + first.uid) > -1 && moved.ics.indexOf('SEQUENCE:1') > -1, 'reschedule reuses the UID with SEQUENCE:1 — calendars REPLACE the old slot');
   const sv = html.slice(html.indexOf('async function asSave'), html.indexOf('async function asSave') + 14000);
   ok(/var isResched=!!\(prevA&&prevA\.date\);/.test(sv), 'an existing booking makes the save a reschedule');
-  ok(/var sameMode=isResched&&prevA\.eventId&&\(!!prevA\.virtual===isVirtual\);/.test(sv) && /method:'PATCH'/.test(sv), 'same-mode reschedule MOVES the existing event (PATCH) — Teams link + participant survive');
+  ok(/method:'PATCH'/.test(sv), 'same-mode reschedule MOVES the existing event (PATCH) — Teams link + participant survive');
+  ok(/function reconstructBooking\(ri\)/.test(html) && /followUpTimes\(\)\[String\(ri\)\]\|\|''/.test(html) && /\(enginesDoc\.assessors\|\|\{\}\)\[String\(ri\)\]/.test(html), 'reconstruction pulls date from NF, time from the queue gate, assessor from the handoff');
+  ok(/var prevA=bookingFor\(ri\);/.test(html), 'the scheduler prefills from stored OR reconstructed bookings');
   ok(/method:'DELETE'/.test(sv) && /Mode flipped/.test(sv), 'mode flip retires the old event before creating the new one');
-  ok(/em\.subject='Updated: '\+em\.subject;/.test(sv), 'reschedule email subject says Updated');
+  ok(/em\.subject='Rescheduled: '\+em\.subject;/.test(sv), 'reschedule email subject says Rescheduled');
+  ok(/This visit has a new time\.<\/b> It was '\+escapeHtml\(prevWhen\)/.test(sv), 'a banner above the email names the OLD time — never reads as a fresh booking');
+  ok(/var prevA=bookingFor\(ri\)\|\|null;/.test(sv), 'reschedule detection uses the stored record OR the sheet reconstruction');
+  ok(/\/me\/calendarView\?startDateTime=/.test(sv) && /so it MOVES instead of stacking a duplicate/.test(sv), 'pre-tracking bookings find their event on the old date by subject match');
+  ok(/var sameMode=isResched&&moveId&&/.test(sv), 'a found event moves exactly like a tracked one');
   ok(/Assessment RESCHEDULED — was '\+prevWhen\+' → now '\+when/.test(sv), 'sheet note records old time → new time');
   ok(/outcome:isResched\?'assessment-rescheduled':'assessment-scheduled'/.test(sv), 'Comms Log distinguishes reschedules');
   ok(/schedAssessments\(\)\[String\(ri\)\]=\{date:f\.date/.test(sv), 'the booking is remembered (synced doc) for the NEXT reschedule');

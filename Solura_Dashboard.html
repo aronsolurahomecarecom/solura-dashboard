@@ -1750,7 +1750,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0925-96';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0925-97';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3245,6 +3245,33 @@ function presetsForLead(ri){
 }
 // 🔁 The scheduled assessment per lead (synced doc): what reschedules read.
 function schedAssessments(){enginesDoc.assessments=enginesDoc.assessments||{};return enginesDoc.assessments;}
+// A booking made BEFORE tracking existed (or whose record was lost) is
+// reconstructed from what the sheet already knows: the status, Follow-Up
+// date, the queue time, the assessor handoff, and the location in the
+// newest 📅/🔁 note stamp. That way EVERY scheduled lead reschedules —
+// prefilled, event moved, email marked — never a silent fresh booking.
+function reconstructBooking(ri){
+  var r=rows[ri]||[];
+  if(!/assessment scheduled/i.test(String(r[C.ST]||'')))return null;
+  var d=pd(r[C.NF]);
+  if(!d)return null;
+  var iso=d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
+  var b={date:iso,time:'',location:'',virtual:false,assessor:'',dur:60,
+    eventId:'',joinUrl:'',invited:false,icsUid:'',icsSeq:0,legacy:true};
+  try{b.time=followUpTimes()[String(ri)]||'';}catch(_){}
+  try{b.assessor=(enginesDoc.assessors||{})[String(ri)]||'';}catch(_){}
+  var m=String(r[C.NT]||'').match(/(?:📅|🔁)[^\n]*?@\s*(💻\s*)?([^·\n]+)/);
+  if(m){
+    b.location=String(m[2]||'').trim();
+    b.virtual=!!m[1]||/^https?:\/\//i.test(b.location);
+    if(b.virtual&&/^https?:\/\//i.test(b.location))b.joinUrl=b.location;
+  }
+  return b;
+}
+function bookingFor(ri){
+  var s=schedAssessments()[String(ri)];
+  return (s&&s.date)?s:reconstructBooking(ri);
+}
 /* 🅰🅱🅲 retrack + loss-reason runtime */
 var _rtRi=-1,_lossRi=-1;
 var LOSS_REASONS=['Recipient refused','Cost','Chose another agency','Need resolved','Moved to facility','Unreachable','Other'];
@@ -3276,7 +3303,7 @@ function openAsmtSched(ri){
   el('as-out').textContent='';
   // 🔁 An existing booking makes this a RESCHEDULE: prefill everything,
   // show what it currently says, and let him change only what moved.
-  var prevA=schedAssessments()[String(ri)];
+  var prevA=bookingFor(ri);
   var rn=el('as-resched-note'),sb=el('as-save-btn');
   if(prevA&&prevA.date){
     el('as-date').value=prevA.date;
@@ -3360,8 +3387,9 @@ async function asSave(){
     var calDur=parseInt((el('as-dur')||{}).value,10)||60;
     var dmName=String(r[C.DM]||r[C.NM]||'').trim();
     var ptName=String(r[C.NM]||'').trim();
-    // 🔁 An existing booking makes this a reschedule
-    var prevA=schedAssessments()[String(ri)]||null;
+    // 🔁 An existing booking makes this a reschedule (stored record, or
+    // reconstructed from the sheet for pre-tracking bookings)
+    var prevA=bookingFor(ri)||null;
     var isResched=!!(prevA&&prevA.date);
     var prevWhen=isResched?(invPrettyDate(prevA.date)+(prevA.time?(' at '+asmtPrettyTime(prevA.time)):'')):'';
     // ── The calendar event goes FIRST: a virtual visit needs the Teams
@@ -3391,22 +3419,38 @@ async function asSave(){
             ev.attendees=[{emailAddress:{address:em.to,name:dmName||em.to},type:'required'}];
           }
         }
-        var sameMode=isResched&&prevA.eventId&&(!!prevA.virtual===isVirtual);
+        var moveId=isResched?(prevA.eventId||''):'';
+        if(isResched&&!moveId){
+          // Pre-tracking booking: FIND the event on the old date by
+          // subject match, so it MOVES instead of stacking a duplicate.
+          try{
+            var fr9=await gfetch(GR+'/me/calendarView?startDateTime='+encodeURIComponent(prevA.date+'T00:00:00')+'&endDateTime='+encodeURIComponent(prevA.date+'T23:59:59')+'&$select=id,subject&$top=25');
+            if(fr9.ok){
+              var fj9=await fr9.json();
+              var hit=(fj9.value||[]).find(function(e9){
+                var s9=String(e9.subject||'').toLowerCase();
+                return /assessment/.test(s9)&&((ptName&&s9.indexOf(ptName.toLowerCase())>-1)||(dmName&&s9.indexOf(dmName.toLowerCase())>-1));
+              });
+              if(hit)moveId=hit.id;
+            }
+          }catch(_){}
+        }
+        var sameMode=isResched&&moveId&&(!!prevA.virtual===isVirtual);
         if(sameMode){
           // MOVE the existing event: the Teams link and the participant
           // survive, and Exchange itself sends the lead the new-time
           // update — no duplicate meetings ever.
           var patch={start:ev.start,end:ev.end,location:ev.location,subject:ev.subject};
-          var pr9=await gfetch(GR+'/me/events/'+encodeURIComponent(prevA.eventId),{method:'PATCH',body:JSON.stringify(patch)});
+          var pr9=await gfetch(GR+'/me/events/'+encodeURIComponent(moveId),{method:'PATCH',body:JSON.stringify(patch)});
           if(!pr9.ok)throw new Error('event move '+pr9.status);
-          evId=prevA.eventId;
+          evId=moveId;
           joinUrl=prevA.joinUrl||'';
           eventInvited=!!prevA.invited;
           calNote='moved on your calendar'+(eventInvited?' · lead sent the new time':'');
         }else{
-          if(isResched&&prevA.eventId){
+          if(isResched&&moveId){
             // Mode flipped (in-person ⇄ virtual): retire the old event
-            try{await gfetch(GR+'/me/events/'+encodeURIComponent(prevA.eventId),{method:'DELETE'});}catch(_){}
+            try{await gfetch(GR+'/me/events/'+encodeURIComponent(moveId),{method:'DELETE'});}catch(_){}
           }
           var er=await gfetch(GR+'/me/events',{method:'POST',body:JSON.stringify(ev)});
           if(!er.ok)throw new Error('event '+er.status);
@@ -3434,7 +3478,12 @@ async function asSave(){
       f=asFields();
       em=asBuildEmail();
     }
-    if(isResched)em.subject='Updated: '+em.subject;
+    if(isResched){
+      // The email must READ as a reschedule, not a fresh booking: banner
+      // above the card naming the old time, subject says Rescheduled.
+      em.subject='Rescheduled: '+em.subject;
+      em.html='<div style="max-width:600px;margin:0 auto 12px;background:#fdf3dd;border:1.5px solid #C59B4E;border-radius:10px;padding:12px 18px;font-family:Georgia,\'Times New Roman\',serif;font-size:14px;line-height:1.6;color:#3d4348;text-align:center">🔁 <b>This visit has a new time.</b> It was '+escapeHtml(prevWhen)+'. The updated details are below.</div>'+em.html;
+    }
     var when=invPrettyDate(f.date)+(f.time?(' at '+asmtPrettyTime(f.time)):'');
     var detail=(isResched?('Assessment RESCHEDULED — was '+prevWhen+' → now '+when):('Assessment scheduled — '+when))
       +(finalLoc?(' @ '+(isVirtual?'💻 ':'')+finalLoc):'')
