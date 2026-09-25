@@ -853,7 +853,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <span style="font-size:11.5px;color:var(--soft)">Length:</span>
         <select id="as-dur" class="ee-inp" style="width:auto;padding:5px 8px;font-size:12px">
           <option value="30">30 min</option><option value="45">45 min</option>
-          <option value="60" selected>1 hour</option><option value="90">1.5 hours</option>
+          <option value="60">1 hour</option><option value="90" selected>1.5 hours</option>
           <option value="120">2 hours</option>
         </select>
         <span style="font-size:10.5px;color:var(--soft)">(needs a date + time)</span>
@@ -1750,7 +1750,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0925-97';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0925-98';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3021,7 +3021,7 @@ function buildAssessmentIcs(f,opts){
   opts=opts||{};
   var start=new Date(f.date+'T'+(f.time||'12:00')+':00');
   if(isNaN(start))return null;
-  var durMin=parseInt(opts.duration,10)||60;
+  var durMin=parseInt(opts.duration,10)||90;
   var end=new Date(start.getTime()+durMin*60000);
   // Reusing a UID with a higher SEQUENCE makes mail clients REPLACE the
   // old slot on the recipient's calendar — that is how a reschedule lands.
@@ -3256,7 +3256,7 @@ function reconstructBooking(ri){
   var d=pd(r[C.NF]);
   if(!d)return null;
   var iso=d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
-  var b={date:iso,time:'',location:'',virtual:false,assessor:'',dur:60,
+  var b={date:iso,time:'',location:'',virtual:false,assessor:'',dur:90,
     eventId:'',joinUrl:'',invited:false,icsUid:'',icsSeq:0,legacy:true};
   try{b.time=followUpTimes()[String(ri)]||'';}catch(_){}
   try{b.assessor=(enginesDoc.assessors||{})[String(ri)]||'';}catch(_){}
@@ -3299,7 +3299,7 @@ function openAsmtSched(ri){
   var vh0=el('as-virtual-hint');if(vh0)vh0.style.display='none';
   el('as-location').placeholder='Client\'s home — street address';
   if(el('as-cal'))el('as-cal').checked=true;
-  if(el('as-dur'))el('as-dur').value='60';
+  if(el('as-dur'))el('as-dur').value='90';
   el('as-out').textContent='';
   // 🔁 An existing booking makes this a RESCHEDULE: prefill everything,
   // show what it currently says, and let him change only what moved.
@@ -3310,7 +3310,7 @@ function openAsmtSched(ri){
     el('as-time').value=prevA.time||'';
     el('as-assessor').value=prevA.assessor||'Meir Schwimer';
     el('as-location').value=prevA.location||'';
-    if(el('as-dur'))el('as-dur').value=String(prevA.dur||60);
+    if(el('as-dur'))el('as-dur').value=String(prevA.dur||90);
     if(el('as-virtual')&&prevA.virtual){
       el('as-virtual').checked=true;
       if(vh0)vh0.style.display='block';
@@ -3384,7 +3384,7 @@ async function asSave(){
   out.style.color='var(--mid)';out.textContent=isVirtual&&!customLink?'Creating the Teams meeting…':(wantEmail?'Saving + sending…':'Saving…');
   try{
     var ri=_asRi,r=rows[ri]||[];
-    var calDur=parseInt((el('as-dur')||{}).value,10)||60;
+    var calDur=parseInt((el('as-dur')||{}).value,10)||90;
     var dmName=String(r[C.DM]||r[C.NM]||'').trim();
     var ptName=String(r[C.NM]||'').trim();
     // 🔁 An existing booking makes this a reschedule (stored record, or

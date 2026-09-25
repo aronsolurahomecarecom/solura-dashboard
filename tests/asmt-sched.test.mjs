@@ -151,6 +151,13 @@ ok(/Join the video visit<\/a>/.test(html), 'a link location renders as a Join li
   ok(A.fillAsmtSchedTokens('<p>{location}</p>', { date: '2026-09-30', location: '123 Superior Ave' }).indexOf('123 Superior Ave') > -1, 'street addresses render as plain text, as before');
 }
 ok(/id="as-cal" checked/.test(html) && /id="as-dur"/.test(html), 'invite toggle (default on) + duration picker in the modal');
+ok(/value="90" selected/.test(html) && /el\('as-dur'\)\)el\('as-dur'\)\.value='90';/.test(html), 'default assessment length is 90 minutes everywhere');
+{
+  const d90 = A.buildAssessmentIcs({ date: '2026-10-01', time: '10:00' }, { to: 'k@x.com' });
+  const p9 = n => (n < 10 ? '0' : '') + n;
+  const utc9 = d => d.getUTCFullYear() + p9(d.getUTCMonth() + 1) + p9(d.getUTCDate()) + 'T' + p9(d.getUTCHours()) + p9(d.getUTCMinutes()) + p9(d.getUTCSeconds()) + 'Z';
+  ok(d90.ics.indexOf('DTEND:' + utc9(new Date(new Date('2026-10-01T10:00:00').getTime() + 90 * 60000))) > -1, 'unspecified duration builds a 90-minute invite');
+}
 ok(/one email; they tap Add to calendar/.test(html), 'modal label describes the merged single-email behavior');
 
 // ── conditions on the add-lead form (B-0911-83) ──
