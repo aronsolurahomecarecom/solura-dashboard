@@ -205,13 +205,34 @@ ok(/attachLinks\.push\(\{name:fileObj\.name,url:attachUrl\}\)/.test(html), 'uplo
 ok(/Uploaded documents:/.test(html) && /asmtSendIntakeEmail\(leadName,summary,docUrl,attachLinks\)/.test(html), 'doc links ride the finished-assessment email');
 ok(/cfg\('asmtIntakeTo'\)\|\|''\)\.trim\(\)\|\|'intake@solurahomecare\.com'/.test(html) && /data-cfg="asmtIntakeTo"/.test(html), 'intake recipient editable in Settings, sensible default');
 
+// ── 🔁 reschedule (B-0925-96) ──
+{
+  const cf = { date: '2026-09-30', time: '14:00', location: '123 Superior Ave', assessor: 'Meir Schwimer', notes: '' };
+  const first = A.buildAssessmentIcs(cf, { to: 'k@x.com', duration: 60 });
+  ok(first.ics.indexOf('SEQUENCE:0') > -1 && !!first.uid, 'first invite carries SEQUENCE:0 and returns its UID');
+  const moved = A.buildAssessmentIcs({ ...cf, date: '2026-10-02', time: '10:00' }, { to: 'k@x.com', duration: 60, uid: first.uid, sequence: 1 });
+  ok(moved.ics.indexOf('UID:' + first.uid) > -1 && moved.ics.indexOf('SEQUENCE:1') > -1, 'reschedule reuses the UID with SEQUENCE:1 — calendars REPLACE the old slot');
+  const sv = html.slice(html.indexOf('async function asSave'), html.indexOf('async function asSave') + 14000);
+  ok(/var isResched=!!\(prevA&&prevA\.date\);/.test(sv), 'an existing booking makes the save a reschedule');
+  ok(/var sameMode=isResched&&prevA\.eventId&&\(!!prevA\.virtual===isVirtual\);/.test(sv) && /method:'PATCH'/.test(sv), 'same-mode reschedule MOVES the existing event (PATCH) — Teams link + participant survive');
+  ok(/method:'DELETE'/.test(sv) && /Mode flipped/.test(sv), 'mode flip retires the old event before creating the new one');
+  ok(/em\.subject='Updated: '\+em\.subject;/.test(sv), 'reschedule email subject says Updated');
+  ok(/Assessment RESCHEDULED — was '\+prevWhen\+' → now '\+when/.test(sv), 'sheet note records old time → new time');
+  ok(/outcome:isResched\?'assessment-rescheduled':'assessment-scheduled'/.test(sv), 'Comms Log distinguishes reschedules');
+  ok(/schedAssessments\(\)\[String\(ri\)\]=\{date:f\.date/.test(sv), 'the booking is remembered (synced doc) for the NEXT reschedule');
+  ok(/uid:\(prevA&&prevA\.icsUid\)\|\|null,sequence:icsSeqUsed/.test(sv), '.ics reschedules reuse the UID with a bumped sequence');
+}
+ok(/id="as-resched-note"/.test(html) && /Rescheduling\.<\/b> Currently:/.test(html), 'the scheduler shows the current booking when reopening');
+ok(/sb\.textContent='🔁 Reschedule & notify';/.test(html), 'the save button renames itself in reschedule mode');
+ok(/data-action="open-asmt-sched" data-ri="'\+ri\+'" title="Reschedule the assessment/.test(html), '🔁 button rides every Assessment Scheduled lead row');
+
 // ── source-level locks on the flow ──
 ok(/id="modal-asmt-sched"/.test(html) && /data-action="as-save"/.test(html) && /data-action="as-preview"/.test(html), 'logger modal with Save & Send + Preview');
 ok(/data-action="open-asmt-sched" data-ri/.test(html), '📅 launch button rides the Responded/Update dialog footer');
 ok(/u\[C\.ST\]='Assessment Scheduled'/.test(html), 'save stamps the status that unlocks 🏥 Start Assessment');
 ok(/u\[C\.NF\]=f\.date/.test(html), 'Follow-Up moves to the assessment date');
 ok(/followUpTimes\(\)\[String\(ri\)\]=f\.time/.test(html), 'assessment time gates the due-now queue');
-ok(/outcome:'assessment-scheduled'/.test(html), 'Comms Log row written with its own outcome');
+ok(/'assessment-scheduled'/.test(html), 'Comms Log row written with its own outcome');
 ok(/Saved to the sheet, but the email failed/.test(html), 'email failure after a successful sheet write says exactly that');
 ok(/data-cfg="asmtSchedSubject"/.test(html) && /data-cfg="asmtSchedTemplate"/.test(html), 'subject + template editable in Settings → Email');
 ok(/asmtSchedSubject"\],\[data-cfg="asmtSchedTemplate"/.test(html.replace(/\s+/g, '')) || /data-cfg="asmtSchedTemplate"\]'\)/.test(html), 'settings boxes prefill with the built-in as starting point');

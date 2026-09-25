@@ -833,6 +833,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
     <div class="mhead"><div class="mtitle">📅 Log Scheduled Assessment</div><button class="mclose" data-action="close-modal" data-mid="modal-asmt-sched">✕</button></div>
     <div class="mbody">
       <div id="as-lead" style="font-size:12.5px;color:var(--mid);margin-bottom:12px"></div>
+      <div id="as-resched-note" style="display:none;background:#fdf3dd;border:1.5px solid var(--gold,#C8870A);border-radius:10px;padding:10px 14px;font-size:12px;margin-bottom:12px"></div>
       <div class="la-grid g3" style="margin-bottom:10px">
         <div class="la-f"><label>Date</label><input type="date" id="as-date"></div>
         <div class="la-f"><label>Time</label><input type="time" id="as-time"></div>
@@ -861,7 +862,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <div style="display:flex;gap:8px;align-items:center">
         <span id="as-out" style="flex:1;font-size:11.5px;white-space:pre-wrap"></span>
         <button data-action="as-preview" style="padding:9px 14px;background:none;color:var(--mid);border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">👁 Preview</button>
-        <button data-action="as-save" style="padding:9px 18px;background:linear-gradient(135deg,#1f4d3a,#153627);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">✓ Save &amp; Send</button>
+        <button data-action="as-save" id="as-save-btn" style="padding:9px 18px;background:linear-gradient(135deg,#1f4d3a,#153627);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">✓ Save &amp; Send</button>
         <span id="as-spin" style="display:none"><div class="mspin"></div></span>
       </div>
       <div style="font-size:10.5px;color:var(--soft);margin-top:8px">Saving sets the status to Assessment Scheduled (the 🏥 Start Assessment button appears on the lead), moves Follow-Up to the assessment date, prepends a 📅 note, and writes a Comms Log row.</div>
@@ -1749,7 +1750,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0924-95';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0925-96';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3022,7 +3023,9 @@ function buildAssessmentIcs(f,opts){
   if(isNaN(start))return null;
   var durMin=parseInt(opts.duration,10)||60;
   var end=new Date(start.getTime()+durMin*60000);
-  var uid='asmt-'+start.getTime()+'-'+Math.random().toString(36).slice(2,8)+'@solurahomecare.com';
+  // Reusing a UID with a higher SEQUENCE makes mail clients REPLACE the
+  // old slot on the recipient's calendar — that is how a reschedule lands.
+  var uid=opts.uid||('asmt-'+start.getTime()+'-'+Math.random().toString(36).slice(2,8)+'@solurahomecare.com');
   var lines=[
     'BEGIN:VCALENDAR',
     'PRODID:-//Solura Home Care//Dashboard//EN',
@@ -3030,6 +3033,7 @@ function buildAssessmentIcs(f,opts){
     'METHOD:REQUEST',
     'BEGIN:VEVENT',
     'UID:'+uid,
+    'SEQUENCE:'+(parseInt(opts.sequence,10)||0),
     'DTSTAMP:'+icsUtc(new Date()),
     'DTSTART:'+icsUtc(start),
     'DTEND:'+icsUtc(end),
@@ -3044,7 +3048,7 @@ function buildAssessmentIcs(f,opts){
   }
   lines.push('STATUS:CONFIRMED','BEGIN:VALARM','TRIGGER:-PT60M','ACTION:DISPLAY',
     'DESCRIPTION:In-home assessment in 1 hour','END:VALARM','END:VEVENT','END:VCALENDAR');
-  return {ics:lines.join('\r\n'),fileName:'Solura_Assessment_'+String(f.date||'').replace(/-/g,'')+'.ics'};
+  return {ics:lines.join('\r\n'),uid:uid,fileName:'Solura_Assessment_'+String(f.date||'').replace(/-/g,'')+'.ics'};
 }
 // A stored override must EARN the right to replace the built-in: filled
 // with probe data it needs real visible text (hidden display:none blocks
@@ -3239,6 +3243,8 @@ function presetsForLead(ri){
   var ctx={status:r[C.ST],source:r[C.SO],engineId:engId,engineName:engName};
   return emailPresets().filter(function(p){return presetMatch(p,ctx);});
 }
+// 🔁 The scheduled assessment per lead (synced doc): what reschedules read.
+function schedAssessments(){enginesDoc.assessments=enginesDoc.assessments||{};return enginesDoc.assessments;}
 /* 🅰🅱🅲 retrack + loss-reason runtime */
 var _rtRi=-1,_lossRi=-1;
 var LOSS_REASONS=['Recipient refused','Cost','Chose another agency','Need resolved','Moved to facility','Unreachable','Other'];
@@ -3268,6 +3274,32 @@ function openAsmtSched(ri){
   if(el('as-cal'))el('as-cal').checked=true;
   if(el('as-dur'))el('as-dur').value='60';
   el('as-out').textContent='';
+  // 🔁 An existing booking makes this a RESCHEDULE: prefill everything,
+  // show what it currently says, and let him change only what moved.
+  var prevA=schedAssessments()[String(ri)];
+  var rn=el('as-resched-note'),sb=el('as-save-btn');
+  if(prevA&&prevA.date){
+    el('as-date').value=prevA.date;
+    el('as-time').value=prevA.time||'';
+    el('as-assessor').value=prevA.assessor||'Meir Schwimer';
+    el('as-location').value=prevA.location||'';
+    if(el('as-dur'))el('as-dur').value=String(prevA.dur||60);
+    if(el('as-virtual')&&prevA.virtual){
+      el('as-virtual').checked=true;
+      if(vh0)vh0.style.display='block';
+      el('as-location').placeholder='Paste a meeting link (https://…) — or leave BLANK to auto-create a Teams meeting';
+    }
+    if(rn){
+      rn.style.display='block';
+      rn.innerHTML='🔁 <b>Rescheduling.</b> Currently: '+escapeHtml(invPrettyDate(prevA.date)+(prevA.time?(' at '+asmtPrettyTime(prevA.time)):''))
+        +(prevA.virtual?' · 💻 virtual':'')
+        +'. Change what moved and save — the calendar event MOVES (no duplicate), the family gets the update.';
+    }
+    if(sb)sb.textContent='🔁 Reschedule & notify';
+  }else{
+    if(rn)rn.style.display='none';
+    if(sb)sb.textContent='✓ Save & Send';
+  }
   el('modal-asmt-sched').classList.add('open');
 }
 function asFields(){
@@ -3328,13 +3360,17 @@ async function asSave(){
     var calDur=parseInt((el('as-dur')||{}).value,10)||60;
     var dmName=String(r[C.DM]||r[C.NM]||'').trim();
     var ptName=String(r[C.NM]||'').trim();
+    // 🔁 An existing booking makes this a reschedule
+    var prevA=schedAssessments()[String(ri)]||null;
+    var isResched=!!(prevA&&prevA.date);
+    var prevWhen=isResched?(invPrettyDate(prevA.date)+(prevA.time?(' at '+asmtPrettyTime(prevA.time)):'')):'';
     // ── The calendar event goes FIRST: a virtual visit needs the Teams
     // join link before the email, the sheet note, or the log exist.
     // In-person keeps the merged design (quiet event, NO attendees, .ics
     // rides the confirmation). Virtual adds the lead as a PARTICIPANT —
     // Exchange sends them the native invite with the Join button, so no
     // .ics is attached (it would duplicate).
-    var calNote='',icsAtt=null,joinUrl='',eventInvited=false;
+    var calNote='',icsAtt=null,joinUrl='',eventInvited=false,evId='',icsUidUsed='',icsSeqUsed=0;
     if(wantCal){
       try{
         var tzName='America/New_York';
@@ -3355,15 +3391,34 @@ async function asSave(){
             ev.attendees=[{emailAddress:{address:em.to,name:dmName||em.to},type:'required'}];
           }
         }
-        var er=await gfetch(GR+'/me/events',{method:'POST',body:JSON.stringify(ev)});
-        if(!er.ok)throw new Error('event '+er.status);
-        var ej=await er.json().catch(function(){return{};});
-        joinUrl=(ej.onlineMeeting&&ej.onlineMeeting.joinUrl)||'';
-        eventInvited=!!(isVirtual&&ev.attendees);
-        if(isVirtual&&!customLink&&!joinUrl)throw new Error('Teams meeting had no join link');
-        calNote=isVirtual
-          ?((customLink?'on your calendar':'Teams meeting created')+(eventInvited?' · lead invited':''))
-          :'on your calendar';
+        var sameMode=isResched&&prevA.eventId&&(!!prevA.virtual===isVirtual);
+        if(sameMode){
+          // MOVE the existing event: the Teams link and the participant
+          // survive, and Exchange itself sends the lead the new-time
+          // update — no duplicate meetings ever.
+          var patch={start:ev.start,end:ev.end,location:ev.location,subject:ev.subject};
+          var pr9=await gfetch(GR+'/me/events/'+encodeURIComponent(prevA.eventId),{method:'PATCH',body:JSON.stringify(patch)});
+          if(!pr9.ok)throw new Error('event move '+pr9.status);
+          evId=prevA.eventId;
+          joinUrl=prevA.joinUrl||'';
+          eventInvited=!!prevA.invited;
+          calNote='moved on your calendar'+(eventInvited?' · lead sent the new time':'');
+        }else{
+          if(isResched&&prevA.eventId){
+            // Mode flipped (in-person ⇄ virtual): retire the old event
+            try{await gfetch(GR+'/me/events/'+encodeURIComponent(prevA.eventId),{method:'DELETE'});}catch(_){}
+          }
+          var er=await gfetch(GR+'/me/events',{method:'POST',body:JSON.stringify(ev)});
+          if(!er.ok)throw new Error('event '+er.status);
+          var ej=await er.json().catch(function(){return{};});
+          evId=ej.id||'';
+          joinUrl=(ej.onlineMeeting&&ej.onlineMeeting.joinUrl)||'';
+          eventInvited=!!(isVirtual&&ev.attendees);
+          if(isVirtual&&!customLink&&!joinUrl)throw new Error('Teams meeting had no join link');
+          calNote=isVirtual
+            ?((customLink?'on your calendar':'Teams meeting created')+(eventInvited?' · lead invited':''))
+            :'on your calendar';
+        }
       }catch(calErr){
         if(isVirtual&&!customLink){
           throw new Error('Could not create the Teams meeting ('+calErr.message+'). Sign out and back in once (calendar permission), or paste your own meeting link.');
@@ -3379,8 +3434,9 @@ async function asSave(){
       f=asFields();
       em=asBuildEmail();
     }
+    if(isResched)em.subject='Updated: '+em.subject;
     var when=invPrettyDate(f.date)+(f.time?(' at '+asmtPrettyTime(f.time)):'');
-    var detail='Assessment scheduled — '+when
+    var detail=(isResched?('Assessment RESCHEDULED — was '+prevWhen+' → now '+when):('Assessment scheduled — '+when))
       +(finalLoc?(' @ '+(isVirtual?'💻 ':'')+finalLoc):'')
       +(f.assessor?(' · assessor: '+f.assessor):'')
       +(f.notes?(' · '+f.notes):'');
@@ -3388,7 +3444,7 @@ async function asSave(){
     u[C.ST]='Assessment Scheduled'; // unlocks the 🏥 Start Assessment primary
     u[C.NF]=f.date;
     u[C.LC]=fd(localToday());
-    var stamp='📅 ['+new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+'] '+detail;
+    var stamp=(isResched?'🔁':'📅')+' ['+new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+'] '+detail;
     var exNotes=String(r[C.NT]||'').trim();
     u[C.NT]=exNotes?(stamp+'\n\n'+exNotes):stamp;
     await writeRow(ri,u);
@@ -3408,9 +3464,12 @@ async function asSave(){
     // in-person always; virtual only as the fallback for a custom link
     // whose calendar event could not be created.
     if(wantCal&&wantEmail&&(!isVirtual||(customLink&&!eventInvited))){
+      icsSeqUsed=isResched?(((prevA&&prevA.icsSeq)||0)+1):0;
       var built=buildAssessmentIcs(f,{to:em.to,attendeeName:dmName,duration:calDur,
+        uid:(prevA&&prevA.icsUid)||null,sequence:icsSeqUsed,
         summary:(isVirtual?'Virtual assessment':'In-home assessment')+' — Solura Home Care'});
       if(built){
+        icsUidUsed=built.uid;
         icsAtt={'@odata.type':'#microsoft.graph.fileAttachment',name:built.fileName,
           contentType:'text/calendar',contentBytes:btoa(unescape(encodeURIComponent(built.ics)))};
         calNote='invite attached'+(calNote?(' · '+calNote):'');
@@ -3428,12 +3487,23 @@ async function asSave(){
       }
       sent=true;
     }
+    // 🔁 Remember the booking so the next open is a reschedule
+    try{
+      schedAssessments()[String(ri)]={date:f.date,time:f.time,location:finalLoc,virtual:isVirtual,
+        assessor:f.assessor,dur:calDur,
+        eventId:evId||(prevA&&prevA.eventId)||'',
+        joinUrl:joinUrl||(isVirtual&&prevA?(prevA.joinUrl||''):''),
+        invited:eventInvited,
+        icsUid:icsUidUsed||(prevA&&prevA.icsUid)||'',
+        icsSeq:icsSeqUsed||((prevA&&prevA.icsSeq)||0)};
+      saveEnginesDoc().catch(function(){});
+    }catch(_){}
     logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
-      contact:sent?em.to:'',subject:sent?em.subject:'Assessment scheduled',
+      contact:sent?em.to:'',subject:sent?em.subject:(isResched?'Assessment rescheduled':'Assessment scheduled'),
       preview:detail+(calNote?(' · '+calNote):''),
-      outcome:'assessment-scheduled'}));
+      outcome:isResched?'assessment-rescheduled':'assessment-scheduled'}));
     el('modal-asmt-sched').classList.remove('open');
-    var doneMsg=(isVirtual?'💻 Virtual assessment':'📅 Assessment')+' logged'+(sent?(' — confirmation sent to '+em.to):'');
+    var doneMsg=(isResched?'🔁 Assessment rescheduled':(isVirtual?'💻 Virtual assessment logged':'📅 Assessment logged'))+(sent?(' — email sent to '+em.to):'');
     if(calNote)doneMsg+=' · 📆 '+calNote;
     if(em.usedFallback)doneMsg+=' · ⚠ your saved email template was blank, so the built-in was used — fix it via ↺ Restore in ⚙ Settings → Email';
     toast(doneMsg);
@@ -5074,7 +5144,8 @@ function buildButtons(l){
     altsA+='<button class="btn-sm bg-sky-l" data-action="call" data-ri="'+ri+'">📞</button>';
     altsA+='<button class="btn-sm bg-grn-l" data-action="open-sms" data-ri="'+ri+'">💬</button>';
     altsA+='<button class="btn-sm bg-gold-l" data-action="open-email" data-ri="'+ri+'">✉</button>';
-    altsA+='<button class="btn-sm bg-cream" data-action="open-script" data-ri="'+ri+'">📋</button>'+inv;
+    altsA+='<button class="btn-sm bg-cream" data-action="open-script" data-ri="'+ri+'">📋</button>';
+    altsA+='<button class="btn-sm bg-cream" data-action="open-asmt-sched" data-ri="'+ri+'" title="Reschedule the assessment — moves the calendar event, notifies the family">🔁</button>'+inv;
     return '<div class="bwrap">'
       +'<div class="brow" style="flex:1"><button class="btn-primary asmt-primary-btn" data-action="open-assessment" data-ri="'+ri+'">🏥 Start Assessment</button><button class="btn-sec bg-gold-l" style="flex:0 0 auto" data-action="open-ep" data-ri="'+ri+'" data-mode="update">✏</button></div>'
       +'<div class="brow">'+altsA+'</div>'
