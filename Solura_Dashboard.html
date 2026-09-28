@@ -861,6 +861,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <div class="la-f" style="margin-bottom:12px"><label>Send to</label><input type="email" id="as-to"></div>
       <div style="display:flex;gap:8px;align-items:center">
         <span id="as-out" style="flex:1;font-size:11.5px;white-space:pre-wrap"></span>
+        <button data-action="as-cancel" id="as-cancel-btn" style="display:none;padding:9px 14px;background:none;color:#c0392b;border:1.5px solid #c0392b;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">✕ Cancel assessment</button>
         <button data-action="as-preview" style="padding:9px 14px;background:none;color:var(--mid);border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">👁 Preview</button>
         <button data-action="as-save" id="as-save-btn" style="padding:9px 18px;background:linear-gradient(135deg,#1f4d3a,#153627);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">✓ Save &amp; Send</button>
         <span id="as-spin" style="display:none"><div class="mspin"></div></span>
@@ -1750,7 +1751,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0925-99';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0928-100';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3030,7 +3031,7 @@ function buildAssessmentIcs(f,opts){
     'BEGIN:VCALENDAR',
     'PRODID:-//Solura Home Care//Dashboard//EN',
     'VERSION:2.0',
-    'METHOD:REQUEST',
+    'METHOD:'+(opts.method==='CANCEL'?'CANCEL':'REQUEST'),
     'BEGIN:VEVENT',
     'UID:'+uid,
     'SEQUENCE:'+(parseInt(opts.sequence,10)||0),
@@ -3049,8 +3050,14 @@ function buildAssessmentIcs(f,opts){
   if(opts.to&&opts.to.indexOf('@')>0){
     lines.push('ATTENDEE;CN='+icsEsc(opts.attendeeName||opts.to)+';RSVP=TRUE:mailto:'+opts.to);
   }
-  lines.push('STATUS:CONFIRMED','BEGIN:VALARM','TRIGGER:-PT60M','ACTION:DISPLAY',
-    'DESCRIPTION:In-home assessment in 1 hour','END:VALARM','END:VEVENT','END:VCALENDAR');
+  if(opts.method==='CANCEL'){
+    // Same UID + bumped SEQUENCE + CANCEL removes the slot from the
+    // recipient's calendar instead of adding anything.
+    lines.push('STATUS:CANCELLED','END:VEVENT','END:VCALENDAR');
+  }else{
+    lines.push('STATUS:CONFIRMED','BEGIN:VALARM','TRIGGER:-PT60M','ACTION:DISPLAY',
+      'DESCRIPTION:In-home assessment in 1 hour','END:VALARM','END:VEVENT','END:VCALENDAR');
+  }
   return {ics:lines.join('\r\n'),uid:uid,fileName:'Solura_Assessment_'+String(f.date||'').replace(/-/g,'')+'.ics'};
 }
 // A stored override must EARN the right to replace the built-in: filled
@@ -3066,6 +3073,18 @@ function asmtTemplateUsable(tpl){
       .replace(/<[^>]*>/g,' ').replace(/&nbsp;/gi,' ').replace(/\s+/g,' ').trim();
     return txt.length>=40&&txt.indexOf('Jan 15, 2026')>-1;
   }catch(_){return false;}
+}
+// ❌ Cancellation note: short, warm, no blame, no urgency, door open.
+function buildCancelEmailHtml(prevWhen,isVirtual){
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f0e8"><tr><td align="center" style="padding:28px 12px">'
+    +'<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background-color:#faf8f4;border-radius:16px;overflow:hidden">'
+    +'<tr><td style="background-color:#C59B4E;height:4px;font-size:0">&nbsp;</td></tr>'
+    +'<tr><td style="padding:30px 48px 6px"><p style="margin:0 0 22px;font-family:Georgia,\'Times New Roman\',serif;font-size:26px;color:#1f3d57">Hi {dm},</p>'
+    +'<p style="margin:0 0 20px;font-family:Georgia,\'Times New Roman\',serif;font-size:17px;line-height:2;color:#3d4348">The '+(isVirtual?'video visit':'home visit')+' we had planned for <b>'+escapeHtml(prevWhen)+'</b> has been cancelled, and it is off your calendar. Nothing is needed from you.</p>'
+    +'<p style="margin:0 0 26px;font-family:Georgia,\'Times New Roman\',serif;font-size:17px;line-height:2;color:#3d4348">Whenever a better time comes into view for you and {pt}, just reply to this email or call (216) 770-4886. We would be glad to set a new one.</p>'
+    +'<p style="margin:0 0 30px;font-family:Georgia,\'Times New Roman\',serif;font-size:17px;color:#3d4348;font-style:italic">Warmly,<br><b style="font-style:normal;color:#1f3d57">Meir Schwimer</b><br><span style="font-family:Arial,sans-serif;font-size:12px;color:#C59B4E;font-weight:bold">Solura Home Care</span></p></td></tr>'
+    +'<tr><td style="background-color:#1f3d57;padding:18px 40px;text-align:center;font-family:Arial,sans-serif;font-size:12px;line-height:1.9;color:#c2cfdb"><span style="color:#C59B4E;font-weight:bold;letter-spacing:0.08em">SOLURA HOME CARE</span><br>815 Superior Ave E Ste 1618, Cleveland OH 44114</td></tr>'
+    +'</table></td></tr></table>';
 }
 function asmtSchedCfg(){
   var tpl=String(cfg('asmtSchedTemplate')||'').trim();
@@ -3326,9 +3345,11 @@ function openAsmtSched(ri){
         +'. Change what moved and save — the calendar event MOVES (no duplicate), the family gets the update.';
     }
     if(sb)sb.textContent='🔁 Reschedule & notify';
+    var cb0=el('as-cancel-btn');if(cb0)cb0.style.display='inline-block';
   }else{
     if(rn)rn.style.display='none';
     if(sb)sb.textContent='✓ Save & Send';
+    var cb1=el('as-cancel-btn');if(cb1)cb1.style.display='none';
   }
   el('modal-asmt-sched').classList.add('open');
 }
@@ -3359,6 +3380,99 @@ function asPreview(){
   var url=URL.createObjectURL(blob);
   window.open(url,'_blank');
   setTimeout(function(){URL.revokeObjectURL(url);},60000);
+}
+// ❌ Cancel: removes the event from BOTH calendars, tells the family
+// kindly, reverts the lead to an active conversation due today, stamps
+// the record, and clears the booking.
+async function asCancel(){
+  var ri=_asRi;if(ri<0)return;
+  var prevA=bookingFor(ri);
+  if(!prevA||!prevA.date){toast('Nothing is scheduled for this lead');return;}
+  var r=rows[ri]||[];
+  var prevWhen=invPrettyDate(prevA.date)+(prevA.time?(' at '+asmtPrettyTime(prevA.time)):'');
+  var wantEmail=el('as-send-email').checked;
+  var to=String(el('as-to').value||'').trim();
+  var willMail=wantEmail&&to.indexOf('@')>0;
+  if(!confirm('Cancel the assessment ('+prevWhen+')?\n\n'+(willMail?'The family gets a short cancellation note and it comes OFF their calendar.':'No email goes out (the toggle is off) — their calendar entry stays until you tell them.')))return;
+  var out=el('as-out'),spin=el('as-spin');
+  if(spin)spin.style.display='inline-flex';
+  out.style.color='var(--mid)';out.textContent='Cancelling…';
+  try{
+    var dmName=String(r[C.DM]||r[C.NM]||'').trim();
+    var ptName=String(r[C.NM]||'').trim();
+    // 1) His calendar: delete the event (stored id, or found on the date)
+    var evId=prevA.eventId||'';
+    if(!evId){
+      try{
+        var fr9=await gfetch(GR+'/me/calendarView?startDateTime='+encodeURIComponent(prevA.date+'T00:00:00')+'&endDateTime='+encodeURIComponent(prevA.date+'T23:59:59')+'&$select=id,subject&$top=25');
+        if(fr9.ok){
+          var fj9=await fr9.json();
+          var hit=(fj9.value||[]).find(function(e9){
+            var s9=String(e9.subject||'').toLowerCase();
+            return /assessment/.test(s9)&&((ptName&&s9.indexOf(ptName.toLowerCase())>-1)||(dmName&&s9.indexOf(dmName.toLowerCase())>-1));
+          });
+          if(hit)evId=hit.id;
+        }
+      }catch(_){}
+    }
+    var calMsg='';
+    if(evId){
+      try{
+        var dr9=await gfetch(GR+'/me/events/'+encodeURIComponent(evId),{method:'DELETE'});
+        calMsg=(dr9.ok||dr9.status===204)?'removed from your calendar':'calendar removal failed';
+      }catch(_){calMsg='calendar removal failed';}
+    }
+    // 2) Sheet: back to an active conversation, follow up today
+    var u={};
+    u[C.ST]='Active Conversation';
+    u[C.NF]=fd(localToday());
+    u[C.LC]=fd(localToday());
+    var notes9=String(el('as-notes').value||'').trim();
+    var stamp='❌ ['+new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+'] Assessment CANCELLED — was '+prevWhen+(notes9?(' · '+notes9):'');
+    var exN=String(r[C.NT]||'').trim();
+    u[C.NT]=exN?(stamp+'\n\n'+exN):stamp;
+    await writeRow(ri,u);
+    // 3) The family: short branded note + a CANCEL invite that clears
+    // the slot from their calendar (same UID, bumped sequence)
+    var sent=false;
+    if(willMail){
+      try{
+        var names=getNames(ri);
+        var isVirt=!!prevA.virtual;
+        var html9=fillNames(buildCancelEmailHtml(prevWhen,isVirt),names);
+        var msg9={subject:'Cancelled: your '+(isVirt?'video visit':'home visit')+' on '+invPrettyDate(prevA.date),
+          body:{contentType:'HTML',content:html9},
+          toRecipients:[{emailAddress:{address:to}}]};
+        if(prevA.icsUid){
+          var canc=buildAssessmentIcs({date:prevA.date,time:prevA.time||'12:00',location:prevA.location,assessor:prevA.assessor},
+            {to:to,attendeeName:dmName,duration:prevA.dur||90,uid:prevA.icsUid,sequence:(prevA.icsSeq||0)+1,method:'CANCEL'});
+          if(canc)msg9.attachments=[{'@odata.type':'#microsoft.graph.fileAttachment',name:'Cancelled_'+canc.fileName,
+            contentType:'text/calendar',contentBytes:btoa(unescape(encodeURIComponent(canc.ics)))}];
+        }
+        var sr9=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:msg9,saveToSentItems:true})});
+        if(!(sr9.ok||sr9.status===202))throw new Error('mail '+sr9.status);
+        sent=true;
+      }catch(eM){
+        toast('⚠ Cancelled, but the email failed ('+eM.message+') — tell the family yourself');
+      }
+    }
+    // 4) Clear the booking + the queue time gate
+    try{delete schedAssessments()[String(ri)];}catch(_){}
+    try{delete followUpTimes()[String(ri)];}catch(_){}
+    try{saveEnginesDoc().catch(function(){});}catch(_){}
+    logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
+      contact:sent?to:'',subject:sent?('Cancelled: assessment on '+invPrettyDate(prevA.date)):'Assessment cancelled',
+      preview:'Assessment cancelled — was '+prevWhen+(calMsg?(' · '+calMsg):''),
+      outcome:'assessment-cancelled'}));
+    el('modal-asmt-sched').classList.remove('open');
+    toast('❌ Assessment cancelled'+(sent?' — family notified, their calendar cleared':'')+(calMsg?(' · 📆 '+calMsg):''));
+    _asRi=-1;
+    try{await buildUI();}catch(_){}
+  }catch(e){
+    out.style.color='var(--red)';out.textContent='✗ '+e.message;
+  }finally{
+    if(spin)spin.style.display='none';
+  }
 }
 async function asSave(){
   if(_asRi<0)return;
@@ -14096,6 +14210,9 @@ function onClick(ev){
       break;
     case 'as-save':
       asSave();
+      break;
+    case 'as-cancel':
+      Promise.resolve(asCancel()).catch(function(eC){showErr('Cancel failed: '+String(eC&&eC.message||eC));});
       break;
     case 'inv-add-disc':
       _invDiscounts.push({label:'',value:''});

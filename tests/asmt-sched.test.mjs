@@ -20,7 +20,7 @@ let CFG = {};
 const cfgStub = k => CFG[k];
 const escapeHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const mk = new Function('cfg', 'lc', 'escapeHtml',
-  src + '\nreturn {DEFAULT_ASMTSCHED_SUBJECT,DEFAULT_ASMTSCHED_TEMPLATE,asmtSchedCfg,asmtPrettyTime,fillAsmtSchedTokens,buildAssessmentIcs,icsEsc,htmlHasVisibleText,asmtTemplateUsable};');
+  src + '\nreturn {DEFAULT_ASMTSCHED_SUBJECT,DEFAULT_ASMTSCHED_TEMPLATE,asmtSchedCfg,asmtPrettyTime,fillAsmtSchedTokens,buildAssessmentIcs,icsEsc,htmlHasVisibleText,asmtTemplateUsable,buildCancelEmailHtml};');
 const A = mk(cfgStub, s => String(s || '').toLowerCase(), escapeHtml);
 
 // ── time prettifier ──
@@ -240,6 +240,28 @@ ok(/cfg\('asmtIntakeTo'\)\|\|''\)\.trim\(\)\|\|'intake@solurahomecare\.com'/.tes
 ok(/id="as-resched-note"/.test(html) && /Rescheduling\.<\/b> Currently:/.test(html), 'the scheduler shows the current booking when reopening');
 ok(/sb\.textContent='🔁 Reschedule & notify';/.test(html), 'the save button renames itself in reschedule mode');
 ok(/data-action="open-asmt-sched" data-ri="'\+ri\+'" title="Reschedule the assessment/.test(html), '🔁 button rides every Assessment Scheduled lead row');
+
+// ── ❌ cancel (B-0928-100) ──
+{
+  const base = A.buildAssessmentIcs({ date: '2026-10-08', time: '11:00', location: '123 Superior Ave' }, { to: 'k@x.com', duration: 90 });
+  const canc = A.buildAssessmentIcs({ date: '2026-10-08', time: '11:00', location: '123 Superior Ave' }, { to: 'k@x.com', duration: 90, uid: base.uid, sequence: 1, method: 'CANCEL' });
+  ok(canc.ics.indexOf('METHOD:CANCEL') > -1 && canc.ics.indexOf('STATUS:CANCELLED') > -1, 'cancel invite carries METHOD:CANCEL + STATUS:CANCELLED');
+  ok(canc.ics.indexOf('UID:' + base.uid) > -1 && canc.ics.indexOf('SEQUENCE:1') > -1, 'same UID + bumped sequence — the slot CLEARS from their calendar');
+  ok(canc.ics.indexOf('VALARM') === -1, 'no reminder alarm on a cancellation');
+  const note = A.buildCancelEmailHtml('Oct 8, 2026 at 11:00 AM', true);
+  ok(note.indexOf('video visit') > -1 && note.indexOf('Oct 8, 2026 at 11:00 AM') > -1, 'cancellation note names the visit type and the old time');
+  ok(note.indexOf('Meir Schwimer') > -1 && note.indexOf('815 Superior Ave E Ste 1618') > -1, 'signed Meir Schwimer, footer carries the address');
+  ok(note.indexOf('—') === -1 && !/hurry|urgent|last chance/i.test(note), 'no em dashes, no pressure — door left open warmly');
+  ok(A.buildCancelEmailHtml('X', false).indexOf('home visit') > -1, 'in-person cancellations say home visit');
+  const cv = html.slice(html.indexOf('async function asCancel'), html.indexOf('async function asSave'));
+  ok(/u\[C\.ST\]='Active Conversation';/.test(cv) && /u\[C\.NF\]=fd\(localToday\(\)\)/.test(cv), 'the lead reverts to an active conversation, due today for the rebooking call');
+  ok(/Assessment CANCELLED — was '\+prevWhen/.test(cv), 'the record stamps what was cancelled');
+  ok(/delete schedAssessments\(\)\[String\(ri\)\]/.test(cv) && /delete followUpTimes\(\)\[String\(ri\)\]/.test(cv), 'the booking and the queue time gate are cleared');
+  ok(/outcome:'assessment-cancelled'/.test(cv), 'Comms Log records the cancellation');
+  ok(/method:'DELETE'/.test(cv) && /calendarView/.test(cv), 'his calendar event is deleted — stored id or found on the date');
+  ok(/Cancelled, but the email failed/.test(cv), 'an email failure never blocks the cancellation, and says so');
+}
+ok(/id="as-cancel-btn"/.test(html) && /cb0\.style\.display='inline-block'/.test(html), 'the Cancel button appears only when a booking exists');
 
 // ── source-level locks on the flow ──
 ok(/id="modal-asmt-sched"/.test(html) && /data-action="as-save"/.test(html) && /data-action="as-preview"/.test(html), 'logger modal with Save & Send + Preview');
