@@ -753,6 +753,46 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
   <div class="done-pop-inner" id="done-pop-inner"></div>
 </div>
 
+<!-- 📝 Lead editor — every core field, saved only when changed -->
+<div class="modal" id="modal-lead-edit">
+  <div class="mbox" style="max-width:640px">
+    <div class="mhead"><div class="mtitle" id="le-title">📝 Edit lead</div><button class="mclose" data-action="close-modal" data-mid="modal-lead-edit">✕</button></div>
+    <div class="mbody">
+      <div class="la-grid g2" style="margin-bottom:10px">
+        <div class="la-f"><label>Client name (patient) *</label><input type="text" id="le-nm"></div>
+        <div class="la-f"><label>Decision maker</label><input type="text" id="le-dm"></div>
+      </div>
+      <div class="la-grid g3" style="margin-bottom:10px">
+        <div class="la-f"><label>Phone</label><input type="tel" id="le-ph"></div>
+        <div class="la-f"><label>Email</label><input type="email" id="le-em"></div>
+        <div class="la-f"><label>Relationship</label><input type="text" id="le-rel" list="le-rel-list"><datalist id="le-rel-list"></datalist></div>
+      </div>
+      <div class="la-grid g3" style="margin-bottom:10px">
+        <div class="la-f"><label>Source</label><input type="text" id="le-so" list="le-so-list"><datalist id="le-so-list"></datalist></div>
+        <div class="la-f"><label>Area / ZIP</label><input type="text" id="le-ar"></div>
+        <div class="la-f"><label>Hrs / week</label><input type="text" id="le-hr"></div>
+      </div>
+      <div class="la-grid g3" style="margin-bottom:10px">
+        <div class="la-f"><label>Services</label><input type="text" id="le-sv"></div>
+        <div class="la-f"><label>Est. start</label><input type="text" id="le-es"></div>
+        <div class="la-f"><label>Pay type</label><input type="text" id="le-pt"></div>
+      </div>
+      <div class="la-grid g3" style="margin-bottom:10px">
+        <div class="la-f"><label>Status</label><input type="text" id="le-st" list="le-st-list"><datalist id="le-st-list"></datalist></div>
+        <div class="la-f"><label>Est. monthly value</label><input type="text" id="le-mv"></div>
+        <div class="la-f"><label>Safety concerns</label><input type="text" id="le-safety"></div>
+      </div>
+      <div class="la-f" style="margin-bottom:12px"><label>Notes (the full history — edit carefully)</label><textarea id="le-nt" rows="5" style="width:100%;font-size:12px;line-height:1.5"></textarea></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="le-out" style="flex:1;font-size:11.5px;white-space:pre-wrap"></span>
+        <button data-action="le-save" style="padding:9px 18px;background:linear-gradient(135deg,var(--gold),#D4920F);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">✓ Save changes</button>
+        <button data-action="close-modal" data-mid="modal-lead-edit" style="padding:9px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>
+      </div>
+      <div style="font-size:10.5px;color:var(--soft);margin-top:8px">Only the fields you actually change are written to the sheet. Changing the status here behaves like the Update dialog (a lost status asks for the loss reason).</div>
+    </div>
+  </div>
+</div>
+
 <!-- ✏ PDF fill-in marker — click the rendered page to place fields -->
 <div class="modal" id="modal-pdfmark">
   <div class="mbox" style="max-width:720px">
@@ -1751,7 +1791,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0928-100';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0928-101';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3304,6 +3344,58 @@ function openLossReason(ri){
     return '<button data-action="loss-pick" data-v="'+escapeHtml(v)+'" style="padding:10px 8px;border:1.5px solid var(--border);border-radius:9px;background:none;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">'+escapeHtml(v)+'</button>';
   }).join('');
   el('modal-loss').classList.add('open');
+}
+/* 📝 Lead editor runtime */
+var _leRi=-1;
+var LE_FIELDS=[['le-nm','NM'],['le-dm','DM'],['le-ph','PH'],['le-em','EM'],['le-rel','REL'],
+  ['le-so','SO'],['le-ar','AR'],['le-hr','HR'],['le-sv','SV'],['le-es','ES'],['le-pt','PT'],
+  ['le-st','ST'],['le-mv','MV'],['le-safety','SAFETY'],['le-nt','NT']];
+function openLeadEdit(ri){
+  _leRi=ri;
+  var r=rows[ri]||[];
+  el('le-title').textContent='📝 Edit lead — '+(String(r[C.NM]||r[C.DM]||'').trim()||'(unnamed)');
+  LE_FIELDS.forEach(function(p){
+    var inp=el(p[0]);
+    if(inp)inp.value=String(r[C[p[1]]]==null?'':r[C[p[1]]]);
+  });
+  var dl=function(id,vals){var d=el(id);if(d)d.innerHTML=vals.map(function(v){return '<option value="'+escapeHtml(v)+'">';}).join('');};
+  try{dl('le-rel-list',allRelationships());}catch(_){}
+  try{dl('le-so-list',allSources());}catch(_){}
+  try{dl('le-st-list',allStatuses());}catch(_){}
+  el('le-out').textContent='';
+  el('modal-lead-edit').classList.add('open');
+}
+async function leSave(){
+  var ri=_leRi;if(ri<0)return;
+  var r=rows[ri]||[];
+  var out=el('le-out');
+  var nm=String(el('le-nm').value||'').trim();
+  if(!nm){out.style.color='var(--red)';out.textContent='✗ The client name cannot be empty.';return;}
+  // Diff-only: touch exactly the fields that changed
+  var u={},changed=[];
+  var prevSt=String(r[C.ST]||'');
+  LE_FIELDS.forEach(function(p){
+    var inp=el(p[0]);if(!inp)return;
+    var nv=String(inp.value==null?'':inp.value);
+    if(p[1]!=='NT')nv=nv.trim();
+    var ov=String(r[C[p[1]]]==null?'':r[C[p[1]]]);
+    if(nv!==ov){u[C[p[1]]]=nv;changed.push(p[1]);}
+  });
+  if(!changed.length){el('modal-lead-edit').classList.remove('open');toast('No changes');return;}
+  out.style.color='var(--mid)';out.textContent='Saving '+changed.length+' field'+(changed.length!==1?'s':'')+'…';
+  try{
+    u[C.LC]=u[C.LC]||fd(localToday());
+    await writeRow(ri,u);
+    el('modal-lead-edit').classList.remove('open');
+    toast('📝 Lead updated — '+changed.length+' field'+(changed.length!==1?'s':'')+' changed');
+    // Status transitions behave like the Update dialog
+    if(u[C.ST]&&isExcluded(u[C.ST])&&!isExcluded(prevSt))openLossReason(ri);
+    if(u[C.ST]&&/responded/i.test(u[C.ST]))openConditionsPicker(ri,{fromResponded:true});
+    _leRi=-1;
+    try{await buildUI();}catch(_){}
+  }catch(e){
+    out.style.color='var(--red)';out.textContent='✗ Save failed: '+e.message;
+  }
 }
 /* 📅 Assessment-scheduled logger runtime */
 var _asRi=-1;
@@ -5571,7 +5663,8 @@ function openEp(ri,mode,opts){
   html+='<div class="la-foot">'
     +'<button class="save" data-action="save-ep" data-ri="'+ri+'" data-mode="'+mode+'">Save to Sheet</button>'
     +'<button class="cancel" data-action="close-ep" data-ri="'+ri+'">Cancel</button>'
-    +'<button type="button" class="cancel" style="margin-left:auto" data-action="open-asmt-sched" data-ri="'+ri+'" title="Log a scheduled in-home assessment and send the family a confirmation">\ud83d\udcc5 Assessment scheduled\u2026</button>'
+    +'<button type="button" class="cancel" style="margin-left:auto" data-action="open-lead-edit" data-ri="'+ri+'" title="Edit every core field of this lead">\ud83d\udcdd Edit lead\u2026</button>'
+    +'<button type="button" class="cancel" data-action="open-asmt-sched" data-ri="'+ri+'" title="Log a scheduled in-home assessment and send the family a confirmation">\ud83d\udcc5 Assessment scheduled\u2026</button>'
     +'<div class="saving" id="spin-'+ri+'"><div class="mspin"></div> Saving\u2026</div>'
     +'</div>';
   bodyEl.innerHTML=html;
@@ -14210,6 +14303,13 @@ function onClick(ev){
       break;
     case 'as-save':
       asSave();
+      break;
+    case 'open-lead-edit':
+      el('modal-log-action').classList.remove('open');
+      openLeadEdit(parseInt(t.dataset.ri,10));
+      break;
+    case 'le-save':
+      Promise.resolve(leSave()).catch(function(eL){showErr('Lead save failed: '+String(eL&&eL.message||eL));});
       break;
     case 'as-cancel':
       Promise.resolve(asCancel()).catch(function(eC){showErr('Cancel failed: '+String(eC&&eC.message||eC));});

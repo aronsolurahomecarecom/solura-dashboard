@@ -263,6 +263,19 @@ ok(/data-action="open-asmt-sched" data-ri="'\+ri\+'" title="Reschedule the asses
 }
 ok(/id="as-cancel-btn"/.test(html) && /cb0\.style\.display='inline-block'/.test(html), 'the Cancel button appears only when a booking exists');
 
+// ── 📝 lead editor (B-0928-101) ──
+{
+  ok(/id="modal-lead-edit"/.test(html) && /data-action="le-save"/.test(html), 'full lead editor modal with save');
+  ok(/data-action="open-lead-edit" data-ri="'\+ri\+'"/.test(html), '📝 Edit lead rides the Responded/Update dialog footer');
+  const lv = html.slice(html.indexOf('async function leSave'), html.indexOf('/* 📅 Assessment-scheduled logger runtime */'));
+  ok(/if\(nv!==ov\)\{u\[C\[p\[1\]\]\]=nv;changed\.push\(p\[1\]\);\}/.test(lv), 'DIFF-only: exactly the changed fields are written');
+  ok(/if\(!changed\.length\)\{el\('modal-lead-edit'\)\.classList\.remove\('open'\);toast\('No changes'\)/.test(lv), 'no changes = no write at all');
+  ok(/The client name cannot be empty/.test(lv), 'the patient name is protected from being blanked');
+  ok(/isExcluded\(u\[C\.ST\]\)&&!isExcluded\(prevSt\)\)openLossReason\(ri\)/.test(lv) && /openConditionsPicker\(ri,\{fromResponded:true\}\)/.test(lv), 'status changes trigger the same follow-ups as the Update dialog');
+  ok(/\['le-nm','NM'\]/.test(html) && /\['le-safety','SAFETY'\]/.test(html) && /\['le-nt','NT'\]/.test(html), 'all 15 core fields editable, notes included');
+  ok(/allRelationships\(\)/.test(html) && /le-so-list/.test(html) && /le-st-list/.test(html), 'relationship / source / status suggest from the central registries');
+}
+
 // ── source-level locks on the flow ──
 ok(/id="modal-asmt-sched"/.test(html) && /data-action="as-save"/.test(html) && /data-action="as-preview"/.test(html), 'logger modal with Save & Send + Preview');
 ok(/data-action="open-asmt-sched" data-ri/.test(html), '📅 launch button rides the Responded/Update dialog footer');
