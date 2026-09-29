@@ -11343,6 +11343,18 @@ function _toggleCallGroup(){
   if(typeof render==='function')render();
 }
 function toggleBucket(i){collapsed[i]=!collapsed[i];document.getElementById('sw-'+i).classList.toggle('collapsed',collapsed[i]);}
+/* Miles between a job-tracked candidate and their job's client, or null. Cheap (ZIP-centroid
+   lookup + haversine) and called per row per render. */
+function _candJobMiles(c){
+  try{
+    const jb=(typeof _jobFor==='function')?_jobFor(c):null;
+    if(!jb||!jb.zip)return null;
+    const cz=String((c.st&&c.st.zip)||(c.st&&c.st.facts&&c.st.facts.zip)||'');
+    if(!cz)return null;
+    const mi=_zipMiles(cz,jb.zip);
+    return (mi===undefined||mi===null)?null:{mi:Math.round(mi),job:jb.name||'the job',address:jb.address||''};
+  }catch(e){return null;}
+}
 function rowHtml(c){
   const a=action(c),sc=scoreRow(c),col=BANDCSS[sc.dec.cls];
   const bd='bd-'+(sc.dec.cls==='grey'?'soft':sc.dec.cls);
@@ -11363,7 +11375,12 @@ function rowHtml(c){
     if(totalRefs>0)giftPill+='<span class="giftpill caregiver" title="'+totalRefs+' caregiver referral'+(totalRefs===1?'':'s')+'">🎁 '+totalRefs+'</span>';
     if(custRefs>0)giftPill+='<span class="giftpill customer" title="'+custRefs+' customer referral'+(custRefs===1?'':'s')+'">💰 '+custRefs+'</span>';
   }
-  const idline='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">'+band+ftPill+certs+dl+pills+giftPill+'</div>';
+  /* Distance to their job's client, ON the card (Meir, 2026-09-29): green ≤10 mi, gold ≤25,
+     red beyond — visible without opening the candidate. Only for job-tracked candidates
+     with a computable ZIP pair. */
+  const _jm=_candJobMiles(c);
+  const distPill=_jm==null?'':'<span class="cbadge" style="background:'+(_jm.mi<=10?'#EBF5EA;color:#3D7A34':_jm.mi<=25?'#FEF7E8;color:#8B6500':'#FDECEA;color:#B03025')+'" title="'+esc(_jm.mi+' miles from '+_jm.job+(_jm.address?' ('+_jm.address+')':''))+'">📍 '+_jm.mi+' mi</span>';
+  const idline='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">'+band+ftPill+distPill+certs+dl+pills+giftPill+'</div>';
   const _srcTag=candidateSourceLabel(c);
   const sub='<div class="dm-tag" style="margin-top:5px">'+(_srcTag&&_srcTag!=='—'?esc(_srcTag)+' · ':'')+'Q <span>'+(sc.Q==null?'—':sc.Q)+'</span> · R <span>'+(sc.R==null?'—':sc.R)+'</span></div>';
   const sci=a.info.color;
@@ -13505,8 +13522,12 @@ function renderWorkspace(){_memGen++;
   const _stMeter=(_stPct!=null&&_stPct>=60)
     ?'<span class="sbadge" style="background:'+(_stPct>=85?'#FDECEA':'#FEF7E8')+';color:'+(_stPct>=85?'#8B1A1A':'#8B6500')+';margin-right:8px" title="Stored state uses '+_stPct+'% of the 32,767-character spreadsheet cell. Old log/history entries trim automatically as it fills.">🗜 state '+_stPct+'%</span>'
     :'';
+  /* Distance to their job's client, in the header (Meir: visible inside AND outside). */
+  const _wsJm=c?_candJobMiles(c):null;
+  const _wsDist=_wsJm?'<span class="sbadge" style="background:'+(_wsJm.mi<=10?'#EBF5EA;color:#3D7A34':_wsJm.mi<=25?'#FEF7E8;color:#8B6500':'#FDECEA;color:#B03025')+';margin-right:8px" title="'+esc(_wsJm.mi+' miles from '+_wsJm.job+(_wsJm.address?' ('+_wsJm.address+')':''))+'">📍 '+_wsJm.mi+' mi</span>':'';
   document.getElementById('ws-sub').innerHTML=
     '<span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-right:8px">'+esc(stageLabel(W.stage))+'</span>'
+    +_wsDist
     +(W.st.manualAwaiting?'<span class="sbadge" style="background:#FAF6EE;color:#8B6500;border:1px solid var(--gold);margin-right:8px" title="'+esc(W.st.awaitingReason||'Manually parked')+'">⏸ AWAITING</span>':'')
     +_stMeter
     +'<span class="bandpill" style="background:'+col[0]+';color:'+col[1]+';margin-right:10px">'+sc.dec.band+'</span>'
@@ -18543,10 +18564,13 @@ async function backgroundRefresh(){
 async function manualBookingsSync(){return manualRefresh();} /* legacy name */
 function openAddFromBooking(name,email,startISO){
   openAdd();
-  /* prefill */
+  /* prefill — the drawer is the application form now, so target its question ids */
   setTimeout(()=>{
     if(!AD)return;
-    AD.name=name||'';AD.email=email||'';
+    const parts=String(name||'').trim().split(/\s+/);
+    if(parts[0])AD.answers.firstName=parts[0];
+    if(parts.length>1)AD.answers.lastName=parts.slice(1).join(' ');
+    if(email)AD.answers.email=email;
     renderAdd();
   },100);
 }
@@ -21258,7 +21282,8 @@ function _jobOpenModal(id){
       <label style="font-size:12px;color:var(--mid)">Client<input id="job-client" type="text" value="${esc(j.client||'')}" placeholder="client / family name" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Sequence<select id="job-seq" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px;background:#fff"><option value="">— portal default —</option>${seqOpts}<option value="__NEW__">＋ Create a new sequence for this job…</option></select>${j.sequenceId?`<button class="btn-sm bg-cream" style="cursor:pointer;margin-top:5px" onclick="_jobEditSeq('${esc(j.id)}')">⚙ Open this job's sequence in the editor</button>`:''}</label>
       <label style="font-size:12px;color:var(--mid)">Pay (fills {pay}/{wage} in emails)<input id="job-wage" type="text" value="${esc(j.wage||'')}" placeholder="e.g. $16–$18/hr" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
-      <label style="font-size:12px;color:var(--mid)">Client ZIP (proximity rating factor)<input id="job-zip" type="text" value="${esc(j.zip||'')}" placeholder="e.g. 44122" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Client address (Claude weighs it; ZIP auto-fills from it)<input id="job-address" type="text" value="${esc(j.address||'')}" placeholder="e.g. 3690 Orange Pl, Beachwood, OH 44122" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Client ZIP (drives the distance math)<input id="job-zip" type="text" value="${esc(j.zip||'')}" placeholder="e.g. 44122" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Notes<input id="job-notes" type="text" value="${esc(j.notes||'')}" placeholder="anything about this posting" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Application form<select id="job-form" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px;background:#fff">
         <option value="__GLOBAL__">— the global form —</option>
@@ -21365,7 +21390,10 @@ function _jobSave(){
     SETTINGS.jobs.push(j);
   }
   _jobLinks(j);
-  j.name=name;j.client=g('job-client');j.wage=g('job-wage');j.zip=g('job-zip');j.notes=g('job-notes');
+  j.name=name;j.client=g('job-client');j.wage=g('job-wage');j.address=g('job-address');j.zip=g('job-zip');j.notes=g('job-notes');
+  /* The address is the human truth; the ZIP drives the distance math. A pasted address
+     containing a ZIP fills an empty ZIP field automatically so distance just works. */
+  if(!j.zip&&j.address){const zm=/\b(\d{5})\b/.exec(j.address);if(zm)j.zip=zm[1];}
   const seqPick=g('job-seq');
   if(seqPick==='__NEW__'){
     /* A sequence OF THIS JOB: cloned from the ★default as the starting shape, fully
@@ -22987,7 +23015,7 @@ async function _claudeResumeScreen(row){
       const missing=(jb.req&&typeof _jobMissingReqs==='function')?_jobMissingReqs(cand,jb):[];
       const cz=String((cand.st&&cand.st.zip)||(cand.st&&cand.st.facts&&cand.st.facts.zip)||'');
       const mi=(typeof _zipMiles==='function'&&jb.zip)?_zipMiles(cz,jb.zip):undefined;
-      return{jobName:jb.name,client:jb.client||'',wage:jb.wage||'',requirementsMissing:missing,distanceMiles:(mi===undefined||mi===null)?null:Math.round(mi)};
+      return{jobName:jb.name,client:jb.client||'',address:jb.address||'',wage:jb.wage||'',requirementsMissing:missing,distanceMiles:(mi===undefined||mi===null)?null:Math.round(mi)};
     }catch(e){return null;}})()
   };
   try{
@@ -23047,7 +23075,7 @@ function _claudeJobFitHtml(cand){
       :(jb.req?'<span style="background:#EBF5EA;color:#3D7A34;border-radius:999px;padding:2px 9px;font-size:11px">✓ all listed requirements met</span>':'');
     if(!missHtml&&!band&&!jb.wage)return '';
     return `<div style="border-top:1px dashed var(--border);margin-top:8px;padding-top:8px">
-      <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--soft);margin-bottom:4px">Fit for ${esc(jb.name)}${jb.client?' · '+esc(jb.client):''}</div>
+      <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--soft);margin-bottom:4px">Fit for ${esc(jb.name)}${jb.client?' · '+esc(jb.client):''}${jb.address?' <span style="font-weight:400;text-transform:none;letter-spacing:0">· '+esc(jb.address)+'</span>':''}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${missHtml}
         ${band?'<span style="background:#EDF3FA;color:#1E4E8C;border-radius:999px;padding:2px 9px;font-size:11px">📍 '+esc(band)+'</span>':''}
         ${jb.wage?'<span style="background:#FBF1DC;color:#8A6A1F;border-radius:999px;padding:2px 9px;font-size:11px">💵 '+esc(String(jb.wage))+'</span>':''}
@@ -24954,11 +24982,80 @@ async function closeSlotAt(iso,startTime){
 
 /* ===================== add candidate ===================== */
 let AD=null;
-function openAdd(){AD={name:'',phone:'',email:'',address:'',city:'',state:'OH',zip:'',source:'',otherSource:'',pills:[],certs:[],licenseState:'OH',licenseNum:'',hasLicense:false,years:'',settings:[],longest:'',shorts:0,gates:{},showMoreExp:false,showMoreCert:false,dayShifts:{}};
+/* ── ADD CANDIDATE = THE APPLICATION FORM (Meir, 2026-09-29) ─────────────────────────────
+   The drawer renders the SAME question set an online applicant gets — driven by the form
+   config, not a hardcoded subset — with a job picker on top: pick a job and the drawer
+   serves THAT job's custom form (read-only resolution; adding a candidate never creates a
+   job form config) and stamps the candidate with the job's link code so sequence binding,
+   pay, requirements, and the job-fit rating all engage exactly as if they'd applied online. */
+function openAdd(){AD={jobId:'',source:'',otherSource:'',answers:{state:'OH'},employers:[],dayShifts:{},licenseState:'OH',licenseNum:'',hasLicense:false};
   renderAdd();document.getElementById('aoverlay').classList.add('open');document.getElementById('adrawer').classList.add('open');}
 function closeAdd(){document.getElementById('aoverlay').classList.remove('open');document.getElementById('adrawer').classList.remove('open');AD=null;}
+/* Form config for the drawer — the selected job's custom form when one exists, else the
+   global form. READ-ONLY: unlike _fc(), never seeds SETTINGS.jobFormConfigs. */
+function _adCfg(){
+  const jid=AD&&AD.jobId;
+  if(jid){const jc=SETTINGS.jobFormConfigs&&SETTINGS.jobFormConfigs[jid];
+    if(jc&&Array.isArray(jc.questions)&&jc.questions.length)return jc;}
+  return (SETTINGS.formConfig&&Array.isArray(SETTINGS.formConfig.questions)&&SETTINGS.formConfig.questions.length)?SETTINGS.formConfig:_fcDefaultConfig();
+}
+function adAns(id,v){AD.answers[id]=v;renderAdd();}
+function adAnsText(id,v){AD.answers[id]=v;} /* oninput — no re-render, keeps focus */
+function adTogAns(id,v){const a=AD.answers[id]=Array.isArray(AD.answers[id])?AD.answers[id]:[];const i=a.indexOf(v);if(i<0)a.push(v);else a.splice(i,1);renderAdd();}
+function adEmpAdd(){AD.employers.push({name:'',role:'',from:'',to:''});renderAdd();}
+function adEmpDel(i){AD.employers.splice(i,1);renderAdd();}
+function adEmpSet(i,k,v){if(AD.employers[i])AD.employers[i][k]=v;}
+/* One question → HTML, faithful to the public form's types. */
+function _adQHtml(q){
+  const id=esc(String(q.id));
+  const val=AD.answers[q.id];
+  const req=q.required?' *':'';
+  const hint=q.hint?`<div style="font-size:10.5px;color:var(--soft);margin-top:2px">${esc(q.hint)}</div>`:'';
+  if(q.type==='text')
+    return `<div style="margin-top:10px"><label>${esc(q.label)}${req}</label><input value="${esc(val==null?'':val)}" oninput="adAnsText('${id}',this.value)">${hint}</div>`;
+  if(q.type==='yesno'||q.type==='select'){
+    const opts=(q.options||[]).map(o=>`<button class="${String(val)===String(o.value)?'on':''}" onclick="adAns('${id}',${JSON.stringify(String(o.value)).replace(/"/g,'&quot;')})">${esc(o.label)}</button>`).join('');
+    return `<div style="margin-top:10px"><label>${esc(q.label)}${req}</label><div class="pillselect">${opts}</div>${hint}</div>`;
+  }
+  if(q.type==='multiselect'){
+    const arr=Array.isArray(val)?val:[];
+    const opts=(q.options||[]).map(o=>`<button class="${arr.includes(o.value)?'on':''}" onclick="adTogAns('${id}',${JSON.stringify(String(o.value)).replace(/"/g,'&quot;')})">${esc(o.label)}</button>`).join('');
+    const extra=arr.filter(v2=>!(q.options||[]).some(o=>o.value===v2)).map(v2=>`<span class="added-chip">${esc(v2)}<button onclick="adTogAns('${id}',${JSON.stringify(String(v2)).replace(/"/g,'&quot;')})">✕</button></span>`).join('');
+    return `<div style="margin-top:10px"><label>${esc(q.label)}${req}</label>${extra?`<div style="margin-bottom:6px">${extra}</div>`:''}<div class="pillselect">${opts}</div>${hint}</div>`;
+  }
+  if(q.type==='schedule'){
+    const dayRows=DAYS.map(d=>{const shifts=AD.dayShifts[d]||[];const on=shifts.length>0;
+      return `<div class="day-row ${on?'':'off'}"><div class="day-lbl">${d}</div><div class="shifts">${SHIFTS.map(sh=>`<button class="${shifts.includes(sh)?'on':''}" onclick="adDayShift('${d}','${sh}')">${sh}</button>`).join('')}</div></div>`;}).join('');
+    return `<div style="margin-top:10px"><label>${esc(q.label)}${req}</label><div style="font-size:11.5px;color:var(--soft);margin-bottom:6px">Tap shifts they can cover.</div>${dayRows}</div>`;
+  }
+  if(q.type==='employers'){
+    const rows=AD.employers.map((e2,i)=>`<div style="display:flex;gap:5px;margin-bottom:5px;align-items:center">
+      <input placeholder="Employer" value="${esc(e2.name||'')}" oninput="adEmpSet(${i},'name',this.value)" style="flex:2">
+      <input placeholder="Role" value="${esc(e2.role||'')}" oninput="adEmpSet(${i},'role',this.value)" style="flex:1">
+      <input placeholder="From" value="${esc(e2.from||'')}" oninput="adEmpSet(${i},'from',this.value)" style="flex:0 0 62px">
+      <input placeholder="To" value="${esc(e2.to||'')}" oninput="adEmpSet(${i},'to',this.value)" style="flex:0 0 62px">
+      <button class="btn-sm bg-cream" style="cursor:pointer" onclick="adEmpDel(${i})">✕</button></div>`).join('');
+    return `<div style="margin-top:10px"><label>${esc(q.label)}</label>${rows}<button class="btn-sec bg-cream" style="padding:6px 12px;cursor:pointer" onclick="adEmpAdd()">+ Add employer</button>${hint}</div>`;
+  }
+  return ''; /* resume handled by the top card; unknown types render nothing rather than lie */
+}
 function renderAdd(){
   const _rz=window._adResumeFile;
+  const jobs=(SETTINGS.jobs||[]).filter(j=>j&&j.active!==false);
+  const jb=AD.jobId?jobs.find(j=>j.id===AD.jobId):null;
+  const hasCustomForm=!!(jb&&SETTINGS.jobFormConfigs&&SETTINGS.jobFormConfigs[jb.id]&&Array.isArray(SETTINGS.jobFormConfigs[jb.id].questions)&&SETTINGS.jobFormConfigs[jb.id].questions.length);
+  const jobCard=`<div style="background:#F4F8F3;border:1.5px solid var(--grn);border-radius:10px;padding:12px 14px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <b style="font-size:12.5px">🧳 Applying for</b>
+      <select onchange="AD.jobId=this.value;renderAdd()" style="flex:1;min-width:180px;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;outline:none">
+        <option value="">— general application —</option>
+        ${jobs.map(j=>`<option value="${esc(j.id)}" ${AD.jobId===j.id?'selected':''}>${esc(j.name)}${j.client?' · '+esc(j.client):''}</option>`).join('')}
+      </select>
+    </div>
+    <div style="font-size:10.5px;color:var(--soft);margin-top:5px">${jb
+      ?(hasCustomForm?'Serving this job’s custom application form.':'This job uses the standard form.')+' They’ll be tracked under this job — its sequence, pay, requirements and distance all apply.'
+      :'Pick a job to serve its application form and track them under it.'}</div>
+  </div>`;
   const resumeCard=`<div style="background:#FDF9F0;border:1.5px dashed var(--gold-mid);border-radius:10px;padding:12px 14px;margin-bottom:14px">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <b style="font-size:12.5px">📄 Résumé</b>
@@ -24967,97 +25064,34 @@ function renderAdd(){
     </div>
     <div style="font-size:10.5px;color:var(--soft);margin-top:5px">Uploads to their folder on save${_rz?' · '+esc(_rz.name):''}. Autofill reads the PDF with Claude and fills the form — review every field before saving.</div>
   </div>`;
+  /* The application itself — the config's questions, in its sections and order. */
+  const cfg=_adCfg();
+  const qs=(cfg.questions||[]).filter(q=>q&&q.active!==false&&q.type!=='resume').sort((a,b)=>(a.order||0)-(b.order||0));
+  let curSection=null,formHtml='';
+  for(const q of qs){
+    const sec=q.section||'More';
+    if(sec!==curSection){curSection=sec;formHtml+=`<div class="acsection">${esc(sec)}</div>`;}
+    formHtml+=_adQHtml(q);
+  }
   const sourceOpts=SOURCES.map(s=>`<option ${AD.source===s?'selected':''}>${s}</option>`).join('');
-  const stateOpts=US_STATES.map(s=>`<option ${AD.state===s?'selected':''}>${s}</option>`).join('');
   const lsOpts=US_STATES.map(s=>`<option ${AD.licenseState===s?'selected':''}>${s}</option>`).join('');
-  const expCommon=EXPERTISE_COMMON.map(e=>`<button class="${AD.pills.includes(e)?'on':''}" onclick="adTogglePill(${JSON.stringify(e).replace(/"/g,'&quot;')})">${esc(e)}</button>`).join('');
-  const expMore=AD.showMoreExp?EXPERTISE_MORE.map(e=>`<button class="${AD.pills.includes(e)?'on':''}" onclick="adTogglePill(${JSON.stringify(e).replace(/"/g,'&quot;')})">${esc(e)}</button>`).join(''):'';
-  const customExp=AD.pills.filter(p=>!EXPERTISE_COMMON.includes(p)&&!EXPERTISE_MORE.includes(p)).map(p=>`<span class="added-chip">${esc(p)}<button onclick="adTogglePill(${JSON.stringify(p).replace(/"/g,'&quot;')})">✕</button></span>`).join('');
-  const certCommon=CERT_COMMON.map(c=>`<button class="${AD.certs.includes(c)?'on':''}" onclick="adToggleCert(${JSON.stringify(c).replace(/"/g,'&quot;')})">${esc(c)}</button>`).join('');
-  const certMore=AD.showMoreCert?CERT_MORE.map(c=>`<button class="${AD.certs.includes(c)?'on':''}" onclick="adToggleCert(${JSON.stringify(c).replace(/"/g,'&quot;')})">${esc(c)}</button>`).join(''):'';
-  const customCerts=AD.certs.filter(c=>!CERT_COMMON.includes(c)&&!CERT_MORE.includes(c)).map(c=>`<span class="added-chip gold">${esc(c)}<button onclick="adToggleCert(${JSON.stringify(c).replace(/"/g,'&quot;')})">✕</button></span>`).join('');
-  const dayRows=DAYS.map(d=>{const shifts=AD.dayShifts[d]||[];const on=shifts.length>0;
-    return `<div class="day-row ${on?'':'off'}"><div class="day-lbl">${d}</div><div class="shifts">${SHIFTS.map(sh=>`<button class="${shifts.includes(sh)?'on':''}" onclick="adDayShift('${d}','${sh}')">${sh}</button>`).join('')}</div></div>`;}).join('');
-  document.getElementById('a-body').innerHTML=resumeCard+`
+  document.getElementById('a-body').innerHTML=jobCard+resumeCard+`
     <div class="ef">
-    <div class="acsection">Contact</div>
-    <div class="ac-row-2">
-      <div><label>Name *</label><input id="ad_name" value="${esc(AD.name)}" oninput="AD.name=this.value"></div>
-      <div><label>Phone</label><input id="ad_phone" value="${esc(AD.phone)}" oninput="AD.phone=this.value"></div>
-    </div>
-    <div style="margin-top:10px"><label>Email</label><input id="ad_email" value="${esc(AD.email)}" oninput="AD.email=this.value"></div>
-    <div style="margin-top:10px"><label>Source</label>
+    ${formHtml}
+    <div class="acsection">Portal extras</div>
+    ${jb?'':`<div style="margin-top:4px"><label>Source</label>
       <select onchange="AD.source=this.value;renderAdd()" style="width:100%;padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;outline:none">
         <option value="">— select —</option>${sourceOpts}
       </select>
       ${AD.source==='Other'?`<input placeholder="Specify source" value="${esc(AD.otherSource)}" oninput="AD.otherSource=this.value" style="margin-top:6px">`:''}
+    </div>`}
+    <div style="display:flex;gap:6px;align-items:center;margin-top:10px">
+      <button class="btn-sec ${AD.hasLicense?'bg-grn':'bg-cream'}" onclick="AD.hasLicense=!AD.hasLicense;renderAdd()" style="flex:0 0 auto;padding:7px 14px;color:${AD.hasLicense?'#fff':'var(--mid)'}">${AD.hasLicense?'✓ License on file':'No license recorded'}</button>
+      ${AD.hasLicense?`<select onchange="AD.licenseState=this.value" style="flex:0 0 90px;padding:7px 9px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none">${lsOpts}</select>
+      <input value="${esc(AD.licenseNum)}" oninput="AD.licenseNum=this.value" placeholder="License # (optional)" style="flex:1">`:''}
     </div>
-
-    <div class="acsection">Address</div>
-    <div><label>Street address</label><input value="${esc(AD.address)}" oninput="AD.address=this.value" placeholder="2200 Coventry Rd, Apt 2"></div>
-    <div class="ac-row-2" style="margin-top:10px">
-      <div><label>City</label><input value="${esc(AD.city)}" oninput="AD.city=this.value" placeholder="Cleveland Heights"></div>
-      <div><label>State</label><select onchange="AD.state=this.value" style="width:100%;padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;outline:none">${stateOpts}</select></div>
-    </div>
-    <div style="margin-top:10px"><label>ZIP</label><input value="${esc(AD.zip)}" oninput="AD.zip=this.value" placeholder="44118" style="max-width:140px"></div>
-
-    <div class="acsection">Certificates</div>
-    ${customCerts?`<div style="margin-bottom:6px">${customCerts}</div>`:''}
-    <div class="pillselect">${certCommon}<button class="more-trigger" onclick="AD.showMoreCert=!AD.showMoreCert;renderAdd()">${AD.showMoreCert?'– less':'+ more'}</button></div>
-    ${certMore?`<div class="pillselect" style="margin-top:6px">${certMore}</div>`:''}
-    <div style="display:flex;gap:6px;margin-top:8px;align-items:center"><input id="ad_certfree" placeholder="Add another cert…" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none"><button class="btn-sec bg-cream" onclick="adAddCustom('cert')" style="flex:0 0 auto;padding:7px 13px">Add</button></div>
-
-    <div class="acsection">Driver's license</div>
-    <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
-      <button class="btn-sec ${AD.hasLicense?'bg-grn':'bg-cream'}" onclick="AD.hasLicense=!AD.hasLicense;renderAdd()" style="flex:0 0 auto;padding:7px 14px;color:${AD.hasLicense?'#fff':'var(--mid)'}">${AD.hasLicense?'✓ Has license':'No license'}</button>
-    </div>
-    ${AD.hasLicense?`<div class="ac-row-2">
-      <div><label>State</label><select onchange="AD.licenseState=this.value" style="width:100%;padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;outline:none">${lsOpts}</select></div>
-      <div><label>Number</label><input value="${esc(AD.licenseNum)}" oninput="AD.licenseNum=this.value" placeholder="(optional)"></div>
-    </div>`:''}
-
-    <div class="acsection">Expertise</div>
-    ${customExp?`<div style="margin-bottom:6px">${customExp}</div>`:''}
-    <div class="pillselect">${expCommon}<button class="more-trigger" onclick="AD.showMoreExp=!AD.showMoreExp;renderAdd()">${AD.showMoreExp?'– less':'+ more'}</button></div>
-    ${expMore?`<div class="pillselect" style="margin-top:6px">${expMore}</div>`:''}
-    <div style="display:flex;gap:6px;margin-top:8px;align-items:center"><input id="ad_expfree" placeholder="Add another expertise…" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;outline:none"><button class="btn-sec bg-cream" onclick="adAddCustom('exp')" style="flex:0 0 auto;padding:7px 13px">Add</button></div>
-
-    <div class="acsection">Experience</div>
-    <div class="ac-row-2">
-      <div><label>Years</label><select onchange="AD.years=this.value" style="width:100%;padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;outline:none">
-        <option value="">—</option><option value="0" ${AD.years==='0'?'selected':''}>none</option><option value="u1" ${AD.years==='u1'?'selected':''}>under 1</option><option value="12" ${AD.years==='12'?'selected':''}>1–2</option><option value="35" ${AD.years==='35'?'selected':''}>3–5</option><option value="5p" ${AD.years==='5p'?'selected':''}>5+</option>
-      </select></div>
-      <div><label>Longest job</label><select onchange="AD.longest=this.value" style="width:100%;padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12.5px;outline:none">
-        <option value="">—</option><option value="u6" ${AD.longest==='u6'?'selected':''}>under 6mo</option><option value="u12" ${AD.longest==='u12'?'selected':''}>6–12mo</option><option value="y12" ${AD.longest==='y12'?'selected':''}>1–2yr</option><option value="y23" ${AD.longest==='y23'?'selected':''}>2–3yr</option><option value="y3p" ${AD.longest==='y3p'?'selected':''}>3yr+</option>
-      </select></div>
-    </div>
-    <div style="margin-top:10px"><label>Short stints (&lt;6mo) last 3 yr</label><input type="number" value="${AD.shorts}" oninput="AD.shorts=this.value" style="max-width:100px"></div>
-    <div style="margin-top:10px"><label>Settings worked</label>
-      <div class="pillselect">${[['home','Home care'],['memory','Memory care'],['hospice','Hospice'],['facility','Facility'],['hospital','Hospital']].map(([k,l])=>`<button class="${AD.settings.includes(k)?'on':''}" onclick="adTogSet('${k}')">${l}</button>`).join('')}</div>
-    </div>
-
-    <div class="acsection">Availability — per day</div>
-    <div style="font-size:11.5px;color:var(--soft);margin-bottom:8px">Tap shifts they can cover on each day.</div>
-    ${dayRows}
-
-    <div class="acsection">Gates</div>
-    <div class="gatesrow">${GATES.map(([k,l])=>`<div class="gateitem">${l}<span class="yn"><button class="y ${AD.gates[k]==='Y'?'on':''}" onclick="adGate('${k}','Y')">Y</button><button class="n ${AD.gates[k]==='N'?'on':''}" onclick="adGate('${k}','N')">N</button></span></div>`).join('')}</div>
-
     <button class="esave" style="width:100%;margin-top:20px" onclick="saveAdd()">Add to pipeline</button></div>`;
 }
-function adTogglePill(v){const i=AD.pills.indexOf(v);if(i<0)AD.pills.push(v);else AD.pills.splice(i,1);renderAdd();}
-function adToggleCert(v){const i=AD.certs.indexOf(v);if(i<0)AD.certs.push(v);else AD.certs.splice(i,1);renderAdd();}
-function adAddCustom(kind){const fld=document.getElementById(kind==='cert'?'ad_certfree':'ad_expfree');const v=fld.value.trim();if(!v)return;
-  if(kind==='cert'){if(!AD.certs.includes(v))AD.certs.push(v);
-    /* persist to permanent list */
-    if(!CERT_COMMON.includes(v)&&!CERT_MORE.includes(v)&&!(SETTINGS.customCerts||[]).includes(v)){
-      SETTINGS.customCerts=SETTINGS.customCerts||[];SETTINGS.customCerts.push(v);saveSettings();}}
-  else{if(!AD.pills.includes(v))AD.pills.push(v);
-    if(!EXPERTISE_COMMON.includes(v)&&!EXPERTISE_MORE.includes(v)&&!(SETTINGS.customExpertise||[]).includes(v)){
-      SETTINGS.customExpertise=SETTINGS.customExpertise||[];SETTINGS.customExpertise.push(v);saveSettings();}}
-  fld.value='';renderAdd();}
-function adGate(k,v){AD.gates[k]=AD.gates[k]===v?'':v;renderAdd();}
-function adTogSet(k){const i=AD.settings.indexOf(k);if(i<0)AD.settings.push(k);else AD.settings.splice(i,1);renderAdd();}
 function adDayShift(d,sh){AD.dayShifts[d]=AD.dayShifts[d]||[];const i=AD.dayShifts[d].indexOf(sh);if(i<0)AD.dayShifts[d].push(sh);else AD.dayShifts[d].splice(i,1);
   if(!AD.dayShifts[d].length)delete AD.dayShifts[d];renderAdd();}
 const SERVICE_ZIPS={'44118':5,'44106':5,'44112':5,'44121':5,'44120':4,'44122':4,'44124':4,'44104':4,'44103':4,'44108':4,'44110':4,'44117':4,'44119':3,'44123':3,'44132':3,'44143':3,'44105':3,'44109':3,'44128':3,'44137':3,'44125':3,'44131':2,'44141':2,'44146':2,'44139':2,'44092':2,'44060':1,'44094':1,'44095':1};
@@ -25081,38 +25115,87 @@ async function adAutofill(){
     const j=await r.json();
     if(!j.ok){toast('⚠ '+(j.error||'extract failed'));if(st)st.textContent='';return;}
     const e=j.extract||{};
-    /* Fill only what's empty — never clobber operator-typed values. */
-    ['name','phone','email','address','city','zip'].forEach(k=>{if(e[k]&&!AD[k])AD[k]=String(e[k]);});
-    if(e.state&&/^[A-Z]{2}$/i.test(e.state))AD.state=e.state.toUpperCase();
-    if(e.yearsExperience&&!AD.years)AD.years=String(e.yearsExperience);
-    if(e.longestTenureYears&&!AD.longest)AD.longest=String(e.longestTenureYears);
-    (Array.isArray(e.certs)?e.certs:[]).forEach(c=>{const n=String(c).trim();if(n&&!AD.certs.some(x=>x.toLowerCase()===n.toLowerCase()))AD.certs.push(n);});
-    (Array.isArray(e.skills)?e.skills:[]).forEach(p=>{const n=String(p).trim();if(n&&!AD.pills.some(x=>x.toLowerCase()===n.toLowerCase()))AD.pills.push(n);});
-    window._adExtractEmployers=Array.isArray(e.employers)?e.employers.slice(0,8):[];
+    const A=AD.answers;
+    /* Fill only what's empty — never clobber operator-typed values. Targets the FORM's own
+       question ids, so the filled fields are exactly what the application form would hold. */
+    const nm=String(e.name||'').trim();
+    if(nm){const parts=nm.split(/\s+/);if(!A.firstName)A.firstName=parts[0];if(!A.lastName&&parts.length>1)A.lastName=parts.slice(1).join(' ');}
+    ['phone','email','address','city','zip'].forEach(k=>{if(e[k]&&!A[k])A[k]=String(e[k]);});
+    if(e.state&&/^[A-Z]{2}$/i.test(e.state)&&!A.state)A.state=e.state.toUpperCase();
+    if(e.yearsExperience!=null&&!A.years){const y=Number(e.yearsExperience);A.years=!isFinite(y)?'':y<=0?'0':y<1?'u1':y<=2?'12':y<=5?'35':'5p';}
+    if(e.longestTenureYears!=null&&!A.longest){const t=Number(e.longestTenureYears);A.longest=!isFinite(t)?'':t<0.5?'u6':t<1?'u12':t<2?'y12':t<3?'y23':'y3p';}
+    A.cred=Array.isArray(A.cred)?A.cred:[];
+    (Array.isArray(e.certs)?e.certs:[]).forEach(c=>{const n=String(c).trim();if(n&&!A.cred.some(x=>String(x).toLowerCase()===n.toLowerCase()))A.cred.push(n);});
+    A.expertise=Array.isArray(A.expertise)?A.expertise:[];
+    (Array.isArray(e.skills)?e.skills:[]).forEach(p=>{const n=String(p).trim();if(n&&!A.expertise.some(x=>String(x).toLowerCase()===n.toLowerCase()))A.expertise.push(n);});
+    (Array.isArray(e.employers)?e.employers.slice(0,8):[]).forEach(x=>{
+      const n2=String(x.name||'').trim();
+      if(n2&&!AD.employers.some(r=>String(r.name).toLowerCase()===n2.toLowerCase()))AD.employers.push({name:n2,role:String(x.role||''),from:String(x.from||''),to:String(x.to||'')});
+    });
     renderAdd();
     toast('⚡ Filled from résumé — review before saving');
   }catch(err){toast('⚠ '+err.message);if(st)st.textContent='';}
 }
-async function saveAdd(){if(!AD.name){toast('Name required');return;}
-  const gv=k=>AD.gates[k]||'',zip=AD.zip;
-  const prx=rProx(zip),ten=rTen(AD.longest,AD.shorts),cmp=rComp(AD.years,AD.settings,AD.certs),ava=rAva(AD.dayShifts);
-  const source=AD.source==='Other'?AD.otherSource:AD.source;
-  /* persist "Other" sources as permanent */
-  if(AD.source==='Other'&&AD.otherSource&&!SOURCES.includes(AD.otherSource)&&!(SETTINGS.customSources||[]).includes(AD.otherSource)){
+async function saveAdd(){
+  const A=AD.answers||{};
+  const name=[A.firstName,A.lastName].filter(Boolean).join(' ').trim();
+  if(!name){toast('First name required');return;}
+  const cfg=_adCfg();
+  const jb=AD.jobId?(SETTINGS.jobs||[]).find(j=>j.id===AD.jobId):null;
+  /* Screening/facts split — the exact shapes the worker writes for online applications, so
+     every downstream reader (filters, snapshot, PDFs, job requirements, Claude) sees a
+     manually-added candidate identically. */
+  const SCREEN_KEYS=['age18','dl','revoked','abuseFinding','personalCare','lifting','smoker','languages'];
+  const screening={};SCREEN_KEYS.forEach(k=>{const v=A[k];if(v!==undefined&&v!==''&&!(Array.isArray(v)&&!v.length))screening[k]=v;});
+  const facts={zip:A.zip||'',years:A.years||'',settings:Array.isArray(A.settings)?A.settings:[],longest:A.longest||''};
+  /* Gates derived from the config's own gate rules (same judgment as the worker): answer
+     equals the fail value → N; answered otherwise → Y; unanswered → blank (unknown). */
+  const gates={wa:'',cr:'',bg:'',tr:'',av:''};
+  const COLMAP={H:'wa',I:'cr',J:'bg',K:'tr',L:'av'};
+  (cfg.questions||[]).forEach(q=>{
+    if(!q||q.active===false||!q.gate||!q.gate.column)return;
+    const gk=COLMAP[String(q.gate.column).toUpperCase()];if(!gk)return;
+    const ans=A[q.id];
+    if(ans===undefined||ans===null||ans==='')return;
+    if(Array.isArray(ans))gates[gk]=(q.gate.failValue==='__none__'&&!ans.length)?'N':'Y';
+    else gates[gk]=(String(ans)===String(q.gate.failValue))?'N':'Y';
+  });
+  if(!gates.av)gates.av=Object.keys(AD.dayShifts||{}).length?'Y':'';
+  const certs=Array.isArray(A.cred)?A.cred.slice():[];
+  const pills=Array.isArray(A.expertise)?A.expertise.slice():[];
+  /* Custom questions (fq-…) live in column AI, built-ins in st.formAnswers — worker parity. */
+  const custom={};const formAnswers={};
+  Object.keys(A).forEach(k=>{const v=A[k];if(v===undefined||v===''||(Array.isArray(v)&&!v.length))return;if(/^fq-/.test(k))custom[k]=v;else formAnswers[k]=v;});
+  const prx=rProx(facts.zip),ten=rTen(A.longest,0),cmp=rComp(A.years,facts.settings,certs),ava=rAva(AD.dayShifts);
+  const jbLinks=jb?((typeof _jobLinks==='function'?_jobLinks(jb):jb.links)||[]):[];
+  const srcCode=jb?String((jbLinks[0]&&jbLinks[0].code)||jb.code||'').toUpperCase().slice(0,12):'';
+  const source=jb?jb.name:((AD.source==='Other'?AD.otherSource:AD.source)||'Manual');
+  if(!jb&&AD.source==='Other'&&AD.otherSource&&!SOURCES.includes(AD.otherSource)&&!(SETTINGS.customSources||[]).includes(AD.otherSource)){
     SETTINGS.customSources=SETTINGS.customSources||[];SETTINGS.customSources.push(AD.otherSource);saveSettings();}
-  const fullAddr=[AD.address,AD.city,AD.state,zip].filter(Boolean).join(', ');
-  const _exEmp=(window._adExtractEmployers||[]).map(x=>({name:String(x.name||'').slice(0,120),role:String(x.role||'').slice(0,80),from:String(x.from||'').slice(0,12),to:String(x.to||'').slice(0,12)})).filter(x=>x.name);
-  const st={due:null,booking:null,zip:zip,address:fullAddr,pills:AD.pills.slice(),certs:AD.certs.slice(),licenseState:AD.hasLicense?AD.licenseState:'',licenseNum:AD.hasLicense?AD.licenseNum:'',license:AD.hasLicense?'Y':'',reqCheck:'',tpCheck:'',employers:_exEmp,refs:[],sent:{},checkins:[],dayShifts:AD.dayShifts,log:[{t:stamp(),x:'Added manually'+(window._adResumeFile?' with résumé':'')}]};
+  const refCode=Math.random().toString(36).replace(/[^a-z0-9]/g,'').slice(0,6).toUpperCase();
+  const emps=(AD.employers||[]).filter(x=>x&&x.name&&x.name.trim()).map(x=>({name:String(x.name).slice(0,120),role:String(x.role||'').slice(0,80),from:String(x.from||'').slice(0,12),to:String(x.to||'').slice(0,12)}));
+  const st={due:null,booking:null,
+    zip:facts.zip,facts,
+    address:[A.address,A.city,A.state].filter(Boolean).join(', '),addressLine:A.address||'',city:A.city||'',state:A.state||'',
+    firstName:A.firstName||'',lastName:A.lastName||'',liveIn:false,
+    pills,certs,
+    licenseState:AD.hasLicense?AD.licenseState:'',licenseNum:AD.hasLicense?AD.licenseNum:'',license:AD.hasLicense?'Y':(screening.dl==='Y'?'Yes':''),
+    reqCheck:'',tpCheck:'',employers:emps,refs:[],sent:{},checkins:[],dayShifts:AD.dayShifts,
+    screening,formAnswers,gates:{wa:gates.wa,cr:gates.cr,bg:gates.bg,tr:gates.tr,av:gates.av},
+    appliedDate:today(),refCode,referredBy:'',sourceCode:srcCode,
+    referralCount:{submitted:0,screened:0,hired:0},referrals:[],customerReferrals:[],
+    log:[{t:stamp(),x:'Added manually via the application form'+(jb?' — for "'+jb.name+'"':'')+(window._adResumeFile?' · with résumé':'')}]};
   const row=nextRow,bl=v=>(v===''||v==null?'':v);
   try{
-    await patchRange('C'+row+':L'+row,[[AD.name,AD.phone,AD.email,source,'Applied',bl(gv('wa')),bl(gv('cr')),bl(gv('bg')),bl(gv('tr')),bl(gv('av'))]]);
+    await patchRange('C'+row+':L'+row,[[name,A.phone||'',A.email||'',source,'Applied',gates.wa,gates.cr,gates.bg,gates.tr,gates.av]]);
     await patchRange('N'+row+':Y'+row,[['','','','','',bl(cmp),'','',bl(ten),bl(prx),bl(ava),'']]);
+    if(Object.keys(custom).length)await patchRange('AI'+row,[[JSON.stringify(custom)]]);
     await patchRange('AJ'+row,[[_stCell(st)]]); /* rule 5: no raw AJ writes, new row or not */
     /* Résumé upload — same folder convention as the worker (safeName mirror), simple PUT (<8MB). */
     const rf=window._adResumeFile;
     if(rf){
       try{
-        const safe=String(AD.name).replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,' ').trim();
+        const safe=String(name).replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,' ').trim();
         const path=('caregivers/'+safe+'/onboarding/'+rf.name).split('/').map(encodeURIComponent).join('/');
         const buf=await rf.arrayBuffer();
         const up=await gfetch(GR+'/drives/'+driveId+'/root:/'+path+':/content',{method:'PUT',headers:{'Content-Type':rf.type||'application/octet-stream'},body:buf});
@@ -25124,7 +25207,7 @@ async function saveAdd(){if(!AD.name){toast('Name required');return;}
       }catch(ue){toast('⚠ Résumé upload failed: '+ue.message);}
     }
     window._adResumeFile=null;window._adExtractEmployers=null;
-    toast('Added');closeAdd();await loadData();
+    toast('Added'+(jb?' — tracked under '+jb.name:''));closeAdd();await loadData();
   }catch(e){toast('Add failed: '+e.message);}}
 
 /* ===================== boot ===================== */
