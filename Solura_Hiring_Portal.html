@@ -9020,7 +9020,10 @@ function predictedQuality(c){
      "failed", and all 161 live rows are blank in H-L, so firing on blank would decline or
      flag the entire pipeline. */
   if(_scYN(g.wa)===false)hard.push('No work authorization');
-  if(hard.length)return{tier:'decline',reasons:hard};
+  /* Meir's rule (2026-09-29): a decline RECOMMENDATION is never a wall. Once he clicks
+     "Proceed anyway" (st.declineOverride) the hard reasons stop forcing the reject primary
+     and the candidate flows through the normal soft-tier evaluation. */
+  if(hard.length&&!(c.st&&c.st.declineOverride))return{tier:'decline',reasons:hard};
 
   const soft=[];
   /* _yearsMin, not parseInt/free-text: this also picks up the real under-1 codes 'u1' and
@@ -9577,7 +9580,7 @@ function _actionC(c){
   if(s==='Declined'||s==='Withdrawn')return{bucket:'closed',info}; /* both terminal — a Withdrawn column-G value used to fall through as if active */
   /* declineHint set by recordCertAnswer when required minimums weren't met after a cert claim.
      Surfaces a red 'Send rejection' primary CTA — user confirms before it actually sends. */
-  if(c.st.declineHint&&s!=='Declined'&&s!=='Hired'){
+  if(c.st.declineHint&&!c.st.declineOverride&&s!=='Declined'&&s!=='Hired'){
     const reason=c.st.declineHint.reason||'Missing required minimums';
     return{bucket:'action',timing:_dn(reason,'pr2'),info,primary:{kind:'email-tpl',tpl:'reject',advanceTo:'Declined',label:'✕ Send rejection — '+reason,cls:'red'}};
   }
@@ -10456,6 +10459,49 @@ function moveToStageWS(){
       <button class="btn-sec" onclick="closeModal()">Cancel</button>
       <button class="btn-primary bg-grn" onclick="commitMoveToStage()">⇄ Move</button>
     </div>`;
+}
+/* Dismiss a decline recommendation and let the candidate flow normally (Meir's rule: the
+   portal recommends, he decides). Clears declineHint and stamps declineOverride so neither
+   the hint row nor the predicted-quality decline tier re-forces the reject primary. */
+async function _proceedPastDecline(){
+  if(!W)return;
+  delete W.st.declineHint;
+  W.st.declineOverride={at:new Date().toISOString(),by:userEmail||'operator'};
+  logW('✓ Decline recommendation overridden — proceeding with the normal flow');
+  if(!(await saveW(true)))return;
+  _memGen++;toast('✓ Proceeding — the decline recommendation is dismissed');
+  renderWorkspace();if(typeof render==='function')render();
+}
+/* ⏭ One password-gated hop to the NEXT stage of the candidate's own sequence (Meir,
+   2026-09-29). Same gate and same minimal semantics as ⇄ Move to stage: no emails fire,
+   no reports upload — it repositions, real progression stays with the action buttons. */
+async function advanceNextStepWS(){
+  if(!_stageMoveAllowed()){toast('Restricted — see Settings → Pipeline config');return;}
+  const _amCfg=(SETTINGS.config&&SETTINGS.config.stageMove)||{};
+  if(_amCfg.password){
+    const pw=prompt('Enter the Move-to-stage password:');
+    if(pw===null)return;
+    if(pw!==_amCfg.password){toast('✕ Wrong password');return;}
+  }
+  const _mc=pipeline.find(x=>x.excelRow===W.row)||{st:W.st,stage:W.stage};
+  const stages=_seqStagesFor(_mc);
+  const i=stages.indexOf(W.stage);
+  const next=i>=0?stages[i+1]:null;
+  if(!next){toast(i<0?'Their current stage isn\'t in their sequence — use ⇄ Move to stage':'Already at the last stage of their sequence');return;}
+  if(!confirm('Move '+(W.name||'this candidate')+' from "'+W.stage+'" to "'+next+'"?\n\nManual move — no emails fire, no reports upload.'))return;
+  const fromStage=W.stage;
+  W.stage=next;
+  logW('⏭ Manually advanced to '+next+' (from '+fromStage+')');
+  if(!(await saveW(true))){
+    W.stage=fromStage;
+    if(W.st&&Array.isArray(W.st.log))W.st.log.pop();
+    renderWorkspace();
+    return;
+  }
+  const c=pipeline.find(x=>x.excelRow===W.row);
+  if(c){c.stage=next;c.row[6]=next;}
+  toast('⏭ '+next);
+  renderWorkspace();if(typeof render==='function')render();
 }
 async function commitMoveToStage(){
   const sel=document.getElementById('move-stage-sel');
@@ -11343,7 +11389,18 @@ function _toggleCallGroup(){
   if(typeof render==='function')render();
 }
 function toggleBucket(i){collapsed[i]=!collapsed[i];document.getElementById('sw-'+i).classList.toggle('collapsed',collapsed[i]);}
-/* Miles between a job-tracked candidate and their job's client, or null. Cheap (ZIP-centroid
+/* Straight-line ZIP miles → estimated DRIVE MINUTES (Meir: time, not miles). City driving
+   estimate: 1.3 route factor over the straight line at ~27 mph average. Neighborhood-level,
+   not door-to-door — good enough to judge a commute. */
+function _driveMinutes(mi){return Math.max(1,Math.round(mi*1.3/27*60));}
+/* The acceptable commute: the job's own limit, else the general default, else 30 min.
+   Customizable per job (job editor) and generally (Settings → Job packages). */
+function _driveLimitFor(jb){
+  const j=Number(jb&&jb.maxDriveMin);if(j>0)return j;
+  const g=Number(SETTINGS.config&&SETTINGS.config.maxDriveMin);if(g>0)return g;
+  return 30;
+}
+/* Commute between a job-tracked candidate and their job's client, or null. Cheap (ZIP-centroid
    lookup + haversine) and called per row per render. */
 function _candJobMiles(c){
   try{
@@ -11352,7 +11409,9 @@ function _candJobMiles(c){
     const cz=String((c.st&&c.st.zip)||(c.st&&c.st.facts&&c.st.facts.zip)||'');
     if(!cz)return null;
     const mi=_zipMiles(cz,jb.zip);
-    return (mi===undefined||mi===null)?null:{mi:Math.round(mi),job:jb.name||'the job',address:jb.address||''};
+    if(mi===undefined||mi===null)return null;
+    const min=_driveMinutes(mi);
+    return {mi:Math.round(mi),min,limit:_driveLimitFor(jb),job:jb.name||'the job',address:jb.address||''};
   }catch(e){return null;}
 }
 function rowHtml(c){
@@ -11379,7 +11438,7 @@ function rowHtml(c){
      red beyond — visible without opening the candidate. Only for job-tracked candidates
      with a computable ZIP pair. */
   const _jm=_candJobMiles(c);
-  const distPill=_jm==null?'':'<span class="cbadge" style="background:'+(_jm.mi<=10?'#EBF5EA;color:#3D7A34':_jm.mi<=25?'#FEF7E8;color:#8B6500':'#FDECEA;color:#B03025')+'" title="'+esc(_jm.mi+' miles from '+_jm.job+(_jm.address?' ('+_jm.address+')':''))+'">📍 '+_jm.mi+' mi</span>';
+  const distPill=_jm==null?'':'<span class="cbadge" style="background:'+(_jm.min<=_jm.limit?'#EBF5EA;color:#3D7A34':_jm.min<=_jm.limit*1.5?'#FEF7E8;color:#8B6500':'#FDECEA;color:#B03025')+'" title="'+esc('~'+_jm.min+' min drive ('+_jm.mi+' mi straight-line) to '+_jm.job+(_jm.address?' at '+_jm.address:'')+' · limit '+_jm.limit+' min')+'">🚗 ~'+_jm.min+' min</span>';
   const idline='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">'+band+ftPill+distPill+certs+dl+pills+giftPill+'</div>';
   const _srcTag=candidateSourceLabel(c);
   const sub='<div class="dm-tag" style="margin-top:5px">'+(_srcTag&&_srcTag!=='—'?esc(_srcTag)+' · ':'')+'Q <span>'+(sc.Q==null?'—':sc.Q)+'</span> · R <span>'+(sc.R==null?'—':sc.R)+'</span></div>';
@@ -13524,7 +13583,7 @@ function renderWorkspace(){_memGen++;
     :'';
   /* Distance to their job's client, in the header (Meir: visible inside AND outside). */
   const _wsJm=c?_candJobMiles(c):null;
-  const _wsDist=_wsJm?'<span class="sbadge" style="background:'+(_wsJm.mi<=10?'#EBF5EA;color:#3D7A34':_wsJm.mi<=25?'#FEF7E8;color:#8B6500':'#FDECEA;color:#B03025')+';margin-right:8px" title="'+esc(_wsJm.mi+' miles from '+_wsJm.job+(_wsJm.address?' ('+_wsJm.address+')':''))+'">📍 '+_wsJm.mi+' mi</span>':'';
+  const _wsDist=_wsJm?'<span class="sbadge" style="background:'+(_wsJm.min<=_wsJm.limit?'#EBF5EA;color:#3D7A34':_wsJm.min<=_wsJm.limit*1.5?'#FEF7E8;color:#8B6500':'#FDECEA;color:#B03025')+';margin-right:8px" title="'+esc('~'+_wsJm.min+' min drive ('+_wsJm.mi+' mi straight-line) to '+_wsJm.job+(_wsJm.address?' at '+_wsJm.address:'')+' · limit '+_wsJm.limit+' min')+'">🚗 ~'+_wsJm.min+' min</span>':'';
   document.getElementById('ws-sub').innerHTML=
     '<span class="sbadge" style="background:'+info.color[0]+';color:'+info.color[1]+';margin-right:8px">'+esc(stageLabel(W.stage))+'</span>'
     +_wsDist
@@ -13542,7 +13601,7 @@ function renderWorkspace(){_memGen++;
      Visible at any stage except Hired/Declined. The Park button pops a small modal to enter an
      optional reason + optional follow-up date. Resume button only shows when currently parked. */
   const isParked=!!W.st.manualAwaiting;
-  const moveBtn=_stageMoveAllowed()?'<button class="btn-sm bg-cream" onclick="moveToStageWS()" title="Manually place this candidate at any pipeline stage">⇄ Move to stage</button>':'';
+  const moveBtn=_stageMoveAllowed()?'<button class="btn-sm bg-cream" onclick="advanceNextStepWS()" title="Password-gated: hop to the next stage of their own sequence — no emails fire">⏭ Next step</button><button class="btn-sm bg-cream" onclick="moveToStageWS()" title="Manually place this candidate at any pipeline stage">⇄ Move to stage</button>':'';
   let quickActions='';
   if(W.stage==='Hired'||W.stage==='Declined'||W.stage==='Withdrawn'){
     /* Terminal stages: the stage move IS the escape hatch (mistaken decline, un-hire, etc.). */
@@ -13717,7 +13776,9 @@ function renderWorkspace(){_memGen++;
   /* sticky footer with primary action — always visible */
   const ftext=`<div class="ftext">Next step<b>${esc(a.info.next||'—')}</b></div>`;
   const fprim=p.kind==='lock'?'<button class="ws-pri lock" disabled>'+esc(p.label)+'</button>':'<button class="ws-pri '+cls+'" onclick="doPrimary('+W.row+')">'+esc(p.label)+' →</button>';
-  document.getElementById('ws-footer').innerHTML=ftext+'<div class="ws-fbtns"><button class="ws-sec danger" onclick="declineFromWS()">Decline</button>'+fprim+'</div>';
+  /* A recommended rejection always ships with the way past it (Meir's rule). */
+  const fproceed=(p.kind==='email-tpl'&&p.tpl==='reject'&&W.stage!=='Declined')?'<button class="ws-sec" style="border-color:var(--grn);color:var(--grn-deep)" onclick="_proceedPastDecline()" title="Dismiss the decline recommendation and continue their normal flow">✓ Proceed anyway</button>':'';
+  document.getElementById('ws-footer').innerHTML=ftext+'<div class="ws-fbtns"><button class="ws-sec danger" onclick="declineFromWS()">Decline</button>'+fproceed+fprim+'</div>';
   document.getElementById('ws-footer').style.display='flex';
   loadDocs();
 }
@@ -13919,7 +13980,15 @@ function qansPerRef(refIdx,id,v){
   renderWorkspace();
 }
 async function completeQuestions(nextStage){_memGen++;applyAnswers();const sc=scoreW();
-  if(sc.dec.cls==='red'){return doEmail('reject','Declined');}
+  /* A red score RECOMMENDS the rejection; it never forces it (Meir's rule). OK sends the
+     reject; Cancel proceeds with the normal advance, logged as an override. */
+  if(sc.dec.cls==='red'){
+    if(confirm('Scores came out RED (Q'+sc.Q+'/R'+sc.R+') — send the rejection email?\n\nCancel to proceed to '+nextStage+' anyway (recorded as your override).')){
+      return doEmail('reject','Declined');
+    }
+    W.st.declineOverride={at:new Date().toISOString(),by:userEmail||'operator',context:'red score at session complete (Q'+sc.Q+'/R'+sc.R+')'};
+    logW('✓ Red-score decline recommendation overridden — proceeding to '+nextStage);
+  }
   const completedStage=W.stage; /* capture before changing */
   W.stage=nextStage;W.st.due=today();logW('Completed step → '+nextStage+' (Q'+sc.Q+'/R'+sc.R+')');
   /* Sequence bridge — MUST run while the booking still exists (the wait/stage steps just
@@ -21266,7 +21335,13 @@ function renderSettingsJobs(){
   return `<div class="set-content">
     <h2 style="margin-top:0">🧳 Job packages</h2>
     <p class="set-help">Each job bundles its <b>link</b>, <b>sequence</b>, <b>pay</b> and the client's <b>rating factors</b> into one package. Post the link for a specific client's job and its candidates get exactly this treatment — sequence and pay assignments are written through the package, not as general rules.</p>
-    <button class="btn-primary bg-gold" style="margin-bottom:14px" onclick="_jobOpenModal('')">＋ New job</button>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+      <button class="btn-primary bg-gold" onclick="_jobOpenModal('')">＋ New job</button>
+      <label style="font-size:12px;color:var(--mid);display:flex;gap:6px;align-items:center;margin-left:auto">🚗 Default max drive time
+        <input type="number" min="1" value="${esc((SETTINGS.config&&SETTINGS.config.maxDriveMin)||'')}" placeholder="30" style="width:70px;padding:6px 8px;border:1.5px solid var(--border);border-radius:7px" onchange="SETTINGS.config.maxDriveMin=Number(this.value)>0?Number(this.value):'';markSettingsDirty();renderSettings()"> min
+        <span style="font-size:10.5px;color:var(--soft)">— any job can override this in its editor</span>
+      </label>
+    </div>
     ${rows||'<p style="color:var(--soft);font-style:italic">No jobs yet — create the first one.</p>'}
   </div>`;
 }
@@ -21284,6 +21359,7 @@ function _jobOpenModal(id){
       <label style="font-size:12px;color:var(--mid)">Pay (fills {pay}/{wage} in emails)<input id="job-wage" type="text" value="${esc(j.wage||'')}" placeholder="e.g. $16–$18/hr" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Client address (Claude weighs it; ZIP auto-fills from it)<input id="job-address" type="text" value="${esc(j.address||'')}" placeholder="e.g. 3690 Orange Pl, Beachwood, OH 44122" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Client ZIP (drives the distance math)<input id="job-zip" type="text" value="${esc(j.zip||'')}" placeholder="e.g. 44122" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid)">Max drive time for THIS job, minutes (blank = the general default${Number(SETTINGS.config&&SETTINGS.config.maxDriveMin)>0?', currently '+SETTINGS.config.maxDriveMin:', currently 30'})<input id="job-maxdrive" type="number" min="1" value="${esc(j.maxDriveMin||'')}" placeholder="e.g. 25" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Notes<input id="job-notes" type="text" value="${esc(j.notes||'')}" placeholder="anything about this posting" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Application form<select id="job-form" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px;background:#fff">
         <option value="__GLOBAL__">— the global form —</option>
@@ -21391,6 +21467,7 @@ function _jobSave(){
   }
   _jobLinks(j);
   j.name=name;j.client=g('job-client');j.wage=g('job-wage');j.address=g('job-address');j.zip=g('job-zip');j.notes=g('job-notes');
+  j.maxDriveMin=Number(g('job-maxdrive'))>0?Number(g('job-maxdrive')):'';
   /* The address is the human truth; the ZIP drives the distance math. A pasted address
      containing a ZIP fills an empty ZIP field automatically so distance just works. */
   if(!j.zip&&j.address){const zm=/\b(\d{5})\b/.exec(j.address);if(zm)j.zip=zm[1];}
@@ -23015,7 +23092,10 @@ async function _claudeResumeScreen(row){
       const missing=(jb.req&&typeof _jobMissingReqs==='function')?_jobMissingReqs(cand,jb):[];
       const cz=String((cand.st&&cand.st.zip)||(cand.st&&cand.st.facts&&cand.st.facts.zip)||'');
       const mi=(typeof _zipMiles==='function'&&jb.zip)?_zipMiles(cz,jb.zip):undefined;
-      return{jobName:jb.name,client:jb.client||'',address:jb.address||'',wage:jb.wage||'',requirementsMissing:missing,distanceMiles:(mi===undefined||mi===null)?null:Math.round(mi)};
+      return{jobName:jb.name,client:jb.client||'',address:jb.address||'',wage:jb.wage||'',requirementsMissing:missing,
+        distanceMiles:(mi===undefined||mi===null)?null:Math.round(mi),
+        driveMinutesEstimate:(mi===undefined||mi===null)?null:_driveMinutes(mi),
+        maxDriveMinutes:_driveLimitFor(jb)};
     }catch(e){return null;}})()
   };
   try{
@@ -23069,7 +23149,9 @@ function _claudeJobFitHtml(cand){
     const miss=(jb.req&&typeof _jobMissingReqs==='function')?_jobMissingReqs(cand,jb):[];
     const cz=String((cand.st&&cand.st.zip)||(cand.st&&cand.st.facts&&cand.st.facts.zip)||'');
     const mi=(typeof _zipMiles==='function'&&jb.zip)?_zipMiles(cz,jb.zip):undefined;
-    const band=(mi===undefined||mi===null)?null:(mi<=5?Math.round(mi)+' mi — right there':mi<=10?Math.round(mi)+' mi — close':mi<=25?Math.round(mi)+' mi — commutable':Math.round(mi)+' mi — far');
+    const _dMin=(mi===undefined||mi===null)?null:_driveMinutes(mi);
+    const _dLim=_driveLimitFor(jb);
+    const band=_dMin==null?null:('~'+_dMin+' min drive'+(_dMin<=_dLim?' — within the '+_dLim+' min limit':_dMin<=_dLim*1.5?' — over the '+_dLim+' min limit':' — well over the '+_dLim+' min limit'));
     const missHtml=miss.length
       ?miss.map(m=>'<span style="background:#FDECEA;color:#8B3D2F;border-radius:999px;padding:2px 9px;font-size:11px">✗ '+esc(m)+'</span>').join(' ')
       :(jb.req?'<span style="background:#EBF5EA;color:#3D7A34;border-radius:999px;padding:2px 9px;font-size:11px">✓ all listed requirements met</span>':'');
@@ -23077,7 +23159,7 @@ function _claudeJobFitHtml(cand){
     return `<div style="border-top:1px dashed var(--border);margin-top:8px;padding-top:8px">
       <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--soft);margin-bottom:4px">Fit for ${esc(jb.name)}${jb.client?' · '+esc(jb.client):''}${jb.address?' <span style="font-weight:400;text-transform:none;letter-spacing:0">· '+esc(jb.address)+'</span>':''}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${missHtml}
-        ${band?'<span style="background:#EDF3FA;color:#1E4E8C;border-radius:999px;padding:2px 9px;font-size:11px">📍 '+esc(band)+'</span>':''}
+        ${band?'<span style="background:'+(_dMin<=_dLim?'#EBF5EA;color:#3D7A34':_dMin<=_dLim*1.5?'#FEF7E8;color:#8B6500':'#FDECEA;color:#B03025')+';border-radius:999px;padding:2px 9px;font-size:11px" title="'+esc(Math.round(mi)+' mi straight-line')+'">🚗 '+esc(band)+'</span>':''}
         ${jb.wage?'<span style="background:#FBF1DC;color:#8A6A1F;border-radius:999px;padding:2px 9px;font-size:11px">💵 '+esc(String(jb.wage))+'</span>':''}
       </div></div>`;
   }catch(e){return '';}
