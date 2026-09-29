@@ -11018,7 +11018,11 @@ function render(){_memGen++;if(!tok)return;updateFilterCount();if(view==='calend
     if(wasManuallyOpened)collapse=false;
     else if(wasManuallyCollapsed)collapse=true;
     else collapse=isEmpty;   /* default behavior: collapse-if-empty */
-    document.getElementById('sw-'+i).classList.toggle('collapsed',collapse);
+    /* sw-3 (the old Hired section) no longer exists in the markup — the unguarded lookup
+       threw here on EVERY render, silently aborting the loop's tail (sw-4 never toggled)
+       and any caller code after a bare render() call. Found live 2026-09-29. */
+    const _sw=document.getElementById('sw-'+i);
+    if(_sw)_sw.classList.toggle('collapsed',collapse);
   }
 }
 
