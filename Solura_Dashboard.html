@@ -1802,7 +1802,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0929-102';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0929-103';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3537,14 +3537,17 @@ async function asCancel(){
     await writeRow(ri,u);
     // 3) The family: short branded note + a CANCEL invite that clears
     // the slot from their calendar (same UID, bumped sequence)
-    var sent=false;
+    var sent=false,trkC=null;
     if(willMail){
       try{
         var names=getNames(ri);
         var isVirt=!!prevA.virtual;
         var html9=fillNames(buildCancelEmailHtml(prevWhen,isVirt),names);
-        var msg9={subject:'Cancelled: your '+(isVirt?'video visit':'home visit')+' on '+invPrettyDate(prevA.date),
-          body:{contentType:'HTML',content:html9},
+        var subj9='Cancelled: your '+(isVirt?'video visit':'home visit')+' on '+invPrettyDate(prevA.date);
+        // Read receipts on the cancellation too — he sees they saw it
+        trkC=trackSystemEmail(ri,to,subj9,html9,'assessment-cancel');
+        var msg9={subject:subj9,
+          body:{contentType:'HTML',content:trkC.html},
           toRecipients:[{emailAddress:{address:to}}]};
         if(prevA.icsUid){
           var canc=buildAssessmentIcs({date:prevA.date,time:prevA.time||'12:00',location:prevA.location,assessor:prevA.assessor},
@@ -3552,9 +3555,10 @@ async function asCancel(){
           if(canc)msg9.attachments=[{'@odata.type':'#microsoft.graph.fileAttachment',name:'Cancelled_'+canc.fileName,
             contentType:'text/calendar',contentBytes:btoa(unescape(encodeURIComponent(canc.ics)))}];
         }
-        var sr9=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:msg9,saveToSentItems:true})});
+        var sr9=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:msg9,saveToSentItems:!trkC.tracked})});
         if(!(sr9.ok||sr9.status===202))throw new Error('mail '+sr9.status);
         sent=true;
+        if(trkC.tracked)saveCleanSentCopy(subj9,to,trkC.html,msg9.attachments,null);
       }catch(eM){
         toast('⚠ Cancelled, but the email failed ('+eM.message+') — tell the family yourself');
       }
@@ -3563,10 +3567,12 @@ async function asCancel(){
     try{delete schedAssessments()[String(ri)];}catch(_){}
     try{delete followUpTimes()[String(ri)];}catch(_){}
     try{saveEnginesDoc().catch(function(){});}catch(_){}
-    logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
+    var _cnLog=logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
       contact:sent?to:'',subject:sent?('Cancelled: assessment on '+invPrettyDate(prevA.date)):'Assessment cancelled',
       preview:'Assessment cancelled — was '+prevWhen+(calMsg?(' · '+calMsg):''),
-      outcome:'assessment-cancelled'}));
+      outcome:'assessment-cancelled',
+      messageId:(sent&&trkC)?trkC.id:''}));
+    if(sent&&trkC)trkC.record(_cnLog);
     el('modal-asmt-sched').classList.remove('open');
     toast('❌ Assessment cancelled'+(sent?' — family notified, their calendar cleared':'')+(calMsg?(' · 📆 '+calMsg):''));
     _asRi=-1;
@@ -3740,17 +3746,20 @@ async function asSave(){
         calNote='invite attached'+(calNote?(' · '+calNote):'');
       }
     }
-    var sent=false;
+    var sent=false,trkA=null;
     if(wantEmail){
-      var msg9={subject:em.subject,body:{contentType:'HTML',content:em.html},
+      // Read receipts for the confirmation, same as composer emails
+      trkA=trackSystemEmail(ri,em.to,em.subject,em.html,'assessment');
+      var msg9={subject:em.subject,body:{contentType:'HTML',content:trkA.html},
         toRecipients:[{emailAddress:{address:em.to}}]};
       if(icsAtt)msg9.attachments=[icsAtt];
-      var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:msg9,saveToSentItems:true})});
+      var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:msg9,saveToSentItems:!trkA.tracked})});
       if(!(res.ok||res.status===202)){
         var ee=await res.json().catch(function(){return{};});
         throw new Error('Saved to the sheet, but the email failed: '+(ee.error?ee.error.message:res.status));
       }
       sent=true;
+      if(trkA.tracked)saveCleanSentCopy(em.subject,em.to,trkA.html,msg9.attachments,null);
     }
     // 🔁 Remember the booking so the next open is a reschedule
     try{
@@ -3762,10 +3771,12 @@ async function asSave(){
         icsSeq:icsSeqUsed||((prevA&&prevA.icsSeq)||0)};
       saveEnginesDoc().catch(function(){});
     }catch(_){}
-    logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
+    var _asLog=logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
       contact:sent?em.to:'',subject:sent?em.subject:(isResched?'Assessment rescheduled':'Assessment scheduled'),
       preview:detail+(calNote?(' · '+calNote):''),
-      outcome:isResched?'assessment-rescheduled':'assessment-scheduled'}));
+      outcome:isResched?'assessment-rescheduled':'assessment-scheduled',
+      messageId:(sent&&trkA)?trkA.id:''}));
+    if(sent&&trkA)trkA.record(_asLog);
     el('modal-asmt-sched').classList.remove('open');
     var doneMsg=(isResched?'🔁 Assessment rescheduled':(isVirtual?'💻 Virtual assessment logged':'📅 Assessment logged'))+(sent?(' — email sent to '+em.to):'');
     if(calNote)doneMsg+=' · 📆 '+calNote;
@@ -3883,12 +3894,14 @@ async function invSend(){
   if(spin)spin.style.display='inline-flex';
   out.style.color='var(--mid)';out.textContent='Sending from '+em.from+'…';
   try{
+    // Read receipts: pixel + kind-labeled sent record, clean copy after send
+    var trk=trackSystemEmail(_invRi,em.to,em.subject,em.html,'invoice');
     var payload={message:{
       subject:em.subject,
-      body:{contentType:'HTML',content:em.html},
+      body:{contentType:'HTML',content:trk.html},
       toRecipients:[{emailAddress:{address:em.to}}],
       from:{emailAddress:{address:em.from}}
-    },saveToSentItems:true};
+    },saveToSentItems:!trk.tracked};
     if(_invAtts.length){
       payload.message.attachments=_invAtts.map(function(a){
         return {'@odata.type':'#microsoft.graph.fileAttachment',name:a.name,contentType:a.type,contentBytes:a.dataBase64};
@@ -3902,11 +3915,12 @@ async function invSend(){
         throw new Error('Microsoft refused to send AS '+em.from+'. Two fixes: (1) in Microsoft 365 admin, give your account "Send As" on the shared mailbox; (2) sign out and back in here so the new permission (Mail.Send.Shared) is granted. Then try again.');
       throw new Error(msg);
     }
+    if(trk.tracked)saveCleanSentCopy(em.subject,em.to,trk.html,payload.message.attachments,null,em.from);
     // Log it and advance the invoice counter (background — hash-skip safe)
     try{
-      logComms(commsEntryForLead(_invRi,{direction:'out',channel:'email',contact:em.to,
+      trk.record(logComms(commsEntryForLead(_invRi,{direction:'out',channel:'email',contact:em.to,
         subject:em.subject,preview:'Invoice '+em.fields.invno+' — '+(fmtMoney(em.fields.amount)||em.fields.amount)+' due '+em.fields.due,
-        outcome:'invoice-sent',messageId:''}));
+        outcome:'invoice-sent',messageId:trk.id})));
     }catch(_){}
     try{
       var cur9=parseInt(cfg('invoiceNextNo'),10)||1001;
@@ -8364,7 +8378,9 @@ async function expandLeadMail(ri,foldId,arrowId){
   fold.innerHTML=(msgs.length
     ? msgs.map(function(m){return leadMailCardHtml(ri,m,readTs);}).join('')
     : '<div style="font-size:11px;color:var(--soft);padding:6px 0">No emails from them found in your mailbox.</div>')
-    +(hasUnread?'<div class="activity-actions"><button data-action="mark-inbox-read" data-email="'+escapeHtml(normEmail(em))+'">✓ Mark all as read</button></div>':'');
+    +(hasUnread?'<div class="activity-actions"><button data-action="mark-inbox-read" data-email="'+escapeHtml(normEmail(em))+'">✓ Mark all as read</button></div>':'')
+    // Read receipts ride the same fold: every tracked send with open status
+    +(typeof renderSentEmailsFor==='function'?renderSentEmailsFor(ri):'');
 }
 // The 📧 Email tab: leads grouped, newest activity first, unread on top.
 async function openMailbox(){
@@ -8952,7 +8968,7 @@ function stripTrackingFromHtml(html){
   });
   return s;
 }
-async function saveCleanSentCopy(subj,toAddr,html,atts,largeNames){
+async function saveCleanSentCopy(subj,toAddr,html,atts,largeNames,fromAddr){
   try{
     var body=stripTrackingFromHtml(html);
     if(largeNames&&largeNames.length){
@@ -8964,6 +8980,7 @@ async function saveCleanSentCopy(subj,toAddr,html,atts,largeNames){
       // PR_MESSAGE_FLAGS = 1 (read, not unsent) → files as a real sent
       // item instead of a draft
       singleValueExtendedProperties:[{id:'Integer 0x0E07',value:'1'}]};
+    if(fromAddr)msg.from={emailAddress:{address:fromAddr}};
     if(atts&&atts.length)msg.attachments=atts;
     var r=await gfetch(GR+'/me/mailFolders/sentitems/messages',{method:'POST',body:JSON.stringify(msg)});
     if(!r.ok){var e=await r.json().catch(function(){return{};});
@@ -9005,6 +9022,39 @@ async function scrubSentCopy(pxFrag,subj,toAddr,html,atts,largeNames){
   traceOp({kind:'sent-scrub-miss',subj:String(subj||'').slice(0,60)});
 }
 /* ⚡SELF-OPEN — END */
+/* ⚡RECEIPTS — BEGIN (sliced by tests/receipts.test.mjs)
+ * System emails — invoices, assessment confirmations, cancellations — get
+ * the SAME read receipts as composer sends: pixel in the body, send-id in
+ * the sent store (kind-labeled so the list says WHAT was opened), and a
+ * pixel-free copy filed to Sent Items so his own opens never count.
+ * Internal mail (the intake@ summary) is deliberately left untracked.   */
+function trackSystemEmail(ri,toAddr,subj,html,kind){
+  var sendId='m'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+  var px='';
+  try{px=trackingPixelHtml(ri,toAddr,subj,sendId);}catch(_){}
+  return {
+    id:sendId,
+    html:px?injectBeforeClose(html,px):html,
+    tracked:!!px,
+    // Chain onto the send's logComms promise so opens stamp the SAME row;
+    // a failed log still records locally (receipts survive log hiccups).
+    record:function(commsRowPromise){
+      Promise.resolve(commsRowPromise).then(function(commsRow){
+        try{recordSentEmail(sendId,ri,toAddr,subj,commsRow||null,'',kind);}catch(_){}
+      }).catch(function(){
+        try{recordSentEmail(sendId,ri,toAddr,subj,null,'',kind);}catch(_){}
+      });
+    }
+  };
+}
+// Human labels for the kind chip shown beside tracked system emails
+var EMAIL_KIND_LABELS={invoice:'🧾 invoice',assessment:'📅 assessment','assessment-cancel':'❌ cancellation'};
+function emailKindChip(kind){
+  if(!kind)return '';
+  var lbl=EMAIL_KIND_LABELS[kind]||kind;
+  return ' <span style="font-size:9px;font-weight:800;padding:1px 6px;border-radius:7px;background:#E8F1F8;color:var(--sky-deep)">'+escapeHtml(lbl)+'</span>';
+}
+/* ⚡RECEIPTS — END */
 /* ─── Sent-email record ────────────────────────────────────────────────
  * Every outgoing email gets a send-id. The pixel and tracked doc links
  * carry it; open events resolve back to the ORIGINAL sent record — the
@@ -9022,11 +9072,11 @@ function sentStore(){
   }catch(_){return {};}
 }
 function saveSentStore(o){try{localStorage.setItem(SENT_STORE_KEY,JSON.stringify(o));}catch(_){}}
-function recordSentEmail(id,ri,email,subj,commsRow,variant){
+function recordSentEmail(id,ri,email,subj,commsRow,variant,kind){
   var o=sentStore();
   o[id]={id:id,ri:ri,email:normEmail(email),subj:String(subj||'').slice(0,140),
     ts:Date.now(),commsRow:commsRow||null,openedAt:0,opens:0,docOpens:0,
-    variant:String(variant||'')};
+    variant:String(variant||''),kind:String(kind||'')};
   // Cap per lead: keep newest 25
   var mine=Object.keys(o).filter(function(k){return o[k].ri===ri;})
     .sort(function(a,b){return o[b].ts-o[a].ts;});
@@ -12453,7 +12503,7 @@ function renderSentEmailsFor(ri){
     var docBadge=rec.docOpens?' <span style="color:var(--sky-deep);font-weight:700;font-size:10.5px">📄 doc ×'+rec.docOpens+'</span>':'';
     var vBadge=rec.variant?' <span style="font-size:9px;font-weight:800;padding:1px 6px;border-radius:7px;background:var(--gold-pale);color:#8B6500">'+escapeHtml(rec.variant)+'</span>':'';
     return '<div class="activity-item" style="border-left-color:'+(rec.openedAt?'var(--grn)':'var(--border)')+'">'
-      +'<div class="subj">'+escapeHtml(rec.subj||'(no subject)')+vBadge+'</div>'
+      +'<div class="subj">'+escapeHtml(rec.subj||'(no subject)')+vBadge+emailKindChip(rec.kind)+'</div>'
       +'<div class="meta">sent '+whenStr+' — '+openBadge+docBadge+'</div>'
       +'</div>';
   }).join('');
