@@ -13688,6 +13688,7 @@ function renderWorkspace(){_memGen++;
     <button class="btn-sec bg-cream" style="margin-top:7px;width:auto;padding:7px 13px" onclick="addNote()">Add note</button></div>`;
   document.getElementById('ws-body').innerHTML=`
     ${thisStep}
+    ${aiScreenCard(true)}
     <div class="wsgrid">
       <div>${gatesCard}${_bgFindingsCard}${_reconciliationCard}${_credentialsCard}${work}${_appSnap}${docs}${activity}</div>
       <div>${identity}${scoreCard}${_yardstikPrev}${_empPrev}${_refPrev}${refsPreviewCard}${emailsCard}</div>
@@ -22960,6 +22961,9 @@ async function _claudeResumeScreen(row){
      ghost state over a corrupt cell. Refuse up front instead: there is nothing worth screening
      on a row whose profile has not been recovered yet. */
   if(cand.st&&cand.st.__ajCorrupt){toast('⚠ '+(cand.name||'This candidate')+' - stored data is corrupt; recover the row before screening');return false;}
+  /* Meir's rule: the rating waits for the résumé. Automatic runs are held upstream (the
+     tick never calls in here without one); a MANUAL run without a résumé asks first. */
+  if(!(cand.st&&cand.st.hasResume)&&!confirm('No résumé on file for '+(cand.name||'this candidate')+' — the rating normally waits until one arrives. Rate from the application data alone anyway?'))return false;
   const tok=(SETTINGS.config||{}).ziToken||'';
   if(!tok){toast('Set the internal worker token first (Settings → 🔌 Integrations, ZoomInfo card — shared across integrations)');return false;}
   toast('🤖 Claude is screening '+(cand.name||'candidate')+'…');
@@ -22974,7 +22978,17 @@ async function _claudeResumeScreen(row){
     answers:(cand.st&&cand.st.answers)||cand.answers||null,
     notes:cand.notes||'',
     scores:{Q:(cand.sc&&cand.sc.Q),R:(cand.sc&&cand.sc.R)},
-    hasResume:!!(cand.st&&cand.st.hasResume)
+    hasResume:!!(cand.st&&cand.st.hasResume),
+    /* Job context (Meir, 2026-09-29): when they applied through a job package, the rating
+       should weigh THAT job — requirements gaps and distance ride along so the worker's
+       prompt can fold them into the verdict (needs the pending worker paste to be used). */
+    jobFit:(function(){try{
+      const jb=(typeof _jobFor==='function')?_jobFor(cand):null;if(!jb)return null;
+      const missing=(jb.req&&typeof _jobMissingReqs==='function')?_jobMissingReqs(cand,jb):[];
+      const cz=String((cand.st&&cand.st.zip)||(cand.st&&cand.st.facts&&cand.st.facts.zip)||'');
+      const mi=(typeof _zipMiles==='function'&&jb.zip)?_zipMiles(cz,jb.zip):undefined;
+      return{jobName:jb.name,client:jb.client||'',wage:jb.wage||'',requirementsMissing:missing,distanceMiles:(mi===undefined||mi===null)?null:Math.round(mi)};
+    }catch(e){return null;}})()
   };
   try{
     const _post=async(s2)=>{
@@ -23017,12 +23031,51 @@ async function _claudeResumeScreen(row){
     return true;
   }catch(e){toast('⚠ Screen failed: '+e.message);return false;}
 }
-/* Advisory result card for the workspace. Renders only when a screen exists. */
-function aiScreenCard(){
+/* Job-fit strip for the Claude box (Meir, 2026-09-29): when the candidate came through a
+   job package, show how they measure against THAT job — requirements met/missing, distance
+   from the client's ZIP, the job's pay — computed live from the same data the rating uses. */
+function _claudeJobFitHtml(cand){
+  try{
+    const jb=(typeof _jobFor==='function')?_jobFor(cand):null;
+    if(!jb)return '';
+    const miss=(jb.req&&typeof _jobMissingReqs==='function')?_jobMissingReqs(cand,jb):[];
+    const cz=String((cand.st&&cand.st.zip)||(cand.st&&cand.st.facts&&cand.st.facts.zip)||'');
+    const mi=(typeof _zipMiles==='function'&&jb.zip)?_zipMiles(cz,jb.zip):undefined;
+    const band=(mi===undefined||mi===null)?null:(mi<=5?Math.round(mi)+' mi — right there':mi<=10?Math.round(mi)+' mi — close':mi<=25?Math.round(mi)+' mi — commutable':Math.round(mi)+' mi — far');
+    const missHtml=miss.length
+      ?miss.map(m=>'<span style="background:#FDECEA;color:#8B3D2F;border-radius:999px;padding:2px 9px;font-size:11px">✗ '+esc(m)+'</span>').join(' ')
+      :(jb.req?'<span style="background:#EBF5EA;color:#3D7A34;border-radius:999px;padding:2px 9px;font-size:11px">✓ all listed requirements met</span>':'');
+    if(!missHtml&&!band&&!jb.wage)return '';
+    return `<div style="border-top:1px dashed var(--border);margin-top:8px;padding-top:8px">
+      <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--soft);margin-bottom:4px">Fit for ${esc(jb.name)}${jb.client?' · '+esc(jb.client):''}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${missHtml}
+        ${band?'<span style="background:#EDF3FA;color:#1E4E8C;border-radius:999px;padding:2px 9px;font-size:11px">📍 '+esc(band)+'</span>':''}
+        ${jb.wage?'<span style="background:#FBF1DC;color:#8A6A1F;border-radius:999px;padding:2px 9px;font-size:11px">💵 '+esc(String(jb.wage))+'</span>':''}
+      </div></div>`;
+  }catch(e){return '';}
+}
+/* Advisory result card for the workspace. With `top` it is the box at the very beginning of
+   the candidate workspace (Meir's rule): rating + overview first, job fit included, and when
+   there is no résumé yet it says plainly that the rating is WAITING for one. Without `top`
+   (the checks hub copy) it renders only when a screen exists. */
+function aiScreenCard(top){
   try{
     const cand=pipeline.find(x=>x.excelRow===W.row)||W;
     const a=cand.st&&cand.st.aiScreen;
-    if(!a)return '';
+    const jobFit=_claudeJobFitHtml(cand);
+    if(!a){
+      if(!top)return '';
+      const hasR=!!(cand.st&&cand.st.hasResume);
+      const reqAt=cand.st&&cand.st.sent&&cand.st.sent.request_resume;
+      return `<div style="background:#fff;border:1.5px solid var(--border);border-left:3px solid var(--gold-mid);border-radius:11px;padding:12px 14px;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:16px">🤖</span><b style="font-size:12.5px">Claude rating</b>
+        ${hasR
+          ?`<span style="font-size:12px;color:var(--mid)">résumé on file — not rated yet</span><button class="btn-sm bg-cream" style="cursor:pointer;margin-left:auto" onclick="_claudeResumeScreen(${cand.excelRow})">▶ Rate now</button>`
+          :`<span style="font-size:12px;color:var(--mid)">⏳ waiting for the résumé — Claude rates automatically the moment it arrives</span>`
+           +(reqAt?`<span style="font-size:10.5px;color:var(--soft);margin-left:auto">requested ${esc(String(reqAt))}</span>`
+                  :`<button class="btn-sm bg-cream" style="cursor:pointer;margin-left:auto" onclick="doEmail('request_resume')">✉ Request résumé</button>`)}
+        </div>${jobFit}</div>`;
+    }
     const vCol={advance:['#EBF5EA','#3D7A34'],review:['#FEF7E8','#8B6500'],concern:['#FDECEA','#B03025']}[a.verdict]||['#F2EDE4','#525555'];
     const sev={high:'#B03025',med:'#8B6500',low:'#525555'};
     const flags=(a.flags||[]).map(f=>`<div style="display:flex;gap:7px;align-items:baseline;padding:3px 0;font-size:12px"><span style="color:${sev[f.severity]||'#525555'};font-weight:700;font-size:10px;text-transform:uppercase;min-width:64px">${esc(f.type||'')}${f.severity==='high'?' ⚠':''}</span><span style="color:var(--ink)">${esc(f.detail||'')}</span></div>`).join('');
@@ -23038,6 +23091,7 @@ function aiScreenCard(){
       ${flags?`<div style="margin-bottom:8px">${flags}</div>`:''}
       ${strengths?`<div style="margin-bottom:8px">${strengths}</div>`:''}
       ${verify?`<div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--soft);margin-bottom:3px">Verify on the phone screen</div><ul style="margin:0;padding-left:18px">${verify}</ul>`:''}
+      ${jobFit}
       <div style="font-size:10px;color:var(--soft);margin-top:8px;font-style:italic">Advisory only — sits alongside the scoring engine; the decision is yours.</div>
     </div>`;
   }catch(e){return '';}
@@ -23260,6 +23314,7 @@ function _seqAutomationPreview(){
       if(flow.includes(it.stage)){rows.push({n:c.name,what:'move stage '+c.stage+' → '+it.stage,cls:'ok'});budget--;}
     }else if(it.type==='integration'&&it.provider==='claude'&&/resume[-_]screen/.test(it.action||'')){
       if(c.st.aiScreen){rows.push({n:c.name,what:'skip the Claude screen (already on file) and advance the pointer',cls:'soft'});budget--;}
+      else if(!c.st.hasResume){rows.push({n:c.name,what:'HOLD the Claude rating — waiting for their résumé (rates automatically when it arrives)',cls:'soft'});}
       else{rows.push({n:c.name,what:'run the Claude résumé screen (~1¢) and advance on success',cls:'ok'});budget--;}
     }
   }
@@ -23460,6 +23515,10 @@ async function _seqAutomationTick(){
           }
           continue;
         }
+        /* Meir's rule: no résumé → HOLD the rating. Silent hold, no fail-stamp — the board's
+           no-résumé override already shows the request/await row, and the résumé's arrival
+           (poll, assignment, folder detect) is what releases this. */
+        if(!c.st.hasResume)continue;
         /* Advisory-only AI screen (~1¢) — safe to automate when the step opts in. Runs the
            screen, advances on success; a failure hands the card to a human INSTEAD of
            silently re-failing every 30 seconds. */
@@ -23868,6 +23927,17 @@ function _seqV3Action(c,info){
          land in scheduled" bug: an automate-flagged claude step with automation ON).
          END-TO-END honesty: a set-stage outside the flow order is one the tick refuses to
          write; a claude screen needs the worker token configured. */
+      /* Meir's rule (2026-09-29): NO RÉSUMÉ → the Claude rating WAITS. The step's real
+         prerequisite is the résumé, so the row IS the résumé chase — request it, or await
+         it — never a "robot will handle this" promise the tick is deliberately holding. */
+      const _cl0=(ev.intents||[])[0];
+      if(_cl0&&_cl0.type==='integration'&&_cl0.provider==='claude'&&/resume[-_]screen/.test(_cl0.action||'')
+         &&!(cand.st&&cand.st.hasResume)&&!(cand.st&&cand.st.aiScreen)){
+        if(!(cand.st&&cand.st.sent&&cand.st.sent.request_resume)){
+          return{bucket:'action',timing:{txt:'📄 No résumé — request it; Claude rates once it arrives',pill:'pnew',date:''},info,primary:{kind:'email-tpl',tpl:'request_resume',label:'✉ Request résumé',cls:'gold'}};
+        }
+        return{bucket:'awaiting',timing:{txt:'⏳ Awaiting résumé — Claude rates when it arrives',pill:'psoft',date:''},info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
+      }
       const _flowArr=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
       /* A send-email intent with NO templateKey is not executable: the tick's first branch
          demands it.templateKey, and the if/else chain has no final else, so such a step
