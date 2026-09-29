@@ -614,6 +614,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
   <div class="hdr-r">
     <div class="sync-pill"><div class="sdot" id="sdot"></div><span id="slabel">Not connected</span></div>
     <button class="hbtn hbtn-ghost" id="btn-analytics" style="display:none" data-action="open-analytics" title="Analytics hub">📊</button>
+    <button class="hbtn hbtn-ghost" id="btn-mailbox" style="display:none;position:relative" data-action="open-mailbox" title="Lead emails — everything your leads have sent you">📧<span id="mailbox-badge" style="display:none;position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;font-size:9px;font-weight:800;border-radius:9px;padding:1px 5px;line-height:1.4">0</span></button>
     <button class="hbtn hbtn-ghost" id="btn-settings" style="display:none" data-action="open-settings" title="Settings">⚙</button>
     <button class="hbtn hbtn-gold" id="btn-addlead" style="display:none" data-action="open-addlead">＋ Add Lead</button>
     <button class="hbtn hbtn-gold" id="btn-refresh" style="display:none" data-action="refresh">↺ Refresh</button>
@@ -652,6 +653,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
     <div class="sync-file"><div class="sync-dot"></div><span>Solura_Lead_Tracker.xlsx — OneDrive</span></div>
     <div class="sync-time" id="sync-time"></div>
   </div>
+  <div id="reply-surface" style="display:none;margin-bottom:10px;padding:10px 12px;border:1.5px solid var(--gold);border-radius:12px;background:#FDF9F1"></div>
   <div class="sw" id="sw-0"><div class="shdr" data-action="toggle-bucket" data-bucket="0"><div class="sdot2 red"></div><div class="stitle">Overdue</div><div class="scnt" id="c0">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t0"></tbody></table></div></div>
   <div class="sw" id="sw-1"><div class="shdr" data-action="toggle-bucket" data-bucket="1"><div class="sdot2 gold"></div><div class="stitle">Due Now</div><div class="scnt" id="c1">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t1"></tbody></table></div></div>
   <div class="sw" id="sw-2"><div class="shdr" data-action="toggle-bucket" data-bucket="2"><div class="sdot2 sky"></div><div class="stitle">Later Today</div><div class="scnt" id="c2">0 leads</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Client</th><th>Phone / Email</th><th>Status</th><th>Follow-Up</th><th>Sequence</th><th></th></tr></thead><tbody id="t2"></tbody></table></div></div>
@@ -754,6 +756,15 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
 </div>
 
 <!-- 📝 Lead editor — every core field, saved only when changed -->
+<div class="modal" id="modal-mailbox">
+  <div class="mbox" style="max-width:780px">
+    <div class="mhead"><div class="mtitle">📧 Lead emails</div><button class="mclose" data-action="close-modal" data-mid="modal-mailbox">✕</button></div>
+    <div class="mbody">
+      <div style="font-size:11px;color:var(--soft);margin-bottom:10px">Every email your leads have sent you — including from before today. Leads with unread mail float to the top and stay marked until you mark them read, same as the row badges. Expand a lead to see their full history and reply in-thread.</div>
+      <div id="mailbox-list"><div style="color:var(--soft);font-size:12px">Loading…</div></div>
+    </div>
+  </div>
+</div>
 <div class="modal" id="modal-lead-edit">
   <div class="mbox" style="max-width:640px">
     <div class="mhead"><div class="mtitle" id="le-title">📝 Edit lead</div><button class="mclose" data-action="close-modal" data-mid="modal-lead-edit">✕</button></div>
@@ -1791,7 +1802,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0928-101';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-0929-102';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -3959,6 +3970,7 @@ function onSignedIn(){
   // (📰 Weekly moved off the header — the newsletter lives in Settings → 📰 Newsletter)
   var bst=el('btn-settings');if(bst)bst.style.display='inline-block';
   var ban=el('btn-analytics');if(ban)ban.style.display='inline-block';
+  var bmx=el('btn-mailbox');if(bmx)bmx.style.display='inline-block';
   el('btn-out').style.display='inline-block';
   el('sdot').className='sdot live';
   el('slabel').textContent='Connected to OneDrive';
@@ -5267,6 +5279,7 @@ async function buildUI(){
   el('kbar').style.display='grid';
   el('main').style.display='block';
   var fb=el('feedback-btn');if(fb)fb.classList.add('show');
+  try{renderReplySurface();}catch(_){}
 }
 
 function buildLeadView(ri){
@@ -7940,6 +7953,9 @@ function markInboxRead(email){
   try{localStorage.setItem('inboxLastRead_'+normEmail(email),String(Date.now()));}catch(_){}
   // Refresh the row rendering so the badge disappears
   try{refresh();}catch(_){}
+  try{renderReplySurface();}catch(_){}
+  // If the Email tab is open, its unread ordering just changed — redraw it
+  try{var mbx=el('modal-mailbox');if(mbx&&mbx.classList.contains('open'))openMailbox();}catch(_){}
 }
 function unreadCountFor(email){
   var e=normEmail(email);if(!e)return 0;
@@ -8053,11 +8069,13 @@ async function pollInboundMail(){
         ? '📩 Reply from '+newlyArrived[0].fromName
         : '📩 '+newlyArrived.length+' new replies';
       if(cfg('toastOnReply')!==false)toast(msg);
-      // Refresh row badges
+      // Refresh row badges + surface the lead(s) who wrote
       try{refresh();}catch(_){}
+      try{renderReplySurface();}catch(_){}
     }else{
       // Silent refresh to keep badges accurate as time passes
       try{refresh();}catch(_){}
+      try{renderReplySurface();}catch(_){}
     }
   }catch(e){/* silent — polling is best-effort */}
 }
@@ -8220,6 +8238,211 @@ function renderActivityForEmail(email){
     +actions
     +'</div>';
 }
+
+/* ─── §12c Lead mail: full history, expandable, replyable ──────────────
+ * The 48h inbound cache above catches fresh replies; this layer reaches
+ * back through the WHOLE mailbox on demand. Per-lead history is fetched
+ * lazily (when a fold expands) via a from-address filter, cached ~5 min,
+ * and merged with the live cache. Nothing here auto-marks messages read:
+ * badges keep the exact behavior they had (explicit "Mark all as read").
+ * ─────────────────────────────────────────────────────────────────────── */
+/* ⚡LEADMAIL — BEGIN (sliced by tests/leadmail.test.mjs) */
+var _leadMailHistory={};            // normalized email → {fetchedAt, msgs:[entry]}
+var LEADMAIL_CACHE_MS=5*60*1000;    // refetch a lead's history after 5 min
+function mailEntryFromGraph(m){
+  var addr=(m.from&&m.from.emailAddress&&m.from.emailAddress.address)||'';
+  return {
+    id:m.id,
+    subject:m.subject||'(no subject)',
+    fromName:(m.from&&m.from.emailAddress&&m.from.emailAddress.name)||addr,
+    fromAddr:addr,
+    receivedAt:m.receivedDateTime||'',
+    receivedTs:Date.parse(m.receivedDateTime)||0,
+    preview:String(m.bodyPreview||'').slice(0,500),
+    webLink:m.webLink||'',
+    isRead:!!m.isRead
+  };
+}
+// Merge entry lists newest-first, deduped by message id.
+function mergeMailLists(a,b){
+  var seen={},out=[];
+  (a||[]).concat(b||[]).forEach(function(m){
+    if(!m||!m.id||seen[m.id])return;
+    seen[m.id]=true;out.push(m);
+  });
+  out.sort(function(x,y){return y.receivedTs-x.receivedTs;});
+  return out;
+}
+// Email tab ordering: unread leads first, then newest latest-message first.
+function mailboxOrder(a,b){
+  if((a.unread>0)!==(b.unread>0))return a.unread>0?-1:1;
+  return b.latestTs-a.latestTs;
+}
+// Graph message ids aren't safe as element ids — strip to a stable token.
+function mailDomId(s){return String(s||'').replace(/[^a-zA-Z0-9_-]/g,'');}
+async function fetchLeadEmailHistory(email,force){
+  var e=normEmail(email);if(!e)return [];
+  var c=_leadMailHistory[e];
+  if(c&&!force&&(Date.now()-c.fetchedAt)<LEADMAIL_CACHE_MS)return c.msgs;
+  var sel='$select=id,subject,from,receivedDateTime,bodyPreview,webLink,isRead&$top=100';
+  var msgs=null;
+  try{
+    // Primary: exact-sender filter across the whole mailbox, no date floor
+    var r=await gfetch(GR+"/me/messages?$filter="+encodeURIComponent("from/emailAddress/address eq '"+e.replace(/'/g,"''")+"'")+'&'+sel);
+    if(r.ok){var j=await r.json();msgs=(j.value||[]).map(mailEntryFromGraph);}
+  }catch(_){}
+  if(msgs==null){
+    try{
+      // Fallback: KQL search (some tenants reject the from filter)
+      var r2=await gfetch(GR+'/me/messages?$search='+encodeURIComponent('"from:'+e+'"')+'&'+sel);
+      if(r2.ok){var j2=await r2.json();msgs=(j2.value||[]).map(mailEntryFromGraph);}
+    }catch(_){}
+  }
+  if(msgs==null)msgs=[];
+  // The search fallback can over-match — keep only their actual address
+  msgs=msgs.filter(function(m){return normEmail(m.fromAddr)===e;});
+  var merged=mergeMailLists(msgs,inboundEmailCache[e]||[]);
+  _leadMailHistory[e]={fetchedAt:Date.now(),msgs:merged};
+  return merged;
+}
+function leadMailCached(email){var c=_leadMailHistory[normEmail(email)];return c?c.msgs:null;}
+// Reply targets can come from the live 48h cache OR the fetched history.
+function findMailEntry(ri,mid){
+  var live=inboundFor(ri).find(function(m){return m.id===mid;});
+  if(live)return live;
+  var hist=leadMailCached((rows[ri]||[])[C.EM])||[];
+  return hist.find(function(m){return m.id===mid;})||null;
+}
+function leadsWithUnread(){
+  var out=[];
+  for(var ri=DATA_START;ri<rows.length;ri++){
+    var em=normEmail((rows[ri]||[])[C.EM]);if(!em)continue;
+    var n=unreadCountFor(em);if(!n)continue;
+    var latest=0;(inboundEmailCache[em]||[]).forEach(function(m){if(m.receivedTs>latest)latest=m.receivedTs;});
+    out.push({ri:ri,email:em,n:n,latestTs:latest});
+  }
+  out.sort(function(a,b){return b.latestTs-a.latestTs;});
+  return out;
+}
+// One message card — shared by the drawer fold and the Email tab.
+function leadMailCardHtml(ri,m,readTs){
+  var isUnread=m.receivedTs>readTs;
+  var when=new Date(m.receivedTs);
+  var whenStr=when.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' '+when.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+  var link=m.webLink?' <a href="'+escapeHtml(m.webLink)+'" target="_blank" rel="noopener" style="color:var(--sky-deep);font-size:10.5px;font-weight:600;text-decoration:none" onclick="event.stopPropagation()">→ Outlook</a>':'';
+  return '<div class="activity-item'+(isUnread?' unread':'')+'" style="border-left-color:var(--sky-mid)">'
+    +'<div class="subj">'+(isUnread?'● ':'')+'📥 '+escapeHtml(m.subject)+'</div>'
+    +'<div style="font-size:10.5px;color:var(--soft);margin:2px 0 4px">'+whenStr+' · '+escapeHtml(m.fromName||m.fromAddr)+link+'</div>'
+    +'<div style="font-size:11px;color:var(--mid);line-height:1.45;white-space:pre-wrap" id="mailbody-'+mailDomId(m.id)+'">'+escapeHtml(String(m.preview||'').slice(0,200))+'</div>'
+    +'<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">'
+    +'<button class="ee-mini" style="padding:5px 12px;font-size:11px" data-action="reply-inbound" data-ri="'+ri+'" data-mid="'+escapeHtml(m.id)+'">↩ Reply</button>'
+    +'<button class="ee-mini" style="padding:5px 12px;font-size:11px" data-action="lead-mail-full" data-ri="'+ri+'" data-mid="'+escapeHtml(m.id)+'">📖 Full message</button>'
+    +'</div></div>';
+}
+// Swap a card's preview for the sender's full text (their words, no chain).
+async function leadMailShowFull(ri,mid){
+  var entry=findMailEntry(ri,mid);if(!entry)return;
+  var div=el('mailbody-'+mailDomId(mid));if(!div)return;
+  div.textContent='Loading full message…';
+  await fetchInboundFullBody(entry);
+  div.textContent=entry.fullBody||entry.preview||'(no text)';
+}
+// Toggle a lead's history fold (drawer or Email tab share this).
+// Deliberately does NOT mark anything read — unread behaves like till now.
+// _leadMailOpen remembers open folds so a drawer re-render restores them.
+var _leadMailOpen={};
+async function expandLeadMail(ri,foldId,arrowId){
+  var fold=el(foldId),arrow=el(arrowId);
+  if(!fold)return;
+  if(fold.style.display!=='none'){fold.style.display='none';if(arrow)arrow.textContent='▸';_leadMailOpen[foldId]=false;return;}
+  fold.style.display='block';if(arrow)arrow.textContent='▾';_leadMailOpen[foldId]=true;
+  fold.innerHTML='<div style="font-size:11px;color:var(--soft);padding:6px 0">Loading their full email history…</div>';
+  var em=(rows[ri]||[])[C.EM];
+  var msgs=await fetchLeadEmailHistory(em);
+  var readTs=inboxLastReadTs(em);
+  var hasUnread=msgs.some(function(m){return m.receivedTs>readTs;});
+  fold.innerHTML=(msgs.length
+    ? msgs.map(function(m){return leadMailCardHtml(ri,m,readTs);}).join('')
+    : '<div style="font-size:11px;color:var(--soft);padding:6px 0">No emails from them found in your mailbox.</div>')
+    +(hasUnread?'<div class="activity-actions"><button data-action="mark-inbox-read" data-email="'+escapeHtml(normEmail(em))+'">✓ Mark all as read</button></div>':'');
+}
+// The 📧 Email tab: leads grouped, newest activity first, unread on top.
+async function openMailbox(){
+  el('modal-mailbox').classList.add('open');
+  var list=el('mailbox-list');
+  list.innerHTML='<div style="color:var(--soft);font-size:12px">Checking the mailbox…</div>';
+  var emailToRi={};
+  for(var ri=DATA_START;ri<rows.length;ri++){
+    var e=normEmail((rows[ri]||[])[C.EM]);
+    if(e&&emailToRi[e]==null)emailToRi[e]=ri;
+  }
+  // Overview sweep: the most recent 100 inbox messages regardless of age,
+  // so leads who wrote before the 48h window surface without opening each.
+  var latest={};
+  try{
+    var r=await gfetch(GR+'/me/mailFolders/Inbox/messages?$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,webLink,isRead&$top=100');
+    if(r.ok){var j=await r.json();(j.value||[]).forEach(function(m){
+      var en=mailEntryFromGraph(m),e2=normEmail(en.fromAddr);
+      if(emailToRi[e2]==null)return;
+      if(!latest[e2]||en.receivedTs>latest[e2].receivedTs)latest[e2]=en;
+    });}
+  }catch(_){}
+  // Fold in the live cache + any histories already fetched this session
+  Object.keys(emailToRi).forEach(function(e3){
+    (inboundEmailCache[e3]||[]).concat(leadMailCached(e3)||[]).forEach(function(m){
+      if(!latest[e3]||m.receivedTs>latest[e3].receivedTs)latest[e3]=m;
+    });
+  });
+  var items=Object.keys(latest).map(function(e4){
+    return {ri:emailToRi[e4],email:e4,latest:latest[e4],latestTs:latest[e4].receivedTs,unread:unreadCountFor(e4)};
+  });
+  items.sort(mailboxOrder);
+  renderMailboxList(items);
+}
+function renderMailboxList(items){
+  var list=el('mailbox-list');if(!list)return;
+  if(!items.length){
+    list.innerHTML='<div style="color:var(--soft);font-size:12px">No emails from your leads found yet. When a lead writes you, they surface here automatically.</div>';
+    return;
+  }
+  list.innerHTML=items.map(function(it){
+    var r=rows[it.ri]||[];
+    var nm=escapeHtml(String(r[C.NM]||r[C.DM]||it.email).trim());
+    var when=new Date(it.latestTs);
+    var whenStr=when.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    return '<div style="border:1.5px solid '+(it.unread?'var(--gold)':'var(--border)')+';border-radius:10px;margin-bottom:8px;overflow:hidden">'
+      +'<div data-action="mailbox-expand" data-ri="'+it.ri+'" style="display:flex;gap:10px;align-items:center;padding:10px 12px;cursor:pointer'+(it.unread?';background:var(--gold-pale)':'')+'">'
+      +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12.5px">'+(it.unread?'● ':'')+nm
+      +(it.unread?' <span class="inbox-badge">📩 '+it.unread+' new</span>':'')+'</div>'
+      +'<div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(it.latest.subject)+' — '+escapeHtml(String(it.latest.preview||'').slice(0,90))+'</div></div>'
+      +'<div style="font-size:10.5px;color:var(--soft);white-space:nowrap">'+whenStr+'</div>'
+      +'<span id="mbx-arrow-'+it.ri+'">▸</span></div>'
+      +'<div id="mbx-fold-'+it.ri+'" style="display:none;padding:4px 12px 10px"></div>'
+      +'</div>';
+  }).join('');
+}
+function updateMailboxBadge(){
+  var b=el('mailbox-badge');if(!b)return;
+  var total=0;try{leadsWithUnread().forEach(function(x){total+=x.n;});}catch(_){}
+  if(total>0){b.style.display='inline-block';b.textContent=total>99?'99+':String(total);}
+  else b.style.display='none';
+}
+// Surface strip above the buckets: every lead with unread inbound mail.
+function renderReplySurface(){
+  var host=el('reply-surface');if(!host)return;
+  var items;try{items=leadsWithUnread();}catch(_){items=[];}
+  updateMailboxBadge();
+  if(!items.length){host.style.display='none';host.innerHTML='';return;}
+  host.style.display='block';
+  host.innerHTML='<div style="font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:#8B6500;margin-bottom:6px">📩 They emailed you</div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap">'
+    +items.map(function(it){
+      var r=rows[it.ri]||[];
+      var nm=escapeHtml(String(r[C.NM]||r[C.DM]||it.email).trim());
+      return '<button class="ee-mini" style="border-color:var(--gold);background:var(--gold-pale)" data-action="surface-lead" data-ri="'+it.ri+'">📩 '+nm+' ('+it.n+')</button>';
+    }).join('')+'</div>';
+}
+/* ⚡LEADMAIL — END */
 
 /* ─── §13 Manual call logging ──────────────────────────────────────────
  * "Log a call" button on the drawer opens a modal to record inbound or
@@ -12196,22 +12419,27 @@ function openDrawer(ri){
   el('d-body').innerHTML=actionsRow+inboundHtml+sentHtml+activityHtml+fieldsHtml;
   el('drawer').classList.add('open');
   el('doverlay').classList.add('open');
+  // Restore the email fold if it was open before this re-render (cached, instant)
+  try{if(_leadMailOpen['lead-mail-fold-'+ri])expandLeadMail(ri,'lead-mail-fold-'+ri,'lead-mail-arrow-'+ri).catch(function(){});}catch(_){}
   // Item 3 fix: values typed straight into the sheet (e.g. Notes edited in
   // Excel) were invisible until a full Refresh. Pull this one row fresh.
   refreshRowFromSheet(ri);
 }
 function renderInboundFor(ri){
-  var list=inboundFor(ri);
-  if(!list.length)return '';
-  var items=list.slice(0,6).map(function(m2){
-    return '<div class="activity-item" style="border-left-color:var(--sky-mid)">'
-      +'<div class="subj">📥 '+escapeHtml(m2.subject||'(no subject)')+'</div>'
-      +'<div style="font-size:10.5px;color:var(--soft);margin:2px 0 4px">'+escapeHtml(String(m2.receivedAt||'').slice(0,10))+' · '+escapeHtml(m2.fromName||m2.fromAddr||'')+'</div>'
-      +'<div style="font-size:11px;color:var(--mid);line-height:1.4">'+escapeHtml(String(m2.preview||'').slice(0,160))+'</div>'
-      +'<button class="ee-mini" style="margin-top:6px;padding:5px 12px;font-size:11px" data-action="reply-inbound" data-ri="'+ri+'" data-mid="'+escapeHtml(m2.id)+'">↩ Reply</button>'
-      +'</div>';
-  }).join('');
-  return '<div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--soft);margin:14px 0 6px">📥 From them</div>'+items;
+  // Folded expandable — expanding pulls their FULL history (any age), each
+  // message replyable. Collapsed by default; unread badges behave as before.
+  var em=normEmail((rows[ri]||[])[C.EM]);
+  if(!em)return '';
+  var n=unreadCountFor(em);
+  var cached=leadMailCached(em);
+  var known=cached?cached.length:inboundFor(ri).length;
+  return '<div class="activity-section" style="background:#F4F8FC;border-color:#D6E4F0">'
+    +'<div class="activity-hdr" style="cursor:pointer;color:var(--sky-deep)" data-action="toggle-lead-mail" data-ri="'+ri+'">📥 Emails from them'
+    +(known?' <span class="count" style="background:var(--sky-deep)">'+known+'</span>':'')
+    +(n?' <span class="inbox-badge">📩 '+n+' new</span>':'')
+    +' <span id="lead-mail-arrow-'+ri+'" style="float:right">▸</span></div>'
+    +'<div id="lead-mail-fold-'+ri+'" style="display:none"></div>'
+    +'</div>';
 }
 function renderSentEmailsFor(ri){
   var sent=sentEmailsFor(ri);
@@ -14435,9 +14663,33 @@ function onClick(ev){
       (function(){
         var rri=parseInt(t.dataset.ri,10);
         var mid=t.dataset.mid;
-        var entry=inboundFor(rri).find(function(m3){return m3.id===mid;});
-        if(entry){closeDrawer();openEmail(rri,{reply:entry});}
+        // Live cache OR fetched history — any of their emails is replyable
+        var entry=findMailEntry(rri,mid);
+        if(entry){
+          closeDrawer();
+          var mbx=el('modal-mailbox');if(mbx)mbx.classList.remove('open');
+          openEmail(rri,{reply:entry});
+        }
       })();
+      break;
+    case 'open-mailbox':
+      openMailbox().catch(function(e){showErr('Mailbox: '+e.message);});
+      break;
+    case 'mailbox-expand':
+      if(ri!=null)expandLeadMail(ri,'mbx-fold-'+ri,'mbx-arrow-'+ri).catch(function(){});
+      break;
+    case 'toggle-lead-mail':
+      if(ri!=null)expandLeadMail(ri,'lead-mail-fold-'+ri,'lead-mail-arrow-'+ri).catch(function(){});
+      break;
+    case 'lead-mail-full':
+      (function(){
+        var fri=parseInt(t.dataset.ri,10);
+        if(!isNaN(fri))leadMailShowFull(fri,t.dataset.mid).catch(function(){});
+      })();
+      break;
+    case 'surface-lead':
+      // Pre-arm the fold flag; openDrawer's restore hook expands it once
+      if(ri!=null){_leadMailOpen['lead-mail-fold-'+ri]=true;openDrawer(ri);}
       break;
     case 'cancel-reply':
       _emailReplyTo=null;
