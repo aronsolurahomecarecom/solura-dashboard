@@ -9147,6 +9147,17 @@ function _initEmailTriggers(){
 }
 
 /* Helper to evaluate a trigger by name, with safe fallback for unknown triggers. */
+/* The interview-cert choreography (T-60 warning email, T-30 Cal.com cancel) is about an
+   INTERVIEW booking. Column G can lag at 'Interview booked' after the interview happened
+   (offer/onboarding sent by hand), and when the candidate then books ONBOARDING the worker
+   stores that booking on the row without advancing G — live Chloe Petersen r112, Sep 29. The
+   choreography then read the onboarding as "the interview" and would have warned and then
+   auto-cancelled her onboarding over missing certs. A booking KNOWN to be another kind leaves
+   the lane; an unclassified one keeps today's behavior. */
+function _bookingNotInterview(c){
+  const k=(typeof _bookingKind==='function')?_bookingKind(c):null;
+  return k==='screen'||k==='onboarding';
+}
 /* Certs claimed on the application that have NO uploaded file yet. */
 function _missingAppCerts(c){
   const st=(c&&c.st)||{};
@@ -9468,7 +9479,7 @@ function action(c){
        T-15                        → 🎥 Run interview (opens interview hub + meeting link).
      Nothing cancels silently — cancel is one click → Cal.com via the worker; the
      BOOKING_CANCELLED webhook updates state normally. */
-  if(c&&c.st&&c.st.booking&&c.stage==='Interview booked'&&!(c.st.emails||[]).some(e2=>!e2.seen)){
+  if(c&&c.st&&c.st.booking&&c.stage==='Interview booked'&&!_bookingNotInterview(c)&&!(c.st.emails||[]).some(e2=>!e2.seen)){
     /* An unread reply from the candidate outranks the choreography (they may be
        rescheduling) — fall through so _actionC's email override surfaces it. */
     const _mins=minsUntil(c.st.booking);
@@ -23414,7 +23425,7 @@ function _seqAutomationPreview(){
     if(c.st.__ajCorrupt)continue;
     if(_wsOpenOn(c.excelRow))continue;
     /* cert warn/cancel lane */
-    if(c.st.booking&&c.stage==='Interview booked'&&!_autoCancelDoneFor(c)&&c.st.calBookingId&&!(_certSignoffValid(c)&&!c.st.certsReadyReview)
+    if(c.st.booking&&c.stage==='Interview booked'&&!_bookingNotInterview(c)&&!_autoCancelDoneFor(c)&&c.st.calBookingId&&!(_certSignoffValid(c)&&!c.st.certsReadyReview)
        &&!(c.st.emails||[]).some(e2=>!e2.seen)){
       const m=minsUntil(c.st.booking),miss=_missingAppCerts(c);
       const missingAny=(miss.length||_bgFormBlocks(c))&&!c.st.certsReadyReview;
@@ -23478,7 +23489,7 @@ async function _seqAutomationTick(){
        sends / double cancels). */
     if(_wsOpenOn(c.excelRow))continue;
     /* 1-hour auto-cancel: automation ON makes the warned rule real. Once per booking. */
-    if(c.st.booking&&c.stage==='Interview booked'&&!_autoCancelDoneFor(c)&&c.st.calBookingId&&!(_certSignoffValid(c)&&!c.st.certsReadyReview)
+    if(c.st.booking&&c.stage==='Interview booked'&&!_bookingNotInterview(c)&&!_autoCancelDoneFor(c)&&c.st.calBookingId&&!(_certSignoffValid(c)&&!c.st.certsReadyReview)
        &&!(c.st.emails||[]).some(e2=>!e2.seen)){
       /* ✓ Done with checks is the operator's sign-off — automation never warns or cancels past it.
          An UNREAD reply also parks the robot: action() yields to the email override ("they may
