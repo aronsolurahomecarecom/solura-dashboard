@@ -10332,7 +10332,13 @@ function setInboxSearch(s){_inboxSearch=s;clearTimeout(_inboxSearchTimer);_inbox
 async function markAllRead(){
   if(!confirm('Mark all unread emails as read?'))return;
   let count=0;
-  for(const c of pipeline){
+  /* Iterate ROWS and re-find the live card each pass: every write below awaits, and loadData swaps
+     `pipeline` for fresh card objects every 30s. Iterating the original array kept marking and
+     writing ORPHANED cards whose st predates whatever landed since (inbox merge, tick, a workspace
+     save) — each such write rolled that row's AJ back. */
+  const _rows=pipeline.map(c=>c.excelRow);
+  for(const _r of _rows){
+    const c=pipeline.find(x=>x.excelRow===_r);if(!c||!c.st)continue;
     const emails=c.st.emails||[];
     let dirty=false;
     /* Mirror into the open workspace's deep copy too — see _mirrorSeenToW. Without it, the very
@@ -17118,9 +17124,16 @@ async function saveAttachment(messageId,attIdx,row){
        onto that OTHER candidate and ran a full saveW of them: a stray log line on the wrong person
        plus an unrelated state write. */
     if(ownerC&&_wsOpenOn(ownerC.excelRow)){logW('📎 Saved attachment "'+filename+'" from email');await saveW(true);}
-    else if(ownerC&&ownerC.st&&!ownerC.st.__ajCorrupt){
-      ownerC.st.log=(ownerC.st.log||[]).concat({t:stamp(),x:'📎 Saved attachment "'+filename+'" from email'});
-      try{await patchRange('AJ'+ownerC.excelRow,[[_stCell(ownerC.st)]]);}catch(e2){console.warn('attachment log write failed row',ownerC.excelRow,e2.message);}
+    else if(ownerC){
+      /* Re-find the LIVE card: ownerC was captured before the folder check + upload (seconds), and
+         loadData rebuilds `pipeline` every 30s — writing the click-time card's st back rolled AJ over
+         whatever landed meanwhile (inbox merge, tick, workspace save). Same rule as _doAssignment.
+         Build the new state aside and adopt it only once the write took (no phantom log line). */
+      const liveC=pipeline.find(c=>c.excelRow===ownerC.excelRow)||ownerC;
+      if(liveC.st&&!liveC.st.__ajCorrupt){
+        const _nst=Object.assign({},liveC.st,{log:(liveC.st.log||[]).concat({t:stamp(),x:'📎 Saved attachment "'+filename+'" from email'})});
+        try{await patchRange('AJ'+liveC.excelRow,[[_stCell(_nst)]]);liveC.st=_nst;}catch(e2){console.warn('attachment log write failed row',liveC.excelRow,e2.message);}
+      }
     }
     toast('✓ Attachment saved to candidate folder');
   }catch(e){
