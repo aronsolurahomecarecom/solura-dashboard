@@ -13111,6 +13111,10 @@ async function reallySend(tpl,advanceTo){
      advance and — for a rejection — stage 'Declined' then landed on THAT candidate and were saved to
      their row, while this one kept no record the email went out. */
   const w=W;
+  /* Refuse BEFORE sending, as _sendNudgeHeadless and _execCatalogAction do: saveW refuses a corrupt
+     row only AFTER the email is out, so nothing records it (sent stamp, email record, a rejection's
+     Declined) and the board offers the very same send again. */
+  if(w.st&&w.st.__ajCorrupt){toast('🛑 Not sent — this candidate\'s stored data is corrupted. Restore the row first, then send.');return;}
   advanceTo=_tplAdvanceTo(tpl,advanceTo); /* a rejection ALWAYS closes the candidate — regardless of which entry point opened the composer */
   /* Substitute any placeholders in subject/body BEFORE sending. This makes the placeholder
      buttons work even for free-typed text that includes tokens like {first} or {appLink}. */
@@ -13317,9 +13321,24 @@ async function reallySend(tpl,advanceTo){
     if(advanceTo){W.stage=advanceTo;if(advanceTo==='Screen invite'||advanceTo==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();logW('Advanced to '+advanceTo);if(advanceTo==='Declined'&&W.st.declineHint)delete W.st.declineHint;}
     _saveP=saveW(true);
     }finally{W=_curW;}
-    await _saveP;
+    /* saveW never throws — it toasts and returns false (throttled batch AND sequential fallback, or
+       _stCell refusing an oversized state). This line used to ignore that: the "Save failed" toast was
+       overwritten a moment later by "Email sent", the composer closed, and the send's whole record —
+       the sent stamp, the email entry, the park, the stage move (a rejection's Declined) — was gone
+       from the sheet and the board, which then offered the same email again. The email is already
+       out, so the composer must still close (its Send would mail them twice); retry the save once,
+       and if it still fails say so in a way that cannot be missed. */
+    let _saved=await _saveP;
+    if(!_saved){await new Promise(r=>setTimeout(r,1500));_saved=await _saveWFor(w,true);}
     /* Close only THIS composer — if it was dismissed and another dialog opened meanwhile, leave that one. */
     if(document.getElementById('sendbtn')===b)closeModal();
+    if(!_saved){
+      console.error('reallySend: email to',w.email,'('+tpl+') was SENT but its record could not be saved, row',w.row);
+      alert('The email to '+(w.name||w.email)+' WAS SENT, but recording it on their row failed (see the warning just shown).\n\nDo not send it again. Reload the portal, open '+(w.name||'the candidate')+', and redo what the send should have done'+(advanceTo?' (move them to '+advanceTo+')':'')+' — or note it by hand.');
+      watchForBounce(w.email,w.row);
+      render();
+      return;
+    }
     toast('Email sent — watching for delivery');
     /* Auto-save stage report on advance via email-send (e.g., Applied → Screen invite triggers
        application snapshot save). Skip when no advance happened. */
