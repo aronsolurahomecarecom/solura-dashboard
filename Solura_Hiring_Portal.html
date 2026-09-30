@@ -9580,7 +9580,10 @@ function _actionC(c){
   if(s==='Declined'||s==='Withdrawn')return{bucket:'closed',info}; /* both terminal — a Withdrawn column-G value used to fall through as if active */
   /* declineHint set by recordCertAnswer when required minimums weren't met after a cert claim.
      Surfaces a red 'Send rejection' primary CTA — user confirms before it actually sends. */
-  if(c.st.declineHint&&!c.st.declineOverride&&s!=='Declined'&&s!=='Hired'){
+  /* An override dismisses the recommendation that existed WHEN it was given — a hint recorded
+     AFTER it (a later cert claim missing required minimums) is a new recommendation and shows. */
+  const _dhMuted=!!(c.st.declineHint&&c.st.declineOverride&&!(String(c.st.declineHint.at||'')>String(c.st.declineOverride.at||'')));
+  if(c.st.declineHint&&!_dhMuted&&s!=='Declined'&&s!=='Hired'){
     const reason=c.st.declineHint.reason||'Missing required minimums';
     return{bucket:'action',timing:_dn(reason,'pr2'),info,primary:{kind:'email-tpl',tpl:'reject',advanceTo:'Declined',label:'✕ Send rejection — '+reason,cls:'red'}};
   }
