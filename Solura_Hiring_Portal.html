@@ -16815,7 +16815,7 @@ async function _doAssignment(messageId,attIdx,cand,item){
     /* Derive output filename, preserving original extension if possible */
     const origExt=(att.name||'').match(/\.[a-z0-9]{2,5}$/i);
     const baseName=kindCfg?kindCfg.filename(cand,item.name||''):(item.name||'document')+'-'+today();
-    const finalName=baseName.replace(/\.pdf$/i,'')+(origExt?origExt[0]:'.pdf');
+    let finalName=baseName.replace(/\.pdf$/i,'')+(origExt?origExt[0]:'.pdf');
     const folder='caregivers/'+safeFileName(cand.name)+'/onboarding';
     await ensureFolderPath(folder);
     /* base64 → bytes → upload */
@@ -16823,13 +16823,20 @@ async function _doAssignment(messageId,attIdx,cand,item){
     for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
     const path=folder+'/'+finalName;
     const enc=path.split('/').map(encodeURIComponent).join('/');
-    const r=await fetch(GR+'/drives/'+driveId+'/root:/'+enc+':/content',{
+    /* Per-kind filenames are FIXED (id-<name>, license-<name>, cert-<cert>…), and a bare PUT
+       silently REPLACES a same-named file — the front of an ID was overwritten by its back the
+       moment both photos were assigned as Photo ID. Rename on conflict instead; the résumé alone
+       keeps replace semantics (the worker's _findResumePdf picks the last resume-* by name, so a
+       renamed "resume-X 1.pdf" would lose to the stale original). */
+    const _cb=item.kind==='resume'?'':'?@microsoft.graph.conflictBehavior=rename';
+    const r=await fetch(GR+'/drives/'+driveId+'/root:/'+enc+':/content'+_cb,{
       method:'PUT',
       headers:{Authorization:'Bearer '+tok,'Content-Type':att.contentType||'application/octet-stream'},
       body:bytes
     });
     if(!r.ok)throw new Error('Upload failed: '+r.status);
     const uploaded=await r.json();
+    if(uploaded&&uploaded.name)finalName=uploaded.name; /* the name it actually landed under */
     /* Re-find the LIVE card: the folder check + upload take seconds, and loadData rebuilds `pipeline`
        with new objects every 30s — the click-time card can be an orphan whose st predates whatever
        landed since (inbox merge, tick, workspace save), and writing it back undid those. Snapshot it
@@ -16989,15 +16996,18 @@ async function saveAttachment(messageId,attIdx,row){
     /* decode base64 → bytes → upload */
     const bin=atob(att.contentBytes);const bytes=new Uint8Array(bin.length);
     for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
-    const filename=att.name||('attachment-'+today());
+    let filename=att.name||('attachment-'+today());
     const path=folder+'/'+filename;
     const enc=path.split('/').map(encodeURIComponent).join('/');
-    const r=await fetch(GR+'/drives/'+driveId+'/root:/'+enc+':/content',{
+    /* Rename on conflict: phone photos all arrive as image0.jpeg / IMG_… — a bare PUT replaced
+       the file saved from an EARLIER email with the same name. */
+    const r=await fetch(GR+'/drives/'+driveId+'/root:/'+enc+':/content?@microsoft.graph.conflictBehavior=rename',{
       method:'PUT',
       headers:{Authorization:'Bearer '+tok,'Content-Type':att.contentType||'application/octet-stream'},
       body:bytes
     });
     if(!r.ok)throw new Error(r.status);
+    try{const _up=await r.json();if(_up&&_up.name)filename=_up.name;}catch(e){}
     btn.textContent='✓ Saved';btn.style.background='var(--grn-pale,#EBF5EA)';btn.style.color='var(--grn)';btn.style.borderColor='var(--grn-mid,#8FCC87)';
     /* note in candidate log */
     /* Log to the EMAIL'S candidate, never to whichever workspace happens to be open. The upload
