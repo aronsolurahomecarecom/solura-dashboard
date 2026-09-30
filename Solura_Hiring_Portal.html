@@ -11489,10 +11489,18 @@ function rowHtml(c){
 function _declineInfo(c){
   const st=c.st||{},log=st.log||[];
   let when='',why='';
+  /* Newest-first scan in two tiers: the canonical decline-event lines win; the loose keyword
+     match is only a fallback, and skips lines that merely MENTION the decline (e.g. the
+     Cal.com "booking attempted from stage Declined" warning, which postdates the decline). */
+  let evT='',evX='',kwT='',kwX='';
   for(let i=log.length-1;i>=0;i--){
-    const x=String(log[i].x||'');
-    if(/declin|withdraw|reject|no-show|unreachable/i.test(x)){when=log[i].t||'';why=x.replace(/^[^A-Za-z]+/,'');break;}
+    const raw=String(log[i].x||''),x=raw.replace(/^[^A-Za-z]+/,'');
+    if(!evX&&/^(manually declined|application withdrawn|advanced to declined)/i.test(x)){evT=log[i].t||'';evX=x;}
+    if(!kwX&&/declin|withdraw|reject|no-show|unreachable/i.test(x)&&!/attempted|blocked|dismiss|hint|refus/i.test(x)){kwT=log[i].t||'';kwX=x;}
+    if(evX)break;
   }
+  when=evT||kwT;why=evX||kwX;
+  if(/^advanced to declined/i.test(why))why='Rejection sent';
   if(st.withdrawn||c.stage==='Withdrawn'){
     if(st.withdrawnReason)why='Withdrew — '+st.withdrawnReason;else if(!why)why='Application withdrawn';
     if(!when)when=st.withdrawnAt||'';
