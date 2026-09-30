@@ -1691,6 +1691,7 @@ input[type="text"]:focus,input[type="search"]:focus{background-color:#FFFEFA;}
     <div class="sw" id="sw-1"><div class="shdr" onclick="toggleBucket(1)"><div class="sdot2 gold"></div><div class="stitle">Awaiting candidate</div><div class="scnt" id="c1">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t1"></tbody></table></div></div>
     <div class="sw" id="sw-2"><div class="shdr" onclick="toggleBucket(2)"><div class="sdot2 sky"></div><div class="stitle">Checks running</div><div class="scnt" id="c2">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t2"></tbody></table></div></div>
     <div class="sw sw-all collapsed" id="sw-4" style="margin-top:8px"><div class="shdr" onclick="toggleBucket(4)"><div class="sdot2 soft"></div><div class="stitle">All candidates in pipeline</div><div class="scnt" id="c4">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Stage</th><th>Next action</th><th>Sequence</th><th></th></tr></thead><tbody id="t4"></tbody></table></div></div>
+    <div class="sw sw-all collapsed" id="sw-declined"><div class="shdr" onclick="toggleBucket('declined')"><div class="sdot2 red"></div><div class="stitle">✕ Declined — everyone, all time</div><div class="scnt" id="cdeclined">0</div><div class="bucket-arrow">▾</div></div><div class="tc"><table><thead><tr><th>Candidate</th><th>Phone / Email</th><th>Outcome</th><th>When</th><th>Reason</th><th></th></tr></thead><tbody id="tdeclined"></tbody></table></div></div>
   </div>
   <div id="calendar-view" style="display:none"></div>
   <div id="active-view" style="display:none"></div>
@@ -10940,8 +10941,8 @@ async function markPayoutPaid(row,idx){
   catch(e){toast('Save failed: '+e.message);}
 }
 function render(){_memGen++;if(!tok)return;updateFilterCount();if(view==='calendar')return renderCalendar();if(view==='active')return renderActiveCaregivers();if(view==='referrals')return renderReferralsView();
-  const B={action:[],scheduled:[],awaiting:[],checks:[]},all=[];
-  pipeline.forEach(c=>{if(c.stage==='Hired'||!matchFilters(c))return;const a=action(c);if(a.bucket==='closed'||a.bucket==='hired')return;all.push(c);(B[a.bucket]||B.action).push(c);});
+  const B={action:[],scheduled:[],awaiting:[],checks:[]},all=[],declined=[];
+  pipeline.forEach(c=>{if(c.stage==='Hired'||!matchFilters(c))return;const a=action(c);if(a.bucket==='closed'||a.bucket==='hired'){if(c.stage==='Declined'||c.stage==='Withdrawn')declined.push(c);return;}all.push(c);(B[a.bucket]||B.action).push(c);});
   /* KV counter flash on value change — gives a brief visual ping when a count moves. */
   const setKv=(id,val)=>{
     const el=document.getElementById(id);if(!el)return;
@@ -11016,6 +11017,7 @@ function render(){_memGen++;if(!tok)return;updateFilterCount();if(view==='calend
   fillBucket(1,B.awaiting.sort(byTime));
   fillBucket(2,B.checks.sort(byTime));
   fillBucket(4,all.sort((a,b)=>ord(b)-ord(a)||(a.name<b.name?-1:1)));
+  fillDeclined(declined);
   /* Auto-collapse buckets that are empty UNLESS the user explicitly expanded them this session.
      Without honoring the explicit-expand flag, every render() that empties a bucket (e.g., after
      sending a nudge that moves the candidate or just refreshed the data) re-collapses sections
@@ -11478,6 +11480,68 @@ function rowHtml(c){
     +'<td>'+seq+'</td>'
     +'<td onclick="event.stopPropagation()" style="width:215px;padding:8px">'+btns+'</td>'
     +'</tr>';
+}
+
+/* ── Declined archive (Meir, 2026-09-30): one place to see everyone ever declined or withdrawn.
+   Rows never leave the sheet, so this is purely display — reads straight from pipeline, all time.
+   Restore path: Open → ⇄ Move to stage in the workspace quick bar. rowHtml is NOT reusable here:
+   it dereferences a.primary, which action() never builds for the closed bucket. */
+function _declineInfo(c){
+  const st=c.st||{},log=st.log||[];
+  let when='',why='';
+  for(let i=log.length-1;i>=0;i--){
+    const x=String(log[i].x||'');
+    if(/declin|withdraw|reject|no-show|unreachable/i.test(x)){when=log[i].t||'';why=x.replace(/^[^A-Za-z]+/,'');break;}
+  }
+  if(st.withdrawn||c.stage==='Withdrawn'){
+    if(st.withdrawnReason)why='Withdrew — '+st.withdrawnReason;else if(!why)why='Application withdrawn';
+    if(!when)when=st.withdrawnAt||'';
+  }else if(st.declineReason)why=st.declineReason;
+  else if(!why&&st.declineHint&&st.declineHint.reason)why=st.declineHint.reason;
+  if(!when&&log.length)when=log[log.length-1].t||'';
+  return{when:when||'—',why:why||'—',withdrawn:!!st.withdrawn||c.stage==='Withdrawn'};
+}
+/* stamp() writes "Sep 12" with no year — same future-means-last-year rule as computeIdleDays */
+function _declineSortTs(when){
+  if(!when||when==='—')return 0;
+  try{const now=Date.now(),yr=new Date().getFullYear();
+    let d=new Date(when+' '+yr);if(isNaN(d.getTime()))return 0;
+    if(d.getTime()>now+86400000){d=new Date(when+' '+(yr-1));if(isNaN(d.getTime()))return 0;}
+    return d.getTime();}catch(e){return 0;}
+}
+function _declinedRowHtml(c,info){
+  const r=c.excelRow;
+  const phone=c.phone?'<a class="ph" href="tel:'+telify(c.phone)+'" onclick="event.stopPropagation()">📞 '+esc(c.phone)+'</a>':'';
+  const email=c.email?'<div><a class="em" href="mailto:'+esc(c.email)+'" onclick="event.stopPropagation()">✉ '+esc(c.email)+'</a></div>':'';
+  const _srcTag=candidateSourceLabel(c);
+  const sub=_srcTag&&_srcTag!=='—'?'<div class="dm-tag" style="margin-top:5px">'+esc(_srcTag)+'</div>':'';
+  const badge=info.withdrawn
+    ?'<span class="sbadge" style="background:#F3EFE7;color:#6B5E4A;border-color:#6B5E4A33">↩ Withdrew</span>'
+    :'<span class="sbadge" style="background:#FDECEA;color:#B03025;border-color:#B0302533">✕ Declined</span>';
+  return '<tr class="dr" onclick="openWorkspace('+r+')" style="opacity:.85">'
+    +'<td><div class="tn">'+esc(c.name)+'</div>'+sub+'</td>'
+    +'<td>'+phone+email+'</td>'
+    +'<td>'+badge+'</td>'
+    +'<td><span style="font-size:12px;color:var(--soft)">'+esc(info.when)+'</span></td>'
+    +'<td><span style="font-size:12px">'+esc(info.why)+'</span></td>'
+    +'<td onclick="event.stopPropagation()" style="width:110px;padding:8px"><button class="btn-sm bg-sky-l" onclick="event.stopPropagation();openWorkspace('+r+')">Open</button></td>'
+    +'</tr>';
+}
+function fillDeclined(list){
+  const cEl=document.getElementById('cdeclined'),tEl=document.getElementById('tdeclined');
+  if(!cEl||!tEl)return;
+  const rows=list.map(c=>{const info=_declineInfo(c);return{c,info,ts:_declineSortTs(info.when)};});
+  rows.sort((a,b)=>b.ts-a.ts||(a.c.name<b.c.name?-1:1));
+  cEl.textContent=rows.length;
+  tEl.innerHTML=rows.length?rows.map(r=>_declinedRowHtml(r.c,r.info)).join('')
+    :'<tr><td colspan="6" class="empty" style="padding:22px;text-align:center;color:var(--soft);font-size:12px">No one has been declined.</td></tr>';
+  /* Archive defaults to tucked away even when full — unlike the live buckets, whose default is
+     collapse-only-when-empty. Seeding collapsed['declined']=true (not leaving it undefined) also
+     keeps toggleBucket coherent: its blind flip would read undefined as "open" and the first
+     click would no-op. */
+  if(collapsed['declined']===undefined)collapsed['declined']=true;
+  const _swd=document.getElementById('sw-declined');
+  if(_swd)_swd.classList.toggle('collapsed',collapsed['declined']);
 }
 
 /* ── Cmd-K / Ctrl-K settings search — jump to any settings section by typing. */
