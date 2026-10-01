@@ -23128,7 +23128,7 @@ async function _seqRunIntent(row,intentJson){
          await (the handler throws on failure). Handlers that merely open a workspace dialog
          (yardstik, zoominfo, graph) signal nothing — the operator advances after those. */
       if(intent.stepId&&/^claude:resume[-_]screen$/.test(intent.provider+':'+intent.action)){
-        await _seqAdvance(cand);
+        await _seqAdvance(_liveCandAfterAwait(row,cand)||cand); /* the screen adopted onto the live card — advancing the click-time one would write the pre-screen state back */
         toast('🧬 Sequence advanced — screen complete');
       }
     }
@@ -23191,6 +23191,13 @@ async function _seqRunIntent(row,intentJson){
    sit alongside the scoring engine and you decide. Costs one API call per run (~a cent). */
 /* Returns true only when a verdict was stored — callers (the sequence integration step,
    locked packs) gate their advance on it. */
+/* The card to write to after a long await: loadData may have replaced `pipeline` meanwhile, so
+   the click-time card can be an orphan whose st predates whatever landed since. null = refuse
+   (row gone, or its stored state is corrupt — rule 5). */
+function _liveCandAfterAwait(row,fallback){
+  const c=pipeline.find(x=>x.excelRow===row)||fallback;
+  return (c&&c.st&&!c.st.__ajCorrupt)?c:null;
+}
 async function _claudeResumeScreen(row){
   const cand=pipeline.find(x=>x.excelRow===row);if(!cand){toast('Candidate not found');return false;}
   /* Both save paths below run cand.st=sanitizeState(cand.st) BEFORE _stCell, and sanitizeState
@@ -23251,22 +23258,33 @@ async function _claudeResumeScreen(row){
     if(!j.ok){
       const err=(j.error||('HTTP '+j._http));
       console.error('Claude screen FAILED for',cand.name,'—',err,resumeSkipped?('(also failed without résumé; first error: '+resumeSkipped+')'):'');
-      cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'⚠ Claude screen failed: '+String(err).slice(0,200)});
-      cand.st=sanitizeState(cand.st);
-      patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]).catch(()=>{});
+      const liveF=_liveCandAfterAwait(row,cand);
+      if(liveF){
+        const _fst=sanitizeState(Object.assign({},liveF.st,{log:(liveF.st.log||[]).concat({t:stamp(),x:'⚠ Claude screen failed: '+String(err).slice(0,200)})}));
+        patchRange('AJ'+liveF.excelRow,[[_stCell(_fst)]]).then(()=>{liveF.st=_fst;if(W&&W.row===row&&W.st!==liveF.st)W.st=liveF.st;}).catch(()=>{});
+      }
       toast('⚠ Screen failed for '+(cand.name||'candidate')+': '+err);
       return false;
     }
-    if(resumeSkipped){
-      cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🤖 Screened WITHOUT the résumé PDF — attaching it failed ('+String(resumeSkipped).slice(0,160)+'). Check the PDF in their folder.'});
-    }
-    cand.st.aiScreen=Object.assign({},j.screen,{at:new Date().toISOString(),resumeIncluded:!!j.resumeIncluded,resumeName:j.resumeName||null});
-    cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🤖 Claude screened: '+(j.screen.verdict||'?')+' ('+(j.screen.score!=null?j.screen.score:'—')+') — '+String(j.screen.summary||'').slice(0,120)});
+    /* WRITE ONTO THE LIVE CARD, NOT THE CLICK-TIME ONE. The Claude call (plus the no-résumé retry)
+       routinely runs tens of seconds, and loadData swaps `pipeline` for fresh cards every 30s while
+       the inbox poll merges new replies into AJ and the worker writes bookings / Yardstik results.
+       Writing `cand.st` — captured before the await — rolled every one of those back: a reply the
+       poll had just recorded (its watermark already past it, so never re-ingested) vanished. Same
+       rule as _doAssignment / saveAttachment / markAllRead. */
+    const live=_liveCandAfterAwait(row,cand);
+    if(!live){toast('⚠ '+(cand.name||'This candidate')+' - stored data is corrupt or the row is gone; screen result NOT saved');return false;}
+    const _add=[];
+    if(resumeSkipped)_add.push({t:stamp(),x:'🤖 Screened WITHOUT the résumé PDF — attaching it failed ('+String(resumeSkipped).slice(0,160)+'). Check the PDF in their folder.'});
+    _add.push({t:stamp(),x:'🤖 Claude screened: '+(j.screen.verdict||'?')+' ('+(j.screen.score!=null?j.screen.score:'—')+') — '+String(j.screen.summary||'').slice(0,120)});
     /* sanitizeState like every other save path — a heavily-logged candidate otherwise blows
        the 32k AJ cell cap and the screen fails for that one candidate only. */
-    cand.st=sanitizeState(cand.st);
-    await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
-    if(W&&W.row===row){if(W.st!==cand.st)W.st=cand.st;renderWorkspace();}
+    const _nst=sanitizeState(Object.assign({},live.st,{
+      aiScreen:Object.assign({},j.screen,{at:new Date().toISOString(),resumeIncluded:!!j.resumeIncluded,resumeName:j.resumeName||null}),
+      log:(live.st.log||[]).concat(_add)}));
+    await patchRange('AJ'+live.excelRow,[[_stCell(_nst)]]);
+    live.st=_nst; /* adopt only once the write took */
+    if(W&&W.row===row){if(W.st!==live.st)W.st=live.st;renderWorkspace();}
     toast('🤖 '+(j.screen.verdict==='advance'?'✓ Advance':j.screen.verdict==='concern'?'⚠ Concern':'👁 Review')+' — score '+(j.screen.score!=null?j.screen.score:'—'));
     return true;
   }catch(e){toast('⚠ Screen failed: '+e.message);return false;}
@@ -23686,9 +23704,11 @@ async function _seqAutomationTick(){
     const _stepId=ev.currentStep.id;
     if(c.st.seqAutoFail&&c.st.seqAutoFail.stepId===_stepId)continue;
     const _stampFail=async(why)=>{
-      c.st.seqAutoFail={stepId:_stepId,at:new Date().toISOString(),why:String(why||'').slice(0,120)};
-      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚠ Automation could not run this step ('+(why||'failed')+') — surfaced for you'});
-      try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);}catch(e2){console.warn('autofail stamp:',e2.message);}
+      /* Runs after the lane's await (a send, a Claude call of tens of seconds) — stamp the LIVE card. */
+      const fc=_liveCandAfterAwait(c.excelRow,c);if(!fc)return;
+      fc.st.seqAutoFail={stepId:_stepId,at:new Date().toISOString(),why:String(why||'').slice(0,120)};
+      fc.st.log=(fc.st.log||[]).concat({t:stamp(),x:'🤖⚠ Automation could not run this step ('+(why||'failed')+') — surfaced for you'});
+      try{await patchRange('AJ'+fc.excelRow,[[_stCell(fc.st)]]);}catch(e2){console.warn('autofail stamp:',e2.message);}
     };
     const _clearFail=()=>{if(c.st.seqAutoFail)delete c.st.seqAutoFail;};
     try{
@@ -23765,11 +23785,16 @@ async function _seqAutomationTick(){
            screen, advances on success; a failure hands the card to a human INSTEAD of
            silently re-failing every 30 seconds. */
         if(await _claudeResumeScreen(c.excelRow)===true){
-          _clearFail();
-          const adv=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
-          if(!adv.error)Object.assign(c.st,adv.partialState||{});
-          c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-ran Claude screen (sequence automation)'});
-          await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+          /* The screen wrote onto the LIVE card (the call outlives loadData's 30s swap); `c` may now
+             be an orphan without the aiScreen — advancing and writing it would erase the screen. */
+          const lc=_liveCandAfterAwait(c.excelRow,c);
+          if(lc){
+            if(lc.st.seqAutoFail)delete lc.st.seqAutoFail;
+            const adv=window.SeqEngineV2.advanceStep(seq,lc,_seqTriggerEval);
+            if(!adv.error)Object.assign(lc.st,adv.partialState||{});
+            lc.st.log=(lc.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-ran Claude screen (sequence automation)'});
+            await patchRange('AJ'+lc.excelRow,[[_stCell(lc.st)]]);
+          }
           budget--;
         }else await _stampFail('Claude screen failed');
       }
