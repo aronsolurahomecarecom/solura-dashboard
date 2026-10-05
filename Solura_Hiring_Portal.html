@@ -9182,6 +9182,16 @@ function _yardstikFormFilled(c){
      form Yardstik had already turned into a clear report. A re-order resets tpCheck to pending and
      replaces the BG fields, decision included, so this cannot outlive the check it describes. */
   if(c.st.tpCheck==='clear'||c.st.tpCheck==='flag'||ys.decision)return true;
+  /* A REPORT ID IS NOT A SUBMITTED FORM. This account's reports exist, status 'created', before the
+     candidate has submitted anything: read live 2026-10-05, four orders had a report resolvable from
+     the candidate id 82 to 240 seconds after the order was placed, and three of them (r103, r146,
+     r161) later went created -> expired without ever reaching 'processing'. Webhook history shows the
+     real order of events: invitation clicked/viewed -> report created -> report processing. So the
+     bare id used to answer "form done" the moment the operator clicked Refresh status after ordering
+     (which backfills the id), and the interview gate's background-form half was disarmed for that
+     candidate for good. The pre-submission statuses are not done, id or no id. Anything else keeps
+     the old reading, 'expired' included (what an expired intake should do is proposal P-30). */
+  if(/^(created|sent|clicked|viewed|opened)$/i.test(String(ys.status||'').trim()))return false;
   return !!(ys.reportId||/report|complete|clear|consider/i.test(ys.status||''));
 }
 /* ---- Interview cert-gate helpers ------------------------------------------------
@@ -23527,6 +23537,49 @@ function _seqAutomationLog(){
    live targets sit. Latent-not-firing when written (2026-09-01: the one sequence carrying an
    automate-marked email step, 'Streamlined hiring — fast lane', has 0 candidates on it) — it
    arms itself the moment anyone is assigned to that lane. */
+/* THE ROBOT ASKS YARDSTIK BEFORE IT ACTS ON THE BACKGROUND FORM. st.yardstik.status is only as fresh
+   as the last webhook or the last click on Refresh status, and the webhook has delivered nothing since
+   2026-08-14 (read live 2026-10-05: 179 webhook log lines Jun 30 - Aug 14, none after; of 21 open
+   orders, 7 stored statuses were stale - six 'created' that Yardstik reports as expired and one
+   'created' that is really final_adverse). On that stored word alone the tick emailed the T-60
+   cancellation warning and cancelled the interview through Cal.com at T-30 with the reason
+   "Background-check form not completed" - for a candidate who may have submitted it days ago.
+   Returns true ONLY when Yardstik itself confirms nothing has been submitted. Could not ask (no
+   token, no candidate id, worker or Yardstik error) -> false: the robot never performs an
+   irreversible outward act on a third-party status it could not confirm; the board's own warning
+   and cancel cards stay with the operator. What Yardstik says is mirrored onto the record with the
+   same mapping refreshYardstik uses, only when the report is unambiguous (the one on file, or the
+   candidate's only non-verification report) and only when it changed - one log line per change. */
+async function _bgFormBlocksConfirmed(c){
+  if(!c||!c.st||!_bgFormBlocks(c))return false;
+  const ys=c.st.yardstik,tok=(SETTINGS.config||{}).ziToken||'';
+  if(!tok||!ys.candidateId)return false;
+  const memo=(window._ysGateChk=window._ysGateChk||{}),key=c.excelRow+'|'+String(c.st.booking||'');
+  if(memo[key]&&Date.now()-memo[key].at<120000)return memo[key].blocks; /* a failing warn/cancel retries every pass - do not re-ask each time */
+  let reps;
+  try{
+    const r=await fetch(ZI_WORKER_URL+'/yardstik/report-status?candidateId='+encodeURIComponent(ys.candidateId),{headers:{'X-Solura-Token':tok}});
+    const j=await r.json().catch(()=>null);
+    if(!r.ok||!j||!Array.isArray(j.reports))return false;
+    const vRid=ys.verifyReportId,vPkg=ys.verifyPackageId;
+    reps=j.reports.filter(x=>x&&x.id&&x.id!==vRid&&!(vPkg&&(x.packageId===vPkg||x.package_id===vPkg)));
+  }catch(e){return false;}
+  const PRE=/^(created|sent|clicked|viewed|opened)$/i;
+  const blocks=reps.every(x=>PRE.test(String(x.status||'').trim())); /* no report at all = nothing submitted */
+  memo[key]={at:Date.now(),blocks:blocks};
+  const hit=reps.find(x=>x.id===ys.reportId)||(reps.length===1&&!ys.reportId?reps[0]:null);
+  const lc=_liveCandAfterAwait(c.excelRow,c);
+  if(hit&&hit.status&&lc&&lc.st.yardstik&&lc.st.yardstik.candidateId===ys.candidateId&&!_wsOpenOn(lc.excelRow)
+     &&(lc.st.yardstik.status!==hit.status||lc.st.yardstik.reportId!==hit.id)){
+    const y2=lc.st.yardstik,s2=String(hit.status);
+    y2.reportId=hit.id;y2.status=s2;y2.lastUpdate=new Date().toISOString();
+    if(['clear','proceed','pass'].includes(s2)){lc.st.tpCheck='clear';y2.decisionRequired=false;}
+    else if(['consider','pre_adverse','ys_qa_review','final_adverse','fail'].includes(s2)&&!y2.decision){lc.st.tpCheck='flag';y2.decisionRequired=true;}
+    lc.st.log=(lc.st.log||[]).concat({t:stamp(),x:'🤖🛡 Yardstik asked before the interview gate → '+s2+(blocks?' · form still not submitted':' · the background form is not what is missing')});
+    try{await patchRange('AJ'+lc.excelRow,[[_stCell(lc.st)]]);}catch(e2){console.warn('yardstik gate sync write failed row',lc.excelRow,e2.message);}
+  }
+  return blocks;
+}
 function _tickOutwardHold(c){
   if(!c||!c.st)return '';
   if(c.st.manualAwaiting)return 'parked in awaiting by you';
@@ -23551,8 +23604,9 @@ function _seqAutomationPreview(){
        &&!(c.st.emails||[]).some(e2=>!e2.seen)){
       const m=minsUntil(c.st.booking),miss=_missingAppCerts(c);
       const missingAny=(miss.length||_bgFormBlocks(c))&&!c.st.certsReadyReview;
-      if(m!=null&&m<=60&&m>30&&missingAny&&!_certWarnSentFor(c)){rows.push({n:c.name,what:'send the interview cancellation WARNING ('+(miss.join(', ')||'BG form')+' missing, T-'+Math.round(m)+'m)',cls:'warn'});budget--;continue;}
-      if(m!=null&&m<=30&&m>0&&missingAny){rows.push({n:c.name,what:'CANCEL the interview via Cal.com ('+(miss.join(', ')||'BG form')+' still missing at T-'+Math.round(m)+'m)',cls:'bad'});budget--;continue;}
+      const _ysAsk=miss.length?'':' — only if Yardstik confirms the form is still not submitted';
+      if(m!=null&&m<=60&&m>30&&missingAny&&!_certWarnSentFor(c)){rows.push({n:c.name,what:'send the interview cancellation WARNING ('+(miss.join(', ')||'BG form')+' missing, T-'+Math.round(m)+'m)'+_ysAsk,cls:'warn'});budget--;continue;}
+      if(m!=null&&m<=30&&m>0&&missingAny){rows.push({n:c.name,what:'CANCEL the interview via Cal.com ('+(miss.join(', ')||'BG form')+' still missing at T-'+Math.round(m)+'m)'+_ysAsk,cls:'bad'});budget--;continue;}
     }
     const seq=(SETTINGS.sequences||[]).find(q=>q.id===c.st.sequenceId);
     if(!seq)continue;
@@ -23618,13 +23672,20 @@ async function _seqAutomationTick(){
          be rescheduling"), and the tick must not cancel behind the very reply the operator is
          being told to open. */
       const m=minsUntil(c.st.booking),miss=_missingAppCerts(c);
-      const missingAny=(miss.length||_bgFormBlocks(c))&&!c.st.certsReadyReview; /* fresh certs awaiting review → never auto-warn/cancel */
+      let missingAny=(miss.length||_bgFormBlocks(c))&&!c.st.certsReadyReview; /* fresh certs awaiting review → never auto-warn/cancel */
       /* T-60→T-30: auto-send the cancellation warning (once per booking). T-30→0: auto-cancel. */
       /* What THIS session already did, by booking. Every refresh rebuilds the pipeline from the sheet, so
          a stamp that was not saved - a failed write (it threw out of the whole tick), or a refresh whose
          loadData read the sheet while the previous tick was still sending - is simply absent from the row
          the next tick holds, and the warning or the Cal.com cancel went out again. */
       const _tA=(window._tickActs=window._tickActs||{}),_wk='warn|'+c.excelRow+'|'+String(c.st.booking||''),_ck='cancel|'+c.excelRow+'|'+String(c.st.calBookingId||'');
+      /* The background form is the ONLY thing missing and an outward act is due this pass → ask
+         Yardstik first (see _bgFormBlocksConfirmed). Missing certificates need no such check: they
+         are judged from files on the record, not from a third party's status. */
+      if(missingAny&&!miss.length&&m!=null&&((m<=60&&m>30&&!_certWarnSentFor(c)&&!_tA[_wk])||(m<=30&&m>0&&!_tA[_ck]))){
+        if(!(await _bgFormBlocksConfirmed(c)))missingAny=false;
+        if(pipeline!==_myPipe)return; /* the board was reloaded during the question - same abort as the loop head */
+      }
       if(m!=null&&m<=60&&m>30&&missingAny&&!_certWarnSentFor(c)&&!_tA[_wk]){
         let _warnSent=false,_warnErr='';
         try{ _warnSent=await _autoSendTpl(c,'interview_cert_warning',true); } /* _certWarnSentFor above is the per-booking gate */
