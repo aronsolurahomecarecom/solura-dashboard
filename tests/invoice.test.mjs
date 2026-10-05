@@ -179,5 +179,17 @@ ok(/id="st-sec-invoicing" hidden/.test(html) && /data-cfg="invoiceTemplate"/.tes
 ok(/data-sec="invoicing">🧾 Invoicing<\/button>/.test(html), 'Invoicing has its own nav button in Settings');
 ok(!/trackingPixelHtml\(_invRi/.test(html) && !/_trkPx/.test(src), 'invoices carry no tracking pixel');
 
+// ── 🧾 invoice as a next follow-up (B-1005-104) ──
+{
+  ok(/var NSM_OPS=MOPS\.slice\(1\)\.concat\(\['Send invoice'\]\);/.test(html), 'Send invoice is a next-method option');
+  ok(!/MOPS=\[[^\]]*invoice/i.test(html), 'Method Used stays contact-only — invoice is a PLAN, never a logged method');
+  const nsmSelects = html.match(/class="ep-nsm"><option value="">[^<]*<\/option>'\+(\w+)\.map/g) || [];
+  ok(nsmSelects.length === 2 && nsmSelects.every((s) => s.indexOf('NSM_OPS.map') > -1), 'BOTH next-method selects (done popover + update dialog) offer it');
+  const bb = html.slice(html.indexOf('function buildButtons'), html.indexOf('/* ─── §10 Action handlers'));
+  ok(/if\(nsm\.indexOf\('invoice'\)>-1\)\{/.test(bb) && /data-action="open-invoice" data-ri="'\+ri\+'">🧾 Send Invoice<\/button>/.test(bb), 'selecting it DEFAULTS 🧾 Send Invoice as the primary row button');
+  ok(bb.indexOf("nsm.indexOf('invoice')") < bb.indexOf("nsm.indexOf('call')"), 'invoice outranks the call/text/email fallbacks when selected');
+  ok(/inv='';\s*\/\/ no duplicate small 🧾/.test(bb), 'no duplicate small 🧾 in the alts row when it is primary');
+}
+
 console.log('\nInvoicing: ' + PASS + ' passed, ' + FAIL + ' failed');
 process.exit(FAIL ? 1 : 0);

@@ -1802,7 +1802,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-0929-103';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1005-104';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -5435,7 +5435,11 @@ function buildButtons(l){
     // Active lead: primary suggested method + update + alts
     var nsm=lc(l.nsm);
     var primary;
-    if(nsm.indexOf('call')>-1||nsm.indexOf('phone')>-1){
+    if(nsm.indexOf('invoice')>-1){
+      // "Send invoice" picked as the next step → 🧾 defaults as the primary
+      primary='<button class="btn-primary" style="background:linear-gradient(135deg,var(--gold),#8B6500)" data-action="open-invoice" data-ri="'+ri+'">🧾 Send Invoice</button>';
+      inv=''; // no duplicate small 🧾 in the alts row
+    }else if(nsm.indexOf('call')>-1||nsm.indexOf('phone')>-1){
       primary='<button class="btn-primary bg-sky" data-action="call" data-ri="'+ri+'">📞 Call</button>';
     }else if(nsm.indexOf('sms')>-1||nsm.indexOf('text')>-1){
       primary='<button class="btn-primary bg-grn" data-action="open-sms" data-ri="'+ri+'">💬 Text</button>';
@@ -5483,6 +5487,10 @@ function buildButtons(l){
 
 // MOPS = method-of-contact options (col M)
 var MOPS=['','Phone call','SMS','Email','In person','Left voicemail','No answer'];
+// Next-method options: every contact method PLUS planned actions that only
+// make sense as a NEXT step (an invoice is a plan, not a logged contact).
+// Picking "Send invoice" makes 🧾 the lead's primary row button.
+var NSM_OPS=MOPS.slice(1).concat(['Send invoice']);
 var STATUS_OPTS=['New','No answer','Contacted','Active Conversation','Assessment Scheduled','Assessment Completed','Proposal Sent','Signed','On Service','Hold','Closed','Not Interested','Lost','Wrong Number','Deceased','Duplicate'];
 /* ─── Central stage/source registries ────────────────────────────────────
  * ONE list each, fed by three springs: the built-ins, custom additions
@@ -5642,7 +5650,7 @@ function openEp(ri,mode,opts){
       +'<div class="la-grid g3">'
       +epLockField('Pay Type',vPT,'<select class="ep-pay">'+payOpts+'</select>')
       +'<div class="la-f"><label>Next Follow-Up</label><div style="display:flex;gap:6px"><input type="date" class="ep-fu" value="'+escapeHtml(nfDate?ds(nfDate):ds(def3))+'"><input type="time" class="ep-fut" style="width:104px" title="Callback time (optional — hides in Later Today until then)" value="'+escapeHtml(followUpTimes()[String(ri)]||'')+'"></div></div>'
-      +'<div class="la-f"><label>Next Method</label><select class="ep-nsm"><option value="">\u2014 select \u2014</option>'+MOPS.slice(1).map(function(s){return '<option'+(s===curNSM?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
+      +'<div class="la-f"><label>Next Method</label><select class="ep-nsm"><option value="">\u2014 select \u2014</option>'+NSM_OPS.map(function(s){return '<option'+(s===curNSM?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
       +'</div>'
       +'<div class="la-grid g1">'
       +'<div class="la-f"><label>Conversation Notes <span style="font-weight:400;color:var(--soft)">(added to the top of the lead\u2019s notes \u2014 history is kept)</span></label><textarea class="ep-notes" placeholder="Key details, concerns, next steps\u2026"></textarea></div>'
@@ -5676,7 +5684,7 @@ function openEp(ri,mode,opts){
       +'<div class="la-f"><label>Status</label><select class="ep-st">'+statusOpts+'</select></div>'
       +'<div class="la-f"><label>Next Follow-Up</label><div style="display:flex;gap:6px"><input type="date" class="ep-fu" value="'+escapeHtml(curFu?ds(curFu):'')+'"><input type="time" class="ep-fut" style="width:104px" title="Callback time (optional — hides in Later Today until then)" value="'+escapeHtml(followUpTimes()[String(ri)]||'')+'"></div></div>'
       +'<div class="la-f"><label>Method Used</label><select class="ep-mt">'+moptsForDone+'</select></div>'
-      +'<div class="la-f"><label>Next Suggested Method</label><select class="ep-nsm"><option value="">\u2014 select \u2014</option>'+MOPS.slice(1).map(function(s){return '<option value="'+escapeHtml(s)+'"'+(s===curNSM?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
+      +'<div class="la-f"><label>Next Suggested Method</label><select class="ep-nsm"><option value="">\u2014 select \u2014</option>'+NSM_OPS.map(function(s){return '<option value="'+escapeHtml(s)+'"'+(s===curNSM?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
       +'</div>'
       +'<div class="la-grid g1">'
       +'<div class="la-f"><label>Notes</label><textarea class="ep-notes">'+escapeHtml(r[C.NT]||'')+'</textarea></div>'
