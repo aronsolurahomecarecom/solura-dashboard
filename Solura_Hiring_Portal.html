@@ -18448,7 +18448,7 @@ function openMassEmailModal(){
   /* The currently-filtered candidate set is what we'll send to. Show count + breakdown. */
   /* Hired candidates ARE eligible — referral campaigns target current caregivers. Only Declined
      (which includes withdrawn) is excluded. Use the stage filters to narrow further. */
-  const candidates=pipeline.filter(c=>c.stage!=='Declined'&&matchFilters(c));
+  const candidates=pipeline.filter(c=>c.stage!=='Declined'&&c.stage!=='Withdrawn'&&matchFilters(c));
   const withEmail=candidates.filter(c=>c.email&&c.email.trim());
   const stageBreakdown={};
   withEmail.forEach(c=>{stageBreakdown[c.stage]=(stageBreakdown[c.stage]||0)+1;});
@@ -18592,7 +18592,7 @@ async function sendMassEmail(){
   const subTpl=subEl?subEl.value:'',bodyTpl=bodyEl?bodyEl.value:'';
   if(!subTpl||!bodyTpl){toast('Subject + body required');return;}
   const isHtml=window._massMode==='html';
-  const candidates=pipeline.filter(c=>c.stage!=='Declined'&&matchFilters(c)&&c.email&&c.email.trim());
+  const candidates=pipeline.filter(c=>c.stage!=='Declined'&&c.stage!=='Withdrawn'&&matchFilters(c)&&c.email&&c.email.trim());
   if(!candidates.length){toast('No recipients');return;}
   if(!confirm('Send '+(isHtml?'HTML':'plain text')+' email to '+candidates.length+' candidate'+(candidates.length===1?'':'s')+'? This cannot be undone.'))return;
   const btn=document.getElementById('mass-send');
