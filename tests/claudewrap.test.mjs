@@ -23,7 +23,7 @@ const extractInnerHtml = (v) => {
   if (m) return m[1];
   return v.replace(/<\/?html[^>]*>/gi, '').replace(/<head[\s\S]*?<\/head>/gi, '');
 };
-const mk = new Function('extractInnerHtml', src + '\nreturn {declawDesignHtml,_claudeHtmlDraft};');
+const mk = new Function('extractInnerHtml', src + '\nreturn {declawDesignHtml,_claudeHtmlDraft,shellWillApply,_shellOverride};');
 const W = mk(extractInnerHtml);
 
 // ── declawDesignHtml ──
@@ -43,6 +43,19 @@ const W = mk(extractInnerHtml);
   ok(W._claudeHtmlDraft === false, 'flag starts false');
 }
 
+// ── shellWillApply: the 🎁 Wrap chip's override beats automatic (B-1006-106) ──
+{
+  const f = W.shellWillApply;
+  ok(f({hasShell:true,override:null,suppressed:false,design:false}) === true, 'auto: plain content wraps');
+  ok(f({hasShell:true,override:null,suppressed:false,design:true}) === false, 'auto: a design body skips the shell');
+  ok(f({hasShell:true,override:null,suppressed:true,design:false}) === false, 'auto: suppressed (template/newsletter) skips');
+  ok(f({hasShell:true,override:'off',suppressed:false,design:false}) === false, 'OVERRIDE off: wrapper shuts down on the spot');
+  ok(f({hasShell:true,override:'on',suppressed:false,design:true}) === true, 'OVERRIDE on: wraps even a design body');
+  ok(f({hasShell:true,override:'on',suppressed:true,design:false}) === true, 'OVERRIDE on: beats suppression too');
+  ok(f({hasShell:false,override:'on',suppressed:false,design:false}) === false, 'no shell configured = nothing to wrap, override moot');
+  ok(W._shellOverride === null, 'override starts in automatic mode');
+}
+
 // ── source-level locks on the flow ──
 {
   // Claude apply: a complete design is declawed and NO LONGER suppresses the shell
@@ -58,7 +71,14 @@ const W = mk(extractInnerHtml);
   ok(/_bodyIsDesign=_rawMode\|\|/.test(html), 'raw-HTML paste mode keeps its explicit shell-skip');
 
   // Fresh composer resets the flag so a later manual email is unaffected
-  ok(/_shellSuppressed=false;\s*\n\s*_claudeHtmlDraft=false;/.test(html), 'opening the composer clears the Claude-draft flag');
+  ok(/_shellSuppressed=false;\s*\n\s*_claudeHtmlDraft=false;[^\n]*\n\s*_shellOverride=null;/.test(html), 'opening the composer clears the Claude-draft flag AND the wrap override');
+
+  // 🎁 Wrap chip wiring
+  ok(/id="email-shell-toggle" data-action="toggle-shell"/.test(html), 'the Wrap chip lives in the composer send row');
+  ok(/var _shellWas=shellWillApply\(\{hasShell:/.test(html), 'the send path decides through shellWillApply (one decision point)');
+  ok(/case 'toggle-shell':/.test(html) && /_shellOverride=st\.on\?'off':'on';/.test(html), 'clicking the chip flips the wrapper for THIS send');
+  ok(/Wrapper OFF for this email/.test(html), 'turning it off says so plainly');
+  ok(/function updateShellToggle/.test(html) && /b\.style\.display='none';return;/.test(html), 'the chip hides when no shell is configured');
 }
 
 console.log('\nClaude wrap: ' + PASS + ' passed, ' + FAIL + ' failed');

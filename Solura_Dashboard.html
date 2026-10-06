@@ -734,6 +734,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <div id="email-attach-list" class="email-attach-list"></div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px">
         <button id="email-send-btn" data-action="send-email" style="padding:9px 18px;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer">Send via Outlook</button>
+        <button type="button" id="email-shell-toggle" data-action="toggle-shell" style="padding:9px 12px;background:none;border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;color:var(--mid);font-family:inherit">🎁 Wrap: on</button>
         <button data-action="close-modal" data-mid="modal-email" style="padding:9px 12px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer">Cancel</button>
         <div id="email-spin" style="display:none;align-items:center;gap:5px;font-size:11px;color:var(--soft)"><div class="mspin"></div>Sending…</div>
       </div>
@@ -1802,7 +1803,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1006-105';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1006-106';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -8618,7 +8619,37 @@ function declawDesignHtml(html){
   v=v.replace(/<(div|span)[^>]*style="[^"]*(?:display\s*:\s*none|max-height\s*:\s*0|visibility\s*:\s*hidden)[^"]*"[^>]*>[\s\S]*?<\/\1>/gi,'');
   return v.trim();
 }
+// Per-send wrapper override (Meir, Oct 6 2026): the 🎁 Wrap chip in the
+// composer flips it on the spot. null = automatic; resets on every open.
+var _shellOverride=null;
+// THE one decision point for whether the shell wraps a send.
+function shellWillApply(o){
+  if(!o.hasShell)return false;
+  if(o.override==='off')return false;
+  if(o.override==='on')return true;
+  return !o.suppressed&&!o.design;
+}
 /* ⚡CLAUDEWRAP — END */
+// Composer chip: shows whether THIS email gets the brand wrap; click flips it.
+function shellToggleState(){
+  var hasShell=!!String(cfg('emailShellHtml')||'').trim();
+  var bodyEl=el('email-body');
+  var raw=!!_emailRawHtml;
+  var design=raw||(!_claudeHtmlDraft&&isFullDesignHtml(bodyEl?String(bodyEl.innerHTML||''):''));
+  return {hasShell:hasShell,on:shellWillApply({hasShell:hasShell,override:_shellOverride,suppressed:_shellSuppressed,design:design})};
+}
+function updateShellToggle(){
+  var b=el('email-shell-toggle');if(!b)return;
+  var st=shellToggleState();
+  if(!st.hasShell){b.style.display='none';return;}
+  b.style.display='';
+  b.textContent=st.on?'🎁 Wrap: on':'📄 Wrap: off';
+  b.style.color=st.on?'#8B6500':'var(--soft)';
+  b.style.borderColor=st.on?'var(--gold)':'var(--border)';
+  b.title=st.on
+    ?'This email goes out inside your branded wrapper. Click to send it bare — this send only.'
+    :'This email goes out bare, without the branded wrapper. Click to wrap it.';
+}
 function renderShellPreview(){
   var fr=el('shell-preview');if(!fr)return;
   var shell=String(cfg('emailShellHtml')||'').trim();
@@ -8721,6 +8752,7 @@ function emailClearRawHtml(opts){
   var bodyEl=el('email-body');if(!bodyEl)return;
   bodyEl.setAttribute('contenteditable','true');
   if(!(opts&&opts.keepBody))bodyEl.innerHTML='';
+  try{updateShellToggle();}catch(_){}
 }
 function pickWeeklyVariant(peekOrSet,maybePeek){
   var set,peek;
@@ -10860,6 +10892,7 @@ async function claudeGenerate(){
         bodyEl.innerHTML=newHtml;
         _claudeHtmlDraft=true; // send path: wrap even if it LOOKS like a design
       }
+      try{updateShellToggle();}catch(_){}
     }
     traceOp({kind:'generate',instrLen:instructions.length,instrHead:instructions.slice(0,120),
       trainingDocs:(function(){try{return collectTrainingBlocks().filter(function(b){return b.type==='document'||b.type==='image';}).length;}catch(_){return -1;}})(),
@@ -11624,6 +11657,7 @@ function openEmail(ri,opts){
   _weeklyAppliedFor=null; // fresh composer → rotation may advance
   _shellSuppressed=false;
   _claudeHtmlDraft=false; // fresh composer → no stale Claude-draft wrap flag
+  _shellOverride=null;    // fresh composer → wrap decision back to automatic
   // Unsubscribed: manual 1:1 email is Meir's call, but the state is loud —
   // and the automated weekly nurture draft never auto-loads for them.
   var unsubBan=el('email-unsub-banner');
@@ -11654,6 +11688,7 @@ function openEmail(ri,opts){
     fetchInboundFullBody(opts.reply); // warm the AI context in the background
   }else if(rn){rn.style.display='none';rn.innerHTML='';}
   el('modal-email').dataset.ri=ri;
+  try{updateShellToggle();}catch(_){}
   el('modal-email').classList.add('open');
 }
 
@@ -11734,6 +11769,7 @@ async function emailPasteHtml(){
   _emailRawHtml=html;
   emailRenderRawPreview();
   emailRenderAttachList();
+  try{updateShellToggle();}catch(_){}
   if(convertedCount){
     toast('\u2713 HTML email loaded \u2014 '+convertedCount+' inline image'+(convertedCount!==1?'s':'')+' attached \u00b7 sends as-is, no shell');
   }else{
@@ -12179,10 +12215,12 @@ async function sendEmail(){
   // Raw-HTML mode is an explicit declaration, not a heuristic: always design.
   // EXCEPT Claude drafts: his HTML always rides inside the general shell.
   var _bodyIsDesign=_rawMode||(!_claudeHtmlDraft&&isFullDesignHtml(bodyHtml));
-  var _shellWas=!_shellSuppressed&&!_bodyIsDesign&&!!String(cfg('emailShellHtml')||'').trim();
+  // The 🎁 Wrap chip's choice (if any) beats the automatic decision
+  var _shellWas=shellWillApply({hasShell:!!String(cfg('emailShellHtml')||'').trim(),
+    override:_shellOverride,suppressed:_shellSuppressed,design:_bodyIsDesign});
   if(_shellWas)bodyHtml=applyEmailShell(bodyHtml,ri);
   traceOp({kind:'send',to:toAddr,subj:String(subj||'').slice(0,60),
-    reply:!!_emailReplyTo,suppressed:!!_shellSuppressed,rawHtml:_rawMode,fullDesignBody:_bodyIsDesign,shellApplied:_shellWas,
+    reply:!!_emailReplyTo,suppressed:!!_shellSuppressed,rawHtml:_rawMode,fullDesignBody:_bodyIsDesign,shellApplied:_shellWas,shellOverride:_shellOverride||'',
     slotAfter:findShellSlot(bodyHtml)?'STILL PRESENT \u26A0':'none',
     pixel:!!_trkPx,atts:emailAttachments.map(function(a){return a.name;}),
     bodyHead:String(bodyHtml).replace(/\s+/g,' ').slice(0,260),
@@ -14769,6 +14807,15 @@ function onClick(ev){
     case 'cancel-reply':
       _emailReplyTo=null;
       var rn2=el('email-reply-note');if(rn2){rn2.style.display='none';rn2.innerHTML='';}
+      break;
+    case 'toggle-shell':
+      (function(){
+        var st=shellToggleState();
+        if(!st.hasShell)return;
+        _shellOverride=st.on?'off':'on';
+        updateShellToggle();
+        toast(_shellOverride==='off'?'📄 Wrapper OFF for this email — it sends bare':'🎁 Wrapper back ON for this email');
+      })();
       break;
     case 'use-weekly':
       var _wri=parseInt(el('modal-email').dataset.ri,10);
