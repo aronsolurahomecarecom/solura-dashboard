@@ -7374,7 +7374,9 @@ async function sendMailWithLargeAttachments(to,subject,html,smallAtts,largeAtts)
     const total=bytes.length;
     const sessReq=await gfetch(GR+'/me/messages/'+draftId+'/attachments/createUploadSession',{
       method:'POST',
-      body:JSON.stringify({AttachmentItem:{attachmentType:'file',name:a.name,size:total,contentType:a.contentType||'application/octet-stream'}})
+      /* isInline/contentId ride along: a pasted image that overflowed the 3MB inline budget came through
+         here without them, so the body's cid: reference pointed at nothing - a broken image in the email. */
+      body:JSON.stringify({AttachmentItem:Object.assign({attachmentType:'file',name:a.name,size:total,contentType:a.contentType||'application/octet-stream'},a.isInline?{isInline:true}:{},a.contentId?{contentId:a.contentId}:{})})
     });
     if(!sessReq.ok){const e=await sessReq.json().catch(()=>({}));throw new Error('Upload session: '+((e.error&&e.error.message)||sessReq.status));}
     const sess=await sessReq.json();
@@ -11291,7 +11293,7 @@ async function _sendNudgeHeadless(c){
   c.st.sent=c.st.sent||{};c.st.sent[tpl]=today();
   if(tpl==='interview_cert_warning')c.st.warnedForBooking=String(c.st.booking||''); /* warning is per booking — a reschedule re-arms it */
   c.st.emails=c.st.emails||[];
-  c.st.emails.unshift({id:'local-'+Date.now()+'-'+c.excelRow,direction:'out',subject:(subj||'').slice(0,140),preview:(body||'').slice(0,200),from:'careers@solurahomecare.com',to:c.email,received:new Date().toISOString(),seen:true});
+  c.st.emails.unshift({id:'local-'+Date.now()+'-'+c.excelRow,direction:'out',subject:(subj||'').slice(0,140),preview:_mailPreview(body),from:'careers@solurahomecare.com',to:c.email,received:new Date().toISOString(),seen:true});
   if(c.st.emails.length>40)c.st.emails=c.st.emails.slice(0,40);
   c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'\ud83d\udd14 Nudge sent: '+tpl.replace(/_/g,' ')});
   /* Keep an open workspace pointed at this candidate on the SAME state object. W holds a deep copy from loadW and W.row survives leaving the workspace, so without this the operator's next Save writes the pre-nudge snapshot back over the row \u2014 dropping the outbound email record, the log line, and (the one that bites) the c.st.sent[tpl] stamp that is the ONLY thing stopping _autoSendTpl and needsNudge from sending the very same scripted message a second time. Mirrored BEFORE the write on purpose: the email has already gone out by this line, so the workspace must reflect that even if the AJ patch then fails. */
@@ -12466,6 +12468,11 @@ async function recordCertAnswer(row,idx){
   /* Read checkboxes \u2014 each tagged with the cert name in data-cert. */
   const cbs=document.querySelectorAll('.cert-rec-cb-'+row+'-'+idx);
   const claimed=Array.from(cbs).filter(cb=>cb.checked).map(cb=>cb.getAttribute('data-cert')).filter(Boolean);
+  /* Everything below mutates cand.st before the write. On a refused (_stCell) or failed write the
+     catch only toasted: the board went on showing the claim recorded, the question drained, the
+     candidate released and a decline suggested until the next load silently put it all back (the
+     _markReceivedCore discipline - keep the pre-change copy so a failure is undone honestly). */
+  const _before=JSON.stringify(cand.st);
   /* Update st.certs (legacy flat array). De-dupe. */
   cand.st.certs=Array.from(new Set([...(cand.st.certs||[]),...claimed]));
   /* Update st.credentials (structured registry) with placeholder entries \u2014 no fileUrl yet since
@@ -12545,7 +12552,11 @@ async function recordCertAnswer(row,idx){
     if(W&&W.row===row)renderWorkspace();
     render();
   }catch(e){
-    toast('\u2717 Could not save: '+e.message);
+    const restored=JSON.parse(_before);
+    if(W&&W.st===cand.st)W.st=restored;
+    cand.st=restored;
+    toast('\u2717 Could not save \u2014 the answer was NOT recorded: '+e.message);
+    try{_renderEmailAwait(_currentEmailMsgId);render();}catch(e2){}
   }
 }
 async function markAwaitingReceivedFromEmail(row,idx){
@@ -12799,6 +12810,22 @@ const COMPOSER_PLACEHOLDERS=[
    nudges), so candidates always receive branded HTML while templates stay clean, readable
    plaintext in the editor. Marker div prevents double-wrapping; bodies that are already full
    HTML documents (<html) are left alone. Palette: linen/cream + Solura gold; Georgia serif. */
+/* Text preview of an outgoing body for the candidate's local email record. Every writer stored
+   body.slice(0,200) raw - and the composer's body is the branded shell by then, whose first 200
+   characters are pure markup, so the workspace, the inbox row and the "just sent" reader all showed
+   <div id="solura-shell" style=... instead of the message until (and unless) the Sent Items pass
+   reconciled it. Parsed in an inert document: nothing loads, nothing runs. */
+function _mailPreview(body){
+  let s=String(body==null?'':body);
+  if(/<[a-z][\s\S]*?>/i.test(s)){
+    try{
+      const d=new DOMParser().parseFromString(s.replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)\b[^>]*>/gi,'$& '),'text/html');
+      d.querySelectorAll('style,script,title').forEach(x=>x.remove());
+      s=(d.body&&d.body.textContent)||'';
+    }catch(e){s=s.replace(/<[^>]*>/g,' ');}
+  }
+  return s.replace(/\s+/g,' ').trim().slice(0,200);
+}
 function _soluraShell(innerHtml){
   if(!innerHtml||String(innerHtml).indexOf('solura-shell')>-1||/<html[\s>]/i.test(innerHtml))return innerHtml;
   return '<div id="solura-shell" style="background:#F7F4EE;padding:28px 12px;font-family:Georgia,\'Times New Roman\',serif">'
@@ -12933,8 +12960,8 @@ function emailModal(tpl,subj,body,advanceTo){
       ${missingResume||missingAvail?`<div>
         <div style="font-size:10.5px;font-weight:700;color:#8B6500;text-transform:uppercase;margin-bottom:5px">Other gaps</div>
         <div style="display:flex;flex-wrap:wrap;gap:5px">
-          ${missingResume?`<label style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:#fff;border:1.5px solid var(--gold-mid);border-radius:6px;cursor:pointer;font-size:12px;font-weight:600"><input type="checkbox" id="ms-resume-cb" checked style="cursor:pointer;accent-color:var(--gold-deep);margin:0"><span>\U0001F4C4 R\xE9sum\xE9</span></label>`:''}
-          ${missingAvail?`<label style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:#fff;border:1.5px solid var(--gold-mid);border-radius:6px;cursor:pointer;font-size:12px;font-weight:600"><input type="checkbox" id="ms-avail-cb" checked style="cursor:pointer;accent-color:var(--gold-deep);margin:0"><span>\U0001F4C5 Availability</span></label>`:''}
+          ${missingResume?`<label style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:#fff;border:1.5px solid var(--gold-mid);border-radius:6px;cursor:pointer;font-size:12px;font-weight:600"><input type="checkbox" id="ms-resume-cb" checked style="cursor:pointer;accent-color:var(--gold-deep);margin:0"><span>📄 R\xE9sum\xE9</span></label>`:''}
+          ${missingAvail?`<label style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:#fff;border:1.5px solid var(--gold-mid);border-radius:6px;cursor:pointer;font-size:12px;font-weight:600"><input type="checkbox" id="ms-avail-cb" checked style="cursor:pointer;accent-color:var(--gold-deep);margin:0"><span>📅 Availability</span></label>`:''}
         </div>
       </div>`:''}
     </div>`;
@@ -13294,7 +13321,7 @@ async function reallySend(tpl,advanceTo){
       id:'local-'+Date.now(),
       direction:'out',
       subject:(subj||'').slice(0,140),
-      preview:(body||'').slice(0,200),
+      preview:_mailPreview(body),
       from:'careers@solurahomecare.com',
       to:W.email,
       received:new Date().toISOString(),
@@ -16746,7 +16773,7 @@ function _renderAttachmentRow(a,i,messageId,cand,awaiting){
   }
   const suggestionLabel=suggestion?_awaitingItemLabel(suggestion):'';
   const primaryBtn=suggestion
-    ? `<button class="att-assign-primary" id="att-assign-${i}" onclick="_assignAttachmentToAwaiting('${esc(messageId)}',${i},${cand?cand.excelRow:'null'},${suggestIdx},'${esc(suggestion.kind)}','${encodeURIComponent(String(suggestion.name||''))}')" style="background:linear-gradient(135deg,#8B6500,#C59B4E);color:#fff;border:none;padding:6px 12px;border-radius:6px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer">✓ Assign as ${esc(suggestionLabel)}</button>`
+    ? `<button class="att-assign-primary" id="att-assign-${i}" onclick="_assignAttachmentToAwaiting('${esc(messageId)}',${i},${cand?cand.excelRow:'null'},${suggestIdx},'${esc(suggestion.kind)}','${encodeURIComponent(String(suggestion.name||'')).replace(/'/g,'%27')}')" style="background:linear-gradient(135deg,#8B6500,#C59B4E);color:#fff;border:none;padding:6px 12px;border-radius:6px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer">✓ Assign as ${esc(suggestionLabel)}</button>`
     : '';
   /* The dropdown lets the user override the primary suggestion (assign to a non-awaiting kind),
      or assign when there's no current awaiting request at all. Each kind shows up; "cert" expands
@@ -18382,7 +18409,7 @@ async function commitLinkBooking(candidateExcelRow){
   }
   /* Log the link for the activity trail. */
   cand.st.log=cand.st.log||[];
-  cand.st.log.push({t:stamp(),x:'\U0001F517 Booking linked from unmatched pool ('+u.email+') \u2014 '+new Date(u.start).toLocaleString()+(stageAdvancedTo?' \u2192 advanced to '+stageAdvancedTo:'')});
+  cand.st.log.push({t:stamp(),x:'🔗 Booking linked from unmatched pool ('+u.email+') \u2014 '+new Date(u.start).toLocaleString()+(stageAdvancedTo?' \u2192 advanced to '+stageAdvancedTo:'')});
   /* Remove this entry from AVAIL.unmatched so it disappears from the calendar. */
   AVAIL.unmatched=(AVAIL.unmatched||[]).filter((_,i)=>i!==_unmatchedBookingIdx);
   /* Persist: candidate state (AJ), stage column (G) if changed, and AVAIL (AK1). */
@@ -18597,7 +18624,7 @@ async function sendMassEmail(){
         const lc=pipeline.find(x=>x.excelRow===c.excelRow)||c;
         try{
           lc.st.emails=lc.st.emails||[];
-          lc.st.emails.unshift({id:'mass-'+Date.now()+'-'+sent,direction:'out',subject:subj.slice(0,140),preview:body.slice(0,200),to:c.email,received:new Date().toISOString(),seen:true,blastId:blastId,blastSubject:subj.slice(0,80)});
+          lc.st.emails.unshift({id:'mass-'+Date.now()+'-'+sent,direction:'out',subject:subj.slice(0,140),preview:_mailPreview(body),to:c.email,received:new Date().toISOString(),seen:true,blastId:blastId,blastSubject:subj.slice(0,80)});
           if(lc.st.emails.length>40)lc.st.emails=lc.st.emails.slice(0,40);
           /* Push a log entry so the candidate's idle-days counter resets. Without this, the mass-emailed
              candidates stay in the nudge strip until their NEXT reply, because computeIdleDays reads
@@ -24388,7 +24415,7 @@ async function _sendTplDirect(cand,tpl){
   cand.st.sent=cand.st.sent||{};cand.st.sent[tpl]=today();
   if(tpl==='interview_cert_warning')cand.st.warnedForBooking=String(cand.st.booking||''); /* warning is per booking — a reschedule re-arms it */
   cand.st.emails=cand.st.emails||[];
-  cand.st.emails.unshift({id:'local-'+Date.now(),direction:'out',subject:(subj||'').slice(0,140),preview:(body||'').slice(0,200),from:'careers@solurahomecare.com',to:cand.email,received:new Date().toISOString(),seen:true});
+  cand.st.emails.unshift({id:'local-'+Date.now(),direction:'out',subject:(subj||'').slice(0,140),preview:_mailPreview(body),from:'careers@solurahomecare.com',to:cand.email,received:new Date().toISOString(),seen:true});
   if(cand.st.emails.length>40)cand.st.emails=cand.st.emails.slice(0,40);
   cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'📦 Sent: '+String(tpl).replace(/_/g,' ')+' → '+cand.email});
   await _seqCommitState(cand,{});
