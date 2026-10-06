@@ -1802,7 +1802,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1005-104';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1006-105';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -8604,6 +8604,21 @@ function applyEmailShell(bodyHtml,ri){
   try{out=fillNames(out,getNames(ri));}catch(_){/* names best-effort */}
   return out;
 }
+/* ⚡CLAUDEWRAP — BEGIN (sliced by tests/claudewrap.test.mjs)
+ * Claude HTML drafts STILL ride inside the Settings email shell (Meir,
+ * Oct 6 2026). A full-design draft used to suppress the wrap; now the
+ * draft's document chrome is stripped — <html>/<head>/<body> scaffolding
+ * and hidden preheader blocks (the shell has its own preview line) — so
+ * it sits cleanly in the shell's content slot. The raw-HTML PASTE mode
+ * keeps its shell-skip gate: that path is for complete hand-built designs. */
+var _claudeHtmlDraft=false; // composer body holds a Claude draft → always wrap
+function declawDesignHtml(html){
+  var v=extractInnerHtml(String(html||''));
+  // Hidden preheader blocks fight the shell's own inbox preview line
+  v=v.replace(/<(div|span)[^>]*style="[^"]*(?:display\s*:\s*none|max-height\s*:\s*0|visibility\s*:\s*hidden)[^"]*"[^>]*>[\s\S]*?<\/\1>/gi,'');
+  return v.trim();
+}
+/* ⚡CLAUDEWRAP — END */
 function renderShellPreview(){
   var fr=el('shell-preview');if(!fr)return;
   var shell=String(cfg('emailShellHtml')||'').trim();
@@ -10828,13 +10843,12 @@ async function claudeGenerate(){
       // If the composer already holds a template with a {{body}}-style slot
       // (the preset-template workflow), the draft FILLS the slot instead of
       // replacing the template — the template is the design wrapper.
-      // If Claude produced a COMPLETE email design (its own preheader /
-      // full layout — the care-plan mockup flow), the Settings shell must
-      // stand down or the recipient gets an email nested inside an email.
+      // A COMPLETE design from Claude no longer skips the Settings shell:
+      // its document chrome is stripped (declawed) and the shell wraps it.
       var isCompleteDesign=isFullDesignHtml(newHtml);
       if(isCompleteDesign){
-        _shellSuppressed=true;
-        toast('\ud83c\udfa8 Full-design draft \u2014 sending as-is, without the Settings shell');
+        newHtml=declawDesignHtml(newHtml);
+        toast('\ud83c\udfa8 Full-design draft \u2014 it still rides inside your email shell');
       }
       var pre=String(bodyEl.innerHTML||'');
       var preSlot=findShellSlot(pre);
@@ -10844,6 +10858,7 @@ async function claudeGenerate(){
         toast('\u2728 Draft filled into the template\u2019s '+preSlot+' slot');
       }else{
         bodyEl.innerHTML=newHtml;
+        _claudeHtmlDraft=true; // send path: wrap even if it LOOKS like a design
       }
     }
     traceOp({kind:'generate',instrLen:instructions.length,instrHead:instructions.slice(0,120),
@@ -10851,7 +10866,7 @@ async function claudeGenerate(){
       hollow:_ctsSkippedNoData.slice(0,4),
       refDocs:_claudeRefFiles.map(function(x){return x.name;}),reply:!!_emailReplyTo,
       respFormat:draft.format,gotDoc:!!(draft.doc&&draft.doc.html),
-      fullDesign:!!_shellSuppressed,
+      fullDesign:!!isCompleteDesign,
       filledTemplateSlot:!!preSlot,
       draftHead:String(draft.body||'').replace(/\s+/g,' ').slice(0,200)});
     closeModal('modal-claude');
@@ -11608,6 +11623,7 @@ function openEmail(ri,opts){
   // being wiped when this ran earlier in the open flow).
   _weeklyAppliedFor=null; // fresh composer → rotation may advance
   _shellSuppressed=false;
+  _claudeHtmlDraft=false; // fresh composer → no stale Claude-draft wrap flag
   // Unsubscribed: manual 1:1 email is Meir's call, but the state is loud —
   // and the automated weekly nurture draft never auto-loads for them.
   var unsubBan=el('email-unsub-banner');
@@ -12158,10 +12174,11 @@ async function sendEmail(){
     traceOp({kind:'send-BLOCKED',to:toAddr,subj:String(subj||'').slice(0,60),reason:'unfilled slot '+_unfilled,bodyHead:String(bodyHtml).slice(0,200)});
     throw new Error('The email still contains an unfilled '+_unfilled+' placeholder \u2014 use \u2728 to write the message into it, or delete the placeholder text before sending.');
   }
-  // Universal gate: a full-design body (pasted HTML email, mockup draft,
-  // weekly variant) sends AS-IS — the shell only wraps plain content.
+  // Universal gate: a full-design body (pasted HTML email, weekly variant)
+  // sends AS-IS — the shell only wraps plain content.
   // Raw-HTML mode is an explicit declaration, not a heuristic: always design.
-  var _bodyIsDesign=_rawMode||isFullDesignHtml(bodyHtml);
+  // EXCEPT Claude drafts: his HTML always rides inside the general shell.
+  var _bodyIsDesign=_rawMode||(!_claudeHtmlDraft&&isFullDesignHtml(bodyHtml));
   var _shellWas=!_shellSuppressed&&!_bodyIsDesign&&!!String(cfg('emailShellHtml')||'').trim();
   if(_shellWas)bodyHtml=applyEmailShell(bodyHtml,ri);
   traceOp({kind:'send',to:toAddr,subj:String(subj||'').slice(0,60),
