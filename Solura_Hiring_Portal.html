@@ -13163,14 +13163,18 @@ function _extractEmailHtml(raw){
 }
 function _emailPasteHtml(){
   _htmlPasteBox('Paste HTML email',function(raw){
-    const html=_extractEmailHtml(raw);
+    let html=_extractEmailHtml(raw);
+    /* The composer always has a live candidate (W) — fill {first}/{name}/{screenLink}/… right
+       here so the branded version reads as the real email, wherever the token sits (text,
+       href, alt). reallySend substitutes again at send, which is a no-op on what's left. */
+    try{html=substituteLive(html);}catch(e){}
     const bodyEl=document.getElementById('e-body');
     if(!bodyEl)return;
     const hasContent=(bodyEl.textContent||'').trim().length>0||bodyEl.querySelector('img');
     if(hasContent&&!confirm('Replace the current message with the pasted HTML?\n\nCancel adds it at the end instead.')){
       bodyEl.insertAdjacentHTML('beforeend',html);toast('✓ HTML added at the end of the message');
     }else{
-      bodyEl.innerHTML=html;toast('✓ HTML loaded — that’s what the email will look like');
+      bodyEl.innerHTML=html;toast('✓ HTML loaded — placeholders filled in, this is what they’ll get');
     }
   });
 }
