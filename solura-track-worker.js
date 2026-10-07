@@ -22,8 +22,9 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = '7.2-intake'; // 7.2: intake also stores the optional main
-// condition (cond) and the patient's first name rides pt on the full flow.
+var VERSION = '7.3-intake'; // 7.3: cond holds the portal's condition KEYS
+// (comma list, multi-select) + condLabel holds the readable names; the
+// patient's full name rides pt on the full flow too.
 // 7.1: intake stores the full inquiry — care
 // needs, timeline, hours, payment, best time, SMS consent, referral org,
 // form variant, page URL — all length-capped, queued exactly as before.
@@ -307,7 +308,8 @@ export default {
         hours: String(ib.hours || '').trim().slice(0, 60),
         pay: String(ib.pay || '').trim().slice(0, 60),
         best: String(ib.best || '').trim().slice(0, 30),
-        cond: String(ib.cond || '').trim().slice(0, 80),
+        cond: String(ib.cond || '').trim().slice(0, 200),
+        condLabel: String(ib.condLabel || '').trim().slice(0, 300),
         sms: String(ib.sms || '').trim().slice(0, 60),
         variant: String(ib.variant || '').trim().slice(0, 20),
         org: String(ib.org || '').trim().slice(0, 120),

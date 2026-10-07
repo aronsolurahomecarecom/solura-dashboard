@@ -170,11 +170,6 @@
         <h1>A few quick details</h1>
         <p class="sub" style="margin-top:10px">This helps us come to the call prepared.</p>
       </div>
-      <div class="field" id="pt-wrap">
-        <label class="flabel" for="i-pt"><span>Their first name</span><span class="opt">optional</span></label>
-        <p class="helper">So we know who we'd be caring for.</p>
-        <input id="i-pt" type="text" autocomplete="off" maxlength="120" style="max-width:320px">
-      </div>
       <div style="display:flex;flex-direction:column;gap:14px">
         <div class="field">
           <label class="flabel" for="i-zip"><span>ZIP code of the person needing care</span><span class="opt">required</span></label>
@@ -199,23 +194,10 @@
         <div class="grid" role="radiogroup" id="g-payment"></div>
       </fieldset>
       <div class="dots" aria-hidden="true">• • •</div>
-      <div class="field">
-        <label class="flabel" for="i-cond"><span>Main condition or diagnosis</span><span class="opt">optional</span></label>
-        <p class="helper">If one thing drives the need for care, naming it helps us prepare.</p>
-        <select id="i-cond" style="max-width:440px">
-          <option value="">Choose one if it fits</option>
-          <option value="Dementia / Alzheimer's">Dementia or Alzheimer's</option>
-          <option value="Parkinson's disease">Parkinson's disease</option>
-          <option value="Stroke recovery">Stroke recovery</option>
-          <option value="Heart condition">A heart condition</option>
-          <option value="COPD / breathing issues">COPD or breathing issues</option>
-          <option value="Diabetes">Diabetes</option>
-          <option value="Arthritis / limited mobility">Arthritis or limited mobility</option>
-          <option value="Post-surgery / fall recovery">Recovering from surgery or a fall</option>
-          <option value="General aging support">General support with aging</option>
-          <option value="Other">Something else</option>
-        </select>
-      </div>
+      <fieldset>
+        <legend style="font-size:18px">Conditions or diagnoses<span class="opt">optional</span><span class="opt2">Choose any that apply. Naming them helps us prepare.</span></legend>
+        <div class="chips" id="g-cond"></div>
+      </fieldset>
       <button type="button" class="cta" id="btn-next2">Continue</button>
     </div>
 
@@ -231,6 +213,17 @@
       </div>
       <div class="field"><label class="flabel" for="i-phone"><span>Mobile phone</span><span class="opt">required</span></label><input id="i-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel-national" maxlength="14" style="max-width:320px"><div id="e-phone"></div></div>
       <div class="field"><label class="flabel" for="i-email"><span>Email (optional)</span></label><input id="i-email" name="email" type="email" inputmode="email" autocomplete="email" maxlength="120" style="max-width:440px"><div id="e-email"></div></div>
+      <div id="pt-wrap" style="display:flex;flex-direction:column;gap:14px">
+        <div class="dots" aria-hidden="true">• • •</div>
+        <div>
+          <p style="margin:0;font-size:18px;font-weight:bold;line-height:1.4;color:#1f3d57">Who we'd be caring for <span class="opt">optional</span></p>
+          <p class="helper" style="margin-top:4px">So we know who to ask about when we call.</p>
+        </div>
+        <div class="f2">
+          <div class="field"><label class="flabel" for="i-ptfirst"><span>Their first name</span></label><input id="i-ptfirst" type="text" autocomplete="off" maxlength="60"></div>
+          <div class="field"><label class="flabel" for="i-ptlast"><span>Their last name</span></label><input id="i-ptlast" type="text" autocomplete="off" maxlength="60"></div>
+        </div>
+      </div>
       <fieldset>
         <legend style="font-size:18px">Best time to reach you<span class="opt">optional</span></legend>
         <div class="chips" role="radiogroup" id="g-best"></div>
@@ -377,10 +370,14 @@
   var HOURS=[['A few hours a week','A few hours a week'],['Several hours most days','Several hours most days'],['Full days or overnights','Full days or overnights'],['Not sure','Not sure']];
   var PAY=[['Private pay','Paying privately'],['LTC insurance','Long-term care insurance'],['VA benefits','VA benefits'],['Not sure yet','Not sure yet'],['Medicaid or other','Medicaid or other']];
   var TIMES=[['Morning','Morning'],['Afternoon','Afternoon'],['Evening','Evening'],['Anytime','Anytime']];
+  // Values are the PORTAL's condition keys: they land in the same
+  // mentioned_conditions column the dashboard's picker writes, feed the
+  // conditions engine, and later drive the assessment questions.
+  var CONDS=[['dementia',"Dementia or Alzheimer's"],['parkinsons',"Parkinson's disease"],['stroke','Stroke recovery'],['chf','A heart condition'],['copd','COPD or breathing issues'],['diabetes','Diabetes'],['arthritis','Arthritis or joint pain'],['postsurg','Recovering from surgery'],['fall','Falls or fall risk'],['cancer','Cancer care']];
   var MISSING_PHONE='Please add a phone number so we can reach you.';
   var SHORT_PHONE='That number looks a little short. Please check that it has all 10 digits.';
 
-  var st={recipient:null,needs:[],timeline:null,hours:null,payment:null,best:null,refNeeds:[],cameFrom:'step1'};
+  var st={recipient:null,needs:[],timeline:null,hours:null,payment:null,best:null,conds:[],refNeeds:[],cameFrom:'step1'};
   function el(id){return document.getElementById(id);}
   function digits(v){return String(v).replace(/\D/g,'').length;}
   function fmtPhone(v){
@@ -439,6 +436,7 @@
     renderGroup('g-hours',HOURS,'hours',false,false,{errId:'e-hours'});
     renderGroup('g-payment',PAY,'payment',false,false,{});
     renderGroup('g-best',TIMES,'best',false,true,{});
+    renderGroup('g-cond',CONDS,'conds',true,true,{});
     renderGroup('g-refneeds',NEEDS,'refNeeds',true,true,{});
   }
 
@@ -531,13 +529,16 @@
     var name=(first+' '+last).trim();
     if(!name)return; // belt and suspenders; the gate above already caught it
     if(!phone&&!email)return;
+    var ptName=st.recipient==='Self'?'':(el('i-ptfirst').value.trim()+' '+el('i-ptlast').value.trim()).trim();
+    var condLabels=CONDS.filter(function(c){return st.conds.indexOf(c[0])>-1;}).map(function(c){return c[1];});
     postIntake({
       code:CODE,name:name,phone:phone,email:email,
-      pt:st.recipient==='Self'?'':el('i-pt').value.trim(),
+      pt:ptName,
       rel:st.recipient||'',zip:el('i-zip').value.trim(),
       notes:el('i-notes').value.trim(),
       needs:st.needs.join(', '),timeline:st.timeline||'',hours:st.hours||'',
-      pay:st.payment||'',best:st.best||'',cond:el('i-cond').value,
+      pay:st.payment||'',best:st.best||'',
+      cond:st.conds.join(', '),condLabel:condLabels.join(', '),
       sms:el('i-sms').checked?('yes ('+SMS_CONSENT_VERSION+')'):'',
       variant:'full',org:'',page:String(location.href).slice(0,300),
       hp:el('i-website').value
@@ -563,7 +564,7 @@
     postIntake({
       code:CODE,name:rn,phone:rp,email:'',pt:rc,
       rel:'Client/Patient',zip:'',notes:el('i-refnote').value.trim(),
-      needs:st.refNeeds.join(', '),timeline:'',hours:'',pay:'',best:'',sms:'',cond:'',
+      needs:st.refNeeds.join(', '),timeline:'',hours:'',pay:'',best:'',sms:'',cond:'',condLabel:'',
       variant:'referral',org:ro,page:String(location.href).slice(0,300),
       hp:el('i-website').value
     },this,'e-refsend','Send referral',function(){
