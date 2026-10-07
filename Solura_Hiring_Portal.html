@@ -1240,6 +1240,9 @@ select.app-edit-input{cursor:pointer;}
 #htmlpastebox .hpb-head{display:flex;align-items:center;gap:10px;}
 #htmlpastebox .hpb-title{font-weight:700;font-size:15px;flex:1;}
 #htmlpastebox .hpb-foot{display:flex;align-items:center;gap:8px;}
+/* Template editor branded view — the body field itself rendering the HTML email (Meir: the
+   composing box should show the branded version, no preview popup). Shares .email-body. */
+.tpl-render{min-height:420px;max-height:65vh;border-radius:8px;flex:1;}
 .tpl-placeholders{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0;}
 .tpl-placeholders-label{font-size:10.5px;font-weight:600;color:var(--soft);text-transform:uppercase;letter-spacing:.06em;margin-right:4px;}
 .ph-chip{font-family:'JetBrains Mono','Consolas',monospace;font-size:11px;padding:4px 9px;border-radius:5px;background:var(--sky-pale);color:var(--sky-deep);border:1px solid transparent;cursor:pointer;transition:background .12s ease-out,border-color .12s ease-out;}
@@ -19656,6 +19659,26 @@ function _tplHtmlBadge(key,val){
   const isH=/<[a-z][\s\S]*?>/i.test(val||'');
   el.textContent=isH?'HTML \u2014 sends as rich email':'PLAIN TEXT \u2014 auto-styled paragraphs';
   el.style.cssText='font-size:10.5px;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:4px;'+(isH?'background:#EDF3FA;color:var(--sky-deep);border:1px solid #B8D4F0':'background:var(--cream);color:var(--soft);border:1px solid var(--border)');
+  /* The branded-view toggle only makes sense for HTML bodies. This runs while typing in the
+     CODE view (the branded view syncs through _tplRenderSync instead), so when HTML appears
+     the toggle offers the branded view; when the tags go away it hides. */
+  const tg=document.getElementById('tpl-viewtoggle-'+key);
+  if(tg){tg.style.display=isH?'':'none';const rd=document.getElementById('tpl_r_'+key);const renderShown=rd&&rd.style.display!=='none';tg.textContent=renderShown?'\u270e Edit HTML code':'\ud83d\udc41 Show branded view';}
+}
+/* \u2500\u2500 Branded view \u21c4 HTML code for a template body (Meir 2026-10-06: the body field itself
+   shows the branded email, like the composer; the raw source is one toggle away). The hidden
+   textarea stays the single source of truth \u2014 saveTemplate and the placeholder chips read it \u2014
+   and the contenteditable mirrors into it on every input. */
+function _tplRenderSync(key){
+  const ta=document.getElementById('tpl_b_'+key),rd=document.getElementById('tpl_r_'+key);
+  if(ta&&rd)ta.value=rd.innerHTML;
+}
+function _tplToggleView(key){
+  const ta=document.getElementById('tpl_b_'+key),rd=document.getElementById('tpl_r_'+key),tg=document.getElementById('tpl-viewtoggle-'+key);
+  if(!ta||!rd)return;
+  const renderShown=rd.style.display!=='none';
+  if(renderShown){rd.style.display='none';ta.style.display='';if(tg)tg.textContent='\ud83d\udc41 Show branded view';ta.focus();}
+  else{rd.innerHTML=ta.value;rd.style.display='';ta.style.display='none';if(tg)tg.textContent='\u270e Edit HTML code';}
 }
 function renderSettingsTemplates(){
   const _TLE=_allTemplateLabels();
@@ -19716,9 +19739,11 @@ function renderSettingsTemplates(){
 
       <label class="tpl-label">Body</label>
       ${(typeof TEMPLATE_META!=='undefined'&&TEMPLATE_META[cur]&&TEMPLATE_META[cur].hint)?`<div style="font-size:11px;color:var(--soft);background:var(--cream);padding:6px 10px;border-radius:6px;margin-bottom:6px;line-height:1.45">ℹ ${esc(TEMPLATE_META[cur].hint)}</div>`:''}
-      <textarea id="tpl_b_${cur}" class="tpl-body-input" oninput="_tplHtmlBadge('${cur}',this.value)">${esc(tpl.b)}</textarea>
+      <textarea id="tpl_b_${cur}" class="tpl-body-input" style="${/<[a-z][\s\S]*?>/i.test(tpl.b||'')?'display:none':''}" oninput="_tplHtmlBadge('${cur}',this.value)">${esc(tpl.b)}</textarea>
+      <div id="tpl_r_${cur}" class="email-body tpl-render" contenteditable="true" spellcheck="false" style="${/<[a-z][\s\S]*?>/i.test(tpl.b||'')?'':'display:none'}" oninput="_tplRenderSync('${cur}')">${/<[a-z][\s\S]*?>/i.test(tpl.b||'')?tpl.b:''}</div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:5px">
         <span id="tpl-html-badge-${cur}" style="font-size:10.5px;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:4px;${/<[a-z][\s\S]*?>/i.test(tpl.b||'')?'background:#EDF3FA;color:var(--sky-deep);border:1px solid #B8D4F0':'background:var(--cream);color:var(--soft);border:1px solid var(--border)'}">${/<[a-z][\s\S]*?>/i.test(tpl.b||'')?'HTML \u2014 sends as rich email':'PLAIN TEXT \u2014 auto-styled paragraphs'}</span>
+        <button id="tpl-viewtoggle-${cur}" class="btn-sm bg-cream" style="font-size:10.5px;cursor:pointer;${/<[a-z][\s\S]*?>/i.test(tpl.b||'')?'':'display:none'}" onclick="_tplToggleView('${cur}')" title="Flip between the branded email and its HTML source">\u270e Edit HTML code</button>
         <span class="set-help" style="margin:0;font-size:10.5px">Paste HTML directly (tags are detected automatically) or write plain text. {placeholders} work in both.</span>
       </div>
     </section>
@@ -19737,6 +19762,17 @@ function _onTplFilter(v){
 
 function insertPlaceholder(textareaId,ph){
   const ta=document.getElementById(textareaId);if(!ta)return;
+  /* Template bodies can be showing the BRANDED view (contenteditable) instead of the raw
+     textarea — insert into whichever is visible, then mirror back to the textarea. */
+  if(textareaId.indexOf('tpl_b_')===0){
+    const key=textareaId.slice(6),rd=document.getElementById('tpl_r_'+key);
+    if(rd&&rd.style.display!=='none'){
+      rd.focus();
+      try{document.execCommand('insertText',false,ph);}catch(e){rd.appendChild(document.createTextNode(ph));}
+      ta.value=rd.innerHTML;
+      return;
+    }
+  }
   const start=ta.selectionStart,end=ta.selectionEnd;
   ta.value=ta.value.slice(0,start)+ph+ta.value.slice(end);
   ta.selectionStart=ta.selectionEnd=start+ph.length;
@@ -19751,6 +19787,14 @@ function loadDefaultIntoEditor(key){
   const s=document.getElementById('tpl_s_'+key),b=document.getElementById('tpl_b_'+key);
   if(s)s.value=def.s;
   if(b)b.value=def.b;
+  /* Keep the branded view and badge in step — the default may flip HTML⇄plain. */
+  _tplHtmlBadge(key,def.b);
+  const rd=document.getElementById('tpl_r_'+key);
+  if(rd&&b){
+    const isH=/<[a-z][\s\S]*?>/i.test(def.b||'');
+    if(isH&&rd.style.display!=='none')rd.innerHTML=def.b;
+    else if(!isH){rd.style.display='none';b.style.display='';}
+  }
   toast('Default loaded into editor (not saved yet — click Save to keep)');
 }
 
@@ -19798,8 +19842,9 @@ function previewTemplate(key){
   m.classList.add('open');
 }
 
-/* Template-editor side of the HTML paste box: drop a designed email into the body field,
-   see it rendered immediately via the preview modal. Save still required to keep it. */
+/* Template-editor side of the HTML paste box: drop a designed email into the body field and
+   the field ITSELF flips to the branded view (Meir killed the auto-preview popup — the
+   rendered email belongs in the composing box, not a modal). Save still required to keep it. */
 function _tplPasteHtml(key){
   _htmlPasteBox('Paste HTML email — template body',function(raw){
     const html=_extractEmailHtml(raw);
@@ -19808,8 +19853,9 @@ function _tplPasteHtml(key){
     if(ta.value.trim()&&!confirm('Replace the current template body with the pasted HTML?'))return;
     ta.value=html;
     _tplHtmlBadge(key,html);
-    toast('✓ HTML in the editor — click Save to keep it');
-    previewTemplate(key);
+    const rd=document.getElementById('tpl_r_'+key),tg=document.getElementById('tpl-viewtoggle-'+key);
+    if(rd){rd.innerHTML=html;rd.style.display='';ta.style.display='none';if(tg)tg.textContent='✎ Edit HTML code';}
+    toast('✓ That’s the branded email — click Save to keep it');
   });
 }
 
