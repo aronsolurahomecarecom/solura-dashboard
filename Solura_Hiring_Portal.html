@@ -12848,7 +12848,11 @@ function _mailPreview(body){
   return s.replace(/\s+/g,' ').trim().slice(0,200);
 }
 function _soluraShell(innerHtml){
-  if(!innerHtml||String(innerHtml).indexOf('solura-shell')>-1||/<html[\s>]/i.test(innerHtml))return innerHtml;
+  /* Skip the generic wrap when the content is already a self-contained design: the shell
+     itself, a full <html> document, a paste-box extraction (data-solura-full), or anything
+     carrying its own <style> block. Plain typed/rich messages still get the branded card. */
+  if(!innerHtml||String(innerHtml).indexOf('solura-shell')>-1||/<html[\s>]/i.test(innerHtml)
+    ||/data-solura-full/i.test(innerHtml)||/<style[\s>]/i.test(innerHtml))return innerHtml;
   return '<div id="solura-shell" style="background:#F7F4EE;padding:28px 12px;font-family:Georgia,\'Times New Roman\',serif">'
     +'<div style="max-width:600px;margin:0 auto;background:#FFFDF8;border-radius:10px;border:1px solid #E8E0D0;overflow:hidden">'
     +'<div style="height:5px;background:#C59B4E"></div>'
@@ -13170,7 +13174,12 @@ function _extractEmailHtml(raw){
   const bm=raw.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
   const inner=(bm?bm[2]:raw).replace(/<style[\s\S]*?<\/style>/gi,'').trim();
   const styleAttr=bm?((bm[1].match(/style\s*=\s*("[^"]*"|'[^']*')/i)||[])[0]||''):'';
-  return (styles?styles+'\n':'')+(styleAttr?'<div '+styleAttr+'>'+inner+'</div>':inner);
+  /* data-solura-full marks this as a complete designed email. The <html> shell that used to
+     say so is stripped right here, so without the marker _soluraShell would re-wrap the
+     design in the generic branded card at send time (double branding — Meir 2026-10-06).
+     The marker rides inside the body HTML, so it survives the contenteditable, template
+     saves, and substitution all the way to the send paths. */
+  return (styles?styles+'\n':'')+'<div data-solura-full="1" '+styleAttr+'>'+inner+'</div>';
 }
 function _emailPasteHtml(){
   _htmlPasteBox('Paste HTML email',function(raw){
