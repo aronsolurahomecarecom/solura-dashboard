@@ -61,7 +61,9 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
 
 // ── submission → sheet row ──
 {
-  const sub = { name: 'Susan Gold', phone: '(216) 555-0100', email: 's@x.com', pt: 'Rose Gold', rel: 'Parent', zip: '44118', notes: 'Mom needs help mornings' };
+  const sub = { name: 'Susan Gold', phone: '(216) 555-0100', email: 's@x.com', pt: 'Rose Gold', rel: 'Parent', zip: '44118', notes: 'Mom needs help mornings',
+    needs: 'Personal care, Memory care', timeline: 'Next few weeks', hours: 'Several hours most days', pay: 'Private pay',
+    best: 'Evening', sms: 'yes (sms-v1-2026-10)', variant: 'full' };
   const link = { code: 'fb-1', platform: 'Facebook', method: 'DM' };
   const v = I.intakeLeadVals(sub, link, '10/7/2026', '2026-10-07T12:00:00.000Z');
   ok(v.length === 35, 'row spans exactly A:AI (35 columns, same as Add Lead)');
@@ -69,10 +71,18 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
   ok(v[6] === 'Facebook · DM', 'SOURCE CELL populated from the link: platform · method');
   ok(v[10] === 'New' && v[13] === '10/7/2026' && v[1] === '10/7/2026', 'status New, follow-up today — lands in Due Now');
   ok(v[3] === '(216) 555-0100' && v[4] === 's@x.com' && v[5] === '44118', 'phone/email/area carried');
+  ok(v[7] === 'Personal care, Memory care' && v[8] === 'Several hours most days' && v[9] === 'Next few weeks' && v[15] === 'Private pay',
+    'inquiry answers land in their REAL columns: Services, Hrs/Wk, Est. Start, Pay Type');
   ok(v[18].indexOf('Their words: "Mom needs help mornings"') > -1 && v[18].indexOf('Facebook · DM') > -1, 'their message lands in Notes with the source');
+  ok(v[18].indexOf('Best time to reach: Evening') > -1 && v[18].indexOf('✅ SMS consent given on the form (yes (sms-v1-2026-10))') > -1,
+    'best time + SMS consent (with version) recorded in Notes — the TCPA paper trail');
   ok(v[23] === 'Parent' && v[25] === 0 && v[31] === 'C·high' && v[34] === '2026-10-07T12:00:00.000Z', 'relationship, step 0, track verdict, arrival stamp');
   const solo = I.intakeLeadVals({ name: 'Joe Levin', phone: '1' }, null, '10/7/2026', 'iso');
   ok(solo[2] === 'Joe Levin' && solo[14] === '', 'no patient named → filler IS the client, no duplicate DM');
+  const ref = I.intakeLeadVals({ name: 'Jordan Ellis', phone: '(216) 555-0147', pt: 'Ruth', rel: 'Client/Patient',
+    org: 'Lakeshore Rehabilitation Center', needs: 'Hospital/rehab return', variant: 'referral' }, link, '10/7/2026', 'iso');
+  ok(ref[2] === 'Ruth' && ref[14] === 'Jordan Ellis' && ref[18].indexOf('Referring organization: Lakeshore Rehabilitation Center') > -1
+    && ref[18].indexOf('professional referral form') > -1, 'professional referrals: client is the lead, referrer is DM, org in Notes');
 }
 
 // ── worker queue locks ──
@@ -93,13 +103,23 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
   ok(form.indexOf('graph.microsoft.com') === -1 && form.indexOf('login.microsoftonline') === -1, 'form holds no Graph/auth code at all');
   ok(/id="i-website"/.test(form) && /hp:el\('i-website'\)\.value/.test(form), 'honeypot field rides every submit');
   ok(/qs\.get\('c'\)/.test(form) && /qs\.get\('w'\)/.test(form), 'form reads the link code + worker origin from the URL');
-  ok(/function expandWorker/.test(form) && /'\.workers\.dev'/.test(form.replace(/\\/g, '')) || /\.workers\.dev/.test(form), 'the short w (name.account) expands to the full workers.dev origin');
+  ok(/function expandWorker/.test(form) && /\.workers\.dev/.test(form), 'the short w (name.account) expands to the full workers.dev origin');
   ok(/var WORKER_DEFAULT=''/.test(form), 'bake slot: set WORKER_DEFAULT once and links need only ?c=code');
   ok(/expandWorker\(qs\.get\('w'\)\)\|\|WORKER_DEFAULT/.test(form), 'URL w wins, baked default is the fallback');
-  ok(/if\(!phone&&!email\)/.test(form) && /if\(!name\)/.test(form), 'client-side gate matches the worker gate');
+  ok(/if\(!phone&&!email\)return;/.test(form) && /if\(!name\)return;/.test(form), 'client-side gate backstops the worker gate');
+  ok(/if\(!first\)/.test(form) && /if\(!n\)\{setErr\('e-phone',MISSING_PHONE\)/.test(form) && /n<10/.test(form), 'design validation: first name + 10-digit phone, errors clear on typing');
   ok(/\(216\) 770-4886/.test(form) && /License 4574HHN/.test(form) && /815 Superior Ave E Ste 1618/.test(form), 'brand contact block present');
   ok(form.indexOf('—') === -1, 'no em dashes anywhere in the outbound-facing form');
   ok(/name="robots" content="noindex"/.test(form), 'form stays out of search engines');
+  // The board design's substance
+  ok(/id="step1"/.test(form) && /id="step2"/.test(form) && /id="step3"/.test(form) && /Step '\+n\+' of 3/.test(form), 'three-step flow with a live progress bar');
+  ok(/!\/\^44\[01\]\/\.test\(this\.value\)/.test(form) && /outside where we currently provide care/.test(form), 'ZIP soft check: 440xx/441xx in area, notice never blocks submit');
+  ok(/id="referral"/.test(form) && /variant:'referral',org:ro/.test(form), 'professional referral branch submits its own variant with the organization');
+  ok(/sms-v1-2026-10/.test(form) && /Reply STOP to opt out/.test(form), 'SMS consent checkbox carries the TCPA language + a consent version');
+  ok(/Solura_Application_Form\.html\?src=GNG6XK/.test(form) && /Looking for a caregiver job\?/.test(form), 'job seekers get the Apply here link with the GNG6XK source code');
+  ok(/needs:st\.needs\.join\(', '\)/.test(form) && /timeline:st\.timeline/.test(form) && /hours:st\.hours/.test(form) && /pay:st\.payment/.test(form), 'tap-card answers ride the payload as readable labels');
+  ok(/\[aria-invalid="true"\] \{ border: 3px solid #9a4510/.test(form), 'error fields get the 3px border — color is never the only signal');
+  ok(/images\/team-photo\.jpg/.test(form) && /images\/trust-photo\.jpg/.test(form), 'compressed photos, not the 7MB originals');
 }
 
 // ── dashboard wiring locks ──

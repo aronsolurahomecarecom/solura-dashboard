@@ -1828,7 +1828,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1007-109';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1007-110';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -11155,14 +11155,21 @@ function groupIntakeLinks(list){
   });
   return order.map(function(p){return {platform:p,links:groups[p]};});
 }
-// Submission → full A:AI row, same shape saveAddLead writes.
+// Submission → full A:AI row, same shape saveAddLead writes. The richer
+// inquiry answers land in their REAL columns: needs→Services, hours→Hrs/Wk,
+// timeline→Est. Start, pay→Pay Type; best time, SMS consent, referral org
+// and the page land as labeled note lines.
 function intakeLeadVals(sub,link,todayStr,nowIso){
   var route=routeTrackPure({rel:sub.rel||'',clientName:sub.pt||sub.name||'',dm:sub.name||''});
   var ptName=String(sub.pt||'').trim();
   var clientName=ptName||String(sub.name||'').trim();
   var dm=String(sub.name||'').trim();
-  var notes='📥 ['+todayStr+'] Came in through the intake form ('+intakeSourceString(link)+')'
+  var isRef=String(sub.variant||'')==='referral';
+  var notes='📥 ['+todayStr+'] Came in through the '+(isRef?'professional referral':'intake')+' form ('+intakeSourceString(link)+')'
     +(sub.rel?('\nRelationship: '+sub.rel):'')
+    +(sub.org?('\nReferring organization: '+sub.org):'')
+    +(sub.best?('\nBest time to reach: '+sub.best):'')
+    +(sub.sms?('\n✅ SMS consent given on the form ('+sub.sms+')'):'')
     +(sub.notes?('\nTheir words: "'+String(sub.notes).trim()+'"'):'');
   return [
     '',                      // A  Lead #
@@ -11172,12 +11179,15 @@ function intakeLeadVals(sub,link,todayStr,nowIso){
     String(sub.email||'').trim(), // E  Email
     String(sub.zip||'').trim(),   // F  Area
     intakeSourceString(link),// G  Source — platform · method from the link
-    '','','',                // H I J
+    String(sub.needs||'').trim(), // H  Services — what kind of help
+    String(sub.hours||'').trim(), // I  Hrs/Wk — roughly how much help
+    String(sub.timeline||'').trim(), // J  Est. Start — when care is needed
     'New',                   // K  Status
     '','',                   // L M
     todayStr,                // N  Next Follow-Up — lands in Due Now today
     (dm&&dm.toLowerCase()!==clientName.toLowerCase())?dm:'', // O Decision Maker
-    '','','',                // P Q R
+    String(sub.pay||'').trim(), // P  Pay Type
+    '','',                   // Q R
     notes,                   // S  Notes
     stepLabel(0),            // T  Sequence Phase
     '','',                   // U V

@@ -22,7 +22,10 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = '7.0-intake'; // 7.0: public client-intake form endpoints —
+var VERSION = '7.1-intake'; // 7.1: intake stores the full inquiry — care
+// needs, timeline, hours, payment, best time, SMS consent, referral org,
+// form variant, page URL — all length-capped, queued exactly as before.
+// 7.0: public client-intake form endpoints —
 // POST /intake (public, honeypot-guarded) queues a submission in KV;
 // GET /intake/list + POST /intake/ack (TRACK_TOKEN) let the dashboard
 // pull submissions and append them to the sheet, then delete them.
@@ -296,7 +299,16 @@ export default {
         pt: String(ib.pt || '').trim().slice(0, 120),
         rel: String(ib.rel || '').trim().slice(0, 60),
         zip: String(ib.zip || '').trim().slice(0, 20),
-        notes: String(ib.notes || '').trim().slice(0, 1200)
+        notes: String(ib.notes || '').trim().slice(0, 1200),
+        needs: String(ib.needs || '').trim().slice(0, 300),
+        timeline: String(ib.timeline || '').trim().slice(0, 60),
+        hours: String(ib.hours || '').trim().slice(0, 60),
+        pay: String(ib.pay || '').trim().slice(0, 60),
+        best: String(ib.best || '').trim().slice(0, 30),
+        sms: String(ib.sms || '').trim().slice(0, 60),
+        variant: String(ib.variant || '').trim().slice(0, 20),
+        org: String(ib.org || '').trim().slice(0, 120),
+        page: String(ib.page || '').trim().slice(0, 300)
       };
       var ikey = 'intake:' + sub.ts + ':' + Math.random().toString(36).slice(2, 8);
       try { await kv.put(ikey, JSON.stringify(sub), { expirationTtl: INTAKE_TTL }); }
