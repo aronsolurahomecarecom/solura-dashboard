@@ -8804,7 +8804,18 @@ async function _seqV3RepairPass(){
          30-second refresh, with no operator action anywhere. The unadopted case stays alive below:
          adopting a brand-new candidate is additive and reassignable, whereas rewriting an existing
          tag destroys it in the cell and the sheet cannot give it back. */
-      if(c.st.sequenceId&&((window._lastSettingsLoadStatus||{}).source!=='workerFile'))continue;
+      /* ...AND IT IS NOT EVIDENCE ABOUT AN UNADOPTED ONE EITHER. The paragraph above kept adoption
+         alive on a fallback tier as "additive and reassignable". Live 2026-10-01 20:45Z to 10-02: a
+         session whose settings carried NO sequences had _seqV3Migrate mint an in-memory "Classic
+         flow" and star it, and this pass adopted every new applicant onto id 'classic-flow' - 11
+         rows (r189-r199), each logged 'Adopted "Classic flow"', a name no saved sequence has
+         carried since August. In a healthy session that id IS the retiring references-lane flow,
+         so job-link applicants bound to another sequence and default-flow applicants alike were
+         tagged for life onto the flow being wound down, and two were walked through Ask
+         references. Nothing re-homes an adopted row (rule 6), so the adoption is not reassignable
+         in practice. A degraded session writes no sequence tag at all: the next healthy load
+         adopts them correctly, and until then the board evaluates them in memory (_seqV3Action). */
+      if((window._lastSettingsLoadStatus||{}).source!=='workerFile')continue;
       /* TAG-FOR-LIFE, REPAIR-IN-PLACE: a dangling pointer on a still-existing sequence is a
          POINTER problem, not a sequence problem (step edits/re-imports mint new step ids).
          Re-place stage-matched WITHIN their own sequence; never move them to the default —
@@ -23751,6 +23762,20 @@ async function _bgFormBlocksConfirmed(c){
   }
   return blocks;
 }
+/* The tick's sends are awaited (seconds), and backgroundRefresh - unguarded, every 30s - can swap
+   `pipeline` meanwhile. The card the tick still holds is then an orphan: writing it puts pre-reload
+   state back over AJ (an inbound email the poll just merged, a webhook's booking). Same hazard the
+   Claude lane closed with _liveCandAfterAwait; the two EMAIL lanes still wrote the orphan. Returns
+   the live card carrying what _autoSendTpl stamped (sent flag + its log line), or null when the
+   live cell is corrupt (write nothing - _tickActs already stops a re-send this session). */
+function _tickLiveAfterSend(c,tpl){
+  const lc=_liveCandAfterAwait(c.excelRow,c);
+  if(!lc||lc===c)return lc;
+  if(c.st.sent&&c.st.sent[tpl]){lc.st.sent=lc.st.sent||{};lc.st.sent[tpl]=c.st.sent[tpl];}
+  const ln=(c.st.log||[])[(c.st.log||[]).length-1];
+  if(ln)lc.st.log=(lc.st.log||[]).concat(ln);
+  return lc;
+}
 function _tickOutwardHold(c){
   if(!c||!c.st)return '';
   if(c.st.manualAwaiting)return 'parked in awaiting by you';
@@ -23862,9 +23887,11 @@ async function _seqAutomationTick(){
         try{ _warnSent=await _autoSendTpl(c,'interview_cert_warning',true); } /* _certWarnSentFor above is the per-booking gate */
         catch(e){ _warnErr=(e&&e.message)||String(e); }
         if(_warnSent){_tA[_wk]=1;
-          c.st.warnedForBooking=String(c.st.booking||'');
-          c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-sent interview cert warning (cancel at T-30)'});
-          try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);}catch(e2){console.warn('warn stamp write failed row',c.excelRow,e2.message);}
+          const _wc=_tickLiveAfterSend(c,'interview_cert_warning'); /* live card - see _tickLiveAfterSend */
+          if(!_wc){budget--;continue;} /* live cell corrupt - write nothing; _tickActs stops a re-send */
+          _wc.st.warnedForBooking=String(c.st.booking||''); /* the booking the warning was ABOUT */
+          _wc.st.log=(_wc.st.log||[]).concat({t:stamp(),x:'🤖⚙ Auto-sent interview cert warning (cancel at T-30)'});
+          try{await patchRange('AJ'+_wc.excelRow,[[_stCell(_wc.st)]]);}catch(e2){console.warn('warn stamp write failed row',c.excelRow,e2.message);}
           budget--;continue; /* one action per candidate per tick */
         }
         /* THE WARNING DID NOT GO OUT. This branch had no else at all — _autoSendTpl returning false
@@ -23976,10 +24003,17 @@ async function _seqAutomationTick(){
         /* Name the actual blocker: 'email not sent' was also what an already-sent step got. */
         if(!c.email){await _stampFail('no email address on file');continue;}
         if(await _autoSendTpl(c,it.templateKey)){window._tickActs=window._tickActs||{};window._tickActs['seq|'+c.excelRow+'|'+it.templateKey]=1;
-          _clearFail();
-          const adv=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
-          if(!adv.error)Object.assign(c.st,adv.partialState||{});
-          try{await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);}catch(e2){console.warn('sequence send stamp write failed row',c.excelRow,e2.message);}
+          const _sc=_tickLiveAfterSend(c,it.templateKey); /* live card - see _tickLiveAfterSend */
+          if(_sc){
+            if(_sc.st.seqAutoFail)delete _sc.st.seqAutoFail;
+            /* Advance only from the step that was just executed: a reloaded card whose pointer
+               already moved (a stage snap after a webhook) must not be pushed a second step. */
+            if(_sc.st.sequenceStepId===_stepId){
+              const adv=window.SeqEngineV2.advanceStep(seq,_sc,_seqTriggerEval);
+              if(!adv.error)Object.assign(_sc.st,adv.partialState||{});
+            }
+            try{await patchRange('AJ'+_sc.excelRow,[[_stCell(_sc.st)]]);}catch(e2){console.warn('sequence send stamp write failed row',c.excelRow,e2.message);}
+          }
           budget--;
         }else await _stampFail('email not sent');
       }else if(it.type==='set-stage'){
