@@ -101,6 +101,8 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 â€
 {
   ok(/data-sec="intake"/.test(html) && /id="st-sec-intake"/.test(html), 'Intake links section lives in Settings');
   ok(/case 'intake-new':/.test(html) && /makeIntakeCode\(p\)/.test(html), 'create-link flow generates a unique code per platform');
+  ok(/intakeLinks\(\)\.push\(l\);\s*\n\s*renderIntakeLinks\(\);/.test(html), 'create is INSTANT: the link renders before the background config sync');
+  ok(/Link created, but syncing it failed/.test(html), 'a failed background sync is loud, not silent');
   ok(/case 'intake-copy':/.test(html) && /navigator\.clipboard\.writeText/.test(html), 'one-click URL copy');
   ok(/onchange="intakeNoteChanged\(this\)"/.test(html) && /function intakeNoteChanged/.test(html), 'internal notes editable per link, saved to the synced config');
   ok(/groupIntakeLinks\(L\)\.map/.test(html), 'the list renders grouped by platform');

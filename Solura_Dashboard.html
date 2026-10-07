@@ -1828,7 +1828,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1007-107';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1007-108';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -11288,7 +11288,8 @@ function intakeNoteChanged(ta){
   var l=null;for(var i=0;i<L.length;i++)if(L[i].id===ta.dataset.id){l=L[i];break;}
   if(!l)return;
   l.notes=String(ta.value||'');
-  saveEnginesDoc().then(function(){toast('📝 Note saved');}).catch(function(e){showErr(e.message);});
+  toast('📝 Note saved');
+  saveEnginesDoc().catch(function(e){showErr('Note failed to sync: '+e.message);});
 }
 async function intakeTestConnection(){
   var out=el('intake-test-out');if(out)out.textContent='checking…';
@@ -14256,13 +14257,14 @@ function onClick(ev){
           method:String(((el('intake-method')||{}).value||'')).trim(),
           notes:String(((el('intake-notes-new')||{}).value||'')).trim(),
           createdAt:Date.now(),fills:0};
+        // Instant: the URL is deterministic (code + worker origin), nothing
+        // about it needs the server — render now, sync in the background.
         intakeLinks().push(l);
-        saveEnginesDoc().then(function(){
-          renderIntakeLinks();
-          toast('🔗 '+p+' link created — copy its URL below');
-          if(el('intake-method'))el('intake-method').value='';
-          if(el('intake-notes-new'))el('intake-notes-new').value='';
-        }).catch(function(e){showErr(e.message);});
+        renderIntakeLinks();
+        toast('🔗 '+p+' link created — copy its URL below');
+        if(el('intake-method'))el('intake-method').value='';
+        if(el('intake-notes-new'))el('intake-notes-new').value='';
+        saveEnginesDoc().catch(function(e){showErr('Link created, but syncing it failed: '+e.message+' — it saves with the next config change; avoid posting the URL until then');});
       })();
       break;
     case 'intake-copy':
@@ -14284,7 +14286,9 @@ function onClick(ev){
         if(idx<0)return;
         if(!confirm('Delete the '+intakeSourceString(L[idx])+' link? Anyone still using its URL will come in as plain "Intake form".'))return;
         L.splice(idx,1);
-        saveEnginesDoc().then(function(){renderIntakeLinks();toast('🗑 Link deleted');}).catch(function(e){showErr(e.message);});
+        renderIntakeLinks();
+        toast('🗑 Link deleted');
+        saveEnginesDoc().catch(function(e){showErr('Delete failed to sync: '+e.message);});
       })();
       break;
     case 'intake-test': intakeTestConnection(); break;
