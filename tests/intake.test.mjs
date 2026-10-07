@@ -69,7 +69,7 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 â€
 {
   const sub = { name: 'Susan Gold', phone: '(216) 555-0100', email: 's@x.com', pt: 'Rose Gold', rel: 'Parent', zip: '44118', notes: 'Mom needs help mornings',
     needs: 'Personal care, Memory care', timeline: 'Next few weeks', hours: 'Several hours most days', pay: 'Private pay',
-    best: 'Evening', sms: 'yes (sms-v1-2026-10)', variant: 'full' };
+    best: 'Evening', sms: 'yes (sms-v1-2026-10)', variant: 'full', cond: "Dementia / Alzheimer's" };
   const link = { code: 'fb-1', platform: 'Facebook', method: 'DM' };
   const v = I.intakeLeadVals(sub, link, '10/7/2026', '2026-10-07T12:00:00.000Z');
   ok(v.length === 35, 'row spans exactly A:AI (35 columns, same as Add Lead)');
@@ -83,6 +83,7 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 â€
   ok(v[18].indexOf('Best time to reach: Evening') > -1 && v[18].indexOf('âœ… SMS consent given on the form (yes (sms-v1-2026-10))') > -1,
     'best time + SMS consent (with version) recorded in Notes â€” the TCPA paper trail');
   ok(v[23] === 'Parent' && v[25] === 0 && v[31] === 'CÂ·high' && v[34] === '2026-10-07T12:00:00.000Z', 'relationship, step 0, track verdict, arrival stamp');
+  ok(v[28] === "Dementia / Alzheimer's" && v[18].indexOf("Main condition: Dementia / Alzheimer's") > -1, 'the condition lands in the mentioned_conditions column AND the notes');
   const solo = I.intakeLeadVals({ name: 'Joe Levin', phone: '1' }, null, '10/7/2026', 'iso');
   ok(solo[2] === 'Joe Levin' && solo[14] === '', 'no patient named â†’ filler IS the client, no duplicate DM');
   const ref = I.intakeLeadVals({ name: 'Jordan Ellis', phone: '(216) 555-0147', pt: 'Ruth', rel: 'Client/Patient',
@@ -125,6 +126,10 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 â€
   ok(/sms-v1-2026-10/.test(form) && /Reply STOP to opt out/.test(form), 'SMS consent checkbox carries the TCPA language + a consent version');
   ok(/Solura_Application_Form\.html\?src=GNG6XK/.test(form) && /Looking for a caregiver job\?/.test(form), 'job seekers get the Apply here link with the GNG6XK source code');
   ok(/needs:st\.needs\.join\(', '\)/.test(form) && /timeline:st\.timeline/.test(form) && /hours:st\.hours/.test(form) && /pay:st\.payment/.test(form), 'tap-card answers ride the payload as readable labels');
+  ok(/id="i-cond"/.test(form) && /Main condition or diagnosis/.test(form) && /cond:el\('i-cond'\)\.value/.test(form) && /Dementia or Alzheimer's/.test(form), 'optional condition dropdown rides the payload');
+  ok(/id="pt-wrap"/.test(form) && /Their first name/.test(form) && /pw\.hidden=\(v==='Self'\)/.test(form), "patient-name field on step 2, hidden when they're asking for themselves");
+  ok(/pt:st\.recipient==='Self'\?'':el\('i-pt'\)\.value\.trim\(\)/.test(form), 'self-inquiries never send a stray patient name');
+  ok(/cond: String\(ib\.cond \|\| ''\)\.trim\(\)\.slice\(0, 80\)/.test(worker), 'worker stores the condition, length-capped');
   ok(/\[aria-invalid="true"\] \{ border: 3px solid #9a4510/.test(form), 'error fields get the 3px border â€” color is never the only signal');
   ok(/images\/team-photo\.jpg/.test(form) && /images\/trust-photo\.jpg/.test(form), 'compressed photos, not the 7MB originals');
 }
