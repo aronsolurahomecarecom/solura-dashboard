@@ -110,9 +110,20 @@
   'use strict';
   var qs=new URLSearchParams(location.search);
   var CODE=qs.get('c')||'';
-  // The queue lives on our own Cloudflare worker; the link carries its
-  // address (w=) so this page holds no credentials and touches no sheet.
-  var WORKER=(qs.get('w')||'').replace(/\/+$/,'');
+  // The queue lives on our own Cloudflare worker; this page holds no
+  // credentials and touches no sheet. Bake the worker origin below
+  // (e.g. 'https://solura-track.meir-865.workers.dev') and links need
+  // only ?c=code, like the hiring application. Until then the link's
+  // short w= (name.account) expands to the workers.dev address.
+  var WORKER_DEFAULT='';
+  function expandWorker(w){
+    w=String(w||'').replace(/\/+$/,'').trim();
+    if(!w)return '';
+    if(/^https:\/\//i.test(w))return w;
+    if(/^[a-z0-9.-]+$/i.test(w))return 'https://'+w+(/\.workers\.dev$/i.test(w)?'':'.workers.dev');
+    return '';
+  }
+  var WORKER=expandWorker(qs.get('w'))||WORKER_DEFAULT.replace(/\/+$/,'');
   function el(id){return document.getElementById(id);}
   function showErr(m){var e=el('i-err');e.textContent=m;e.style.display='block';}
   el('f').addEventListener('submit',function(ev){

@@ -23,7 +23,7 @@ const src = html.slice(html.indexOf('*/', b) + 2, e);
 // ── stub environment (pure helpers only — poll/create are source-locked) ──
 const enginesDoc = { config: {} };
 const names = ['enginesDoc', 'routeTrackPure', 'stepLabel', 'localStorage'];
-const mk = new Function(...names, src + '\nreturn {intakeLinks,makeIntakeCode,intakeUrlFor,intakeSourceString,intakeLinkByCode,groupIntakeLinks,intakeLeadVals};');
+const mk = new Function(...names, src + '\nreturn {intakeLinks,makeIntakeCode,intakeUrlFor,intakeWorkerParam,intakeSourceString,intakeLinkByCode,groupIntakeLinks,intakeLeadVals};');
 const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 — Day 1', { getItem: () => null, setItem: () => {} });
 
 // ── link codes + URLs ──
@@ -34,7 +34,9 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
   const link = { code: 'fb-abc12', platform: 'Facebook', method: 'DM' };
   const url = I.intakeUrlFor(link, { url: 'https://trk.example.workers.dev', token: 't' });
   ok(url.indexOf('Solura_Intake_Form.html?c=fb-abc12') > -1, 'URL carries the link code');
-  ok(url.indexOf('&w=https%3A%2F%2Ftrk.example.workers.dev') > -1, 'URL carries the worker origin — the form holds no credentials');
+  ok(url.indexOf('&w=trk.example') > -1 && url.indexOf('workers.dev') === -1, 'workers.dev shrinks to name.account — just a few characters, like the hiring links');
+  ok(I.intakeWorkerParam('https://trk.example.workers.dev/') === 'trk.example', 'trailing slash tolerated');
+  ok(I.intakeWorkerParam('https://track.solurahomecare.com') === 'https://track.solurahomecare.com', 'a custom domain rides whole (the form accepts both forms)');
   ok(I.intakeUrlFor(link, null).indexOf('&w=') === -1, 'no tracker configured = URL still generates (form says call us)');
 }
 
@@ -91,6 +93,9 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
   ok(form.indexOf('graph.microsoft.com') === -1 && form.indexOf('login.microsoftonline') === -1, 'form holds no Graph/auth code at all');
   ok(/id="i-website"/.test(form) && /hp:el\('i-website'\)\.value/.test(form), 'honeypot field rides every submit');
   ok(/qs\.get\('c'\)/.test(form) && /qs\.get\('w'\)/.test(form), 'form reads the link code + worker origin from the URL');
+  ok(/function expandWorker/.test(form) && /'\.workers\.dev'/.test(form.replace(/\\/g, '')) || /\.workers\.dev/.test(form), 'the short w (name.account) expands to the full workers.dev origin');
+  ok(/var WORKER_DEFAULT=''/.test(form), 'bake slot: set WORKER_DEFAULT once and links need only ?c=code');
+  ok(/expandWorker\(qs\.get\('w'\)\)\|\|WORKER_DEFAULT/.test(form), 'URL w wins, baked default is the fallback');
   ok(/if\(!phone&&!email\)/.test(form) && /if\(!name\)/.test(form), 'client-side gate matches the worker gate');
   ok(/\(216\) 770-4886/.test(form) && /License 4574HHN/.test(form) && /815 Superior Ave E Ste 1618/.test(form), 'brand contact block present');
   ok(form.indexOf('—') === -1, 'no em dashes anywhere in the outbound-facing form');
