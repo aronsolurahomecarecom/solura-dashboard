@@ -10,7 +10,8 @@ import { dirname, join } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, '..', 'Solura_Dashboard.html'), 'utf8');
 const worker = readFileSync(join(here, '..', 'solura-track-worker.js'), 'utf8');
-const form = readFileSync(join(here, '..', 'Solura_Intake_Form.html'), 'utf8');
+const form = readFileSync(join(here, '..', 'care', 'index.html'), 'utf8');
+const stub = readFileSync(join(here, '..', 'Solura_Intake_Form.html'), 'utf8');
 
 let PASS = 0, FAIL = 0;
 const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: ' + n); } };
@@ -33,11 +34,13 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
   ok(I.makeIntakeCode('???').indexOf('x-') === 0, 'symbol-only platforms still get a valid code');
   const link = { code: 'fb-abc12', platform: 'Facebook', method: 'DM' };
   const url = I.intakeUrlFor(link, { url: 'https://trk.example.workers.dev', token: 't' });
-  ok(url.indexOf('Solura_Intake_Form.html?c=fb-abc12') > -1, 'URL carries the link code');
+  ok(url.indexOf('https://apply.solurahomecare.com/care/?c=fb-abc12') === 0, 'short path: /care/ instead of the long filename');
   ok(url.indexOf('&w=trk.example') > -1 && url.indexOf('workers.dev') === -1, 'workers.dev shrinks to name.account — just a few characters, like the hiring links');
   ok(I.intakeWorkerParam('https://trk.example.workers.dev/') === 'trk.example', 'trailing slash tolerated');
   ok(I.intakeWorkerParam('https://track.solurahomecare.com') === 'https://track.solurahomecare.com', 'a custom domain rides whole (the form accepts both forms)');
   ok(I.intakeUrlFor(link, null).indexOf('&w=') === -1, 'no tracker configured = URL still generates (form says call us)');
+  ok(/if\(wp&&wp!==INTAKE_BAKED_WORKER\)/.test(src), 'bake slot: once the worker is baked into the form, links drop w entirely');
+  ok(/location\.replace\('\/care\/'\+location\.search\+location\.hash\)/.test(stub), 'the old long URL still works — it forwards to /care/ with the code intact');
 }
 
 // ── the Source cell ──

@@ -1828,7 +1828,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1007-110';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1007-111';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -11110,7 +11110,10 @@ async function saveAddLead(){
  * the Source cell comes from the link (platform · method).
  * ─────────────────────────────────────────────────────────────────────── */
 /* ⚡INTAKE — BEGIN (sliced by tests/intake.test.mjs) */
-var INTAKE_FORM_BASE='https://apply.solurahomecare.com/Solura_Intake_Form.html';
+var INTAKE_FORM_BASE='https://apply.solurahomecare.com/care/';
+// When the SAME worker is baked into care/index.html as WORKER_DEFAULT,
+// set its short form here too and links shrink to just ?c=code.
+var INTAKE_BAKED_WORKER='';
 function intakeLinks(){
   enginesDoc.config=enginesDoc.config||{};
   var L=enginesDoc.config.intakeLinks;
@@ -11131,7 +11134,9 @@ function intakeWorkerParam(tcUrl){
 }
 function intakeUrlFor(link,tc){
   var u=INTAKE_FORM_BASE+'?c='+encodeURIComponent(link.code);
-  if(tc&&tc.url)u+='&w='+encodeURIComponent(intakeWorkerParam(tc.url));
+  var wp=tc&&tc.url?intakeWorkerParam(tc.url):'';
+  // The form's baked default covers it → the link needs no w at all
+  if(wp&&wp!==INTAKE_BAKED_WORKER)u+='&w='+encodeURIComponent(wp);
   return u;
 }
 // What lands in the Source cell: platform, plus the method when set
