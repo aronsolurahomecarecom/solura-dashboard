@@ -36,7 +36,8 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 â€
   const url = I.intakeUrlFor(link, { url: 'https://trk.example.workers.dev', token: 't' });
   ok(url.indexOf('https://apply.solurahomecare.com/care/?c=fb-abc12') === 0, 'short path: /care/ instead of the long filename');
   ok(url.indexOf('&w=trk.example') > -1 && url.indexOf('workers.dev') === -1, 'workers.dev shrinks to name.account â€” just a few characters, like the hiring links');
-  ok(I.intakeWorkerParam('https://trk.example.workers.dev/') === 'trk.example', 'trailing slash tolerated');
+  ok(I.intakeWorkerParam('https://solura-track.meir-865.workers.dev') === 'solura-track', 'on OUR account only the worker NAME rides â€” the form assumes meir-865');
+  ok(I.intakeWorkerParam('https://trk.example.workers.dev/') === 'trk.example', 'other accounts keep name.account; trailing slash tolerated');
   ok(I.intakeWorkerParam('https://track.solurahomecare.com') === 'https://track.solurahomecare.com', 'a custom domain rides whole (the form accepts both forms)');
   ok(I.intakeUrlFor(link, null).indexOf('&w=') === -1, 'no tracker configured = URL still generates (form says call us)');
   ok(/if\(wp&&wp!==INTAKE_BAKED_WORKER\)/.test(src), 'bake slot: once the worker is baked into the form, links drop w entirely');
@@ -107,6 +108,7 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 â€
   ok(/id="i-website"/.test(form) && /hp:el\('i-website'\)\.value/.test(form), 'honeypot field rides every submit');
   ok(/qs\.get\('c'\)/.test(form) && /qs\.get\('w'\)/.test(form), 'form reads the link code + worker origin from the URL');
   ok(/function expandWorker/.test(form) && /\.workers\.dev/.test(form), 'the short w (name.account) expands to the full workers.dev origin');
+  ok(/var WORKER_ACCOUNT='meir-865'/.test(form) && /'https:\/\/'\+w\+'\.'\+WORKER_ACCOUNT\+'\.workers\.dev'/.test(form), 'a bare worker NAME expands on our own account â€” links carry just a few characters');
   ok(/var WORKER_DEFAULT=''/.test(form), 'bake slot: set WORKER_DEFAULT once and links need only ?c=code');
   ok(/expandWorker\(qs\.get\('w'\)\)\|\|WORKER_DEFAULT/.test(form), 'URL w wins, baked default is the fallback');
   ok(/if\(!phone&&!email\)return;/.test(form) && /if\(!name\)return;/.test(form), 'client-side gate backstops the worker gate');

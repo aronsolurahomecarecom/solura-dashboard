@@ -1828,7 +1828,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1007-111';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1007-112';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -11129,8 +11129,10 @@ function makeIntakeCode(platform){
 // a workers.dev origin shrinks to name.account (the form adds the rest).
 function intakeWorkerParam(tcUrl){
   var u=String(tcUrl||'').replace(/\/+$/,'');
-  var m=u.match(/^https:\/\/([a-z0-9-]+\.[a-z0-9-]+)\.workers\.dev$/i);
-  return m?m[1]:u;
+  var m=u.match(/^https:\/\/([a-z0-9-]+)\.([a-z0-9-]+)\.workers\.dev$/i);
+  if(!m)return u;
+  // On our own account the form assumes the subdomain — only the NAME rides
+  return m[2].toLowerCase()==='meir-865'?m[1]:(m[1]+'.'+m[2]);
 }
 function intakeUrlFor(link,tc){
   var u=INTAKE_FORM_BASE+'?c='+encodeURIComponent(link.code);
