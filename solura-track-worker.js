@@ -22,7 +22,12 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = '6.5-owner'; // 6.5: contact segments as [{id}] objects (422 fix).
+var VERSION = '7.0-intake'; // 7.0: public client-intake form endpoints —
+// POST /intake (public, honeypot-guarded) queues a submission in KV;
+// GET /intake/list + POST /intake/ack (TRACK_TOKEN) let the dashboard
+// pull submissions and append them to the sheet, then delete them.
+// Outsiders never touch the sheet: the form only ever talks to this queue.
+// 6.5: contact segments as [{id}] objects (422 fix).
 // 6.4: Resend's contacts API migration — one
 // audience per account, contacts live at /contacts (cursor-paginated),
 // Audiences became Segments, broadcasts take segment_id + send:true.
@@ -43,9 +48,10 @@ var GIF = Uint8Array.from(atob('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEA
 
 var CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,OPTIONS',
+  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type'
 };
+var INTAKE_TTL = 30 * 24 * 3600; // unclaimed submissions live 30 days
 
 function kvOf(env) {
   // Binding name varies by install — find the first KV-shaped binding.
@@ -131,12 +137,13 @@ export default {
     }
 
     if (path === '/ping') {
-      var selfCount = 0, pend = 0;
+      var selfCount = 0, pend = 0, intakeCount = 0;
       if (kv) {
         try { selfCount = (await listAllKeys(kv, 'self:')).length; } catch (_) {}
         try { pend = (await listAllKeys(kv, 'ev:')).length; } catch (_) {}
+        try { intakeCount = (await listAllKeys(kv, 'intake:')).length; } catch (_) {}
       }
-      return json({ ok: true, v: VERSION, hasToken: !!env.TRACK_TOKEN, hasKV: !!kv, events: pend, selfOpens: selfCount }, 200, cb);
+      return json({ ok: true, v: VERSION, hasToken: !!env.TRACK_TOKEN, hasKV: !!kv, events: pend, selfOpens: selfCount, intake: intakeCount }, 200, cb);
     }
 
     /* ── pixel ── */
@@ -267,6 +274,67 @@ export default {
       } catch (e) {
         return json({ error: 'relay fetch failed: ' + (e && e.message || 'network') }, 502);
       }
+    }
+
+    /* ── public client-intake form: queue a submission ──────────────────
+     * No token — this is the one public write. Guards: honeypot field is
+     * swallowed silently, every field is length-capped, and a submission
+     * needs a name plus a phone OR an email (the dashboard's own gate). */
+    if (path === '/intake' && req.method === 'POST') {
+      if (!kv) return json({ error: 'no KV' }, 500);
+      var ib = await readJson(req);
+      if (!ib) return json({ error: 'bad json' }, 400);
+      if (ib.hp) return json({ ok: true }, 200); // honeypot: bots think they won
+      var inm = String(ib.name || '').trim().slice(0, 120);
+      var iph = String(ib.phone || '').trim().slice(0, 40);
+      var iem = String(ib.email || '').trim().slice(0, 120);
+      if (!inm || (!iph && !iem)) return json({ error: 'Please give your name and a phone number or email so we can reach you.' }, 400);
+      var sub = {
+        ts: Date.now(),
+        code: String(ib.code || '').slice(0, 40),
+        name: inm, phone: iph, email: iem,
+        pt: String(ib.pt || '').trim().slice(0, 120),
+        rel: String(ib.rel || '').trim().slice(0, 60),
+        zip: String(ib.zip || '').trim().slice(0, 20),
+        notes: String(ib.notes || '').trim().slice(0, 1200)
+      };
+      var ikey = 'intake:' + sub.ts + ':' + Math.random().toString(36).slice(2, 8);
+      try { await kv.put(ikey, JSON.stringify(sub), { expirationTtl: INTAKE_TTL }); }
+      catch (_) { return json({ error: 'could not save, please call us' }, 500); }
+      return json({ ok: true }, 200);
+    }
+
+    /* ── dashboard: pull queued submissions (token) ── */
+    if (path === '/intake/list') {
+      var itok = url.searchParams.get('token') || '';
+      if (!env.TRACK_TOKEN || itok !== env.TRACK_TOKEN) return json({ error: 'unauthorized' }, 401, cb);
+      var subs = [];
+      if (kv) {
+        try {
+          var inames = await listAllKeys(kv, 'intake:');
+          inames.sort(function (a, b) { return tsOfKey(a) - tsOfKey(b); });
+          inames = inames.slice(0, 50);
+          for (var ii = 0; ii < inames.length; ii++) {
+            var sv = await kv.get(inames[ii], 'json');
+            if (sv) { sv.key = inames[ii]; subs.push(sv); }
+          }
+        } catch (_) {}
+      }
+      return json({ ok: true, intake: subs }, 200, cb);
+    }
+
+    /* ── dashboard: acknowledge = delete claimed submissions (token) ── */
+    if (path === '/intake/ack' && req.method === 'POST') {
+      var ab = await readJson(req);
+      var atok = url.searchParams.get('token') || (ab && ab.token) || '';
+      if (!env.TRACK_TOKEN || atok !== env.TRACK_TOKEN) return json({ error: 'unauthorized' }, 401);
+      var akeys = (ab && ab.keys) || [];
+      var deleted = 0;
+      if (kv) for (var ki = 0; ki < akeys.length && ki < 100; ki++) {
+        var kk = String(akeys[ki]);
+        if (kk.indexOf('intake:') === 0) { try { await kv.delete(kk); deleted++; } catch (_) {} }
+      }
+      return json({ ok: true, deleted: deleted }, 200);
     }
 
     return json({ error: 'not found', v: VERSION }, 404);
