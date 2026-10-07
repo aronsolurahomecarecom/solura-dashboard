@@ -41,6 +41,8 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
   ok(I.intakeWorkerParam('https://track.solurahomecare.com') === 'https://track.solurahomecare.com', 'a custom domain rides whole (the form accepts both forms)');
   ok(I.intakeUrlFor(link, null).indexOf('&w=') === -1, 'no tracker configured = URL still generates (form says call us)');
   ok(/if\(wp&&wp!==INTAKE_BAKED_WORKER\)/.test(src), 'bake slot: once the worker is baked into the form, links drop w entirely');
+  const short = I.intakeUrlFor(link, { url: 'https://falling-rain-de79.meir-865.workers.dev', token: 't' });
+  ok(short === 'https://apply.solurahomecare.com/care/?c=fb-abc12', 'THE REAL LINK: hiring-portal short — path + code, nothing else');
   ok(/location\.replace\('\/care\/'\+location\.search\+location\.hash\)/.test(stub), 'the old long URL still works — it forwards to /care/ with the code intact');
 }
 
@@ -109,7 +111,7 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
   ok(/qs\.get\('c'\)/.test(form) && /qs\.get\('w'\)/.test(form), 'form reads the link code + worker origin from the URL');
   ok(/function expandWorker/.test(form) && /\.workers\.dev/.test(form), 'the short w (name.account) expands to the full workers.dev origin');
   ok(/var WORKER_ACCOUNT='meir-865'/.test(form) && /'https:\/\/'\+w\+'\.'\+WORKER_ACCOUNT\+'\.workers\.dev'/.test(form), 'a bare worker NAME expands on our own account — links carry just a few characters');
-  ok(/var WORKER_DEFAULT=''/.test(form), 'bake slot: set WORKER_DEFAULT once and links need only ?c=code');
+  ok(/var WORKER_DEFAULT='https:\/\/falling-rain-de79\.meir-865\.workers\.dev'/.test(form), 'the real worker is BAKED IN — links need only ?c=code');
   ok(/expandWorker\(qs\.get\('w'\)\)\|\|WORKER_DEFAULT/.test(form), 'URL w wins, baked default is the fallback');
   ok(/if\(!phone&&!email\)return;/.test(form) && /if\(!name\)return;/.test(form), 'client-side gate backstops the worker gate');
   ok(/if\(!first\)/.test(form) && /if\(!n\)\{setErr\('e-phone',MISSING_PHONE\)/.test(form) && /n<10/.test(form), 'design validation: first name + 10-digit phone, errors clear on typing');
