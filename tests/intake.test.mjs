@@ -71,7 +71,7 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
 {
   const sub = { name: 'Susan Gold', phone: '(216) 555-0100', email: 's@x.com', pt: 'Rose Gold', rel: 'Parent', zip: '44118', notes: 'Mom needs help mornings',
     needs: 'Personal care, Memory care', timeline: 'Next few weeks', hours: 'Several hours most days', pay: 'Private pay',
-    best: 'Evening', sms: 'yes (sms-v1-2026-10)', variant: 'full', cond: 'dementia, fall', condLabel: "Dementia or Alzheimer's, Falls or fall risk" };
+    best: 'Evening', sms: 'yes (sms-v2-submit-2026-10)', variant: 'full', cond: 'dementia, fall', condLabel: "Dementia or Alzheimer's, Falls or fall risk" };
   const link = { code: 'fb-1', platform: 'Facebook', method: 'DM' };
   const v = I.intakeLeadVals(sub, link, '10/7/2026', '2026-10-07T12:00:00.000Z');
   ok(v.length === 35, 'row spans exactly A:AI (35 columns, same as Add Lead)');
@@ -82,8 +82,8 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
   ok(v[7] === 'Personal care, Memory care' && v[8] === 'Several hours most days' && v[9] === 'Next few weeks' && v[15] === 'Private pay',
     'inquiry answers land in their REAL columns: Services, Hrs/Wk, Est. Start, Pay Type');
   ok(v[18].indexOf('Their words: "Mom needs help mornings"') > -1 && v[18].indexOf('Facebook · DM') > -1, 'their message lands in Notes with the source');
-  ok(v[18].indexOf('Best time to reach: Evening') > -1 && v[18].indexOf('✅ SMS consent given on the form (yes (sms-v1-2026-10))') > -1,
-    'best time + SMS consent (with version) recorded in Notes — the TCPA paper trail');
+  ok(v[18].indexOf('Best time to reach: Evening') > -1 && v[18].indexOf('✅ Call/text consent given by submitting the form (yes (sms-v2-submit-2026-10))') > -1,
+    'best time + submission consent (with version) recorded in Notes — the TCPA paper trail');
   ok(v[23] === 'Parent' && v[25] === 0 && v[31] === 'C·high' && v[34] === '2026-10-07T12:00:00.000Z', 'relationship, step 0, track verdict, arrival stamp');
   ok(v[28] === 'dementia, fall', 'the conditions column gets the PICKER KEYS (comma list) — feeds the conditions engine + assessment questions');
   ok(v[18].indexOf("Conditions: Dementia or Alzheimer's, Falls or fall risk") > -1, 'the notes get the readable condition names');
@@ -126,7 +126,10 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
   ok(/id="step1"/.test(form) && /id="step2"/.test(form) && /id="step3"/.test(form) && /Step '\+n\+' of 3/.test(form), 'three-step flow with a live progress bar');
   ok(/!\/\^44\[01\]\/\.test\(this\.value\)/.test(form) && /outside where we currently provide care/.test(form), 'ZIP soft check: 440xx/441xx in area, notice never blocks submit');
   ok(/id="referral"/.test(form) && /variant:'referral',org:ro/.test(form), 'professional referral branch submits its own variant with the organization');
-  ok(/sms-v1-2026-10/.test(form) && /Reply STOP to opt out/.test(form), 'SMS consent checkbox carries the TCPA language + a consent version');
+  ok(form.indexOf('id="i-sms"') === -1 && form.indexOf('smsbox') === -1, 'the consent CHECKBOX is gone');
+  ok(/class="consentline">By submitting, you agree that Solura Home Care may call, email, or text you/.test(form) && /Reply STOP to any text to opt out/.test(form), 'small print under the button: submitting IS the consent, with frequency/rates/STOP language');
+  ok(/font-size: 13px/.test(form.slice(form.indexOf('.consentline'), form.indexOf('.consentline') + 160)), 'the consent line is visibly small');
+  ok(/sms:'yes \('\+SMS_CONSENT_VERSION\+'\)'/.test(form) && /sms-v2-submit-2026-10/.test(form), 'every full-flow submission records consent with the v2 (submit-based) version');
   ok(/Solura_Application_Form\.html\?src=GNG6XK/.test(form) && /Looking for a caregiver job\?/.test(form), 'job seekers get the Apply here link with the GNG6XK source code');
   ok(/needs:st\.needs\.join\(', '\)/.test(form) && /timeline:st\.timeline/.test(form) && /hours:st\.hours/.test(form) && /pay:st\.payment/.test(form), 'tap-card answers ride the payload as readable labels');
   ok(/\['dementia',"Dementia or Alzheimer's"\]/.test(form) && /\['parkinsons'/.test(form) && /\['chf'/.test(form) && /\['postsurg'/.test(form), "condition chips carry the PORTAL's condition keys");

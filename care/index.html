@@ -82,9 +82,7 @@
   .backbtn:focus-visible { outline: 3px solid #1f3d57; outline-offset: 3px; }
   .finebelow { margin: 0; text-align: center; font-size: 16px; line-height: 1.5; }
 
-  .smsbox { display: flex; gap: 14px; align-items: flex-start; background: #f5f0e8; border: 1px solid #e3d8c4; border-radius: 12px; padding: 18px; cursor: pointer; }
-  .smsbox input { flex: none; width: 26px; height: 26px; min-height: 26px; margin: 1px 0 0; padding: 0; accent-color: #1f3d57; cursor: pointer; border: none; }
-  .smsbox span { font-size: 16px; line-height: 1.6; }
+  .consentline { margin: 0; text-align: center; font-size: 13px; line-height: 1.6; color: #8a8f94; max-width: 36em; align-self: center; }
 
   .callbtn { width: min(100%, 440px); min-height: 62px; padding: 14px 24px; background: #1f3d57; color: #faf8f4 !important; border-bottom: 3px solid #C59B4E; border-radius: 10px; font-size: 20px; font-weight: bold; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 12px; }
   .callbtn:hover { background: #183148; }
@@ -229,19 +227,12 @@
         <div class="chips" role="radiogroup" id="g-best"></div>
       </fieldset>
       <div class="field"><label class="flabel" for="i-notes"><span>Anything you'd like us to know?</span><span class="opt">optional</span></label><textarea id="i-notes" name="notes" rows="4" maxlength="1200"></textarea></div>
-      <div class="dots" aria-hidden="true">• • •</div>
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <p style="margin:0;font-size:16px;font-weight:bold;color:#1f3d57">Text updates <span style="font-weight:normal;color:#3d4348">optional</span></p>
-        <label class="smsbox" for="i-sms">
-          <input id="i-sms" type="checkbox" name="sms_consent">
-          <span>Yes, Solura Home Care may text me about my inquiry. Message frequency varies. Message and data rates may apply. Reply STOP to opt out, HELP for help.</span>
-        </label>
-      </div>
       <div class="hp" aria-hidden="true"><label for="i-website">Website</label><input id="i-website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
       <div id="e-send"></div>
       <div style="display:flex;flex-direction:column;gap:12px">
         <button type="button" class="cta wide" id="btn-submit">Request my free care consultation</button>
         <p class="finebelow">Free and no obligation. We never share your information.</p>
+        <p class="consentline">By submitting, you agree that Solura Home Care may call, email, or text you about your inquiry. Message frequency varies, message and data rates may apply. Reply STOP to any text to opt out, HELP for help.</p>
       </div>
     </div>
 
@@ -360,7 +351,10 @@
     return '';
   }
   var WORKER=expandWorker(qs.get('w'))||WORKER_DEFAULT.replace(/\/+$/,'');
-  var SMS_CONSENT_VERSION='sms-v1-2026-10';
+  // Consent is given by SUBMITTING: the line under the button says so
+  // plainly, with frequency, rates, and STOP language. The version string
+  // records which consent mechanism + wording was live at submission.
+  var SMS_CONSENT_VERSION='sms-v2-submit-2026-10';
 
   // Option lists: [value for the sheet, label shown]. Sheet-side the labels
   // land in cells Meir reads, so labels travel, codes stay here.
@@ -539,7 +533,7 @@
       needs:st.needs.join(', '),timeline:st.timeline||'',hours:st.hours||'',
       pay:st.payment||'',best:st.best||'',
       cond:st.conds.join(', '),condLabel:condLabels.join(', '),
-      sms:el('i-sms').checked?('yes ('+SMS_CONSENT_VERSION+')'):'',
+      sms:'yes ('+SMS_CONSENT_VERSION+')',
       variant:'full',org:'',page:String(location.href).slice(0,300),
       hp:el('i-website').value
     },this,'e-send','Request my free care consultation',function(){
