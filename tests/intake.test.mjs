@@ -29,9 +29,11 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
 
 // ── link codes + URLs ──
 {
-  const code = I.makeIntakeCode('Facebook Ads!');
-  ok(/^facebook-[a-z0-9]{5}$/.test(code), 'codes are platform-slug + random (readable in analytics)');
-  ok(I.makeIntakeCode('???').indexOf('x-') === 0, 'symbol-only platforms still get a valid code');
+  const code = I.makeIntakeCode();
+  ok(/^[a-z2-9]{6}$/.test(code) && !/[01loi]/.test(code), 'codes are 6 anonymous characters — no platform hint, no lookalike letters');
+  const many = {};
+  for (let i = 0; i < 200; i++) many[I.makeIntakeCode()] = 1;
+  ok(Object.keys(many).length === 200, 'codes do not collide in practice');
   const link = { code: 'fb-abc12', platform: 'Facebook', method: 'DM' };
   const url = I.intakeUrlFor(link, { url: 'https://trk.example.workers.dev', token: 't' });
   ok(url.indexOf('https://apply.solurahomecare.com/care/?c=fb-abc12') === 0, 'short path: /care/ instead of the long filename');
@@ -40,7 +42,7 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
   ok(I.intakeWorkerParam('https://trk.example.workers.dev/') === 'trk.example', 'other accounts keep name.account; trailing slash tolerated');
   ok(I.intakeWorkerParam('https://track.solurahomecare.com') === 'https://track.solurahomecare.com', 'a custom domain rides whole (the form accepts both forms)');
   ok(I.intakeUrlFor(link, null).indexOf('&w=') === -1, 'no tracker configured = URL still generates (form says call us)');
-  ok(/if\(wp&&wp!==INTAKE_BAKED_WORKER\)/.test(src), 'bake slot: once the worker is baked into the form, links drop w entirely');
+  ok(/if\(wp&&wp\.toLowerCase\(\)!==INTAKE_BAKED_WORKER\)/.test(src), 'bake slot: once the worker is baked into the form, links drop w entirely');
   const short = I.intakeUrlFor(link, { url: 'https://falling-rain-de79.meir-865.workers.dev', token: 't' });
   ok(short === 'https://apply.solurahomecare.com/care/?c=fb-abc12', 'THE REAL LINK: hiring-portal short — path + code, nothing else');
   ok(/location\.replace\('\/care\/'\+location\.search\+location\.hash\)/.test(stub), 'the old long URL still works — it forwards to /care/ with the code intact');
@@ -137,7 +139,8 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 �
 // ── dashboard wiring locks ──
 {
   ok(/data-sec="intake"/.test(html) && /id="st-sec-intake"/.test(html), 'Intake links section lives in Settings');
-  ok(/case 'intake-new':/.test(html) && /makeIntakeCode\(p\)/.test(html), 'create-link flow generates a unique code per platform');
+  ok(/case 'intake-new':/.test(html) && /makeIntakeCode\(\)/.test(html), 'create-link flow generates an anonymous code per link');
+  ok(/wp\.toLowerCase\(\)!==INTAKE_BAKED_WORKER/.test(html), 'the baked-worker match is case-insensitive — no stray w on generated links');
   ok(/intakeLinks\(\)\.push\(l\);\s*\n\s*renderIntakeLinks\(\);/.test(html), 'create is INSTANT: the link renders before the background config sync');
   ok(/Link created, but syncing it failed/.test(html), 'a failed background sync is loud, not silent');
   ok(/case 'intake-copy':/.test(html) && /navigator\.clipboard\.writeText/.test(html), 'one-click URL copy');

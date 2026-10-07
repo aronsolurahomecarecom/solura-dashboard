@@ -1828,7 +1828,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1007-114';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1007-115';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -11120,9 +11120,13 @@ function intakeLinks(){
   if(!L)L=enginesDoc.config.intakeLinks=[];
   return L;
 }
-function makeIntakeCode(platform){
-  var slug=String(platform||'x').toLowerCase().replace(/[^a-z0-9]+/g,'').slice(0,8)||'x';
-  return slug+'-'+Math.random().toString(36).slice(2,7);
+// Codes are 6 random characters — nothing readable, no platform hint, no
+// lookalike letters (0/O, 1/l/i). The platform lives only in YOUR dashboard.
+function makeIntakeCode(){
+  var abc='abcdefghjkmnpqrstuvwxyz23456789';
+  var s='';
+  for(var i=0;i<6;i++)s+=abc[Math.floor(Math.random()*abc.length)];
+  return s;
 }
 // The URL carries the code AND the worker address in its SHORT form, so the
 // public page holds no credentials and links stay a few characters long:
@@ -11138,7 +11142,7 @@ function intakeUrlFor(link,tc){
   var u=INTAKE_FORM_BASE+'?c='+encodeURIComponent(link.code);
   var wp=tc&&tc.url?intakeWorkerParam(tc.url):'';
   // The form's baked default covers it → the link needs no w at all
-  if(wp&&wp!==INTAKE_BAKED_WORKER)u+='&w='+encodeURIComponent(wp);
+  if(wp&&wp.toLowerCase()!==INTAKE_BAKED_WORKER)u+='&w='+encodeURIComponent(wp);
   return u;
 }
 // What lands in the Source cell: platform, plus the method when set
@@ -14279,7 +14283,7 @@ function onClick(ev){
         var p=String(((el('intake-platform')||{}).value||'')).trim();
         if(!p){toast('Name the platform first (Facebook, Google, flyer…)');return;}
         var l={id:'il'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
-          code:makeIntakeCode(p),platform:p,
+          code:makeIntakeCode(),platform:p,
           method:String(((el('intake-method')||{}).value||'')).trim(),
           notes:String(((el('intake-notes-new')||{}).value||'')).trim(),
           createdAt:Date.now(),fills:0};
