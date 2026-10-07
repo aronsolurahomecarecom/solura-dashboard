@@ -1233,6 +1233,13 @@ select.app-edit-input{cursor:pointer;}
 .tpl-subject-input:focus{border-color:var(--sky-deep);}
 .tpl-body-input{width:100%;flex:1;min-height:420px;padding:14px 16px;border:1.5px solid var(--border);border-radius:8px;font-family:'JetBrains Mono','Consolas',monospace;font-size:13.5px;line-height:1.75;outline:none;background:#fff;color:var(--ink);resize:vertical;transition:border-color .12s ease-out;}
 .tpl-body-input:focus{border-color:var(--sky-deep);}
+/* HTML paste box — shared by the composer toolbar and the template editor. Sits above the
+   composer modal (z 700), so it must out-stack it. */
+#htmlpastebox{position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:950;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px);}
+#htmlpastebox .hpb-card{background:#fff;border-radius:14px;max-width:780px;width:100%;max-height:88vh;display:flex;flex-direction:column;padding:18px 20px;gap:10px;box-shadow:0 18px 60px rgba(0,0,0,.3);}
+#htmlpastebox .hpb-head{display:flex;align-items:center;gap:10px;}
+#htmlpastebox .hpb-title{font-weight:700;font-size:15px;flex:1;}
+#htmlpastebox .hpb-foot{display:flex;align-items:center;gap:8px;}
 .tpl-placeholders{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0;}
 .tpl-placeholders-label{font-size:10.5px;font-weight:600;color:var(--soft);text-transform:uppercase;letter-spacing:.06em;margin-right:4px;}
 .ph-chip{font-family:'JetBrains Mono','Consolas',monospace;font-size:11px;padding:4px 9px;border-radius:5px;background:var(--sky-pale);color:var(--sky-deep);border:1px solid transparent;cursor:pointer;transition:background .12s ease-out,border-color .12s ease-out;}
@@ -13022,7 +13029,7 @@ function emailModal(tpl,subj,body,advanceTo){
             <input type="file" id="e-image-input" accept="image/*" style="display:none" onchange="_emailInsertInlineImage(this.files[0]);this.value=''">
             🖼
           </label>
-          <button type="button" onclick="_emailPasteHtml()" title="Paste HTML template (designer hand-off, etc.)">&lt;/&gt;</button>
+          <button type="button" onclick="_emailPasteHtml()" title="Paste a full HTML email — it renders right here in the message box" style="font-weight:700">&lt;/&gt; HTML</button>
           <button type="button" onclick="_emailFmt('removeFormat')" title="Clear formatting" style="margin-left:auto;color:var(--soft)">Tx</button>
         </div>
         <div id="e-body" class="email-body" contenteditable="true" spellcheck="true" data-placeholder="Write your message…">${_initialBodyHtml}</div>
@@ -13113,13 +13120,56 @@ function _emailInsertLink(){
     }
   }catch(e){}
 }
+/* ===== HTML paste box (Meir, 2026-10-06): a real multi-line box for dropping in a full
+   designed HTML email, replacing the old one-line prompt() (which mangled newlines and
+   couldn't hold a whole page). Shared by the composer toolbar and the template editor. */
+function _htmlPasteBox(title,onInsert){
+  const old=document.getElementById('htmlpastebox');if(old)old.remove();
+  const box=document.createElement('div');
+  box.id='htmlpastebox';
+  box.innerHTML='<div class="hpb-card">'
+    +'<div class="hpb-head"><div class="hpb-title"></div><button class="mclose" id="hpb-x">✕</button></div>'
+    +'<textarea id="hpb-ta" class="tpl-body-input" style="min-height:46vh;font-size:12px;line-height:1.5" placeholder="Paste the HTML here — a whole page with &lt;!doctype&gt; and &lt;head&gt; is fine, it gets unwrapped automatically. {placeholders} keep working."></textarea>'
+    +'<div class="hpb-foot"><span class="set-help" style="margin:0;font-size:11px" id="hpb-note">Waiting for a paste…</span><div style="flex:1"></div>'
+    +'<button class="btn-sec bg-cream" id="hpb-cancel">Cancel</button>'
+    +'<button class="btn-primary bg-grn" id="hpb-ok">✓ Use this HTML</button></div></div>';
+  box.querySelector('.hpb-title').textContent=title;
+  document.body.appendChild(box);
+  const close=()=>box.remove();
+  box.addEventListener('click',e=>{if(e.target===box)close();});
+  box.querySelector('#hpb-x').onclick=close;
+  box.querySelector('#hpb-cancel').onclick=close;
+  const ta=box.querySelector('#hpb-ta'),note=box.querySelector('#hpb-note');
+  const upd=()=>{const v=ta.value;note.textContent=!v.trim()?'Waiting for a paste…':(/<[a-z][\s\S]*?>/i.test(v)?'HTML detected — '+v.length.toLocaleString()+' chars, will render as a rich email':'No tags yet — this would go in as plain text');};
+  ta.addEventListener('input',upd);
+  ta.addEventListener('keydown',e=>{if(e.key==='Escape'){e.stopPropagation();close();}});
+  box.querySelector('#hpb-ok').onclick=()=>{const v=ta.value;if(!v.trim()){toast('Nothing pasted yet');return;}close();onInsert(v);};
+  setTimeout(()=>ta.focus(),50);
+}
+/* A full HTML document can't live inside a contenteditable div (<!doctype>/<html>/<head> get
+   mangled by innerHTML) — unwrap it: keep every <style> block (email clients honor them in the
+   body), keep the <body> tag's own inline style on a wrapper div, drop the rest of the shell. */
+function _extractEmailHtml(raw){
+  raw=String(raw||'').trim();
+  if(!/<body[\s>]/i.test(raw))return raw;
+  const styles=(raw.match(/<style[\s\S]*?<\/style>/gi)||[]).join('\n');
+  const bm=raw.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
+  const inner=(bm?bm[2]:raw).replace(/<style[\s\S]*?<\/style>/gi,'').trim();
+  const styleAttr=bm?((bm[1].match(/style\s*=\s*("[^"]*"|'[^']*')/i)||[])[0]||''):'';
+  return (styles?styles+'\n':'')+(styleAttr?'<div '+styleAttr+'>'+inner+'</div>':inner);
+}
 function _emailPasteHtml(){
-  const html=prompt('Paste raw HTML to insert at cursor (e.g. from a designer or another email):','');
-  if(!html||!html.trim())return;
-  const bodyEl=document.getElementById('e-body');
-  if(!bodyEl)return;
-  bodyEl.focus();
-  try{document.execCommand('insertHTML',false,html);}catch(e){toast('Paste failed: '+e.message);}
+  _htmlPasteBox('Paste HTML email',function(raw){
+    const html=_extractEmailHtml(raw);
+    const bodyEl=document.getElementById('e-body');
+    if(!bodyEl)return;
+    const hasContent=(bodyEl.textContent||'').trim().length>0||bodyEl.querySelector('img');
+    if(hasContent&&!confirm('Replace the current message with the pasted HTML?\n\nCancel adds it at the end instead.')){
+      bodyEl.insertAdjacentHTML('beforeend',html);toast('✓ HTML added at the end of the message');
+    }else{
+      bodyEl.innerHTML=html;toast('✓ HTML loaded — that’s what the email will look like');
+    }
+  });
 }
 async function _emailInsertInlineImage(file){
   if(!file)return;
@@ -19645,6 +19695,7 @@ function renderSettingsTemplates(){
         ${isEdited?'<span class="pill pa" style="font-size:9px">EDITED</span>':'<span class="pill pg" style="font-size:9px">DEFAULT</span>'}
         <div style="flex:1"></div>
         <button class="btn-sec bg-cream" onclick="loadDefaultIntoEditor('${cur}')" title="Replace the editor contents with the system default — useful as a starting point">↻ Load default</button>
+        <button class="btn-sec bg-cream" onclick="_tplPasteHtml('${cur}')" title="Paste a full HTML email into this template — opens a big paste box, then shows the rendered result" style="font-weight:700">&lt;/&gt; Paste HTML</button>
         <button class="btn-sec bg-cream" onclick="previewTemplate('${cur}')">👁 Preview</button>
         ${isEdited&&!isCustomCur?`<button class="btn-sec bg-cream" onclick="revertTemplate('${cur}')" style="color:var(--red)">Revert</button>`:''}
         ${isCustomCur?`<button class="btn-sec" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="deleteCustomTemplate('${cur}')">🗑 Delete</button>`:''}
@@ -19739,8 +19790,27 @@ function previewTemplate(key){
     m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');});
   }
   document.getElementById('prev-subj').textContent=renderedS;
-  document.getElementById('prev-body').textContent=renderedB;
+  /* HTML templates render as the real email (same detection the composer and send path use);
+     plain-text keeps the old pre-wrap view. Before this, an HTML body previewed as code soup. */
+  const _pb=document.getElementById('prev-body');
+  if(/<[a-z][\s\S]*?>/i.test(renderedB)){_pb.style.whiteSpace='normal';_pb.innerHTML=renderedB;}
+  else{_pb.style.whiteSpace='pre-wrap';_pb.textContent=renderedB;}
   m.classList.add('open');
+}
+
+/* Template-editor side of the HTML paste box: drop a designed email into the body field,
+   see it rendered immediately via the preview modal. Save still required to keep it. */
+function _tplPasteHtml(key){
+  _htmlPasteBox('Paste HTML email — template body',function(raw){
+    const html=_extractEmailHtml(raw);
+    const ta=document.getElementById('tpl_b_'+key);
+    if(!ta)return;
+    if(ta.value.trim()&&!confirm('Replace the current template body with the pasted HTML?'))return;
+    ta.value=html;
+    _tplHtmlBadge(key,html);
+    toast('✓ HTML in the editor — click Save to keep it');
+    previewTemplate(key);
+  });
 }
 
 /* ----- SCRIPTS section ----- */
