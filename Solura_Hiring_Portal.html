@@ -10599,16 +10599,17 @@ async function advanceNextStepWS(){
   const next=i>=0?stages[i+1]:null;
   if(!next){toast(i<0?'Their current stage isn\'t in their sequence — use ⇄ Move to stage':'Already at the last stage of their sequence');return;}
   if(!confirm('Move '+(W.name||'this candidate')+' from "'+W.stage+'" to "'+next+'"?\n\nManual move — no emails fire, no reports upload.'))return;
-  const fromStage=W.stage;
-  W.stage=next;
+  /* `w` pins this candidate across the save — see hireNowWS. */
+  const w=W,fromStage=w.stage;
+  w.stage=next;
   logW('⏭ Manually advanced to '+next+' (from '+fromStage+')');
-  if(!(await saveW(true))){
-    W.stage=fromStage;
-    if(W.st&&Array.isArray(W.st.log))W.st.log.pop();
-    renderWorkspace();
+  if(!(await _saveWFor(w,true))){
+    w.stage=fromStage;
+    if(w.st&&Array.isArray(w.st.log))w.st.log.pop();
+    if(W===w)renderWorkspace();
     return;
   }
-  const c=pipeline.find(x=>x.excelRow===W.row);
+  const c=pipeline.find(x=>x.excelRow===w.row);
   if(c){c.stage=next;c.row[6]=next;}
   toast('⏭ '+next);
   renderWorkspace();if(typeof render==='function')render();
@@ -10628,21 +10629,26 @@ async function hireNowWS(){
   }
   if(W.stage==='Hired'){toast('Already an active caregiver');return;}
   if(!confirm('Make '+(W.name||'this candidate')+' an ACTIVE CAREGIVER now?\n\nThis skips every remaining step ('+W.stage+' → Hired) and moves them to the Active caregivers tab. No emails fire.'))return;
-  const fromStage=W.stage;
-  W.stage='Hired';
-  W.st.hiredDate=W.st.hiredDate||today();
-  delete W.st.manualAwaiting;
+  /* `w` pins THIS candidate across the save: the global W is replaced the moment the operator
+     opens someone else, and everything below the await used to act on whoever was open THEN —
+     a failed save rolled the wrong person's stage back, a good one painted them Hired. */
+  const w=W,fromStage=w.stage,_hadHired=w.st.hiredDate,_hadPark=w.st.manualAwaiting;
+  w.stage='Hired';
+  w.st.hiredDate=w.st.hiredDate||today();
+  delete w.st.manualAwaiting;
   logW('⚡ Fast-hired from '+fromStage+' — moved straight to Active caregivers');
-  if(!(await saveW(true))){
-    W.stage=fromStage;
-    delete W.st.hiredDate;
-    if(W.st&&Array.isArray(W.st.log))W.st.log.pop();
-    renderWorkspace();
+  if(!(await _saveWFor(w,true))){
+    /* Put back exactly what was there — a pre-existing hiredDate and a park both survive. */
+    w.stage=fromStage;
+    if(_hadHired)w.st.hiredDate=_hadHired;else delete w.st.hiredDate;
+    if(_hadPark)w.st.manualAwaiting=_hadPark;
+    if(w.st&&Array.isArray(w.st.log))w.st.log.pop();
+    if(W===w)renderWorkspace();
     return;
   }
-  const c=pipeline.find(x=>x.excelRow===W.row);
+  const c=pipeline.find(x=>x.excelRow===w.row);
   if(c){c.stage='Hired';c.row[6]='Hired';}
-  toast('⚡ '+(W.name?W.name.split(' ')[0]:'Caregiver')+' is now an active caregiver');
+  toast('⚡ '+(w.name?w.name.split(' ')[0]:'Caregiver')+' is now an active caregiver');
   renderWorkspace();if(typeof render==='function')render();
 }
 async function commitMoveToStage(){
@@ -21342,7 +21348,9 @@ function _sourceLinkStats(){
     if(c.stage==='Hired')bucket.hired++;
     /* Candidate-initiated exits (self-withdrawn from the confirmation page, or marked
        Withdrawn in the workspace) — distinct from declines, which are our call. */
-    if((c.st&&c.st.withdrawn)||c.stage==='Withdrawn')bucket.withdrawn++;
+    /* st.withdrawn is a lifetime stamp: someone restored (⇄ Move to stage) or fast-hired after
+       withdrawing kept counting as withdrawn AND as hired. Count it only while they are still out. */
+    if(c.stage==='Withdrawn'||(c.st&&c.st.withdrawn&&c.stage==='Declined'))bucket.withdrawn++;
   });
   const rows=Object.values(byCode).concat(orphan.applied?[orphan]:[]).concat(nocode.applied?[nocode]:[]);
   return rows
@@ -21655,6 +21663,13 @@ async function _jobRequirementsPass(){
          silently shunted off the job's flow on first load. */
       const miss=_jobMissingReqs(c,jb).filter(m=>String(m).indexOf('(not answered)')<0);
       if(!miss.length)continue;
+      /* Same rule as the adoption write in _seqV3RepairPass, which runs immediately before this
+         pass: these are Applied-stage rows, the ones the worker may still be filling (AJ is
+         written again after the résumé upload). Writing the load-time copy back dropped
+         whatever landed since — and undid the repair pass's own decision to leave the row
+         alone. Write only onto the cell this load actually saw; otherwise wait for the next load. */
+      if(!(await _ajUnchangedSinceLoad(c)))continue;
+      if(pipeline!==_myPipe)return;
       /* `c.st.sequenceId!==defSeq.id` is the clause that was missing. The test asked only about
          the JOB's sequence, so a candidate ALREADY ON the default still entered the branch and
          had sequenceStepId overwritten by _classicPointerFor — which returns the step for their
@@ -22086,6 +22101,9 @@ function _jobToggle(id){
   markSettingsDirty();renderSettings();
 }
 function _srcDelete(id){
+  /* Rule 8 — the × is hidden for job-owned links; refuse here too, like _srcEdit and
+     _srcToggleActive. Deleting one from under its job left the job card pointing at a dead code. */
+  if(((SETTINGS.config.sourceLinks||[]).find(x=>x.id===id)||{}).jobId){toast('🧳 Managed by a job package — remove this platform from the job instead');return;}
   if(!confirm('Delete this source link? Existing candidates with this code will still show it as raw data.'))return;
   const gone=(SETTINGS.config.sourceLinks||[]).find(x=>x.id===id);
   SETTINGS.config.sourceLinks=(SETTINGS.config.sourceLinks||[]).filter(x=>x.id!==id);
@@ -24620,7 +24638,13 @@ function _seqV3Action(c,info){
       const _CHECK_EVIDENCE={bgClear:'bgStarted',tpCheckClear:'bgStarted',reqCheckClear:'bgStarted',employersVerified:'verifyStarted'};
       const _ev2=_CHECK_EVIDENCE[String(_rawTrg)];
       const _stuck=ev.bucket==='awaiting'||(ev.intents||[]).some(i2=>i2&&(i2.type==='park'||i2.type==='flag'));
-      if(_ev2&&_stuck&&!_seqTriggerEval(_rawTrg,cand)&&_seqTriggerEval(_ev2,cand)){
+      /* A check that came back FLAGGED is finished, not running — it will never "advance when
+         clear". Left here it sat locked in Checks running forever (a declined adjudication whose
+         rejection email was cancelled, or a flag set by hand in the checks hub — neither carries
+         decisionRequired, so the post-sequence override does not rescue it). It stays the
+         operator's action, as it was before this reroute existed. */
+      const _resultIn=_ev2==='bgStarted'&&cand.st&&(String(_rawTrg)==='reqCheckClear'?cand.st.reqCheck==='flag':cand.st.tpCheck==='flag');
+      if(_ev2&&_stuck&&!_resultIn&&!_seqTriggerEval(_rawTrg,cand)&&_seqTriggerEval(_ev2,cand)){
         return{bucket:'checks',timing:{txt:'🔒 '+((_cs&&_cs.label)||'Check')+' — running, advances when clear',pill:'pa',date:_fmtBooking(cand.st&&cand.st.booking)},info:info,primary:{kind:'lock',label:'🔒 Awaiting check',cls:'lock'}};
       }
     }
