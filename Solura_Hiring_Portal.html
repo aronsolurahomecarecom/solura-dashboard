@@ -25662,7 +25662,10 @@ async function saveAdd(){
     const gk=COLMAP[String(q.gate.column).toUpperCase()];if(!gk)return;
     const ans=A[q.id];
     if(ans===undefined||ans===null||ans==='')return;
-    if(Array.isArray(ans))gates[gk]=(q.gate.failValue==='__none__'&&!ans.length)?'N':'Y';
+    /* An emptied multiselect (ticked, then un-ticked) is an empty ARRAY, which slipped past the
+       unanswered test above and was stamped 'Y' — a pass on a gate nobody answered. Only the
+       '__none__' rule reads an empty selection as an answer (a fail); otherwise it is blank. */
+    if(Array.isArray(ans)){if(ans.length)gates[gk]='Y';else if(q.gate.failValue==='__none__')gates[gk]='N';}
     else gates[gk]=(String(ans)===String(q.gate.failValue))?'N':'Y';
   });
   if(!gates.av)gates.av=Object.keys(AD.dayShifts||{}).length?'Y':'';
@@ -25690,8 +25693,19 @@ async function saveAdd(){
     appliedDate:today(),refCode,referredBy:'',sourceCode:srcCode,
     referralCount:{submitted:0,screened:0,hired:0},referrals:[],customerReferrals:[],
     log:[{t:stamp(),x:'Added manually via the application form'+(jb?' — for "'+jb.name+'"':'')+(window._adResumeFile?' · with résumé':'')}]};
-  const row=nextRow,bl=v=>(v===''||v==null?'':v);
+  const bl=v=>(v===''||v==null?'':v);
+  /* One save at a time: a double-click ran two saves side by side into the same drawer. */
+  if(window._adSaving)return;
+  window._adSaving=true;
+  const _ad=AD;
   try{
+    /* nextRow is whatever the last loadData saw — up to 30s old, older if the tab sat hidden —
+       and the worker appends online applications to the same first-empty row. Writing C:L, N:Y
+       and AJ there blind replaced an applicant who landed in between, profile and all. Ask the
+       sheet which row is free NOW. A retry after a half-finished save reuses the row this
+       drawer already claimed instead of leaving a nameless twin behind. */
+    const row=_ad._row||await _adFreeRow(nextRow);
+    _ad._row=row;
     await patchRange('C'+row+':L'+row,[[name,A.phone||'',A.email||'',source,'Applied',gates.wa,gates.cr,gates.bg,gates.tr,gates.av]]);
     await patchRange('N'+row+':Y'+row,[['','','','','',bl(cmp),'','',bl(ten),bl(prx),bl(ava),'']]);
     if(Object.keys(custom).length)await patchRange('AI'+row,[[JSON.stringify(custom)]]);
@@ -25713,7 +25727,20 @@ async function saveAdd(){
     }
     window._adResumeFile=null;window._adExtractEmployers=null;
     toast('Added'+(jb?' — tracked under '+jb.name:''));closeAdd();await loadData();
-  }catch(e){toast('Add failed: '+e.message);}}
+  }catch(e){toast('Add failed: '+e.message);}
+  finally{window._adSaving=false;}}
+/* First genuinely empty row at or below `from`, read live from column C (the name column —
+   the same emptiness test loadData uses). Throws when the sheet cannot be read: adding blind
+   is how a row gets overwritten. */
+async function _adFreeRow(from){
+  const start=Math.max(3,Number(from)||3),SPAN=40;
+  const sid=await getWorkbookSession();
+  const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+"/range(address='C"+start+":C"+(start+SPAN-1)+"')?$select=values",{headers:sid?{'workbook-session-id':sid}:{}});
+  if(!r.ok)throw new Error('could not check the sheet for a free row ('+r.status+')');
+  const vals=(await r.json()).values||[];
+  for(let i=0;i<SPAN;i++){const v=vals[i]&&vals[i][0];if(v===''||v==null)return start+i;}
+  throw new Error('no free row found — refresh and try again');
+}
 
 /* ===================== boot ===================== */
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._t);t._t=setTimeout(()=>{t.style.opacity='0';t.style.transform='translateX(-50%) translateY(20px)';},2300);}
