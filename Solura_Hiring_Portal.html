@@ -24500,6 +24500,19 @@ function _seqV3Action(c,info){
         ev.label=String(ev.label||'').replace(/^Automated: /,'');
       }
     }
+    /* A booked meeting modeled as a WAIT step ("Onboarding call happens", trigger
+       onboardingDone — streamlined-v1) is a TIME gate, not a candidate gate: the engine's
+       generic unmet-wait mapping parked every booked onboarding in Awaiting with "Waiting on
+       candidate" (Meir 2026-10-08, Janaya r184). When the stage is a booked-meeting stage and
+       a booking exists, hand the card to the legacy time-based choreography instead —
+       Scheduled with prep until T-5, "Call now" countdown, overdue log-result — the same
+       treatment session steps get. Sequence-agnostic: any sequence shaping any meeting as a
+       wait gets this. Running the call sets the next stage (e.g. Hired), and the stage snap
+       walks the pointer past the wait. */
+    if(ev.bucket==='awaiting'&&ev.currentStep&&ev.currentStep.kind==='wait'&&cand.st&&cand.st.booking){
+      const _tb=getActiveSequence().find(s4=>s4.key===c.stage&&s4.timeBased);
+      if(_tb)return _sequenceBookingStage(c,_tb,info);
+    }
     const pill=ev.bucket==='awaiting'?'psoft':ev.bucket==='scheduled'?'pg':'pnew';
     const bucket=ev.bucket==='done'?'action':ev.bucket;
     /* Booking time rides on every row so the card always says WHEN the meeting is. */
