@@ -10585,6 +10585,38 @@ async function advanceNextStepWS(){
   toast('⏭ '+next);
   renderWorkspace();if(typeof render==='function')render();
 }
+/* ⚡ Fast-hire (Meir, 2026-10-09): one password-gated click that makes this person an active
+   caregiver RIGHT NOW — skips every remaining step and lands them in Active caregivers.
+   Same minimal semantics as the other manual moves: no emails fire, no reports upload, no
+   referral credits — it only writes the stage, stamps hiredDate, and logs. The sequence
+   pointer catches up via stage-is-truth on the next evaluation. */
+async function hireNowWS(){
+  if(!_stageMoveAllowed()){toast('Restricted — see Settings → Pipeline config');return;}
+  const _fhCfg=(SETTINGS.config&&SETTINGS.config.stageMove)||{};
+  if(_fhCfg.password){
+    const pw=prompt('Enter the Move-to-stage password:');
+    if(pw===null)return;
+    if(pw!==_fhCfg.password){toast('✕ Wrong password');return;}
+  }
+  if(W.stage==='Hired'){toast('Already an active caregiver');return;}
+  if(!confirm('Make '+(W.name||'this candidate')+' an ACTIVE CAREGIVER now?\n\nThis skips every remaining step ('+W.stage+' → Hired) and moves them to the Active caregivers tab. No emails fire.'))return;
+  const fromStage=W.stage;
+  W.stage='Hired';
+  W.st.hiredDate=W.st.hiredDate||today();
+  delete W.st.manualAwaiting;
+  logW('⚡ Fast-hired from '+fromStage+' — moved straight to Active caregivers');
+  if(!(await saveW(true))){
+    W.stage=fromStage;
+    delete W.st.hiredDate;
+    if(W.st&&Array.isArray(W.st.log))W.st.log.pop();
+    renderWorkspace();
+    return;
+  }
+  const c=pipeline.find(x=>x.excelRow===W.row);
+  if(c){c.stage='Hired';c.row[6]='Hired';}
+  toast('⚡ '+(W.name?W.name.split(' ')[0]:'Caregiver')+' is now an active caregiver');
+  renderWorkspace();if(typeof render==='function')render();
+}
 async function commitMoveToStage(){
   const sel=document.getElementById('move-stage-sel');
   if(!sel)return;
@@ -13858,7 +13890,7 @@ function renderWorkspace(){_memGen++;
      Visible at any stage except Hired/Declined. The Park button pops a small modal to enter an
      optional reason + optional follow-up date. Resume button only shows when currently parked. */
   const isParked=!!W.st.manualAwaiting;
-  const moveBtn=_stageMoveAllowed()?'<button class="btn-sm bg-cream" onclick="advanceNextStepWS()" title="Password-gated: hop to the next stage of their own sequence — no emails fire">⏭ Next step</button><button class="btn-sm bg-cream" onclick="moveToStageWS()" title="Manually place this candidate at any pipeline stage">⇄ Move to stage</button>':'';
+  const moveBtn=_stageMoveAllowed()?'<button class="btn-sm bg-cream" onclick="advanceNextStepWS()" title="Password-gated: hop to the next stage of their own sequence — no emails fire">⏭ Next step</button><button class="btn-sm bg-cream" onclick="moveToStageWS()" title="Manually place this candidate at any pipeline stage">⇄ Move to stage</button>'+(W.stage!=='Hired'?'<button class="btn-sm" style="background:#EBF5EA;border:1px solid var(--grn);color:var(--grn-deep);cursor:pointer" onclick="hireNowWS()" title="Password-gated: skip every remaining step and move them straight to Active caregivers — no emails fire">⚡ Hire now</button>':''):'';
   let quickActions='';
   if(W.stage==='Hired'||W.stage==='Declined'||W.stage==='Withdrawn'){
     /* Terminal stages: the stage move IS the escape hatch (mistaken decline, un-hire, etc.). */
