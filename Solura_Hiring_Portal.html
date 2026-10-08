@@ -9159,6 +9159,10 @@ const TRIGGERS={
 
   /* Background check */
   tpCheckClear:     c => (c.st&&c.st.tpCheck)==='clear',
+  /* The sequence builder's default BG gate speaks 'bgClear' — it was never registered here,
+     so evalTrigger warned "Unknown trigger" and failed closed: the gate stayed unmet FOREVER,
+     even after the check cleared. Alias of tpCheckClear (the Yardstik BG verdict). */
+  bgClear:          c => (c.st&&c.st.tpCheck)==='clear',
   tpCheckFlag:      c => (c.st&&c.st.tpCheck)==='flag',
   tpCheckPending:   c => !(c.st&&c.st.tpCheck),
   /* BG-ONLY evidence. candidateId is deliberately excluded: Yardstik creates a candidate for
@@ -24579,6 +24583,21 @@ function _seqV3Action(c,info){
     if(ev.bucket==='awaiting'&&ev.currentStep&&ev.currentStep.kind==='wait'&&cand.st&&cand.st.booking){
       const _tb=getActiveSequence().find(s4=>s4.key===c.stage&&s4.timeBased);
       if(_tb)return _sequenceBookingStage(c,_tb,info);
+    }
+    /* A wall we cannot pass until a CHECK clears belongs in Checks running (Meir 2026-10-09),
+       not in Action needed ("requirement not met" + a Park button) or Awaiting candidate.
+       Applies when the current step is an unmet gate/wait on a check trigger AND the check
+       has genuinely STARTED — if nobody ordered it yet, the row stays an operator action
+       (ordering the check IS the work). Sequence-agnostic: any sequence, any check gate. */
+    {
+      const _cs=ev.currentStep;
+      const _rawTrg=_cs?((_cs.kind==='gate'&&_cs.gate&&_cs.gate.trigger)||(_cs.kind==='wait'&&_cs.wait&&_cs.wait.trigger)||''):'';
+      const _CHECK_EVIDENCE={bgClear:'bgStarted',tpCheckClear:'bgStarted',reqCheckClear:'bgStarted',employersVerified:'verifyStarted'};
+      const _ev2=_CHECK_EVIDENCE[String(_rawTrg)];
+      const _stuck=ev.bucket==='awaiting'||(ev.intents||[]).some(i2=>i2&&(i2.type==='park'||i2.type==='flag'));
+      if(_ev2&&_stuck&&!_seqTriggerEval(_rawTrg,cand)&&_seqTriggerEval(_ev2,cand)){
+        return{bucket:'checks',timing:{txt:'🔒 '+((_cs&&_cs.label)||'Check')+' — running, advances when clear',pill:'pa',date:_fmtBooking(cand.st&&cand.st.booking)},info:info,primary:{kind:'lock',label:'🔒 Awaiting check',cls:'lock'}};
+      }
     }
     const pill=ev.bucket==='awaiting'?'psoft':ev.bucket==='scheduled'?'pg':'pnew';
     const bucket=ev.bucket==='done'?'action':ev.bucket;
