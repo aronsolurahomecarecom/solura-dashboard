@@ -8846,6 +8846,19 @@ async function _seqV3RepairPass(){
          additive, so it stays allowed. */
       const ptr=_classicPointerFor(c,dest);
       if(!ptr)continue;
+      /* ADOPT ONLY ONTO THE CELL THIS LOAD ACTUALLY SAW. This is the one portal write that
+         reaches a brand-new applicant within seconds of the row appearing, and the worker is
+         still writing that row: it puts C:L (the name — what makes the row visible here) first
+         and AJ a few round-trips later, then, when a résumé came with the application, AJ a
+         SECOND time after the upload to add hasResume. A load taken inside either gap holds a
+         copy the worker is about to supersede (an empty default-shaped state, or the profile
+         without hasResume), and writing that copy back with a sequence tag on it replaces the
+         applicant's whole profile — answers, certs, refCode, the source code that binds them
+         to their job — or drops the résumé flag the Claude rating is gated on. Read the cell
+         now; if it is not byte-for-byte what loadData parsed, leave the row for the next load,
+         which will carry the settled cell. A failed read also waits (never write blind). */
+      if(!(await _ajUnchangedSinceLoad(c)))continue;
+      if(pipeline!==_myPipe)return;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧬 '+(wasAdopted?'Sequence was deleted — moved onto':'Adopted')+' "'+dest.name+'" — pointer '+ptr});
       c.st.sequenceId=dest.id;c.st.sequenceStepId=ptr;
       c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
@@ -17400,6 +17413,23 @@ async function _mailScanPages(url,sinceIso,stampOf,maxPages){
   return {resp:firstResp,ok:!!(firstResp&&firstResp.ok),items:items,pages:pages,complete:!next};
 }
 
+/* Is the AJ cell on the sheet still exactly what this session loaded for the candidate?
+   false = it changed underneath us (or could not be read) — the caller must not write its
+   load-time copy over it. Compares against c.row[35], the raw cell loadData parsed. */
+async function _ajUnchangedSinceLoad(c){
+  try{
+    if(!c||!c.excelRow||!Array.isArray(c.row))return false;
+    const sid=await getWorkbookSession();const h=sid?{'workbook-session-id':sid}:{};
+    const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+"/range(address='AJ"+c.excelRow+"')?$select=values",{headers:h});
+    if(!r.ok)return false;
+    const vals=(await r.json()).values||[[]];
+    const raw=vals[0]&&vals[0][0];
+    return String(raw==null?'':raw)===String(c.row[35]==null?'':c.row[35]);
+  }catch(e){
+    console.warn('AJ unchanged-check row',c&&c.excelRow,'failed:',e&&e.message);
+    return false;
+  }
+}
 async function _pollMergeFreshAJ(excelRow, mutated){
   try{
     const sid=await getWorkbookSession();const h=sid?{'workbook-session-id':sid}:{};
