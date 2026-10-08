@@ -21265,10 +21265,10 @@ function candidateSourceLabel(c){
 function _sourceLinkStats(){
   const links=(SETTINGS&&SETTINGS.config&&SETTINGS.config.sourceLinks)||[];
   const byCode={};
-  links.forEach(l=>{byCode[l.code]={link:l,applied:0,screened:0,hired:0};});
+  links.forEach(l=>{byCode[l.code]={link:l,applied:0,screened:0,hired:0,withdrawn:0};});
   /* Also bucket candidates with a code that doesn't map (deleted link) */
-  const orphan={link:null,orphan:true,applied:0,screened:0,hired:0};
-  const nocode={link:null,applied:0,screened:0,hired:0};
+  const orphan={link:null,orphan:true,applied:0,screened:0,hired:0,withdrawn:0};
+  const nocode={link:null,applied:0,screened:0,hired:0,withdrawn:0};
   const SCREENED_STAGES=new Set(['Screen booked','Ask references','Verify employers','References','Interview invite','Interview booked','Offer','Onboarding','Onboarding booked','Hired']);
   (pipeline||[]).forEach(c=>{
     const code=c&&c.st&&c.st.sourceCode;
@@ -21279,13 +21279,17 @@ function _sourceLinkStats(){
     bucket.applied++;
     if(SCREENED_STAGES.has(c.stage))bucket.screened++;
     if(c.stage==='Hired')bucket.hired++;
+    /* Candidate-initiated exits (self-withdrawn from the confirmation page, or marked
+       Withdrawn in the workspace) — distinct from declines, which are our call. */
+    if((c.st&&c.st.withdrawn)||c.stage==='Withdrawn')bucket.withdrawn++;
   });
   const rows=Object.values(byCode).concat(orphan.applied?[orphan]:[]).concat(nocode.applied?[nocode]:[]);
   return rows
     .filter(r=>r.applied>0||(r.link&&r.link.active))
     .map(r=>Object.assign(r,{
       conversionScreenPct: r.applied?Math.round(r.screened*100/r.applied):0,
-      conversionHirePct: r.applied?Math.round(r.hired*100/r.applied):0
+      conversionHirePct: r.applied?Math.round(r.hired*100/r.applied):0,
+      withdrawnPct: r.applied?Math.round(r.withdrawn*100/r.applied):0
     }))
     .sort((a,b)=>b.applied-a.applied);
 }
@@ -21302,10 +21306,10 @@ function renderSettingsSourceLinks(){
 
   const platformSections=Object.keys(byPlatform).sort().map(platform=>{
     const rows=byPlatform[platform].map(l=>{
-      const s=statsByCode[l.code]||{applied:0,screened:0,hired:0,conversionScreenPct:0,conversionHirePct:0};
+      const s=statsByCode[l.code]||{applied:0,screened:0,hired:0,withdrawn:0,conversionScreenPct:0,conversionHirePct:0,withdrawnPct:0};
       const url=_sourceLinkUrl(l.code);
       const inactive=l.active===false;
-      return `<div style="display:grid;grid-template-columns:1fr 90px 90px 90px auto;gap:10px;padding:9px 12px;border-top:1px solid var(--border-soft);align-items:center;font-size:12.5px;${inactive?'opacity:.5':''}">
+      return `<div style="display:grid;grid-template-columns:1fr 90px 90px 90px 90px auto;gap:10px;padding:9px 12px;border-top:1px solid var(--border-soft);align-items:center;font-size:12.5px;${inactive?'opacity:.5':''}">
         <div>
           <div style="font-weight:600;color:var(--ink)">${esc(l.method||'—')}</div>
           <div style="font-size:10px;color:var(--gold-deep);margin-top:1px">${(typeof _srcSeqInline==='function')?_srcSeqInline(l):''}</div>
@@ -21314,6 +21318,7 @@ function renderSettingsSourceLinks(){
         <div style="text-align:center"><b>${s.applied}</b><div style="font-size:10px;color:var(--soft)">applied</div></div>
         <div style="text-align:center"><b>${s.screened}</b><div style="font-size:10px;color:var(--soft)">screened ${s.applied?'('+s.conversionScreenPct+'%)':''}</div></div>
         <div style="text-align:center"><b>${s.hired}</b><div style="font-size:10px;color:var(--soft)">hired ${s.applied?'('+s.conversionHirePct+'%)':''}</div></div>
+        <div style="text-align:center"><b style="${s.withdrawn?'color:var(--red)':''}">${s.withdrawn||0}</b><div style="font-size:10px;color:var(--soft)">withdrew ${s.applied&&s.withdrawn?'('+s.withdrawnPct+'%)':''}</div></div>
         <div style="display:flex;gap:5px">
           <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcCopy('${esc(l.code)}',this)" title="Copy the tracking URL">\u{1F517} copy</button>
           ${l.jobId?'':`<button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcEdit('${esc(l.id)}')" title="Edit platform, method, pay, notes">\u270E edit</button>`}
@@ -21329,8 +21334,8 @@ function renderSettingsSourceLinks(){
         <b style="flex:1">${esc(platform)}</b>
         <span style="font-size:11px;color:var(--soft)">${byPlatform[platform].length} link${byPlatform[platform].length===1?'':'s'} \u00b7 ${platformTotal} applied</span>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 90px 90px 90px auto;gap:10px;padding:6px 12px;font-size:10px;color:var(--soft);font-weight:700;text-transform:uppercase;letter-spacing:.05em">
-        <div>Method</div><div style="text-align:center">Applied</div><div style="text-align:center">Screened</div><div style="text-align:center">Hired</div><div></div>
+      <div style="display:grid;grid-template-columns:1fr 90px 90px 90px 90px auto;gap:10px;padding:6px 12px;font-size:10px;color:var(--soft);font-weight:700;text-transform:uppercase;letter-spacing:.05em">
+        <div>Method</div><div style="text-align:center">Applied</div><div style="text-align:center">Screened</div><div style="text-align:center">Hired</div><div style="text-align:center">Withdrew</div><div></div>
       </div>
       ${rows}
     </div>`;
