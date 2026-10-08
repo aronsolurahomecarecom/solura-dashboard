@@ -9499,11 +9499,35 @@ function sequenceAction(c,info){
   return{bucket:'action',timing:_dn('Ready for next step','pa'),info,primary:{kind:'open',label:'Open candidate',cls:'sky'}};
 }
 
+/* Did the orientation call actually HAPPEN with the candidate on it? True when Cal.com's
+   MEETING_ENDED arrived for the active booking and no no-show mark stands against it.
+   Primary evidence is the worker's st.meetingEndedAt/meetingEndedFor stamp; the fallback for
+   rows touched only by the older deployed worker is its '▣ Meeting ended' log line stamped
+   on the booking's own day (log stamps carry no time). */
+function _orientationDone(c){
+  const st=(c&&c.st)||{};
+  if(!st.booking)return false;
+  if(st.noShowFor)return false; /* current booking is marked no-show — they did NOT attend */
+  const b=new Date(st.booking).getTime();
+  if(st.meetingEndedAt){
+    if(st.meetingEndedFor&&String(st.meetingEndedFor)!==String(st.booking))return false; /* stamp belongs to an older booking */
+    const e=new Date(st.meetingEndedAt).getTime();
+    if(!isNaN(b)&&!isNaN(e)&&e>=b-30*60000)return true;
+  }
+  const want=isNaN(b)?'':new Date(st.booking).toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  return !!want&&(st.log||[]).some(e2=>/▣ Meeting ended/.test(e2.x||'')&&e2.t===want);
+}
 /* Time-based booking stage handler (Screen/Interview/Onboarding booked) */
 function _sequenceBookingStage(c,cfg,info){
   const st=c.st;
   const m=st.booking?minsUntil(st.booking):null;
   const d=st.booking?_bookingLocal(st.booking).slice(0,10):null;
+  /* Orientation ended + candidate attended → the card's job is done; hiring IS the next
+     action (Meir 2026-10-09). Only when the operator may actually use the password-gated
+     fast-hire; otherwise the normal run/log choreography stays. */
+  if(cfg.key==='Onboarding booked'&&m!=null&&m<0&&_orientationDone(c)&&_stageMoveAllowed()){
+    return{bucket:'action',timing:_dn('Orientation done — ready to hire','pg',fmtTime(st.booking)),info,primary:{kind:'hire-now',label:'⚡ Hire now',cls:'grn'}};
+  }
   const baseAction={kind:'questions',stage:cfg.questionsStage,nextStage:cfg.nextStageOnRun,cls:'sky'};
   if(m!=null&&m<=5&&m>-150){
     const cd=m>0?Math.ceil(m)+'m':'now';
@@ -11704,6 +11728,7 @@ function doPrimary(r){_memGen++;const c=pipeline.find(x=>x.excelRow===r);if(!c)r
     return;
   }
   if(p.kind==='stale-call'){_staleCallModal(r);return;} /* P-10: silent park → phone-call ladder */
+  if(p.kind==='hire-now')return hireNowWS(); /* orientation attended → fast-hire (loadW already ran; the gate + password + confirm live inside) */
   if(p.kind==='noshow-rebook'){
     /* P-4: runs the standard 📵 flow — no-show count, stage revert, park, rebook composer. */
     openWorkspace(r);
