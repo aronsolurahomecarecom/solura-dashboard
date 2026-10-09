@@ -1866,8 +1866,39 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1009-123';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1009-124';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
+
+/* ─── 🔄 New-version watcher ────────────────────────────────────────────
+ * The dashboard tab stays open for days, so shipped builds were invisible
+ * until a manual reload. Every 10 minutes this fetches the page's own
+ * HTML (cache-busted past the Pages CDN) and compares the BUILD constant;
+ * a newer one shows a persistent reload banner. ───────────────────────── */
+var _buildWatchSeen='';
+async function checkForNewBuild(){
+  try{
+    var r=await fetch(location.pathname+'?buildcheck='+Date.now(),{cache:'no-store'});
+    if(!r.ok)return;
+    var t2=await r.text();
+    var m=t2.match(/var BUILD='(B-[\d-]+)'/);
+    if(!m||m[1]===BUILD||m[1]===_buildWatchSeen)return;
+    _buildWatchSeen=m[1];
+    var bar=el('newbuild-bar');
+    if(!bar){
+      bar=document.createElement('div');
+      bar.id='newbuild-bar';
+      bar.style.cssText='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9999;background:var(--gold);color:#fff;padding:10px 18px;border-radius:12px;font-family:\'Plus Jakarta Sans\',sans-serif;font-size:12.5px;font-weight:700;box-shadow:0 6px 24px rgba(0,0,0,.25);display:flex;gap:12px;align-items:center;cursor:pointer';
+      bar.innerHTML='<span></span><b style="text-decoration:underline">Reload now</b>';
+      bar.addEventListener('click',function(){location.reload();});
+      document.body.appendChild(bar);
+    }
+    bar.querySelector('span').textContent='🔄 A newer dashboard is live ('+m[1]+' — you are on '+BUILD+')';
+  }catch(_){/* offline or local file — quiet */}
+}
+if(/^https?:/.test(location.protocol)){
+  setInterval(function(){checkForNewBuild();},10*60*1000);
+  setTimeout(function(){checkForNewBuild();},20*1000);
+}
 
 // Sentinel values for STEP column
 var STEP_NEW=-1;          // never started, treat as 0 for engine purposes

@@ -93,5 +93,13 @@ const W = mk(extractInnerHtml);
   ok((html.match(/emailSendButtonsBusy\(false\)/g) || []).length >= 3, 'every exit path (errors, early returns, finally) re-enables both');
 }
 
+// ── 🔄 new-version watcher (B-1009-124) ──
+{
+  ok(/function checkForNewBuild/.test(html) && /buildcheck='\+Date\.now\(\)/.test(html) && /cache:'no-store'/.test(html), 'the open tab checks its own URL for a newer build, busting the Pages CDN cache');
+  ok(/10\*60\*1000/.test(html.slice(html.indexOf('function checkForNewBuild'), html.indexOf('function checkForNewBuild') + 2500)), 'checks every 10 minutes');
+  ok(/A newer dashboard is live/.test(html) && /Reload now/.test(html), 'a newer build shows a persistent reload banner');
+  ok(/m\[1\]===BUILD\|\|m\[1\]===_buildWatchSeen\)return/.test(html), 'same build (or already-announced) = no banner nagging');
+}
+
 console.log('\nClaude wrap: ' + PASS + ' passed, ' + FAIL + ' failed');
 process.exit(FAIL ? 1 : 0);
