@@ -85,6 +85,10 @@ const S = mk(enginesDoc);
   ok(/data-action="schedmail-del"/.test(html), 'each scheduled email can be cancelled from the list');
   ok(/Read receipts included/.test(html) && !/carry no read receipt/.test(html), 'the UI says receipts are IN, and the old caveat is gone');
   ok(/scheduled:'⏰ scheduled'/.test(html), 'scheduled sends get their own chip in the sent-emails list');
+  const mbx = html.slice(html.indexOf('async function openMailbox'), html.indexOf('function renderMailboxList'));
+  ok(/scheduledEmails\(\)\.forEach/.test(mbx) && /⏰ sends '\+when9/.test(mbx.replace(/\\u23f0/g, '⏰')) || /sends '\+when9/.test(mbx), '📧 Email tab: pending scheduled emails surface their lead with the send time');
+  ok(/rec\.kind!=='scheduled'\)return;/.test(mbx) && /not opened yet/.test(mbx) && /opened'\+/.test(mbx), '📧 Email tab: sent scheduled emails show their read-receipt status on the row');
+  ok(/if\(haveRi\[ri9\]\)return; \/\/ lead already listed via inbound/.test(mbx), 'leads with inbound mail are not duplicated — their fold already shows receipts');
 }
 
 console.log('\nScheduled mail: ' + PASS + ' passed, ' + FAIL + ' failed');

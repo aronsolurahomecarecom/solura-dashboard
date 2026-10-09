@@ -1865,7 +1865,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1009-120';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1009-121';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -8693,6 +8693,40 @@ async function openMailbox(){
   });
   var items=Object.keys(latest).map(function(e4){
     return {ri:emailToRi[e4],email:e4,latest:latest[e4],latestTs:latest[e4].receivedTs,unread:unreadCountFor(e4)};
+  });
+  // ⏰ Scheduled-email receipts ride the tab too: a lead surfaces even if
+  // they never wrote in — pending ones say when they send, sent ones show
+  // their open status. Expanding the row shows the full receipt list.
+  var schedRows={};
+  try{
+    scheduledEmails().forEach(function(r9){
+      if(!r9||r9.ri==null)return;
+      var when9=new Date(r9.dueAt).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+      var cur=schedRows[r9.ri];
+      if(!cur||r9.dueAt>cur.ts)schedRows[r9.ri]={ts:r9.dueAt,subj:r9.subj,label:'⏰ sends '+when9};
+    });
+  }catch(_){}
+  try{
+    var o9=sentStore();
+    Object.keys(o9).forEach(function(k9){
+      var rec=o9[k9];
+      if(!rec||rec.kind!=='scheduled')return;
+      var lbl=rec.openedAt
+        ?('📤 sent · ✓ opened'+((rec.opens||0)>1?' ×'+rec.opens:''))
+        :'📤 sent · not opened yet';
+      var cur2=schedRows[rec.ri];
+      if(!cur2||rec.ts>cur2.ts)schedRows[rec.ri]={ts:rec.ts,subj:rec.subj,label:lbl};
+    });
+  }catch(_){}
+  var haveRi={};
+  items.forEach(function(x){haveRi[x.ri]=true;});
+  Object.keys(schedRows).forEach(function(riK){
+    var ri9=parseInt(riK,10);
+    if(haveRi[ri9])return; // lead already listed via inbound — expand shows receipts
+    var s9=schedRows[riK];
+    items.push({ri:ri9,email:normEmail((rows[ri9]||[])[C.EM]),
+      latest:{subject:s9.subj||'(no subject)',preview:s9.label,receivedTs:s9.ts},
+      latestTs:s9.ts,unread:0,sched:true});
   });
   items.sort(mailboxOrder);
   renderMailboxList(items);
