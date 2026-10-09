@@ -735,8 +735,18 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px">
         <button id="email-send-btn" data-action="send-email" style="padding:9px 18px;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer">Send via Outlook</button>
         <button type="button" id="email-shell-toggle" data-action="toggle-shell" style="padding:9px 12px;background:none;border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;color:var(--mid);font-family:inherit">🎁 Wrap: on</button>
+        <button type="button" id="email-sched-btn" data-action="sched-email-open" title="Schedule this email — Microsoft sends it at the set time, even with your laptop off" style="padding:9px 12px;background:none;border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;color:var(--mid);font-family:inherit">🕒 Schedule</button>
         <button data-action="close-modal" data-mid="modal-email" style="padding:9px 12px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer">Cancel</button>
         <div id="email-spin" style="display:none;align-items:center;gap:5px;font-size:11px;color:var(--soft)"><div class="mspin"></div>Sending…</div>
+      </div>
+      <div id="sched-panel" style="display:none;margin-top:10px;padding:12px;border:1.5px dashed var(--gold);border-radius:10px;background:#FDF9F1">
+        <div style="font-size:11.5px;font-weight:700;color:#8B6500;margin-bottom:8px">⏰ Microsoft holds it and sends at this time, even if your laptop is off. Scheduled sends carry no read receipt.</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="date" id="sched-date" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">
+          <input type="time" id="sched-time" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">
+          <button type="button" data-action="sched-email-save" class="ee-mini" style="border-color:var(--gold);color:#8B6500;font-weight:700">⏰ Schedule send</button>
+          <span id="sched-out" style="font-size:11px"></span>
+        </div>
       </div>
     </div>
   </div>
@@ -1304,6 +1314,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <button class="st-nav-btn" data-action="st-nav" data-sec="newsletter">📰 Newsletter</button>
       <button class="st-nav-btn" data-action="st-nav" data-sec="invoicing">🧾 Invoicing</button>
       <button class="st-nav-btn" data-action="st-nav" data-sec="intake">📥 Intake links</button>
+      <button class="st-nav-btn" data-action="st-nav" data-sec="schedmail">⏰ Scheduled emails</button>
       <button class="st-nav-btn" data-action="st-nav" data-sec="about">ℹ About</button>
     </nav>
     <div class="st-content">
@@ -1528,6 +1539,14 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <span id="intake-test-out" style="font-size:11px;color:var(--soft);margin-left:8px"></span>
         </div>
         <div id="intake-links-list"></div>
+      </section>
+      <section class="st-sec" id="st-sec-schedmail" hidden>
+        <div style="font-size:13px;color:var(--mid);line-height:1.6;margin-bottom:14px">
+          Emails scheduled from the composer (🕒 Schedule next to Send). Microsoft Exchange holds each one and sends it
+          at the set time — laptop on or off. Cancelling here pulls the message back before it goes out.
+          Scheduled sends carry no read receipt.
+        </div>
+        <div id="schedmail-list"></div>
       </section>
       <section class="st-sec" id="st-sec-voiceagent" hidden>
         <h3 class="st-h">🎙 Voice agent (Retell / Vapi)</h3>
@@ -1828,7 +1847,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1007-117';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1009-118';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -7087,6 +7106,7 @@ function renderConfigInputs(){
   if(gk){try{gk.value=GHL_KEY();}catch(_){}}
   try{renderEmailPresetSettings();}catch(_){}
   try{renderIntakeLinks();}catch(_){}
+  try{renderSchedMail();}catch(_){}
   renderClaudeSections();
   renderShellPreview();
   // Newsletter audience rules: group checkboxes + live status list
@@ -8243,15 +8263,174 @@ function addLoggedInboundIds(newIds){
   }catch(_){}
 }
 
+/* ─── ⏰ Scheduled emails: Exchange deferred delivery ──────────────────
+ * The composer's 🕒 Schedule hands the finished email to Exchange NOW
+ * with PR_DEFERRED_SEND_TIME set; Microsoft's servers send it at that
+ * time — the laptop can be shut. Records live in the synced config so
+ * every device sees the queue; cancel = delete the message from the
+ * Outbox via Graph. No tracking pixel on scheduled sends: the copy
+ * Exchange files in Sent Items at 3am cannot be scrubbed, so scheduled
+ * emails simply carry no read receipt.
+ * ─────────────────────────────────────────────────────────────────────── */
+/* ⚡SCHEDMAIL — BEGIN (sliced by tests/schedmail.test.mjs) */
+function scheduledEmails(){
+  enginesDoc.config=enginesDoc.config||{};
+  var L=enginesDoc.config.scheduledEmails;
+  if(!L)L=enginesDoc.config.scheduledEmails=[];
+  return L;
+}
+// PR_DEFERRED_SEND_TIME — the MAPI property behind Outlook's own
+// "delay delivery". Exchange holds the sent message until this moment.
+function schedDeferredProp(dueTs){
+  return {id:'SystemTime 0x3FEF',value:new Date(dueTs).toISOString()};
+}
+function schedValidate(o){
+  if(!o.to)return 'No recipient email on this lead.';
+  if(!String(o.subj||'').trim())return 'Give the email a subject first.';
+  if(!String(o.bodyText||'').trim())return 'The message body is empty.';
+  if(o.reply)return 'Replies cannot be scheduled yet. Send it now instead.';
+  if(o.hasInline)return 'Emails with inline images cannot be scheduled yet. Send it now instead.';
+  if(o.hasLarge||o.attsBytes>3*1024*1024)return 'Big attachments cannot be scheduled. Keep them under ~3 MB total, or send now.';
+  if(!(o.dueTs>o.now+60*1000))return 'Pick a time at least a minute in the future.';
+  return null;
+}
+function schedDraftPayload(o){
+  var msg={subject:o.subj,body:{contentType:'HTML',content:o.bodyHtml},
+    toRecipients:[{emailAddress:{address:o.to}}],
+    singleValueExtendedProperties:[schedDeferredProp(o.dueTs)]};
+  if(o.atts&&o.atts.length)msg.attachments=o.atts.map(function(a){
+    return {'@odata.type':'#microsoft.graph.fileAttachment',name:a.name,contentType:a.type,contentBytes:a.dataBase64};
+  });
+  return msg;
+}
+// Past-due with 2 minutes of grace — Exchange is not to-the-second.
+function schedPastDue(list,now){
+  return (list||[]).filter(function(r){return r&&r.dueAt&&r.dueAt<now-2*60*1000;});
+}
+async function schedScheduleFromComposer(dueTs){
+  var out=el('sched-out');
+  var ri=parseInt(el('modal-email').dataset.ri,10);
+  var m=String(el('email-to').textContent||'').match(/<([^>]+)>/);
+  var to=m?m[1]:'';
+  var subj=el('email-subj').value;
+  var bodyEl=el('email-body');
+  var raw=!!_emailRawHtml;
+  var bodyHtml=raw?_emailRawHtml:String(bodyEl?bodyEl.innerHTML:'');
+  var attsBytes=0,hasLarge=false,hasInline=false;
+  emailAttachments.forEach(function(a){
+    if(a.large||a.file)hasLarge=true;
+    if(a.isInline)hasInline=true;
+    attsBytes+=(a.dataBase64?a.dataBase64.length:0);
+  });
+  var err=schedValidate({to:to,subj:subj,bodyText:raw?bodyHtml:(bodyEl?bodyEl.textContent:''),
+    reply:!!_emailReplyTo,hasInline:hasInline,hasLarge:hasLarge,attsBytes:attsBytes,dueTs:dueTs,now:Date.now()});
+  if(err){if(out){out.style.color='var(--red)';out.textContent='✗ '+err;}return;}
+  if(out){out.style.color='var(--mid)';out.textContent='Scheduling…';}
+  try{
+    try{bodyHtml=fillNames(bodyHtml,getNames(ri));}catch(_){}
+    // Same wrap decision as a live send — but NO tracking pixel (see banner)
+    var design=raw||(!_claudeHtmlDraft&&isFullDesignHtml(bodyHtml));
+    if(shellWillApply({hasShell:!!String(cfg('emailShellHtml')||'').trim(),override:_shellOverride,suppressed:_shellSuppressed,design:design})){
+      bodyHtml=applyEmailShell(bodyHtml,ri);
+    }
+    var payload=schedDraftPayload({to:to,subj:subj,bodyHtml:bodyHtml,dueTs:dueTs,
+      atts:emailAttachments.filter(function(a){return a.dataBase64&&!a.isInline;})});
+    var dr=await gfetch(GR+'/me/messages',{method:'POST',body:JSON.stringify(payload)});
+    if(!dr.ok){var e1=await dr.json().catch(function(){return{};});throw new Error(e1.error?e1.error.message:('draft '+dr.status));}
+    var dj=await dr.json();
+    var sr=await gfetch(GR+'/me/messages/'+encodeURIComponent(dj.id)+'/send',{method:'POST'});
+    if(!(sr.ok||sr.status===202))throw new Error('send '+sr.status);
+    scheduledEmails().push({id:dj.id,ri:ri,to:to,subj:String(subj||'').slice(0,140),dueAt:dueTs,createdAt:Date.now()});
+    saveEnginesDoc().catch(function(){});
+    var whenStr=new Date(dueTs).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    logComms(commsEntryForLead(ri,{direction:'out',channel:'email',contact:to,subject:subj,
+      preview:'Scheduled for '+whenStr+' — Exchange sends it even with the laptop off',
+      outcome:'scheduled-send'}));
+    var u=advanceLead(ri,'Email');
+    if(u){try{await writeRow(ri,u);}catch(_){}}
+    var sp=el('sched-panel');if(sp)sp.style.display='none';
+    el('modal-email').classList.remove('open');
+    emailClearRawHtml();emailAttachments=[];
+    toast('⏰ Scheduled — Microsoft sends it '+whenStr+', even if your laptop is off');
+    try{renderSchedMail();}catch(_){}
+    try{await buildUI();}catch(_){}
+  }catch(e){
+    if(out){out.style.color='var(--red)';out.textContent='✗ '+e.message;}
+  }
+}
+async function schedCancel(id){
+  var L=scheduledEmails(),idx=-1;
+  for(var i=0;i<L.length;i++)if(L[i].id===id){idx=i;break;}
+  if(idx<0)return;
+  try{
+    var r=await gfetch(GR+'/me/messages/'+encodeURIComponent(L[idx].id),{method:'DELETE'});
+    if(r.ok||r.status===204){
+      L.splice(idx,1);saveEnginesDoc().catch(function(){});renderSchedMail();
+      toast('🗑 Scheduled email cancelled — it will not send');
+    }else if(r.status===404){
+      L.splice(idx,1);saveEnginesDoc().catch(function(){});renderSchedMail();
+      toast('That one already went out — nothing left to cancel');
+    }else{
+      toast('⚠ Could not cancel ('+r.status+') — delete it from the Outbox in Outlook');
+    }
+  }catch(e){toast('⚠ Could not cancel: '+e.message);}
+}
+// Past-due records get verified against the mailbox: message gone =
+// Exchange sent it → clear the record; still there = flag it loudly.
+var _schedChecking=false;
+async function schedCheckPastDue(){
+  if(!tok||_schedChecking)return;
+  var due=schedPastDue(scheduledEmails(),Date.now());
+  if(!due.length)return;
+  _schedChecking=true;
+  try{
+    var changed=false;
+    for(var i=0;i<due.length;i++){
+      var rec=due[i];
+      try{
+        var r=await gfetch(GR+'/me/messages/'+encodeURIComponent(rec.id)+'?$select=id');
+        if(r.status===404){
+          var L=scheduledEmails(),ix=L.indexOf(rec);
+          if(ix>-1){L.splice(ix,1);changed=true;}
+          toast('✓ Scheduled email to '+(rec.to||'')+' went out');
+        }else if(r.ok&&!rec.stuck){rec.stuck=true;changed=true;}
+      }catch(_){}
+    }
+    if(changed){saveEnginesDoc().catch(function(){});try{renderSchedMail();}catch(_){}}
+  }finally{_schedChecking=false;}
+}
+/* ⚡SCHEDMAIL — END */
+function renderSchedMail(){
+  var host=el('schedmail-list');if(!host)return;
+  var L=scheduledEmails().slice().sort(function(a,b){return a.dueAt-b.dueAt;});
+  if(!L.length){
+    host.innerHTML='<div style="color:var(--soft);font-size:12px">Nothing scheduled. Compose an email and use 🕒 Schedule next to Send.</div>';
+    return;
+  }
+  host.innerHTML=L.map(function(r){
+    var nm='';try{nm=String((rows[r.ri]||[])[C.NM]||(rows[r.ri]||[])[C.DM]||'').trim();}catch(_){}
+    var when=new Date(r.dueAt).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    return '<div style="border:1.5px solid '+(r.stuck?'var(--red)':'var(--border)')+';border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+      +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12.5px">'+escapeHtml(nm||r.to)+' — '+escapeHtml(r.subj||'(no subject)')+'</div>'
+      +'<div style="font-size:11px;color:var(--mid)">⏰ '+when+' · to '+escapeHtml(r.to)
+      +(r.stuck?' · <b style="color:var(--red)">past due but still in the mailbox — check the Outbox in Outlook</b>':'')
+      +'</div></div>'
+      +'<button class="ee-mini" data-action="schedmail-del" data-id="'+escapeHtml(r.id)+'">✕ Cancel</button>'
+      +'</div>';
+  }).join('');
+}
+
 function startInboundPolling(){
   if(inboundEmailPollTimer)return;
   // First poll immediately, then on interval. The deliverability watch
   // (bounces/spam blocks) rides the same cadence, independently caught.
   pollInboundMail();
   pollNdrMail().catch(function(){});
+  schedCheckPastDue().catch(function(){});
   inboundEmailPollTimer=setInterval(function(){
     pollInboundMail();
     pollNdrMail().catch(function(){});
+    schedCheckPastDue().catch(function(){}); // ⏰ confirm Exchange sent what was due
   },INBOUND_POLL_MS);
 }
 function stopInboundPolling(){
@@ -15122,6 +15301,30 @@ function onClick(ev){
         toast(_shellOverride==='off'?'📄 Wrapper OFF for this email — it sends bare':'🎁 Wrapper back ON for this email');
       })();
       break;
+    case 'sched-email-open':
+      (function(){
+        var p=el('sched-panel');if(!p)return;
+        var showing=p.style.display!=='none';
+        p.style.display=showing?'none':'block';
+        if(!showing){
+          // Default: tomorrow at 9:00 — a civilized time to land in an inbox
+          var d=new Date(Date.now()+24*3600*1000);
+          if(!el('sched-date').value)el('sched-date').value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+          if(!el('sched-time').value)el('sched-time').value='09:00';
+          el('sched-out').textContent='';
+        }
+      })();
+      break;
+    case 'sched-email-save':
+      (function(){
+        var dv=el('sched-date').value,tv=el('sched-time').value;
+        var so=el('sched-out');
+        if(!dv||!tv){if(so){so.style.color='var(--red)';so.textContent='✗ Pick a date and a time.';}return;}
+        var due=new Date(dv+'T'+tv).getTime();
+        schedScheduleFromComposer(due).catch(function(e){showErr(e.message);});
+      })();
+      break;
+    case 'schedmail-del': schedCancel(t.dataset.id); break;
     case 'use-weekly':
       var _wri=parseInt(el('modal-email').dataset.ri,10);
       if(!isNaN(_wri))applyWeeklyDraft(_wri);
