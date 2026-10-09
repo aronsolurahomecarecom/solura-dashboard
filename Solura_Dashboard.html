@@ -714,7 +714,8 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <input id="email-subj" style="flex:1;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;outline:none">
         <button type="button" data-action="use-weekly" title="Fill with this week's nurture draft" style="padding:8px 12px;background:#fff;color:var(--mid);border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap">📰</button>
-        <button id="email-send-btn-top" data-action="send-email" title="Same as the Send button below — up here so a long nurture draft sends without scrolling" style="padding:8px 16px;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap">Send via Outlook</button>
+        <button type="button" id="email-claude-btn-top" data-action="claude-write-email" title="Have Claude draft this email from everything known about the lead" style="padding:8px 14px;background:linear-gradient(135deg,#7C5CBF,#5B4BAA);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:0 2px 8px rgba(91,75,170,.3)">✨ Claude</button>
+        <button id="email-send-btn-top" data-action="send-email" title="Same as the Send button below — up here so the long nurture letter sends without scrolling" style="display:none;padding:8px 16px;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap">Send via Outlook</button>
       </div>
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">Message</div>
       <div class="email-toolbar">
@@ -743,7 +744,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       </div>
       <div id="email-attach-list" class="email-attach-list"></div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px">
-        <button type="button" data-action="claude-write-email" title="Have Claude draft this email from everything known about the lead" style="padding:9px 16px;background:linear-gradient(135deg,#7C5CBF,#5B4BAA);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:0 2px 8px rgba(91,75,170,.3)">✨ Claude</button>
+        <button type="button" id="email-claude-btn-bottom" data-action="claude-write-email" title="Have Claude draft this email from everything known about the lead" style="display:none;padding:9px 16px;background:linear-gradient(135deg,#7C5CBF,#5B4BAA);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:0 2px 8px rgba(91,75,170,.3)">✨ Claude</button>
         <button id="email-send-btn" data-action="send-email" style="padding:9px 18px;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer">Send via Outlook</button>
         <button type="button" id="email-shell-toggle" data-action="toggle-shell" style="padding:9px 12px;background:none;border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;color:var(--mid);font-family:inherit">🎁 Wrap: on</button>
         <button type="button" id="email-sched-btn" data-action="sched-email-open" title="Schedule this email — Microsoft sends it at the set time, even with your laptop off" style="padding:9px 12px;background:none;border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;color:var(--mid);font-family:inherit">🕒 Schedule</button>
@@ -1866,7 +1867,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1009-124';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1009-125';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -9295,6 +9296,7 @@ function applyWeeklyDraft(ri,opts){
       }
     }
   }
+  try{updateComposerTopButtons();}catch(_){} // 📰 applied → Send takes the top slot
   var age=setAgeDays(set);
   var stale=age!=null&&age>(parseInt(set.refreshDays,10)||8);
   var multi=liveVariantsOf(set).length>1;
@@ -12392,6 +12394,7 @@ function openEmail(ri,opts){
   }else if(rn){rn.style.display='none';rn.innerHTML='';}
   el('modal-email').dataset.ri=ri;
   try{updateShellToggle();}catch(_){}
+  try{updateComposerTopButtons();}catch(_){}
   el('modal-email').classList.add('open');
 }
 
@@ -12792,6 +12795,18 @@ function emailBuildShareBlock(shared){
   +'</div>';
 }
 
+// The subject-row slot is MODE-AWARE (Meir, Oct 9 2026): the weekly
+// nurture letter puts Send up top (its length makes scrolling painful)
+// and ✨ Claude drops to the bottom row; every other compose keeps the
+// classic layout — Claude up top, Send only at the bottom.
+function updateComposerTopButtons(){
+  var ri=parseInt(el('modal-email').dataset.ri,10);
+  var weekly=!!(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri);
+  var sTop=el('email-send-btn-top'),cTop=el('email-claude-btn-top'),cBot=el('email-claude-btn-bottom');
+  if(sTop)sTop.style.display=weekly?'':'none';
+  if(cTop)cTop.style.display=weekly?'none':'';
+  if(cBot)cBot.style.display=weekly?'':'none';
+}
 // Both send buttons (header + footer) move together — the header one
 // exists so a long draft (the weekly letter) sends without scrolling.
 function emailSendButtonsBusy(on){

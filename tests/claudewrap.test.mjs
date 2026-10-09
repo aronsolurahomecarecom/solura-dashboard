@@ -81,12 +81,18 @@ const W = mk(extractInnerHtml);
   ok(/function updateShellToggle/.test(html) && /b\.style\.display='none';return;/.test(html), 'the chip hides when no shell is configured');
 }
 
-// ── composer: top Send button swap (B-1009-123, weekly-letter friction) ──
+// ── composer: MODE-AWARE top slot (B-1009-125) — Send up top ONLY for the
+// weekly nurture letter; everything else keeps the classic Claude-up-top ──
 {
-  ok(/id="email-send-btn-top" data-action="send-email"/.test(html), 'a second Send sits up top — a long weekly draft sends with zero scrolling');
-  ok(html.indexOf('id="email-send-btn-top"') < html.indexOf('id="email-body"') && html.indexOf('id="email-subj"') < html.indexOf('id="email-send-btn-top"'), 'the top Send took the subject-row slot where ✨ Claude used to be');
-  ok(html.indexOf('data-action="claude-write-email"') > html.indexOf('id="email-attach-list"'), '✨ Claude moved DOWN to the send row at the bottom');
-  ok(html.indexOf('data-action="claude-write-email"') < html.indexOf('id="email-send-btn"'), 'Claude sits in the usual Send slot; Send stays beside it');
+  ok(/id="email-claude-btn-top" data-action="claude-write-email"/.test(html) && /id="email-send-btn-top" data-action="send-email"/.test(html), 'BOTH buttons live in the subject row, toggled by mode');
+  ok(html.indexOf('id="email-send-btn-top"') < html.indexOf('id="email-body"') && html.indexOf('id="email-subj"') < html.indexOf('id="email-claude-btn-top"'), 'the slot sits in the subject row, above the body');
+  const upd = html.slice(html.indexOf('function updateComposerTopButtons'), html.indexOf('function emailSendButtonsBusy'));
+  ok(/_weeklyAppliedFor&&_weeklyAppliedFor\.ri===ri/.test(upd), 'the mode IS the weekly draft: applied for THIS lead = newsletter layout');
+  ok(/sTop\.style\.display=weekly\?'':'none'/.test(upd) && /cTop\.style\.display=weekly\?'none':''/.test(upd), 'weekly → Send up top; otherwise → Claude up top, like it used to be');
+  ok(/cBot\.style\.display=weekly\?'':'none'/.test(upd), 'the bottom Claude appears only in newsletter mode (classic layout stays clean)');
+  ok(/id="email-send-btn-top"[^>]*style="display:none/.test(html) && /id="email-claude-btn-bottom"[^>]*style="display:none/.test(html), 'defaults match the classic layout before any JS runs');
+  ok(/try\{updateComposerTopButtons\(\);\}catch\(_\)\{\}\s*\n\s*el\('modal-email'\)\.classList\.add\('open'\)/.test(html), 'every composer open re-decides the layout');
+  ok(/updateComposerTopButtons\(\);\}catch\(_\)\{\} \/\/ 📰 applied → Send takes the top slot/.test(html), 'clicking 📰 mid-compose flips the slot too');
   ok(/function emailSendButtonsBusy\(on\)/.test(html) && /b2\.textContent=on\?'Sending\\u2026':'Send via Outlook'/.test(html.replace(/\\/g, '\\\\')) || /Sending/.test(html.slice(html.indexOf('function emailSendButtonsBusy'), html.indexOf('function emailSendButtonsBusy') + 400)), 'both buttons share one busy state');
   const sendFn = html.slice(html.indexOf('async function sendEmail()'), html.indexOf('async function sendEmail()') + 20000);
   ok(/emailSendButtonsBusy\(true\)/.test(sendFn), 'send disables BOTH buttons');
