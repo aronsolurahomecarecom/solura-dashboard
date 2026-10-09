@@ -81,5 +81,15 @@ const W = mk(extractInnerHtml);
   ok(/function updateShellToggle/.test(html) && /b\.style\.display='none';return;/.test(html), 'the chip hides when no shell is configured');
 }
 
+// ── composer: header Send button (B-1009-122, weekly-letter friction) ──
+{
+  ok(/id="email-send-btn-top" data-action="send-email"/.test(html), 'a second Send lives in the composer HEADER — a long weekly draft sends with zero scrolling');
+  ok(html.indexOf('id="email-send-btn-top"') < html.indexOf('id="email-body"'), 'the header button sits above the body, visible the moment the composer opens');
+  ok(/function emailSendButtonsBusy\(on\)/.test(html) && /b2\.textContent=on\?'Sending\\u2026':'Send via Outlook'/.test(html.replace(/\\/g, '\\\\')) || /Sending/.test(html.slice(html.indexOf('function emailSendButtonsBusy'), html.indexOf('function emailSendButtonsBusy') + 400)), 'both buttons share one busy state');
+  const sendFn = html.slice(html.indexOf('async function sendEmail()'), html.indexOf('async function sendEmail()') + 20000);
+  ok(/emailSendButtonsBusy\(true\)/.test(sendFn), 'send disables BOTH buttons');
+  ok((html.match(/emailSendButtonsBusy\(false\)/g) || []).length >= 3, 'every exit path (errors, early returns, finally) re-enables both');
+}
+
 console.log('\nClaude wrap: ' + PASS + ' passed, ' + FAIL + ' failed');
 process.exit(FAIL ? 1 : 0);

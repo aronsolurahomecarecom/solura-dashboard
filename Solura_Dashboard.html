@@ -700,7 +700,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
 <!-- Email Modal -->
 <div class="modal" id="modal-email">
   <div class="mbox" style="max-width:640px">
-    <div class="mhead"><div class="mtitle">Send Email</div><button class="mclose" data-action="close-modal" data-mid="modal-email">✕</button></div>
+    <div class="mhead"><div class="mtitle">Send Email</div><button id="email-send-btn-top" data-action="send-email" title="Same as the Send button below — here so a long draft needs no scrolling" style="padding:7px 16px;background:var(--gold);color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;margin-right:10px">Send via Outlook</button><button class="mclose" data-action="close-modal" data-mid="modal-email">✕</button></div>
     <div class="mbody">
       <div id="email-reply-note" style="display:none;font-size:12px;background:var(--sky-pale);border:1px solid var(--sky-mid);color:var(--sky-deep);border-radius:8px;padding:8px 12px;margin-bottom:10px"></div>
       <div id="email-unsub-banner" style="display:none;font-size:12px;font-weight:600;background:#FDECEA;border:1.5px solid #E57373;color:#B71C1C;border-radius:8px;padding:9px 12px;margin-bottom:10px"></div>
@@ -1865,7 +1865,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1009-121';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1009-122';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -12760,6 +12760,14 @@ function emailBuildShareBlock(shared){
   +'</div>';
 }
 
+// Both send buttons (header + footer) move together — the header one
+// exists so a long draft (the weekly letter) sends without scrolling.
+function emailSendButtonsBusy(on){
+  var b1=el('email-send-btn'),b2=el('email-send-btn-top'),sp=el('email-spin');
+  if(b1)b1.disabled=on;
+  if(b2){b2.disabled=on;b2.textContent=on?'Sending…':'Send via Outlook';}
+  if(sp)sp.style.display=on?'flex':'none';
+}
 async function sendEmail(){
   var ri=parseInt(el('modal-email').dataset.ri,10);
   if(isNaN(ri))return;
@@ -12812,7 +12820,7 @@ async function sendEmail(){
   }
 
   var btn=el('email-send-btn'),spin=el('email-spin');
-  btn.disabled=true;spin.style.display='flex';
+  emailSendButtonsBusy(true);
 
   // === OneDrive fallback for messages that would exceed Exchange size cap ===
   // Exchange Online tenants default to 25-35MB max message size but many (including
@@ -12853,7 +12861,7 @@ async function sendEmail(){
         // Prepend the share block to the body
         bodyHtml=emailBuildShareBlock(oneDriveShared)+bodyHtml;
       }catch(odErr){
-        el('email-send-btn').disabled=false;spin.style.display='none';
+        emailSendButtonsBusy(false);
         showErr('OneDrive share failed: '+odErr.message+' \u2014 try smaller files or share via a manual link.');
         return;
       }
@@ -12911,7 +12919,7 @@ async function sendEmail(){
   var _viaResend=!!(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri&&!_emailReplyTo
     &&resendCfg()&&!emailAttachments.some(function(a){return a.isInline;}));
   if(_viaResend&&isUnsubscribed(ri)){
-    el('email-send-btn').disabled=false;spin.style.display='none';
+    emailSendButtonsBusy(false);
     emailAttachments=origAttachments;
     showErr('This lead unsubscribed from the newsletter — the weekly draft cannot be sent to them. A personal note (not the weekly draft) is still your call.');
     return;
@@ -13113,7 +13121,7 @@ async function sendEmail(){
       showErr('Email error: '+msg);
     }
   }finally{
-    btn.disabled=false;spin.style.display='none';
+    emailSendButtonsBusy(false);
     // Ensure emailAttachments is restored if we swapped it and didn't clear it
     if(origAttachments&&origAttachments.length&&emailAttachments!==origAttachments&&emailAttachments.length===0){
       // successful send path already cleared everything, nothing to do
