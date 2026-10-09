@@ -22,7 +22,12 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = '7.3-intake'; // 7.3: cond holds the portal's condition KEYS
+var VERSION = '7.4-sched-sms'; // 7.4: scheduled TEXTS — the dashboard queues
+// them here (/sms/schedule), a CRON TRIGGER sends due ones via GoHighLevel
+// using the GHL_API_KEY secret, results wait in /sms/results until the
+// dashboard acks them. Setup: add the GHL_API_KEY secret (same key as
+// Settings → SMS) and a Cron Trigger of */5 * * * * on this worker.
+// 7.3: cond holds the portal's condition KEYS
 // (comma list, multi-select) + condLabel holds the readable names; the
 // patient's full name rides pt on the full flow too.
 // 7.1: intake stores the full inquiry — care
@@ -143,13 +148,14 @@ export default {
     }
 
     if (path === '/ping') {
-      var selfCount = 0, pend = 0, intakeCount = 0;
+      var selfCount = 0, pend = 0, intakeCount = 0, smsCount = 0;
       if (kv) {
         try { selfCount = (await listAllKeys(kv, 'self:')).length; } catch (_) {}
         try { pend = (await listAllKeys(kv, 'ev:')).length; } catch (_) {}
         try { intakeCount = (await listAllKeys(kv, 'intake:')).length; } catch (_) {}
+        try { smsCount = (await listAllKeys(kv, 'smsq:')).length; } catch (_) {}
       }
-      return json({ ok: true, v: VERSION, hasToken: !!env.TRACK_TOKEN, hasKV: !!kv, events: pend, selfOpens: selfCount, intake: intakeCount }, 200, cb);
+      return json({ ok: true, v: VERSION, hasToken: !!env.TRACK_TOKEN, hasKV: !!kv, events: pend, selfOpens: selfCount, intake: intakeCount, smsQueue: smsCount, hasGhlKey: !!env.GHL_API_KEY }, 200, cb);
     }
 
     /* ── pixel ── */
@@ -354,6 +360,131 @@ export default {
       return json({ ok: true, deleted: deleted }, 200);
     }
 
+    /* ── ⏰ scheduled texts: the dashboard queues, the cron below sends ── */
+    if (path === '/sms/schedule' && req.method === 'POST') {
+      var sb = await readJson(req);
+      var stok = url.searchParams.get('token') || (sb && sb.token) || '';
+      if (!env.TRACK_TOKEN || stok !== env.TRACK_TOKEN) return json({ error: 'unauthorized' }, 401);
+      if (!kv) return json({ error: 'no KV' }, 500);
+      if (!sb || !sb.due || !sb.contactId || !sb.locationId || !String(sb.message || '').trim()) {
+        return json({ error: 'due, contactId, locationId and message are required' }, 400);
+      }
+      var srec = {
+        due: parseInt(sb.due, 10) || 0,
+        contactId: String(sb.contactId).slice(0, 60),
+        locationId: String(sb.locationId).slice(0, 60),
+        message: String(sb.message).slice(0, 1000),
+        phone: String(sb.phone || '').slice(0, 40),
+        leadName: String(sb.leadName || '').slice(0, 120),
+        ri: parseInt(sb.ri, 10),
+        attempts: 0, createdAt: Date.now()
+      };
+      var skey = 'smsq:' + srec.due + ':' + Math.random().toString(36).slice(2, 8);
+      await kv.put(skey, JSON.stringify(srec));
+      return json({ ok: true, key: skey }, 200);
+    }
+    if (path === '/sms/list') {
+      var ltok = url.searchParams.get('token') || '';
+      if (!env.TRACK_TOKEN || ltok !== env.TRACK_TOKEN) return json({ error: 'unauthorized' }, 401, cb);
+      var items = [];
+      if (kv) {
+        try {
+          var qnames = await listAllKeys(kv, 'smsq:');
+          qnames.sort(function (a, b) { return tsOfKey(a) - tsOfKey(b); });
+          for (var qi = 0; qi < qnames.length && qi < 50; qi++) {
+            var qv = await kv.get(qnames[qi], 'json');
+            if (qv) { qv.key = qnames[qi]; items.push(qv); }
+          }
+        } catch (_) {}
+      }
+      return json({ ok: true, sms: items, hasGhlKey: !!env.GHL_API_KEY }, 200, cb);
+    }
+    if (path === '/sms/cancel' && req.method === 'POST') {
+      var cbdy = await readJson(req);
+      var ctok = url.searchParams.get('token') || (cbdy && cbdy.token) || '';
+      if (!env.TRACK_TOKEN || ctok !== env.TRACK_TOKEN) return json({ error: 'unauthorized' }, 401);
+      var ckey = String((cbdy && cbdy.key) || '');
+      if (ckey.indexOf('smsq:') !== 0) return json({ error: 'bad key' }, 400);
+      if (kv) { try { await kv.delete(ckey); } catch (_) {} }
+      return json({ ok: true }, 200);
+    }
+    if (path === '/sms/results') {
+      var rtok2 = url.searchParams.get('token') || '';
+      if (!env.TRACK_TOKEN || rtok2 !== env.TRACK_TOKEN) return json({ error: 'unauthorized' }, 401, cb);
+      var results = [];
+      if (kv) {
+        try {
+          var rnames = await listAllKeys(kv, 'smsr:');
+          rnames.sort(function (a, b) { return tsOfKey(a) - tsOfKey(b); });
+          for (var rj = 0; rj < rnames.length && rj < 50; rj++) {
+            var rv = await kv.get(rnames[rj], 'json');
+            if (rv) { rv.key = rnames[rj]; results.push(rv); }
+          }
+        } catch (_) {}
+      }
+      return json({ ok: true, results: results }, 200, cb);
+    }
+    if (path === '/sms/results/ack' && req.method === 'POST') {
+      var abdy = await readJson(req);
+      var atok2 = url.searchParams.get('token') || (abdy && abdy.token) || '';
+      if (!env.TRACK_TOKEN || atok2 !== env.TRACK_TOKEN) return json({ error: 'unauthorized' }, 401);
+      var akeys2 = (abdy && abdy.keys) || [];
+      var gone = 0;
+      if (kv) for (var ak = 0; ak < akeys2.length && ak < 100; ak++) {
+        var kk2 = String(akeys2[ak]);
+        if (kk2.indexOf('smsr:') === 0) { try { await kv.delete(kk2); gone++; } catch (_) {} }
+      }
+      return json({ ok: true, deleted: gone }, 200);
+    }
+
     return json({ error: 'not found', v: VERSION }, 404);
+  },
+
+  /* ── cron: send due texts via GoHighLevel — runs with every laptop shut.
+   * Add a Cron Trigger on this worker (Settings → Triggers): *\/5 * * * *
+   * and the GHL_API_KEY secret (the same key the dashboard uses).        ── */
+  async scheduled(event, env, ctx) {
+    var kv = kvOf(env);
+    if (!kv) return;
+    var now = Date.now();
+    var names;
+    try { names = await listAllKeys(kv, 'smsq:'); } catch (_) { return; }
+    var due = names.filter(function (k) { return tsOfKey(k) <= now; });
+    for (var i = 0; i < due.length && i < 20; i++) {
+      var key = due[i];
+      var rec;
+      try { rec = await kv.get(key, 'json'); } catch (_) { continue; }
+      if (!rec) continue;
+      var rkey = 'smsr:' + Date.now() + ':' + Math.random().toString(36).slice(2, 8);
+      if (!env.GHL_API_KEY) {
+        await kv.delete(key);
+        await kv.put(rkey, JSON.stringify({ ok: false, error: 'GHL_API_KEY secret not set on the worker', ri: rec.ri, phone: rec.phone, leadName: rec.leadName, message: rec.message, due: rec.due }), { expirationTtl: 7 * 24 * 3600 });
+        continue;
+      }
+      var ok = false, errMsg = '';
+      try {
+        var r = await fetch('https://services.leadconnectorhq.com/conversations/messages', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + env.GHL_API_KEY, Version: '2021-07-28', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'SMS', contactId: rec.contactId, locationId: rec.locationId, message: rec.message })
+        });
+        ok = r.ok;
+        if (!ok) { var ej = await r.json().catch(function () { return {}; }); errMsg = (ej.message || ('HTTP ' + r.status)); }
+      } catch (e) { errMsg = String(e && e.message || 'network'); }
+      if (ok) {
+        await kv.delete(key);
+        await kv.put(rkey, JSON.stringify({ ok: true, ri: rec.ri, phone: rec.phone, leadName: rec.leadName, message: rec.message, due: rec.due, sentAt: Date.now() }), { expirationTtl: 7 * 24 * 3600 });
+      } else {
+        rec.attempts = (rec.attempts || 0) + 1;
+        rec.lastError = String(errMsg).slice(0, 200);
+        if (rec.attempts >= 5) {
+          // Five cron passes of failure: give up loudly, never silently
+          await kv.delete(key);
+          await kv.put(rkey, JSON.stringify({ ok: false, error: rec.lastError, ri: rec.ri, phone: rec.phone, leadName: rec.leadName, message: rec.message, due: rec.due }), { expirationTtl: 7 * 24 * 3600 });
+        } else {
+          await kv.put(key, JSON.stringify(rec));
+        }
+      }
+    }
   }
 };

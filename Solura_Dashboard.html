@@ -679,9 +679,19 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <textarea id="sms-text" style="width:100%;padding:10px 12px;border:1.5px solid var(--sky-mid);border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;min-height:100px;resize:vertical;outline:none;background:var(--sky-pale);margin-bottom:14px"></textarea>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button id="sms-send-btn" data-action="send-sms" style="padding:9px 18px;background:var(--grn);color:#fff;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer">Send SMS</button>
+        <button type="button" id="sms-sched-btn" data-action="sms-sched-open" title="Schedule this text — the worker sends it at the set time, even with your laptop off" style="padding:9px 12px;background:none;border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;color:var(--mid);font-family:inherit">🕒 Schedule</button>
         <a id="sms-hcg-link" href="#" target="_blank" rel="noopener" style="padding:9px 14px;background:var(--sky-pale);color:var(--sky-deep);border:1px solid var(--sky-mid);border-radius:8px;font-size:12px;font-weight:600;text-decoration:none">Open in HCG</a>
         <button data-action="close-modal" data-mid="modal-sms" style="padding:9px 12px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer">Cancel</button>
         <div id="sms-spin" style="display:none;align-items:center;gap:5px;font-size:11px;color:var(--soft)"><div class="mspin"></div>Sending…</div>
+      </div>
+      <div id="sms-sched-panel" style="display:none;margin-top:10px;padding:12px;border:1.5px dashed var(--gold);border-radius:10px;background:#FDF9F1">
+        <div style="font-size:11.5px;font-weight:700;color:#8B6500;margin-bottom:8px">⏰ Our worker sends it at this time, even if your laptop is off.</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="date" id="sms-sched-date" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">
+          <input type="time" id="sms-sched-time" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">
+          <button type="button" data-action="sms-sched-save" class="ee-mini" style="border-color:var(--gold);color:#8B6500;font-weight:700">⏰ Schedule text</button>
+          <span id="sms-sched-out" style="font-size:11px"></span>
+        </div>
       </div>
     </div>
   </div>
@@ -1548,6 +1558,13 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           time the dashboard confirms a send, so avoid re-reading that copy before then.
         </div>
         <div id="schedmail-list"></div>
+        <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:#8B6500;margin:20px 0 8px">📱 Scheduled texts</div>
+        <div style="font-size:12px;color:var(--mid);line-height:1.6;margin-bottom:8px">
+          Queued on the tracking worker; its cron trigger sends them via HomeCareGrow at the set time — laptop on or off.
+          One-time setup on the worker: paste v7.4, add the <b>GHL_API_KEY</b> secret (the same key as Settings → SMS),
+          and add a Cron Trigger of <code>*/5 * * * *</code>.
+        </div>
+        <div id="schedsms-list"></div>
       </section>
       <section class="st-sec" id="st-sec-voiceagent" hidden>
         <h3 class="st-h">🎙 Voice agent (Retell / Vapi)</h3>
@@ -1848,7 +1865,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1009-119';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1009-120';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -7108,6 +7125,7 @@ function renderConfigInputs(){
   try{renderEmailPresetSettings();}catch(_){}
   try{renderIntakeLinks();}catch(_){}
   try{renderSchedMail();}catch(_){}
+  try{renderSchedSms();}catch(_){}
   renderClaudeSections();
   renderShellPreview();
   // Newsletter audience rules: group checkboxes + live status list
@@ -8475,10 +8493,12 @@ function startInboundPolling(){
   pollInboundMail();
   pollNdrMail().catch(function(){});
   schedCheckPastDue().catch(function(){});
+  pollSmsResults().catch(function(){});
   inboundEmailPollTimer=setInterval(function(){
     pollInboundMail();
     pollNdrMail().catch(function(){});
     schedCheckPastDue().catch(function(){}); // ⏰ confirm Exchange sent what was due
+    pollSmsResults().catch(function(){});    // 📱 collect the cron's sent/failed texts
   },INBOUND_POLL_MS);
 }
 function stopInboundPolling(){
@@ -11651,6 +11671,159 @@ function openSMS(ri){
   el('modal-sms').classList.add('open');
 }
 
+// Find (or create) the GHL contact for a lead's phone — shared by the
+// live send and the ⏰ scheduler. Returns the contact id or null.
+async function ghlFindOrCreateContact(ri,clean){
+  if(!GHL_KEY())throw new Error('No GoHighLevel API key — add it in Settings → SMS');
+  var cid=null;
+  var ghlHeaders={Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Accept':'application/json'};
+  function fetchTO(url,opts,ms){
+    var ctrl=new AbortController();
+    var tid=setTimeout(function(){ctrl.abort();},ms||6000);
+    return fetch(url,Object.assign({},opts,{signal:ctrl.signal})).finally(function(){clearTimeout(tid);});
+  }
+  try{
+    var sr=await fetchTO(GHL_BASE+'/contacts/search/duplicate?locationId='+GHL_LOC+'&number='+encodeURIComponent('+'+clean),{headers:ghlHeaders});
+    if(sr.ok){var sj=await sr.json();if(sj.contact)cid=sj.contact.id;}
+  }catch(e){}
+  if(!cid){
+    try{
+      var r2=await fetchTO(GHL_BASE+'/contacts/?locationId='+GHL_LOC+'&query='+encodeURIComponent('+'+clean),{headers:ghlHeaders});
+      if(r2.ok){var j2=await r2.json();if(j2.contacts&&j2.contacts.length>0)cid=j2.contacts[0].id;}
+    }catch(e){}
+  }
+  if(!cid){
+    var r3=rows[ri]||[];
+    try{
+      var cr=await fetchTO(GHL_BASE+'/contacts/',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({locationId:GHL_LOC,firstName:String(r3[C.NM]||'').split(' ')[0],phone:'+'+clean,email:String(r3[C.EM]||'')})});
+      if(cr.ok){var cj=await cr.json();cid=cj.contact?cj.contact.id:null;}
+    }catch(e){}
+  }
+  return cid;
+}
+/* ─── ⏰ Scheduled texts: worker cron sends them, laptop on or off ─────
+ * The dashboard resolves the GHL contact NOW, queues {due, contactId,
+ * message} on the tracking worker, and the worker's cron trigger sends
+ * via GoHighLevel at the due time. Results wait on the worker until the
+ * dashboard picks them up (comms log + toast). Needs worker v7.4 with
+ * the GHL_API_KEY secret and a cron trigger.
+ * ─────────────────────────────────────────────────────────────────────── */
+/* ⚡SCHEDSMS — BEGIN (sliced by tests/schedsms.test.mjs) */
+function smsSchedValidate(o){
+  if(!o.phone)return 'No phone number on this lead.';
+  if(!String(o.msg||'').trim())return 'Write the text first.';
+  if(!o.hasTracker)return 'Set the tracker URL + token first (Settings → Data & analytics) — scheduled texts queue there.';
+  if(!(o.dueTs>o.now+60*1000))return 'Pick a time at least a minute in the future.';
+  return null;
+}
+function smsQueuePayload(o){
+  return {due:o.dueTs,contactId:o.contactId,locationId:o.locationId,
+    message:String(o.msg||'').slice(0,1000),phone:o.phone,
+    leadName:String(o.leadName||'').slice(0,120),ri:o.ri};
+}
+/* ⚡SCHEDSMS — END */
+async function schedSmsFromComposer(dueTs){
+  var out=el('sms-sched-out');
+  function say(c,t2){if(out){out.style.color=c;out.textContent=t2;}}
+  var ri=parseInt(el('modal-sms').dataset.ri,10);
+  var phone=String((rows[ri]||[])[C.PH]||'').trim();
+  var msg=el('sms-text').value;
+  var tc=null;try{tc=trackerCfg();}catch(_){}
+  var err=smsSchedValidate({phone:phone,msg:msg,hasTracker:!!(tc&&tc.token),dueTs:dueTs,now:Date.now()});
+  if(err){say('var(--red)','✗ '+err);return;}
+  say('var(--mid)','Scheduling…');
+  try{
+    var clean=phone.replace(/\D/g,'');if(clean.length===10)clean='1'+clean;
+    var cid=await ghlFindOrCreateContact(ri,clean);
+    if(!cid){say('var(--red)','✗ Could not match this number in HomeCareGrow — send it live instead.');return;}
+    var leadName='';try{leadName=String((rows[ri]||[])[C.NM]||(rows[ri]||[])[C.DM]||'').trim();}catch(_){}
+    var payload=smsQueuePayload({dueTs:dueTs,contactId:cid,locationId:GHL_LOC,msg:msg,phone:phone,leadName:leadName,ri:ri});
+    var r=await fetch(tc.url+'/sms/schedule?token='+encodeURIComponent(tc.token),{method:'POST',body:JSON.stringify(payload)});
+    var j=await r.json().catch(function(){return{};});
+    if(!(r.ok&&j.ok))throw new Error(j.error||('worker '+r.status+' — it may need the v7.4 code pasted in'));
+    var whenStr=new Date(dueTs).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    logComms(commsEntryForLead(ri,{direction:'out',channel:'sms',contact:phone,subject:'',
+      preview:'Scheduled for '+whenStr+' — the worker sends it even with the laptop off · '+String(msg).slice(0,200),
+      outcome:'scheduled-sms'}));
+    var u=advanceLead(ri,'SMS');
+    if(u){try{await writeRow(ri,u);}catch(_){}}
+    var sp=el('sms-sched-panel');if(sp)sp.style.display='none';
+    el('modal-sms').classList.remove('open');
+    toast('⏰ Text scheduled — the worker sends it '+whenStr+', even if your laptop is off');
+    try{await buildUI();}catch(_){}
+  }catch(e){say('var(--red)','✗ '+e.message);}
+}
+// Results the cron left behind: toast + comms-log each, then ack-delete.
+var _smsResultsBusy=false;
+async function pollSmsResults(){
+  if(_smsResultsBusy)return;
+  var tc=null;try{tc=trackerCfg();}catch(_){}
+  if(!tc||!tc.token)return;
+  _smsResultsBusy=true;
+  try{
+    var r=await fetch(tc.url+'/sms/results?token='+encodeURIComponent(tc.token)+'&t='+Date.now());
+    if(!r.ok)return;
+    var j=await r.json();
+    var results=(j&&j.results)||[];
+    if(!results.length)return;
+    var ackKeys=[];
+    for(var i=0;i<results.length;i++){
+      var res=results[i];
+      if(!res||!res.key)continue;
+      ackKeys.push(res.key);
+      var who=res.leadName||res.phone||'';
+      if(res.ok){
+        toast('✓ Scheduled text to '+who+' went out');
+        logComms(commsEntryForLead(res.ri,{direction:'out',channel:'sms',contact:res.phone||'',subject:'',
+          preview:String(res.message||'').slice(0,300),outcome:'scheduled-sms-sent'}));
+      }else{
+        showErr('⚠ Scheduled text to '+who+' FAILED: '+(res.error||'unknown')+' — send it live');
+        logComms(commsEntryForLead(res.ri,{direction:'out',channel:'sms',contact:res.phone||'',subject:'',
+          preview:'FAILED scheduled text ('+(res.error||'unknown')+') · '+String(res.message||'').slice(0,200),
+          outcome:'scheduled-sms-failed'}));
+      }
+    }
+    if(ackKeys.length){
+      try{await fetch(tc.url+'/sms/results/ack?token='+encodeURIComponent(tc.token),{method:'POST',body:JSON.stringify({keys:ackKeys})});}catch(_){}
+    }
+    try{renderSchedSms();}catch(_){}
+  }catch(_){/* best-effort */}
+  finally{_smsResultsBusy=false;}
+}
+async function renderSchedSms(){
+  var host=el('schedsms-list');if(!host)return;
+  var tc=null;try{tc=trackerCfg();}catch(_){}
+  if(!tc||!tc.token){host.innerHTML='<div style="color:var(--soft);font-size:12px">Set the tracker URL + token first (Data & analytics).</div>';return;}
+  host.innerHTML='<div style="color:var(--soft);font-size:12px">Checking the queue…</div>';
+  try{
+    var r=await fetch(tc.url+'/sms/list?token='+encodeURIComponent(tc.token)+'&t='+Date.now());
+    if(r.status===404){host.innerHTML='<div style="color:var(--red);font-size:12px">✗ The worker is outdated — paste solura-track-worker.js (v7.4) over it in Cloudflare and Deploy, add the GHL_API_KEY secret, and add a Cron Trigger of */5 * * * *.</div>';return;}
+    if(!r.ok){host.innerHTML='<div style="color:var(--red);font-size:12px">✗ Worker answered '+r.status+'.</div>';return;}
+    var j=await r.json();
+    var items=(j&&j.sms)||[];
+    var keyWarn=(j&&j.hasGhlKey===false)?'<div style="color:var(--red);font-size:12px;margin-bottom:8px">⚠ The worker has no GHL_API_KEY secret yet — texts will NOT send until you add it (Cloudflare → Worker → Settings → Variables).</div>':'';
+    if(!items.length){host.innerHTML=keyWarn+'<div style="color:var(--soft);font-size:12px">No texts queued. Open a lead’s SMS and use 🕒 Schedule.</div>';return;}
+    host.innerHTML=keyWarn+items.map(function(it){
+      var when=new Date(it.due).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+      return '<div style="border:1.5px solid '+(it.attempts?'var(--red)':'var(--border)')+';border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+        +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12.5px">'+escapeHtml(it.leadName||it.phone||'')+'</div>'
+        +'<div style="font-size:11px;color:var(--mid)">⏰ '+when+' · '+escapeHtml(String(it.message||'').slice(0,90))
+        +(it.attempts?' · <b style="color:var(--red)">'+it.attempts+' failed attempt'+(it.attempts!==1?'s':'')+(it.lastError?(': '+escapeHtml(it.lastError)):'')+'</b>':'')
+        +'</div></div>'
+        +'<button class="ee-mini" data-action="schedsms-del" data-key="'+escapeHtml(it.key)+'">✕ Cancel</button>'
+        +'</div>';
+    }).join('');
+  }catch(e){host.innerHTML='<div style="color:var(--red);font-size:12px">✗ Could not reach the worker.</div>';}
+}
+async function schedSmsCancel(key){
+  var tc=null;try{tc=trackerCfg();}catch(_){}
+  if(!tc||!tc.token)return;
+  try{
+    var r=await fetch(tc.url+'/sms/cancel?token='+encodeURIComponent(tc.token),{method:'POST',body:JSON.stringify({key:key})});
+    if(r.ok){toast('🗑 Scheduled text cancelled');renderSchedSms();}
+    else toast('⚠ Could not cancel ('+r.status+')');
+  }catch(e){toast('⚠ Could not cancel: '+e.message);}
+}
 async function sendSMS(){
   var ri=parseInt(el('modal-sms').dataset.ri,10);
   var phone=String((rows[ri]||[])[C.PH]||'').trim();
@@ -11660,31 +11833,7 @@ async function sendSMS(){
   btn.disabled=true;spin.style.display='flex';
   try{
     var clean=phone.replace(/\D/g,'');if(clean.length===10)clean='1'+clean;
-    var cid=null;
-    if(!GHL_KEY())throw new Error('No GoHighLevel API key — add it in Settings \u2192 SMS');
-    var ghlHeaders={Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Accept':'application/json'};
-    function fetchTO(url,opts,ms){
-      var ctrl=new AbortController();
-      var tid=setTimeout(function(){ctrl.abort();},ms||6000);
-      return fetch(url,Object.assign({},opts,{signal:ctrl.signal})).finally(function(){clearTimeout(tid);});
-    }
-    try{
-      var sr=await fetchTO(GHL_BASE+'/contacts/search/duplicate?locationId='+GHL_LOC+'&number='+encodeURIComponent('+'+clean),{headers:ghlHeaders});
-      if(sr.ok){var sj=await sr.json();if(sj.contact)cid=sj.contact.id;}
-    }catch(e){}
-    if(!cid){
-      try{
-        var r2=await fetchTO(GHL_BASE+'/contacts/?locationId='+GHL_LOC+'&query='+encodeURIComponent('+'+clean),{headers:ghlHeaders});
-        if(r2.ok){var j2=await r2.json();if(j2.contacts&&j2.contacts.length>0)cid=j2.contacts[0].id;}
-      }catch(e){}
-    }
-    if(!cid){
-      var r3=rows[ri]||[];
-      try{
-        var cr=await fetchTO(GHL_BASE+'/contacts/',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({locationId:GHL_LOC,firstName:String(r3[C.NM]||'').split(' ')[0],phone:'+'+clean,email:String(r3[C.EM]||'')})});
-        if(cr.ok){var cj=await cr.json();cid=cj.contact?cj.contact.id:null;}
-      }catch(e){}
-    }
+    var cid=await ghlFindOrCreateContact(ri,clean);
     if(!cid){
       toast('Opening HCG to send manually…');
       window.open('https://app.homecaregrow.io/v2/location/'+GHL_LOC+'/contacts?search='+encodeURIComponent('+'+clean),'hcg','width=1200,height=800,noopener');
@@ -15373,6 +15522,28 @@ function onClick(ev){
       })();
       break;
     case 'schedmail-del': schedCancel(t.dataset.id); break;
+    case 'sms-sched-open':
+      (function(){
+        var p=el('sms-sched-panel');if(!p)return;
+        var showing=p.style.display!=='none';
+        p.style.display=showing?'none':'block';
+        if(!showing){
+          var d=new Date(Date.now()+24*3600*1000);
+          if(!el('sms-sched-date').value)el('sms-sched-date').value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+          if(!el('sms-sched-time').value)el('sms-sched-time').value='10:00';
+          el('sms-sched-out').textContent='';
+        }
+      })();
+      break;
+    case 'sms-sched-save':
+      (function(){
+        var dv=el('sms-sched-date').value,tv=el('sms-sched-time').value;
+        var so=el('sms-sched-out');
+        if(!dv||!tv){if(so){so.style.color='var(--red)';so.textContent='✗ Pick a date and a time.';}return;}
+        schedSmsFromComposer(new Date(dv+'T'+tv).getTime()).catch(function(e){showErr(e.message);});
+      })();
+      break;
+    case 'schedsms-del': schedSmsCancel(t.dataset.key); break;
     case 'use-weekly':
       var _wri=parseInt(el('modal-email').dataset.ri,10);
       if(!isNaN(_wri))applyWeeklyDraft(_wri);
