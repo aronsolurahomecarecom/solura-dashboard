@@ -10624,10 +10624,16 @@ async function advanceNextStepWS(){
 async function markHiredWS(){
   if(W.stage==='Hired'){toast('Already an active caregiver');return;}
   if(!confirm('Mark '+(W.name||'this candidate')+' as hired?\n\nOrientation is done — they move to the Active caregivers tab.'))return;
-  W.st.hiredDate=W.st.hiredDate||today();
-  await advanceWS('Hired','🎉 Hired — orientation complete');
-  const c=pipeline.find(x=>x.excelRow===W.row);
-  if(c){c.stage='Hired';c.row[6]='Hired';}
+  /* `w` pins this candidate; advanceWS reports whether the save landed. The lines that used to
+     follow painted pipeline[W.row] Hired unconditionally — after a REFUSED save that showed an
+     active caregiver the sheet does not have, and after the operator opened someone else during
+     the save it painted THAT person Hired. saveW already rebuilds the right card on success. */
+  const w=W,_hadHired=w.st.hiredDate;
+  w.st.hiredDate=_hadHired||today();
+  if(!(await advanceWS('Hired','🎉 Hired — orientation complete'))){
+    if(_hadHired)w.st.hiredDate=_hadHired;else delete w.st.hiredDate;
+    return;
+  }
   if(typeof render==='function')render();
 }
 /* ⚡ Fast-hire (Meir, 2026-10-09): one password-gated click that makes this person an active
@@ -16530,22 +16536,41 @@ async function refreshYardstik(){
 }
 function setRegistryResult(key,field,val){W.st.registryChecks=W.st.registryChecks||{};W.st.registryChecks[key]=W.st.registryChecks[key]||{};W.st.registryChecks[key][field]=val;if(field==='status')saveW(true);}
 async function advanceWS(toStage,msg){_memGen++;
-  const fromStage=W.stage;
-  W.stage=toStage;if(msg)logW(msg);
-  if(toStage==='Screen invite'||toStage==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();
-  await saveW(true);
+  /* `w` pins THIS candidate across the awaits below (see hireNowWS): the global W is replaced
+     the moment the operator opens someone else, and the stage report, the hired activity log,
+     the referral credit and the auto-opened next email all used to read whoever was open THEN. */
+  const w=W,fromStage=w.stage,_hadDue=w.st.due;
+  w.stage=toStage;if(msg)logW(msg);
+  if(toStage==='Screen invite'||toStage==='Interview invite')w.st.due=plusDays(3);else w.st.due=today();
+  /* A REFUSED OR FAILED SAVE IS NOT AN ADVANCE. saveW returns false (corrupt cell, state too
+     large for the cell, Graph throttling) and has already toasted why — and this used to carry
+     on regardless: '→ Hired' painted over the failure toast, the stage report and the hired
+     activity log were uploaded, and the referrer was credited a hire (written to THEIR row,
+     once-only by design, so it could never be taken back) for a candidate whose column G never
+     moved. Put memory back in step with the sheet and report the failure to the caller. */
+  if(!(await _saveWFor(w,true))){
+    w.stage=fromStage;
+    if(_hadDue===undefined)delete w.st.due;else w.st.due=_hadDue;
+    if(msg&&w.st&&Array.isArray(w.st.log))w.st.log.pop();
+    if(W===w)renderWorkspace();
+    return false;
+  }
   toast('→ '+toStage);
   /* Auto-save the stage report for whatever step we just completed. This is the same hook used
      by completeQuestions; centralizing here means EVERY stage transition gets a PDF, not just
      the ones that go through the questions modal. Fire-and-forget so the user's next action
      isn't blocked. */
-  autoUploadStageReport(W,fromStage).catch(e=>console.warn('Stage PDF auto-upload:',e.message));
-  if(toStage==='Hired'){uploadHiredActivityLog(W).catch(e=>console.warn('Activity log upload:',e.message));}
+  autoUploadStageReport(w,fromStage).catch(e=>console.warn('Stage PDF auto-upload:',e.message));
+  if(toStage==='Hired'){uploadHiredActivityLog(w).catch(e=>console.warn('Activity log upload:',e.message));}
   /* Referral funnel — if this candidate was referred by someone, advance the referrer's counters
      when their referred candidate reaches the appropriate funnel milestone.
      - Phone screen completed (any stage past 'Screen booked') → "screened" credit
      - Hired → "hired" credit */
-  await maybeAdvanceReferrer(fromStage,toStage);
+  await maybeAdvanceReferrer(fromStage,toStage,w);
+  /* The operator opened someone else while this saved: the advance is on the sheet and on the
+     board; what follows (hub reset, repaint, auto-opening the next email) belongs to the
+     workspace of the candidate who was advanced, not to whoever is open now. */
+  if(W!==w){if(typeof render==='function')render();return true;}
   /* clear any focused hub — the prior task is done. User returns to overview by default. */
   W.focusedHub=null;
   renderWorkspace();
@@ -16555,9 +16580,10 @@ async function advanceWS(toStage,msg){_memGen++;
   if(c){
     const a=action(c);
     if(a.primary&&a.primary.kind==='email-tpl'){
-      setTimeout(()=>doEmail(a.primary.tpl,a.primary.advanceTo),250);
+      setTimeout(()=>{if(W===w)doEmail(a.primary.tpl,a.primary.advanceTo);},250);
     }
   }
+  return true;
 }
 
 /* Walk the funnel for this candidate (W) and check if any referral milestones just triggered.
@@ -16565,19 +16591,20 @@ async function advanceWS(toStage,msg){_memGen++;
    and toStage is Ask references or beyond). "hired" milestone = toStage===Hired.
    Idempotent: each referral entry tracks which milestones have already been credited so a
    re-advance (rare but possible) doesn't double-count. */
-async function maybeAdvanceReferrer(fromStage,toStage){
+async function maybeAdvanceReferrer(fromStage,toStage,_w){
   if(!SETTINGS.config.referralEnabled)return;
-  if(!W.st.referredBy)return;
-  const referrerCode=W.st.referredBy;
+  const w=_w||W; /* the candidate who advanced — advanceWS pins them across its save */
+  if(!w||!w.st||!w.st.referredBy)return;
+  const referrerCode=w.st.referredBy;
   const referrer=pipeline.find(x=>x.st&&x.st.refCode===referrerCode);
   if(!referrer)return;
   /* Find the referral entry on the referrer's record matching THIS candidate's refCode */
-  const myCode=W.st.refCode;
+  const myCode=w.st.refCode;
   referrer.st.referrals=referrer.st.referrals||[];
   let entry=referrer.st.referrals.find(r=>r.refCode===myCode);
   if(!entry){
     /* Defensive: should exist from worker submission, but recreate if missing */
-    entry={refCode:myCode,name:W.name,email:W.email,status:'submitted',submittedAt:new Date().toISOString(),history:[{event:'submitted',at:new Date().toISOString()}]};
+    entry={refCode:myCode,name:w.name,email:w.email,status:'submitted',submittedAt:new Date().toISOString(),history:[{event:'submitted',at:new Date().toISOString()}]};
     referrer.st.referrals.push(entry);
   }
   let updated=false;
@@ -16590,7 +16617,7 @@ async function maybeAdvanceReferrer(fromStage,toStage){
     referrer.st.referralCount=referrer.st.referralCount||{submitted:0,screened:0,hired:0};
     referrer.st.referralCount.screened=(referrer.st.referralCount.screened||0)+1;
     referrer.st.log=referrer.st.log||[];
-    referrer.st.log.push({t:stamp(),x:'🎁 Referral milestone: '+W.name+' completed phone screen'});
+    referrer.st.log.push({t:stamp(),x:'🎁 Referral milestone: '+w.name+' completed phone screen'});
     updated=true;
   }
   /* Hired credit */
@@ -16602,7 +16629,7 @@ async function maybeAdvanceReferrer(fromStage,toStage){
     referrer.st.referralCount=referrer.st.referralCount||{submitted:0,screened:0,hired:0};
     referrer.st.referralCount.hired=(referrer.st.referralCount.hired||0)+1;
     referrer.st.log=referrer.st.log||[];
-    referrer.st.log.push({t:stamp(),x:'🎁 Referral milestone: '+W.name+' was hired!'});
+    referrer.st.log.push({t:stamp(),x:'🎁 Referral milestone: '+w.name+' was hired!'});
     updated=true;
   }
   if(updated){
