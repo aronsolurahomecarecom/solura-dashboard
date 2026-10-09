@@ -7581,6 +7581,14 @@ async function _backfillCalBookings(){
       if(cand.st.calBookingId===b.uid)continue; /* already on file */ if(b.uid&&(cand.st.consumedBookingIds||[]).indexOf(String(b.uid))>=0)continue; /* already USED - see _rememberConsumedBooking */
       const hasOtherUpcoming=cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
       if(hasOtherUpcoming)continue; /* a different live booking is already tracked — manual call */
+      /* THE WEBHOOK MAY BE WRITING THIS VERY ROW. A booking Cal.com lists but the row lacks is
+         either one the webhook never delivered, or one it is delivering right now: this pass
+         has just spent a worker + Cal.com round-trip since loadData read the sheet. Writing the
+         load-time copy then replaces the webhook's fresh cell (meeting link, reschedule uid,
+         its own log line) and logs a false "never delivered". Same rule as adoption: write only
+         onto the cell this load actually saw; otherwise the next pull decides (it will find
+         calBookingId on file, or a still-missing booking to backfill). */
+      if(!(await _ajUnchangedSinceLoad(cand)))continue;
       const hay=String((b.title||'')+' '+(b.eventTypeSlug||'')).toLowerCase();
       /* PER-ITEM, like the sibling auto-link pass. _stCell throws — on __ajCorrupt and on a
          state that will not fit after trimming — and that throw is evaluated as an ARGUMENT to
@@ -7637,6 +7645,9 @@ async function _autoLinkUnmatchedBookings(){
     const hasUpcoming=cand&&cand.st&&cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
     if(!cand||_isTerminalStage(cand.stage)||hasUpcoming||_wsOpenOn(cand.excelRow)){keep.push(u);continue;}
     if(cand.st&&cand.st.__ajCorrupt){keep.push(u);continue;} /* rule 5 — never write over a corrupt cell */
+    /* Never write the load-time copy over a cell that changed since (webhook, another operator's
+       tab) — see _backfillCalBookings. The entry stays in the pool for the next pass. */
+    if(!(await _ajUnchangedSinceLoad(cand))){keep.push(u);continue;}
     try{
       cand.st=cand.st||{};
       cand.st.booking=_bookingLocal(u.start);
@@ -12136,7 +12147,7 @@ async function _stateCompactionPass(){
     const lastTry=Number(localStorage.getItem(tryKey)||0);
     if(Date.now()-lastTry<10*60*1000)return;
     localStorage.setItem(tryKey,String(Date.now()));
-    const _myPipe=pipeline;let n=0;
+    const _myPipe=pipeline;let n=0,deferred=0;
     for(const c of pipeline){
       if(pipeline!==_myPipe)return;
       if(!c||!c.st||c.st.__ajCorrupt)continue;
@@ -12175,6 +12186,13 @@ async function _stateCompactionPass(){
       if(raw-j.length<2000)continue; /* genuinely nothing left to reclaim */
       s.log=(s.log||[]).concat({t:stamp(),x:'🗜 State compacted ('+raw+' → '+j.length+' chars) — oldest history trimmed'});
       try{j=_stCell(s);}catch(e){continue;}
+      /* This pass runs LAST in the load-heal chain, so the copy being trimmed can be most of a
+         refresh interval old — and it targets the busiest rows on the board. If the cell changed
+         meanwhile (webhook, another operator's tab, an earlier heal in this same chain) writing
+         the trimmed load-time copy would erase that change. Leave the row for a later sweep and
+         do not spend the day's turn, so it is retried on a fresh load in 10 minutes. */
+      if(!(await _ajUnchangedSinceLoad(c))){deferred++;continue;}
+      if(pipeline!==_myPipe)return;
       try{
         await patchRange('AJ'+c.excelRow,[[j]]);
         c.st=JSON.parse(j);
@@ -12184,7 +12202,7 @@ async function _stateCompactionPass(){
     }
     /* Reached only by a sweep that walked the whole pipeline — the stale-abort returns above
        without stamping, so an interrupted pass gets another turn instead of losing the day. */
-    localStorage.setItem(stampKey,String(Date.now()));
+    if(!deferred)localStorage.setItem(stampKey,String(Date.now()));
     if(n)console.info('🗜 Compacted '+n+' candidate state cell'+(n===1?'':'s'));
   }catch(e){console.warn('state compaction:',e.message);}
 }
