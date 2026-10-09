@@ -9522,11 +9522,13 @@ function _sequenceBookingStage(c,cfg,info){
   const st=c.st;
   const m=st.booking?minsUntil(st.booking):null;
   const d=st.booking?_bookingLocal(st.booking).slice(0,10):null;
-  /* Orientation ended + candidate attended → the card's job is done; hiring IS the next
-     action (Meir 2026-10-09). Only when the operator may actually use the password-gated
-     fast-hire; otherwise the normal run/log choreography stays. */
-  if(cfg.key==='Onboarding booked'&&m!=null&&m<0&&_orientationDone(c)&&_stageMoveAllowed()){
-    return{bucket:'action',timing:_dn('Orientation done — ready to hire','pg',fmtTime(st.booking)),info,primary:{kind:'hire-now',label:'⚡ Hire now',cls:'grn'}};
+  /* Orientation ended + candidate attended → the pipeline is complete; marking them hired is
+     the NATURAL next step, not an override (Meir 2026-10-09: no forced fast-hire here — "we
+     are at the point already"). mark-hired rides advanceWS, the genuine progression path
+     (stage report, hired activity log, referral hired-credit), with a light confirm and no
+     password — the gates protect SKIPPING steps, and nothing is being skipped. */
+  if(cfg.key==='Onboarding booked'&&m!=null&&m<0&&_orientationDone(c)){
+    return{bucket:'action',timing:_dn('Orientation done — mark them hired','pg',fmtTime(st.booking)),info,primary:{kind:'mark-hired',label:'✓ Mark hired',cls:'grn'}};
   }
   const baseAction={kind:'questions',stage:cfg.questionsStage,nextStage:cfg.nextStageOnRun,cls:'sky'};
   if(m!=null&&m<=5&&m>-150){
@@ -10613,6 +10615,20 @@ async function advanceNextStepWS(){
   if(c){c.stage=next;c.row[6]=next;}
   toast('⏭ '+next);
   renderWorkspace();if(typeof render==='function')render();
+}
+/* ✓ Mark hired (Meir, 2026-10-09): the NATURAL end of the pipeline, offered once the
+   orientation happened with the candidate on it. Light confirm, no password — nothing is
+   being skipped — and it rides advanceWS so the real progression side effects fire: stage
+   report PDF, hired activity log, referral hired-credit. Contrast hireNowWS below, the
+   password-gated OVERRIDE that jumps from any earlier stage. */
+async function markHiredWS(){
+  if(W.stage==='Hired'){toast('Already an active caregiver');return;}
+  if(!confirm('Mark '+(W.name||'this candidate')+' as hired?\n\nOrientation is done — they move to the Active caregivers tab.'))return;
+  W.st.hiredDate=W.st.hiredDate||today();
+  await advanceWS('Hired','🎉 Hired — orientation complete');
+  const c=pipeline.find(x=>x.excelRow===W.row);
+  if(c){c.stage='Hired';c.row[6]='Hired';}
+  if(typeof render==='function')render();
 }
 /* ⚡ Fast-hire (Meir, 2026-10-09): one password-gated click that makes this person an active
    caregiver RIGHT NOW — skips every remaining step and lands them in Active caregivers.
@@ -11734,7 +11750,7 @@ function doPrimary(r){_memGen++;const c=pipeline.find(x=>x.excelRow===r);if(!c)r
     return;
   }
   if(p.kind==='stale-call'){_staleCallModal(r);return;} /* P-10: silent park → phone-call ladder */
-  if(p.kind==='hire-now')return hireNowWS(); /* orientation attended → fast-hire (loadW already ran; the gate + password + confirm live inside) */
+  if(p.kind==='mark-hired')return markHiredWS(); /* orientation attended → natural hire (loadW already ran) */
   if(p.kind==='noshow-rebook'){
     /* P-4: runs the standard 📵 flow — no-show count, stage revert, park, rebook composer. */
     openWorkspace(r);
