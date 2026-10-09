@@ -66,18 +66,25 @@ const S = mk(enginesDoc);
   ok(/id="email-sched-btn" data-action="sched-email-open"/.test(html) && /id="sched-panel"/.test(html), '🕒 Schedule button + date/time panel in the composer');
   const flow = html.slice(html.indexOf('async function schedScheduleFromComposer'), html.indexOf('async function schedCancel'));
   ok(/\/me\/messages',\{method:'POST'/.test(flow) && /\/send',\{method:'POST'\}/.test(flow), 'draft is created and SENT immediately — Exchange holds it, not the browser');
-  ok(!/trackingPixelHtml/.test(flow), 'scheduled sends carry NO tracking pixel (no scrub possible at 3am)');
+  ok(/var trk=trackSystemEmail\(ri,to,subj,bodyHtml,'scheduled'\)/.test(flow) && /bodyHtml=trk\.html/.test(flow), 'READ RECEIPTS: the pixel rides scheduled sends like any live send');
+  ok(/sendId:trk\.id,px:pxFrag/.test(flow) && /trk\.record\(logComms\(/.test(flow), 'the receipt record + pixel fragment persist with the queue entry');
   ok(/shellWillApply\(/.test(flow) && /applyEmailShell\(bodyHtml,ri\)/.test(flow), 'the brand wrap decision matches a live send');
   ok(/advanceLead\(ri,'Email'\)/.test(flow) && /outcome:'scheduled-send'/.test(flow), 'scheduling advances the sequence and logs the comms entry');
   ok(/even if your laptop is off/.test(flow), 'the toast names the consequence plainly');
-  const cancel = html.slice(html.indexOf('async function schedCancel'), html.indexOf('var _schedChecking'));
+  const cancel = html.slice(html.indexOf('async function schedCancel'), html.indexOf('async function schedScrubSentCopy'));
   ok(/\{method:'DELETE'\}/.test(cancel) && /r\.status===404/.test(cancel), 'cancel deletes from the Outbox; an already-sent one is reported, not errored');
+  const scrub = html.slice(html.indexOf('async function schedScrubSentCopy'), html.indexOf('var _schedChecking'));
+  ok(/body\.indexOf\(rec\.px\)===-1\)continue/.test(scrub), 'the Sent copy is found by ITS OWN pixel fragment — never a lookalike');
+  ok(/saveCleanSentCopy\(rec\.subj,rec\.to,body,atts,null\)/.test(scrub) && /if\(okCopy\)/.test(scrub), 'pixel-free copy filed FIRST; the original is retired only on success');
+  ok(/\/attachments\?\$select=name,contentType,contentBytes/.test(scrub), 'attachments ride the clean copy');
   const check = html.slice(html.indexOf('async function schedCheckPastDue'), html.indexOf('/* ⚡SCHEDMAIL — END */'));
   ok(/r\.status===404/.test(check) && /went out/.test(check) && /rec\.stuck=true/.test(check), 'past-due check: gone = sent and cleaned; still present = flagged stuck');
+  ok(/schedScrubSentCopy\(rec\); \/\/ receipts stay real/.test(check), 'confirming a send immediately de-pixels its Sent copy');
   ok(/schedCheckPastDue\(\)\.catch\(function\(\)\{\}\); \/\/ ⏰ confirm Exchange sent what was due/.test(html), 'verification rides the standing poll');
   ok(/data-sec="schedmail"/.test(html) && /id="st-sec-schedmail"/.test(html) && /renderSchedMail\(\);\}catch/.test(html), 'Scheduled emails section in Settings, rendered on open');
   ok(/data-action="schedmail-del"/.test(html), 'each scheduled email can be cancelled from the list');
-  ok(/Scheduled sends carry no read receipt/.test(html), 'the no-receipt trade-off is stated where he schedules');
+  ok(/Read receipts included/.test(html) && !/carry no read receipt/.test(html), 'the UI says receipts are IN, and the old caveat is gone');
+  ok(/scheduled:'⏰ scheduled'/.test(html), 'scheduled sends get their own chip in the sent-emails list');
 }
 
 console.log('\nScheduled mail: ' + PASS + ' passed, ' + FAIL + ' failed');

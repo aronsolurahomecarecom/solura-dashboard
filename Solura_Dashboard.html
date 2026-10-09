@@ -740,7 +740,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div id="email-spin" style="display:none;align-items:center;gap:5px;font-size:11px;color:var(--soft)"><div class="mspin"></div>Sending…</div>
       </div>
       <div id="sched-panel" style="display:none;margin-top:10px;padding:12px;border:1.5px dashed var(--gold);border-radius:10px;background:#FDF9F1">
-        <div style="font-size:11.5px;font-weight:700;color:#8B6500;margin-bottom:8px">⏰ Microsoft holds it and sends at this time, even if your laptop is off. Scheduled sends carry no read receipt.</div>
+        <div style="font-size:11.5px;font-weight:700;color:#8B6500;margin-bottom:8px">⏰ Microsoft holds it and sends at this time, even if your laptop is off. Read receipts included.</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input type="date" id="sched-date" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">
           <input type="time" id="sched-time" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">
@@ -1544,7 +1544,8 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div style="font-size:13px;color:var(--mid);line-height:1.6;margin-bottom:14px">
           Emails scheduled from the composer (🕒 Schedule next to Send). Microsoft Exchange holds each one and sends it
           at the set time — laptop on or off. Cancelling here pulls the message back before it goes out.
-          Scheduled sends carry no read receipt.
+          Read receipts work like any other send; the copy in your Sent folder is cleaned of its pixel the next
+          time the dashboard confirms a send, so avoid re-reading that copy before then.
         </div>
         <div id="schedmail-list"></div>
       </section>
@@ -1847,7 +1848,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1009-118';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1009-119';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 // Sentinel values for STEP column
@@ -8268,9 +8269,9 @@ function addLoggedInboundIds(newIds){
  * with PR_DEFERRED_SEND_TIME set; Microsoft's servers send it at that
  * time — the laptop can be shut. Records live in the synced config so
  * every device sees the queue; cancel = delete the message from the
- * Outbox via Graph. No tracking pixel on scheduled sends: the copy
- * Exchange files in Sent Items at 3am cannot be scrubbed, so scheduled
- * emails simply carry no read receipt.
+ * Outbox via Graph. Read receipts: the pixel rides like any live send;
+ * the Sent copy Exchange files at 3am is scrubbed pixel-free the moment
+ * the dashboard next confirms the send went out.
  * ─────────────────────────────────────────────────────────────────────── */
 /* ⚡SCHEDMAIL — BEGIN (sliced by tests/schedmail.test.mjs) */
 function scheduledEmails(){
@@ -8328,11 +8329,18 @@ async function schedScheduleFromComposer(dueTs){
   if(out){out.style.color='var(--mid)';out.textContent='Scheduling…';}
   try{
     try{bodyHtml=fillNames(bodyHtml,getNames(ri));}catch(_){}
-    // Same wrap decision as a live send — but NO tracking pixel (see banner)
+    // Same wrap decision as a live send
     var design=raw||(!_claudeHtmlDraft&&isFullDesignHtml(bodyHtml));
     if(shellWillApply({hasShell:!!String(cfg('emailShellHtml')||'').trim(),override:_shellOverride,suppressed:_shellSuppressed,design:design})){
       bodyHtml=applyEmailShell(bodyHtml,ri);
     }
+    // Read receipts: same pixel + kind-labeled record as live sends. The
+    // Sent copy Exchange files at send time still holds the pixel; the
+    // dashboard scrubs it the moment it confirms the send went out
+    // (schedCheckPastDue → schedScrubSentCopy).
+    var trk=trackSystemEmail(ri,to,subj,bodyHtml,'scheduled');
+    bodyHtml=trk.html;
+    var pxFrag=(String(bodyHtml).match(/\/px\?d=[^"&]+/)||[])[0]||'';
     var payload=schedDraftPayload({to:to,subj:subj,bodyHtml:bodyHtml,dueTs:dueTs,
       atts:emailAttachments.filter(function(a){return a.dataBase64&&!a.isInline;})});
     var dr=await gfetch(GR+'/me/messages',{method:'POST',body:JSON.stringify(payload)});
@@ -8340,12 +8348,12 @@ async function schedScheduleFromComposer(dueTs){
     var dj=await dr.json();
     var sr=await gfetch(GR+'/me/messages/'+encodeURIComponent(dj.id)+'/send',{method:'POST'});
     if(!(sr.ok||sr.status===202))throw new Error('send '+sr.status);
-    scheduledEmails().push({id:dj.id,ri:ri,to:to,subj:String(subj||'').slice(0,140),dueAt:dueTs,createdAt:Date.now()});
+    scheduledEmails().push({id:dj.id,ri:ri,to:to,subj:String(subj||'').slice(0,140),dueAt:dueTs,createdAt:Date.now(),sendId:trk.id,px:pxFrag});
     saveEnginesDoc().catch(function(){});
     var whenStr=new Date(dueTs).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
-    logComms(commsEntryForLead(ri,{direction:'out',channel:'email',contact:to,subject:subj,
+    trk.record(logComms(commsEntryForLead(ri,{direction:'out',channel:'email',contact:to,subject:subj,
       preview:'Scheduled for '+whenStr+' — Exchange sends it even with the laptop off',
-      outcome:'scheduled-send'}));
+      outcome:'scheduled-send',messageId:trk.id})));
     var u=advanceLead(ri,'Email');
     if(u){try{await writeRow(ri,u);}catch(_){}}
     var sp=el('sched-panel');if(sp)sp.style.display='none';
@@ -8375,6 +8383,45 @@ async function schedCancel(id){
     }
   }catch(e){toast('⚠ Could not cancel: '+e.message);}
 }
+// After Exchange sends a scheduled email, its Sent copy still holds the
+// live pixel. Find it by that unique pixel fragment, refile a pixel-free
+// copy (attachments included), retire the original — so his own re-reads
+// never count as opens, same promise the live path makes.
+async function schedScrubSentCopy(rec){
+  if(!rec||!rec.px)return;
+  try{
+    var r=await gfetch(GR+'/me/mailFolders/sentitems/messages?$top=25&$orderby=createdDateTime%20desc&$select=id,subject,hasAttachments');
+    if(!r.ok)return;
+    var j=await r.json();
+    var cands=(j.value||[]).filter(function(m){return String(m.subject||'')===String(rec.subj||'');});
+    for(var k=0;k<cands.length;k++){
+      var br=await gfetch(GR+'/me/messages/'+encodeURIComponent(cands[k].id)+'?$select=body');
+      if(!br.ok)continue;
+      var bj=await br.json();
+      var body=String((bj.body&&bj.body.content)||'');
+      if(body.indexOf(rec.px)===-1)continue;
+      var atts=[];
+      if(cands[k].hasAttachments){
+        try{
+          var ar=await gfetch(GR+'/me/messages/'+encodeURIComponent(cands[k].id)+'/attachments?$select=name,contentType,contentBytes');
+          if(ar.ok){
+            var aj=await ar.json();
+            atts=(aj.value||[]).filter(function(a){return a.contentBytes;}).map(function(a){
+              return {'@odata.type':'#microsoft.graph.fileAttachment',name:a.name,contentType:a.contentType,contentBytes:a.contentBytes};
+            });
+          }
+        }catch(_){}
+      }
+      // Clean copy FIRST, retire the original only on success — his
+      // record of what he sent is never lost.
+      var okCopy=await saveCleanSentCopy(rec.subj,rec.to,body,atts,null);
+      if(okCopy){try{await gfetch(GR+'/me/messages/'+encodeURIComponent(cands[k].id),{method:'DELETE'});}catch(_){}}
+      traceOp({kind:'sched-scrub',ok:!!okCopy});
+      return;
+    }
+    traceOp({kind:'sched-scrub-miss',subj:String(rec.subj||'').slice(0,60)});
+  }catch(_){/* best-effort */}
+}
 // Past-due records get verified against the mailbox: message gone =
 // Exchange sent it → clear the record; still there = flag it loudly.
 var _schedChecking=false;
@@ -8393,6 +8440,7 @@ async function schedCheckPastDue(){
           var L=scheduledEmails(),ix=L.indexOf(rec);
           if(ix>-1){L.splice(ix,1);changed=true;}
           toast('✓ Scheduled email to '+(rec.to||'')+' went out');
+          schedScrubSentCopy(rec); // receipts stay real: de-pixel the Sent copy
         }else if(r.ok&&!rec.stuck){rec.stuck=true;changed=true;}
       }catch(_){}
     }
@@ -9308,7 +9356,7 @@ function trackSystemEmail(ri,toAddr,subj,html,kind){
   };
 }
 // Human labels for the kind chip shown beside tracked system emails
-var EMAIL_KIND_LABELS={invoice:'🧾 invoice',assessment:'📅 assessment','assessment-cancel':'❌ cancellation'};
+var EMAIL_KIND_LABELS={invoice:'🧾 invoice',assessment:'📅 assessment','assessment-cancel':'❌ cancellation',scheduled:'⏰ scheduled'};
 function emailKindChip(kind){
   if(!kind)return '';
   var lbl=EMAIL_KIND_LABELS[kind]||kind;
