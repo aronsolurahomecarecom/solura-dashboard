@@ -9881,9 +9881,15 @@ function action(c){
     const _sentThisBooking=!!(_msSent&&_bookDay&&String(_msSent)>=_bookDay);
     /* Not a no-show when WE cancelled it: a booking the T-30 rule auto-cancelled is not a meeting the
        candidate missed. Per booking, like the stamp above (see _clearCancelledBooking). */
-    if(_msTpl&&_m4!=null&&_m4<=-15&&!_sentThisBooking&&c.st.autoCancelledFor!==String(c.st.booking||'')&&!(c.st.emails||[]).some(e2=>!e2.seen)){
+    /* P-51 (Meir, option 1): Cal Video's own "the guest never joined" signal CONFIRMS this prompt
+       instead of counting on its own. The worker stamps st.calNoShowFor with the booking it was
+       about (per booking — a rebooked meeting starts clean). With it the card says so, and it
+       can appear as soon as Cal reports (Cal waits 8 minutes) rather than at the 15-minute
+       guess. The count still happens only on the click, so it happens once. */
+    const _calSaid=!!c.st.calNoShowFor&&c.st.calNoShowFor===String(c.st.booking||'');
+    if(_msTpl&&_m4!=null&&(_m4<=-15||(_calSaid&&_m4<=0))&&!_sentThisBooking&&c.st.autoCancelledFor!==String(c.st.booking||'')&&!(c.st.emails||[]).some(e2=>!e2.seen)){
       const _ago=-_m4<60?Math.round(-_m4)+'m ago':-_m4<2880?Math.round(-_m4/60)+'h ago':Math.round(-_m4/1440)+'d ago';
-      return{bucket:'action',timing:{txt:'📵 Looks like a no-show — video call was '+_ago,pill:'pbad',date:_fmtBooking(c.st.booking)},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'noshow-rebook',stage:c.stage,label:'📵 No-show — send rebook email',cls:'red'}};
+      return{bucket:'action',timing:{txt:(_calSaid?'📵 Cal Video: never joined — video call was ':'📵 Looks like a no-show — video call was ')+_ago,pill:'pbad',date:_fmtBooking(c.st.booking)},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'noshow-rebook',stage:c.stage,label:'📵 No-show — send rebook email',cls:'red'}};
     }
   }
   /* All certs in → cross-check hub is the action, until ✓ Done with checks is pressed there. */
