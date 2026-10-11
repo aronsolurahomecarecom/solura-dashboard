@@ -577,14 +577,25 @@ function _aiFillCardHtml(){
       <div id="ai-fill-status" style="margin-top:10px;font-size:13.5px;color:#8a7a55;line-height:1.5"></div>
     </div>`;
 }
+/* Attach the résumé uploaded at the TOP of the form to the normal #resume input AND say so
+   on the field — candidates were being asked for the résumé again at the bottom because the
+   programmatic file-stuffing never updated the field's "Upload your résumé" label, so it
+   looked empty and people re-uploaded (Meir 2026-10-11). */
+function _attachAiResume(){
+  if(!window._aiResumeFile)return;
+  const rEl=document.getElementById('resume');
+  if(!rEl)return;
+  try{const dt=new DataTransfer();dt.items.add(window._aiResumeFile);rEl.files=dt.files;}catch(e){return;}
+  const t=document.getElementById('fileT'),s=document.getElementById('fileS');
+  if(t)t.textContent='✓ '+window._aiResumeFile.name;
+  if(s){s.textContent='Already attached from your upload above — nothing more to do here';s.style.color='#3D7A34';}
+}
 function _aiEnsureFillCard(){
   const f=document.getElementById('form');if(!f)return;
   if(!document.getElementById('ai-fill-card'))f.insertAdjacentHTML('afterbegin',_aiFillCardHtml());
   /* Candidate uploaded before the rebuild? Re-apply their extract + re-attach the file. */
   if(window._aiLastExtract)_aiApplyExtract(window._aiLastExtract);
-  if(window._aiResumeFile){
-    try{const rEl=document.getElementById('resume');if(rEl){const dt=new DataTransfer();dt.items.add(window._aiResumeFile);rEl.files=dt.files;}}catch(e){}
-  }
+  _attachAiResume();
 }
 async function _aiFillFromResume(inp){
   const st=document.getElementById('ai-fill-status');
@@ -604,7 +615,7 @@ async function _aiFillFromResume(inp){
   }catch(e){
     console.warn('ai fill:',e);
     st.textContent='We couldn\'t read that automatically — no problem, just fill the form by hand. Your résumé will still be attached.';
-    try{const rEl=document.getElementById('resume');if(rEl&&file){const dt=new DataTransfer();dt.items.add(file);rEl.files=dt.files;}}catch(e2){}
+    _attachAiResume();
   }
 }
 /* Apply a cached extract to whatever form is currently in the DOM — safe to run again after
@@ -634,11 +645,8 @@ function _aiApplyExtract(x){
       });
       if(typeof renderEmployers==='function')renderEmployers();
     }
-    /* the résumé itself rides the normal upload path */
-    try{
-      const rEl=document.getElementById('resume');
-      if(rEl&&window._aiResumeFile){const dt=new DataTransfer();dt.items.add(window._aiResumeFile);rEl.files=dt.files;}
-    }catch(e){}
+    /* the résumé itself rides the normal upload path — attached AND labeled as such */
+    _attachAiResume();
     /* outline the required singles still unanswered so "review and fill the rest" is visual */
     let open=0;
     ['age18','workauth','transport','dl','bgcheck','revoked','abuseFinding','years','longest','personalCare','lifting','smoker'].forEach(q=>{
