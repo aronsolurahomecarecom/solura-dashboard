@@ -17447,6 +17447,58 @@ async function maybeAdvanceReferrer(fromStage,toStage,_w){
     }catch(e){console.warn('Referrer credit failed:',e.message);}
   }
 }
+/* ── Referral milestone reconciler (Meir 2026-10-11: "the referral program fails beyond
+   application submission"). maybeAdvanceReferrer only fires from advanceWS with an exact
+   from→to pair — but stages mostly move through the sequence engine, the composer's
+   advance-on-send, Cal.com webhooks, and manual moves, none of which call it, so screened/
+   hired credits silently stopped. Stage is truth: this pass derives each referred
+   candidate's milestones from their CURRENT stage and credits whatever the referrer is
+   missing. Idempotent via entry.history (a credited milestone never re-credits, so steady
+   state writes nothing); skips corrupt rows and referrers whose workspace is open. */
+const _REF_SCREENED_STAGES=new Set(['Ask references','Verify employers','References','Interview invite','Interview booked','Offer','Onboarding','Onboarding booked','Hired']);
+async function _reconcileReferralMilestones(){
+  if(!SETTINGS.config||!SETTINGS.config.referralEnabled)return;
+  const byRefCode={};
+  (pipeline||[]).forEach(x=>{if(x.st&&x.st.refCode)byRefCode[x.st.refCode]=x;});
+  const dirty=new Map(); /* excelRow -> referrer */
+  (pipeline||[]).forEach(c=>{
+    const st=c&&c.st;
+    if(!st||!st.referredBy||!st.refCode||st.__ajCorrupt)return;
+    const referrer=byRefCode[st.referredBy];
+    if(!referrer||referrer.st.__ajCorrupt||_wsOpenOn(referrer.excelRow))return;
+    const screenedNow=_REF_SCREENED_STAGES.has(c.stage);
+    const hiredNow=c.stage==='Hired';
+    if(!screenedNow&&!hiredNow)return;
+    referrer.st.referrals=referrer.st.referrals||[];
+    let entry=referrer.st.referrals.find(r=>r.refCode===st.refCode);
+    if(!entry){
+      entry={refCode:st.refCode,name:c.name,email:c.email,status:'submitted',submittedAt:new Date().toISOString(),history:[{event:'submitted',at:new Date().toISOString()}]};
+      referrer.st.referrals.push(entry);
+      dirty.set(referrer.excelRow,referrer);
+    }
+    entry.history=entry.history||[];
+    referrer.st.referralCount=referrer.st.referralCount||{submitted:0,screened:0,hired:0};
+    if(screenedNow&&!entry.history.some(h=>h.event==='screened')){
+      entry.status=hiredNow?'hired':'screened';
+      entry.history.push({event:'screened',at:new Date().toISOString()});
+      referrer.st.referralCount.screened=(referrer.st.referralCount.screened||0)+1;
+      referrer.st.log=(referrer.st.log||[]).concat({t:stamp(),x:'🎁 Referral milestone: '+c.name+' completed phone screen'});
+      dirty.set(referrer.excelRow,referrer);
+    }
+    if(hiredNow&&!entry.history.some(h=>h.event==='hired')){
+      entry.status='hired';
+      entry.history.push({event:'hired',at:new Date().toISOString()});
+      referrer.st.referralCount.hired=(referrer.st.referralCount.hired||0)+1;
+      referrer.st.log=(referrer.st.log||[]).concat({t:stamp(),x:'🎁 Referral milestone: '+c.name+' was hired!'});
+      dirty.set(referrer.excelRow,referrer);
+    }
+  });
+  for(const referrer of dirty.values()){
+    try{await patchRange('AJ'+referrer.excelRow,[[_stCell(referrer.st)]]);}
+    catch(e){console.warn('Referral reconcile save failed (row '+referrer.excelRow+'):',e.message);}
+  }
+  if(dirty.size)console.log('🎁 Referral reconcile: credited milestones on '+dirty.size+' referrer row(s)');
+}
 /* ===================== email detail view + attachment upload ===================== */
 let _emailCache={}; /* messageId -> full message object (cached during session) */
 let _currentEmailMsgId=null; /* tracks which email is open for the Reply button */
@@ -19823,6 +19875,10 @@ async function backgroundRefresh(){
   try{await loadData();}catch(e){console.warn('BG loadData:',e.message);}
   try{await loadAvailability();}catch(e){console.warn('BG availability:',e.message);}
   try{await pollInboxForCandidateEmails();}catch(e){console.warn('Inbox poll:',e.message);}
+  /* Referral milestones re-derived from stage every tick — catches advances made by the
+     sequence engine, webhooks, the composer and manual moves, which never call
+     maybeAdvanceReferrer. No-op when everything is already credited. */
+  try{await _reconcileReferralMilestones();}catch(e){console.warn('Referral reconcile:',e.message);}
   try{
     if(view==='calendar')renderCalendar();else if(view==='inbox')renderInbox();else if(view==='pipeline'&&typeof render==='function')render(); /* #17: the poll updates unread/reply state on candidates — without this re-render the pipeline cards stayed stale until you visited the email tab */
     updateInboxBadge();
