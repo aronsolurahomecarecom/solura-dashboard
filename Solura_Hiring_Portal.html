@@ -15915,7 +15915,19 @@ function vrTier1View(emp,cfg){
        Hide manual attempt button and show a status pill; manual buttons stay live so user can
        override anytime (matches the "manual fallback" intent when Yardstik comes back unable). */
     const yInFlight=e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running');
-    const yPill=yInFlight?`<span class="pill" style="font-size:10px;padding:2px 7px;background:var(--sky-l);color:var(--sky-deep);border:1px solid var(--sky)" title="Yardstik is verifying this employer">🛡 Yardstik</span>`:(e.ySrc==='yardstik'&&e.yStatus==='unable'?'<span class="pill psoft" style="font-size:10px">Yardstik unable → manual</span>':'');
+    /* P-47 (Meir, option 1): a FINISHED Yardstik verification is shown, and one click accepts it.
+       The worker writes yStatus 'verified' / 'flagged' on each employer it was asked about, and
+       nothing here read either word — the row lost its badge the moment Yardstik finished. The
+       result is never applied by itself: the verdict is set by the click (or by any of the three
+       manual buttons, which stay live), so the candidate stays in Action needed until then. */
+    const yDone=e.ySrc==='yardstik'&&(e.yStatus==='verified'||e.yStatus==='flagged');
+    const yDonePill=yDone?(e.yStatus==='verified'
+      ?'<span class="pill" style="font-size:10px;padding:2px 7px;background:#EBF5EA;color:var(--grn-deep);border:1px solid var(--grn)" title="Yardstik finished and confirmed this employer">🛡 Yardstik: verified</span>'
+      :'<span class="pill" style="font-size:10px;padding:2px 7px;background:#FEF7E8;color:#8B6500;border:1px solid var(--gold-mid)" title="Yardstik finished and flagged this employer — read the report before deciding">⚠ Yardstik: flagged, review</span>'):'';
+    const yAccept=(yDone&&!e.v)?(e.yStatus==='verified'
+      ?`<button class="btn-sm bg-grn" onclick="vrAcceptYardstik(${i})" style="cursor:pointer;flex:0 0 auto;font-size:11.5px" title="Set this employer's verdict to clear, as Yardstik found">✓ Accept → clear</button>`
+      :`<button class="btn-sm" onclick="vrAcceptYardstik(${i})" style="cursor:pointer;flex:0 0 auto;font-size:11.5px;color:var(--red);border:1px solid var(--red);background:#fff" title="Set this employer's verdict to contradicted, as Yardstik flagged. Or pick clear / unable yourself.">Accept → contradicted</button>`):'';
+    const yPill=yInFlight?`<span class="pill" style="font-size:10px;padding:2px 7px;background:var(--sky-l);color:var(--sky-deep);border:1px solid var(--sky)" title="Yardstik is verifying this employer">🛡 Yardstik</span>`:(yDone?yDonePill+yAccept:(e.ySrc==='yardstik'&&e.yStatus==='unable'?'<span class="pill psoft" style="font-size:10px">Yardstik unable → manual</span>':''));
     const vBtns=`<span class="vbtns" style="flex:0 0 auto;display:flex;gap:3px">
       <button class="ok ${e.v==='ok'?'on':''}" onclick="vset(${i},'ok')" title="Facts confirmed">clear</button>
       <button class="no ${e.v==='no'?'on':''}" onclick="vset(${i},'no')" title="Couldn't reach / confirm">unable</button>
@@ -16218,6 +16230,22 @@ function vrTier2View(emp,cfg){
   return `${intro}<button class="btn-sm bg-cream" style="margin-bottom:10px;cursor:pointer" onclick="vrT1Back()">← back to facts</button>${rows}${banner}<div class="brow" style="margin-top:12px">${advBtn}</div>`;
 }
 function vset(i,v){W.st.employers[i].v=W.st.employers[i].v===v?'':v;saveW(true);renderWorkspace();}
+/* P-47 — accept Yardstik's finished result for ONE employer: verified → clear, flagged →
+   contradicted. Sets (never toggles), records where the verdict came from, and a refused save
+   puts the row back so a verdict is never shown that the sheet does not hold. */
+async function vrAcceptYardstik(i){
+  const w=W;const e=w&&w.st&&w.st.employers&&w.st.employers[i];
+  if(!e||e.ySrc!=='yardstik'||!(e.yStatus==='verified'||e.yStatus==='flagged')||e.v)return;
+  const v=e.yStatus==='verified'?'ok':'denied';
+  const logLen=(w.st.log||[]).length;
+  e.v=v;e.vFrom='yardstik';
+  w.st.log=(w.st.log||[]).concat({t:stamp(),x:'🛡 Yardstik result accepted — '+(e.name||'employer')+': '+e.yStatus+' → '+(v==='ok'?'clear':'contradicted')});
+  if((await _saveWFor(w,true))===false){
+    e.v='';delete e.vFrom;w.st.log=(w.st.log||[]).slice(0,logLen);
+    toast('⚠ Not saved — the verdict was not recorded. Try again.');
+  }
+  if(W===w)renderWorkspace();
+}
 /* Render a compact trail of stage reports that have been auto-saved for this candidate. Reads
    c.st.stageReports — populated by autoUploadStageReport on each transition. Just an at-a-glance
    "what audit trail exists" indicator; the actual files live in SharePoint. */
@@ -16674,7 +16702,7 @@ async function orderYardstikVerification(){
      rows are left alone — user already did the work, don't re-order on top of that. */
   const targets=(W.st.employers||[]).filter(e=>e&&(e.name||'').trim()&&!e.v&&!(e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running')));
   if(!targets.length){toast('No unresolved employers to verify');return;}
-  if(!confirm('Order Yardstik employment verification for '+targets.length+' employer'+(targets.length===1?'':'s')+'?\n\nYardstik will contact each and report back per-employer; results auto-populate the verdicts below.'))return;
+  if(!confirm('Order Yardstik employment verification for '+targets.length+' employer'+(targets.length===1?'':'s')+'?\n\nYardstik will contact each and report back per-employer; each result then shows on its row with a one-click Accept (nothing is decided until you click).'))return;
   /* Same capture as _orderYardstikGo: after the await, the global W may be the NEXT candidate the
      operator opened. Writing through it put this order's verifyReportId/verifyPackageId onto that
      person (whose refreshYardstik then filters their own reports against a foreign id) and left THIS
