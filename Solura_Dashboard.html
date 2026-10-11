@@ -902,6 +902,38 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
 </div>
 
 <!-- 📅 Assessment-scheduled logger — stamps the lead + optional confirmation email -->
+<div class="modal" id="modal-int-sched">
+  <div class="mbox" style="max-width:600px">
+    <div class="mhead"><div class="mtitle">🤝 Schedule an Interview</div><button class="mclose" data-action="close-modal" data-mid="modal-int-sched">✕</button></div>
+    <div class="mbody">
+      <div style="font-size:11.5px;color:var(--soft);margin-bottom:10px">Their chance to interview <b>us</b>: no paperwork, no assessment, just meeting the people who would care for their family. Saving sets the stage to <b>Interview Scheduled</b>.</div>
+      <div id="int-lead" style="font-size:12.5px;color:var(--mid);margin-bottom:12px"></div>
+      <div id="int-resched-note" style="display:none;background:#fdf3dd;border:1.5px solid var(--gold,#C8870A);border-radius:10px;padding:10px 14px;font-size:12px;margin-bottom:12px"></div>
+      <div class="la-grid g3" style="margin-bottom:10px">
+        <div class="la-f"><label>Date</label><input type="date" id="int-date"></div>
+        <div class="la-f"><label>Time</label><input type="time" id="int-time"></div>
+        <div class="la-f"><label>Length</label><select id="int-dur" class="ee-inp" style="padding:5px 8px;font-size:12px"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">1 hour</option></select></div>
+      </div>
+      <div class="la-f" style="margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:12px">Where
+          <label class="st-check" style="margin:0;font-size:11px;text-transform:none;letter-spacing:0"><input type="checkbox" id="int-virtual"> 💻 Virtual</label>
+        </label>
+        <input type="text" id="int-location" placeholder="Their home, our office, a coffee shop — wherever they're comfortable">
+        <div id="int-virtual-hint" style="display:none;font-size:10.5px;color:var(--soft);margin-top:3px">Leave blank to auto-create a <b>Microsoft Teams</b> meeting (the join link rides the confirmation email), or paste your own meeting link.</div>
+      </div>
+      <div class="la-f" style="margin-bottom:10px"><label>Notes (go on the email and the lead's record)</label><textarea id="int-notes" rows="3" placeholder="Who they'll meet, what they might want to ask about…"></textarea></div>
+      <label class="st-check" style="margin-bottom:8px;display:block"><input type="checkbox" id="int-send-email" checked> 📧 Send the family a confirmation email on save</label>
+      <label class="st-check" style="margin-bottom:8px;display:block"><input type="checkbox" id="int-cal" checked> 📆 Calendar invite attached to the email + a quiet event on your Outlook calendar (needs date + time)</label>
+      <div class="la-f" style="margin-bottom:12px"><label>Send to</label><input type="email" id="int-to"></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="int-out" style="flex:1;font-size:11.5px;white-space:pre-wrap"></span>
+        <div id="int-spin" style="display:none;align-items:center;gap:5px;font-size:11px;color:var(--soft)"><div class="mspin"></div>Working…</div>
+        <button data-action="int-save" style="padding:9px 18px;background:linear-gradient(135deg,var(--gold),#D4920F);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🤝 Save &amp; schedule</button>
+        <button data-action="close-modal" data-mid="modal-int-sched" style="padding:9px 14px;background:none;color:var(--soft);border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="modal" id="modal-asmt-sched">
   <div class="mbox" style="max-width:600px">
     <div class="mhead"><div class="mtitle">📅 Log Scheduled Assessment</div><button class="mclose" data-action="close-modal" data-mid="modal-asmt-sched">✕</button></div>
@@ -1867,7 +1899,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1009-125';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1011-126';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -1906,7 +1938,7 @@ var STEP_NEW=-1;          // never started, treat as 0 for engine purposes
 var STEP_OFF_SEQUENCE=999; // lead responded, manual mode
 
 // Status helpers — case-insensitive substring matching
-var ACTIVE_ST=['contacted','active conversation','assessment scheduled','assessment completed','proposal sent','signed','on service','hold'];
+var ACTIVE_ST=['contacted','active conversation','interview scheduled','assessment scheduled','assessment completed','proposal sent','signed','on service','hold'];
 var EXCL_ST=['closed','lost','not interested','duplicate','wrong number','deceased'];
 
 // Migration marker
@@ -3504,6 +3536,200 @@ async function leSave(){
     out.style.color='var(--red)';out.textContent='✗ Save failed: '+e.message;
   }
 }
+/* 🤝 Interview scheduler runtime — the lead interviews US. Mirrors the
+ * assessment scheduler's proven shape: quiet Outlook event (never an
+ * attendee), auto-Teams when virtual with a blank location, the .ics
+ * riding the branded confirmation as THE invite, booking memory in the
+ * synced config so the next open is a reschedule (same UID, bumped
+ * SEQUENCE = calendars replace the slot). Saving sets the stage. */
+/* ⚡INTSCHED — BEGIN (sliced by tests/intsched.test.mjs) */
+function interviews(){enginesDoc.interviews=enginesDoc.interviews||{};return enginesDoc.interviews;}
+// Built-in branded confirmation. {dm}/{pt} fill per lead at save.
+function intEmailHtml(f,isVirtual){
+  var when=invPrettyDate(f.date)+(f.time?(' at '+asmtPrettyTime(f.time)):'');
+  var whereLine=isVirtual
+    ?('<p style="margin:0 0 6px"><b style="color:#1f3d57">Where:</b> Video call. <a href="'+escapeHtml(f.location)+'" style="display:inline-block;margin-left:6px;padding:9px 18px;background:#C59B4E;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold">Join the call</a></p>')
+    :('<p style="margin:0 0 6px"><b style="color:#1f3d57">Where:</b> '+escapeHtml(f.location||'Wherever is comfortable for you')+'</p>');
+  var html=''
+    +'<div style="background:#f5f0e8;padding:28px 14px;font-family:Georgia,\'Times New Roman\',serif;color:#3d4348">'
+    +'<div style="max-width:560px;margin:0 auto;background:#faf8f4;border:1px solid #e8dfcf;border-radius:14px;padding:30px 28px">'
+    +'<p style="margin:0 0 4px;font-size:12px;font-weight:bold;letter-spacing:.1em;color:#8B6500;text-transform:uppercase">Your interview with us</p>'
+    +'<h1 style="margin:0 0 14px;font-size:24px;font-weight:normal;color:#1f3d57">A time to ask us anything</h1>'
+    +'<p style="margin:0 0 16px;font-size:15px;line-height:1.7">Hi {dm}, this visit is yours. No forms and no commitments: you interview us, about {pt}\'s care, our caregivers, and how we work. Bring every question on your mind.</p>'
+    +'<div style="background:#f4e8d0;border-radius:10px;padding:14px 18px;font-size:15px;line-height:1.7;margin:0 0 16px">'
+    +'<p style="margin:0 0 6px"><b style="color:#1f3d57">When:</b> '+escapeHtml(when)+'</p>'
+    +whereLine
+    +(f.notes?('<p style="margin:0"><b style="color:#1f3d57">Notes:</b> '+escapeHtml(f.notes)+'</p>'):'')
+    +'</div>'
+    +'<p style="margin:0 0 16px;font-size:15px;line-height:1.7">If the time stops working, reply here or call and we\'ll find another. Nothing is set in stone.</p>'
+    +'<p style="margin:0;font-size:15px;line-height:1.7">Warmly,<br>Meir Schwimer</p>'
+    +'<hr style="border:none;border-top:1px solid #C59B4E;margin:18px 0 12px">'
+    +'<p style="margin:0;font-size:12px;line-height:1.8;color:#8a8f94">Solura Home Care · (216) 770-4886 · meir@solurahomecare.com<br>License 4574HHN · 815 Superior Ave E Ste 1618, Cleveland OH 44114</p>'
+    +'</div></div>';
+  return {subject:'Your '+(isVirtual?'video ':'')+'interview with Solura Home Care, '+invPrettyDate(f.date),html:html};
+}
+var _intRi=-1;
+function intFields(){
+  return {
+    date:String((el('int-date')||{}).value||'').trim(),
+    time:String((el('int-time')||{}).value||'').trim(),
+    dur:parseInt((el('int-dur')||{}).value,10)||30,
+    location:String((el('int-location')||{}).value||'').trim(),
+    notes:String((el('int-notes')||{}).value||'').trim(),
+    to:String((el('int-to')||{}).value||'').trim()
+  };
+}
+function openIntSched(ri){
+  _intRi=ri;
+  var r=rows[ri]||[];
+  var nm=String(r[C.NM]||'').trim(),dm=String(r[C.DM]||'').trim();
+  el('int-lead').textContent='For '+(nm||dm||'this lead')+(dm&&nm&&dm.toLowerCase()!==nm.toLowerCase()?(' — contact: '+dm):'');
+  el('int-date').value='';el('int-time').value='';el('int-location').value='';el('int-notes').value='';
+  el('int-to').value=String(r[C.EM]||'').trim();
+  if(el('int-virtual'))el('int-virtual').checked=false;
+  var vh=el('int-virtual-hint');if(vh)vh.style.display='none';
+  el('int-out').textContent='';
+  // 🔁 An existing booking makes the next save a reschedule
+  var prev=interviews()[String(ri)];
+  var note=el('int-resched-note');
+  if(prev&&prev.date){
+    el('int-date').value=prev.date;el('int-time').value=prev.time||'';
+    el('int-dur').value=String(prev.dur||30);
+    if(prev.virtual){el('int-virtual').checked=true;if(vh)vh.style.display='block';}
+    el('int-location').value=prev.virtual?'':(prev.location||'');
+    if(note){note.style.display='block';
+      note.innerHTML='🔁 <b>This is a reschedule.</b> Booked for '+escapeHtml(invPrettyDate(prev.date)+(prev.time?(' at '+asmtPrettyTime(prev.time)):''))+' — saving moves it and the email says so.';}
+  }else if(note){note.style.display='none';note.innerHTML='';}
+  el('modal-int-sched').classList.add('open');
+}
+async function intSave(){
+  if(_intRi<0)return;
+  var ri=_intRi,r=rows[ri]||[];
+  var out=el('int-out'),spin=el('int-spin');
+  var f=intFields();
+  if(!f.date){out.style.color='var(--red)';out.textContent='✗ Pick the interview date.';return;}
+  var wantEmail=el('int-send-email').checked;
+  var wantCal=el('int-cal').checked&&!!f.time;
+  if(wantEmail&&(!f.to||f.to.indexOf('@')<1)){out.style.color='var(--red)';out.textContent='✗ Enter a valid email, or untick the confirmation.';return;}
+  var isVirtual=!!(el('int-virtual')&&el('int-virtual').checked);
+  var customLink=isVirtual?f.location:'';
+  if(spin)spin.style.display='inline-flex';
+  out.style.color='var(--mid)';out.textContent='Scheduling…';
+  try{
+    var nm=String(r[C.NM]||'').trim(),dmName=String(r[C.DM]||nm).trim();
+    var prev=interviews()[String(ri)]||null;
+    var isResched=!!(prev&&prev.date);
+    var prevWhen=isResched?(invPrettyDate(prev.date)+(prev.time?(' at '+asmtPrettyTime(prev.time)):'')):'';
+    // Calendar event first (virtual needs the join link before the email).
+    // ONE email, ONE event: the lead is never an attendee.
+    var calNote='',icsAtt=null,joinUrl='',evId='',icsUidUsed='',icsSeqUsed=0;
+    if(wantCal){
+      try{
+        var tzName='America/New_York';
+        try{tzName=Intl.DateTimeFormat().resolvedOptions().timeZone||tzName;}catch(_){}
+        var stD=new Date(f.date+'T'+f.time+':00');
+        var enD=new Date(stD.getTime()+f.dur*60000);
+        var pad2=function(n){return (n<10?'0':'')+n;};
+        var locIso=function(d){return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+'T'+pad2(d.getHours())+':'+pad2(d.getMinutes())+':00';};
+        var ev={subject:(isVirtual?'Virtual interview — ':'Interview — ')+(nm||dmName||'Solura lead'),
+          body:{contentType:'HTML',content:'<p>'+escapeHtml('They interview us — '+(dmName||nm))+'</p><p>Questions or reschedule: (216) 770-4886</p>'},
+          start:{dateTime:locIso(stD),timeZone:tzName},
+          end:{dateTime:locIso(enD),timeZone:tzName},
+          location:{displayName:isVirtual?(customLink||'Microsoft Teams'):(f.location||'To be confirmed')},
+          isReminderOn:true,reminderMinutesBeforeStart:60};
+        if(isVirtual&&!customLink){ev.isOnlineMeeting=true;ev.onlineMeetingProvider='teamsForBusiness';}
+        var moveId=isResched?(prev.eventId||''):'';
+        var sameMode=isResched&&moveId&&(!!prev.virtual===isVirtual);
+        if(sameMode){
+          var patch={start:ev.start,end:ev.end,location:ev.location,subject:ev.subject};
+          var pr9=await gfetch(GR+'/me/events/'+encodeURIComponent(moveId),{method:'PATCH',body:JSON.stringify(patch)});
+          if(!pr9.ok)throw new Error('event move '+pr9.status);
+          evId=moveId;joinUrl=prev.joinUrl||'';calNote='moved on your calendar';
+        }else{
+          if(isResched&&moveId){try{await gfetch(GR+'/me/events/'+encodeURIComponent(moveId),{method:'DELETE'});}catch(_){}}
+          var er=await gfetch(GR+'/me/events',{method:'POST',body:JSON.stringify(ev)});
+          if(!er.ok)throw new Error('event '+er.status);
+          var ej=await er.json().catch(function(){return{};});
+          evId=ej.id||'';
+          joinUrl=(ej.onlineMeeting&&ej.onlineMeeting.joinUrl)||'';
+          if(isVirtual&&!customLink&&!joinUrl)throw new Error('Teams meeting had no join link');
+          calNote=isVirtual&&!customLink?'Teams meeting created':'on your calendar';
+        }
+      }catch(calErr){
+        if(isVirtual&&!customLink){
+          throw new Error('Could not create the Teams meeting ('+calErr.message+'). Sign out and back in once, or paste your own meeting link.');
+        }
+        calNote='calendar event skipped — sign out and back in once to enable it';
+      }
+    }
+    var finalLoc=isVirtual?(customLink||joinUrl):f.location;
+    f.location=finalLoc;
+    var em=intEmailHtml(f,isVirtual);
+    try{em.subject=fillNames(em.subject,getNames(ri));em.html=fillNames(em.html,getNames(ri));}catch(_){}
+    if(isResched){
+      em.subject='Rescheduled: '+em.subject;
+      em.html='<div style="max-width:560px;margin:0 auto 12px;background:#fdf3dd;border:1.5px solid #C59B4E;border-radius:10px;padding:12px 18px;font-family:Georgia,\'Times New Roman\',serif;font-size:14px;line-height:1.6;color:#3d4348;text-align:center">🔁 <b>This interview has a new time.</b> It was '+escapeHtml(prevWhen)+'. The updated details are below.</div>'+em.html;
+    }
+    if(wantCal&&wantEmail){
+      icsSeqUsed=isResched?(((prev&&prev.icsSeq)||0)+1):0;
+      var built=buildAssessmentIcs(f,{to:f.to,attendeeName:dmName,duration:f.dur,
+        uid:(prev&&prev.icsUid)||null,sequence:icsSeqUsed,
+        summary:(isVirtual?'Video interview':'Interview')+' — Solura Home Care'});
+      if(built){
+        icsUidUsed=built.uid;
+        icsAtt={'@odata.type':'#microsoft.graph.fileAttachment',name:built.fileName,
+          contentType:'text/calendar',contentBytes:btoa(unescape(encodeURIComponent(built.ics)))};
+      }
+    }
+    var sent=false;
+    if(wantEmail){
+      var msg9={subject:em.subject,body:{contentType:'HTML',content:em.html},
+        toRecipients:[{emailAddress:{address:f.to}}]};
+      if(icsAtt)msg9.attachments=[icsAtt];
+      var res=await gfetch(GR+'/me/sendMail',{method:'POST',body:JSON.stringify({message:msg9,saveToSentItems:true})});
+      if(!(res.ok||res.status===202)){
+        var ee=await res.json().catch(function(){return{};});
+        throw new Error('The email failed: '+(ee.error?ee.error.message:res.status));
+      }
+      sent=true;
+    }
+    // Sheet: THE STAGE IS SET HERE — status, follow-up, note stamp
+    var when=invPrettyDate(f.date)+(f.time?(' at '+asmtPrettyTime(f.time)):'');
+    var detail=(isResched?('Interview RESCHEDULED — was '+prevWhen+' → now '+when):('Interview scheduled — '+when))
+      +(finalLoc?(' @ '+(isVirtual?'💻 ':'')+finalLoc):'')
+      +(f.notes?(' · '+f.notes):'');
+    var u={};
+    u[C.ST]='Interview Scheduled';
+    u[C.NF]=f.date;
+    u[C.LC]=fd(localToday());
+    var stamp=(isResched?'🔁':'🤝')+' ['+new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+'] '+detail;
+    var exN=String(r[C.NT]||'').trim();
+    u[C.NT]=exN?(stamp+'\n\n'+exN):stamp;
+    await writeRow(ri,u);
+    try{
+      if(f.time){followUpTimes()[String(ri)]=f.time;}
+      interviews()[String(ri)]={date:f.date,time:f.time,location:finalLoc,virtual:isVirtual,dur:f.dur,
+        eventId:evId||(prev&&prev.eventId)||'',joinUrl:joinUrl||(isVirtual&&prev?(prev.joinUrl||''):''),
+        icsUid:icsUidUsed||(prev&&prev.icsUid)||'',icsSeq:icsSeqUsed||((prev&&prev.icsSeq)||0)};
+      saveEnginesDoc().catch(function(){});
+    }catch(_){}
+    logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
+      contact:sent?f.to:'',subject:sent?em.subject:(isResched?'Interview rescheduled':'Interview scheduled'),
+      preview:detail+(calNote?(' · '+calNote):''),
+      outcome:isResched?'interview-rescheduled':'interview-scheduled'}));
+    el('modal-int-sched').classList.remove('open');
+    var doneMsg=(isResched?'🔁 Interview rescheduled':'🤝 Interview scheduled — stage set to Interview Scheduled')+(sent?(' · email sent to '+f.to):'');
+    if(calNote)doneMsg+=' · 📆 '+calNote;
+    toast(doneMsg);
+    _intRi=-1;
+    try{await buildUI();}catch(_){}
+  }catch(e){
+    out.style.color='var(--red)';out.textContent='✗ '+e.message;
+  }finally{
+    if(spin)spin.style.display='none';
+  }
+}
+/* ⚡INTSCHED — END */
 /* 📅 Assessment-scheduled logger runtime */
 var _asRi=-1;
 function openAsmtSched(ri){
@@ -5587,7 +5813,7 @@ var MOPS=['','Phone call','SMS','Email','In person','Left voicemail','No answer'
 // make sense as a NEXT step (an invoice is a plan, not a logged contact).
 // Picking "Send invoice" makes 🧾 the lead's primary row button.
 var NSM_OPS=MOPS.slice(1).concat(['Send invoice']);
-var STATUS_OPTS=['New','No answer','Contacted','Active Conversation','Assessment Scheduled','Assessment Completed','Proposal Sent','Signed','On Service','Hold','Closed','Not Interested','Lost','Wrong Number','Deceased','Duplicate'];
+var STATUS_OPTS=['New','No answer','Contacted','Active Conversation','Interview Scheduled','Assessment Scheduled','Assessment Completed','Proposal Sent','Signed','On Service','Hold','Closed','Not Interested','Lost','Wrong Number','Deceased','Duplicate'];
 /* ─── Central stage/source registries ────────────────────────────────────
  * ONE list each, fed by three springs: the built-ins, custom additions
  * (config-synced, added via any "➕ New…" affordance), and whatever the
@@ -5795,6 +6021,7 @@ function openEp(ri,mode,opts){
     +'<button class="save" data-action="save-ep" data-ri="'+ri+'" data-mode="'+mode+'">Save to Sheet</button>'
     +'<button class="cancel" data-action="close-ep" data-ri="'+ri+'">Cancel</button>'
     +'<button type="button" class="cancel" style="margin-left:auto" data-action="open-lead-edit" data-ri="'+ri+'" title="Edit every core field of this lead">\ud83d\udcdd Edit lead\u2026</button>'
+    +'<button type="button" class="cancel" data-action="open-int-sched" data-ri="'+ri+'" title="They interview US: confirmation email + invite, stage set to Interview Scheduled">\ud83e\udd1d Interview\u2026</button>'
     +'<button type="button" class="cancel" data-action="open-asmt-sched" data-ri="'+ri+'" title="Log a scheduled in-home assessment and send the family a confirmation">\ud83d\udcc5 Assessment scheduled\u2026</button>'
     +'<div class="saving" id="spin-'+ri+'"><div class="mspin"></div> Saving\u2026</div>'
     +'</div>';
@@ -7984,6 +8211,14 @@ document.addEventListener('change',function(ev){
     if(li9)li9.placeholder=vOn?'Paste a meeting link (https://…) — or leave BLANK to auto-create a Teams meeting':'Client\'s home — street address';
     var vh9=el('as-virtual-hint');
     if(vh9)vh9.style.display=vOn?'block':'none';
+  }
+  // 🤝 Same toggle for the interview scheduler
+  if(t&&t.id==='int-virtual'){
+    var vOnI=t.checked;
+    var liI=el('int-location');
+    if(liI)liI.placeholder=vOnI?'Paste a meeting link (https://…) — or leave BLANK to auto-create a Teams meeting':'Their home, our office, a coffee shop — wherever they\'re comfortable';
+    var vhI=el('int-virtual-hint');
+    if(vhI)vhI.style.display=vOnI?'block':'none';
   }
   // 📎 Fillable-PDF template upload (Settings → Email)
   if(t&&t.id==='pdft-file'&&t.files&&t.files.length){
@@ -15421,6 +15656,17 @@ function onClick(ev){
       break;
     case 'le-save':
       Promise.resolve(leSave()).catch(function(eL){showErr('Lead save failed: '+String(eL&&eL.message||eL));});
+      break;
+    case 'open-int-sched':
+      (function(){
+        var riI=parseInt(t.dataset.ri,10);
+        if(isNaN(riI))return;
+        closeModal('modal-log-action'); // it launches from Responded/Update
+        openIntSched(riI);
+      })();
+      break;
+    case 'int-save':
+      Promise.resolve(intSave()).catch(function(eI){showErr('Interview save failed: '+String(eI&&eI.message||eI));});
       break;
     case 'as-cancel':
       Promise.resolve(asCancel()).catch(function(eC){showErr('Cancel failed: '+String(eC&&eC.message||eC));});
