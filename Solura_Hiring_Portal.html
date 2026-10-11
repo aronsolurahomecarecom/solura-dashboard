@@ -13037,6 +13037,8 @@ async function removeAwaitingItem(idx){
   if(!W||!W.st.awaitingItems||!W.st.awaitingItems[idx])return;
   const item=W.st.awaitingItems[idx];
   if(!confirm('Mark "'+_awaitingItemLabel(item)+'" as no longer awaited?'))return;
+  /* Snapshot so a refused/failed save cannot leave a waiver (or a release) in memory only. */
+  const _w52=W,_snap52=JSON.stringify(W.st);
   /* #12 — offer to apply the resolution to the PROFILE, not just drop the queue item. "No longer
      awaited" usually means the question is settled (they have it / it's confirmed) — so give the
      option to record that. Declining = plain removal, profile untouched, not counted as received. */
@@ -13067,8 +13069,32 @@ async function removeAwaitingItem(idx){
   }
   W.st.awaitingItems.splice(idx,1);
   logW('Stopped awaiting: '+_awaitingItemLabel(item)+(applied?' \u00b7 recorded on profile':''));
-  await saveW(true);
+  /* P-52 (Meir, option 2) — waiving the LAST awaited item ends the park, exactly as the last
+     item ARRIVING does (_markAwaitingItemReceived / _doAssignment / recordCertAnswer). Before
+     this the candidate stayed parked under the old reason with an empty list, and the silence
+     ladder eventually picked them up as "no reply — call them". Same field set as every other
+     release site, so real activity also resets the call ladder. */
+  let _released52=false;
+  if(W.st.manualAwaiting&&W.st.awaitingItems.length===0){
+    delete W.st.manualAwaiting;
+    delete W.st.awaitingReason;
+    delete W.st.awaitingUntil;
+    delete W.st.awaitingSince;
+    delete W.st.awaitingItemsInitialCount;
+    delete W.st.awaitingItemsReceived;
+    delete W.st.lastAwaitingReview;delete W.st.staleParkCalls;
+    logW('\u2713 Auto-released from awaiting \u2014 the last awaited item was waived');
+    _released52=true;
+  }
+  if((await _saveWFor(_w52,true))===false){
+    try{_w52.st=JSON.parse(_snap52);}catch(e){}
+    toast('\u26a0 Not saved \u2014 "'+_awaitingItemLabel(item)+'" is still awaited. Try again.');
+    if(W===_w52)renderWorkspace();
+    return;
+  }
+  if(W!==_w52)return;
   renderWorkspace();
+  if(_released52){render();toast('\u25b6 Nothing left to wait for \u2014 released from awaiting');}
 }
 
 function payRange(cand){const cc=cand||W;const _sp=(typeof _seqPayOverride==='function')?_seqPayOverride(cc):null;if(_sp)return _sp;const floor=14,ceil=18;let base=15.5;if(cc&&cc.st&&(cc.st.certs||[]).some(x=>/CNA|STNA/i.test(x)))base+=1.25;let _q=null;try{_q=(cc===W&&W)?scoreW().Q:(cc?scoreRow(cc).Q:null);}catch(e){}if(cc&&((cc.q&&cc.q.cmp>=4)||(_q&&_q>=85)))base+=1;
