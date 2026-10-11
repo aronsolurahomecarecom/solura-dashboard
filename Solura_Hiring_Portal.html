@@ -24222,6 +24222,8 @@ function _tickOutwardHold(c){
    writes nothing. Held sends are listed for transparency and, like the tick, cost no budget. */
 function _seqAutomationPreview(){
   const rows=[];let budget=10;
+  if(_robotNobody())rows.push({n:'⏸',what:'No browser is designated to run automation — nothing below will happen until one is chosen (Settings → Sequences → "This browser runs automation")',cls:'soft'});
+  else if(!_robotIsThisBrowser())rows.push({n:'ℹ',what:'This copy is standing by — the pass below is what the designated browser ("'+((_robotCfg()||{}).label||'another browser')+'") would do, not this one',cls:'soft'});
   const auto=!!(SETTINGS.config&&SETTINGS.config.seqAutomation);
   for(const c of (typeof pipeline!=='undefined'?pipeline:[])){
     if(budget<=0){rows.push({n:'…',what:'budget reached — remaining candidates wait for the following tick',cls:'soft'});break;}
@@ -24271,8 +24273,78 @@ function _seqAutomationPreview(){
     +'<div class="brow" style="margin-top:14px"><button class="btn-sec bg-cream" onclick="closeModal()">Close</button></div>';
   document.getElementById('modal').classList.add('open');
 }
+/* ===================== P-39 — ONE designated robot =====================
+   The robot is this page's 30-second tick, so every open copy of the portal ran its own and
+   nothing coordinated them: two copies could both send the same warning or both cancel the
+   same interview inside one half-minute. Meir's rule: a Settings switch says "this browser
+   runs automation"; every other copy stands by.
+     SETTINGS.config.robotBrowser  undefined      → never set up: legacy, every copy runs
+                                   {id:'rb_…'}    → ONLY the browser holding that id runs
+                                   {id:''}        → released: NO copy runs (shown loudly)
+   The id lives in this browser's localStorage, so it means "this browser profile on this
+   device". Tabs of that same browser share it, so a short localStorage lease picks ONE of
+   them (the lease lapses 75s after its tab stops ticking — hidden tabs do not tick). */
+function _robotLocalId(create){
+  try{let id=localStorage.getItem('solura_robot_id');
+    if(!id&&create){id='rb_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);localStorage.setItem('solura_robot_id',id);}
+    return id||'';}catch(e){return '';}
+}
+function _robotCfg(){const r=SETTINGS.config&&SETTINGS.config.robotBrowser;return (r&&typeof r==='object')?r:null;}
+function _robotNobody(){const r=_robotCfg();return !!r&&!r.id;}
+function _robotIsThisBrowser(){const r=_robotCfg();if(!r)return true;return !!r.id&&r.id===_robotLocalId(false);}
+function _robotTabLease(){
+  try{
+    window._robotTabId=window._robotTabId||('t'+Date.now().toString(36)+Math.random().toString(36).slice(2,6));
+    const now=Date.now();let cur=null;
+    try{cur=JSON.parse(localStorage.getItem('solura_robot_tab')||'null');}catch(e){}
+    if(cur&&cur.tab&&cur.tab!==window._robotTabId&&now-(+cur.ts||0)<75000)return false;
+    localStorage.setItem('solura_robot_tab',JSON.stringify({tab:window._robotTabId,ts:now}));
+    return true;
+  }catch(e){return true;} /* storage blocked → never let that switch automation off silently */
+}
+function _robotMayRun(){return _robotIsThisBrowser()&&_robotTabLease();}
+function _robotBrowserLabel(){
+  const u=navigator.userAgent||'';
+  const b=/Edg\//.test(u)?'Edge':/OPR\//.test(u)?'Opera':/Chrome\//.test(u)?'Chrome':/Firefox\//.test(u)?'Firefox':/Safari\//.test(u)?'Safari':'Browser';
+  const o=/iPhone|iPad/.test(u)?'iPhone/iPad':/Android/.test(u)?'Android':/Windows/.test(u)?'Windows':/Mac OS X/.test(u)?'Mac':/Linux/.test(u)?'Linux':'this device';
+  return b+' on '+o;
+}
+function _robotSetThisBrowser(on){
+  SETTINGS.config=SETTINGS.config||{};
+  const cur=_robotCfg();
+  if(on){
+    if(cur&&cur.id&&cur.id!==_robotLocalId(false)&&!confirm('Automation currently runs in "'+(cur.label||'another browser')+'"'+(cur.by?' ('+cur.by+')':'')+'.\n\nMove it to THIS browser? The other copy stands by as soon as it reloads.'))return renderSettings();
+    SETTINGS.config.robotBrowser={id:_robotLocalId(true),label:_robotBrowserLabel(),by:(typeof userEmail!=='undefined'&&userEmail)||'',at:new Date().toISOString()};
+    toast('🤖 This browser now runs automation — every other copy stands by');
+  }else{
+    /* Only the designated browser can release; releasing means NOBODY runs until one is chosen. */
+    SETTINGS.config.robotBrowser={id:'',label:'',by:(typeof userEmail!=='undefined'&&userEmail)||'',at:new Date().toISOString()};
+    toast('⏸ No browser is running automation now — tick the box in the browser that should');
+  }
+  markSettingsDirty();renderSettings();
+}
+function _robotCardHtml(){
+  try{
+    const r=_robotCfg(),mine=!!(r&&r.id&&r.id===_robotLocalId(false));
+    let when='';try{if(r&&r.at)when=new Date(r.at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});}catch(e){}
+    const meta=(r&&(r.by||when))?' <span style="color:var(--soft)">('+esc([r.by,when].filter(Boolean).join(' · '))+')</span>':'';
+    let note,edge='var(--border)',bg='#FAFAF7';
+    if(!r){note='No browser has been chosen yet, so <b>every open copy of the portal runs the robot</b> — two copies open at once can both act on the same candidate. Tick the box in the one browser that should run it.';edge='var(--gold-mid)';bg='#FEF7E8';}
+    else if(mine){note='Only this browser acts. Every other open copy stands by'+meta+'. Automation pauses whenever this browser is closed, signed out, or its portal tab is hidden.';edge='var(--grn-deep)';bg='#EBF5EA';}
+    else if(!r.id){note='<b>No browser is running automation</b>'+meta+' — nothing automated will happen anywhere until you tick this box in the browser that should run it.';edge='#C0392B';bg='#FBEDEA';}
+    else{note='Automation runs in <b>'+esc(r.label||'another browser')+'</b>'+meta+'. This copy is <b>standing by</b> — it shows the board and does everything you click, but its robot is idle. Tick the box to move automation here.';}
+    return `<div style="display:flex;align-items:flex-start;gap:10px;margin-top:8px;padding:11px 14px;border:1.5px solid ${edge};border-radius:9px;background:${bg}">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap">
+        <input type="checkbox" ${mine?'checked':''} onchange="_robotSetThisBrowser(this.checked)" style="accent-color:var(--grn-deep);width:16px;height:16px">
+        🤖 This browser runs automation
+      </label>
+      <div style="font-size:11.5px;color:var(--mid);line-height:1.5">${note}</div>
+    </div>`;
+  }catch(e){return '';}
+}
 async function _seqAutomationTick(){
   if(!(SETTINGS.config&&SETTINGS.config.seqAutomation))return;
+  if(!_robotMayRun())return; /* P-39 — standby copy, or another tab of this browser holds the lease */
   if(!window.SeqEngineV2||!(SETTINGS.sequences||[]).length)return;
   /* ONE TICK AT A TIME. Every sibling heal pass carries this (_seqRepairRunning, _reconRunning) and the tick — the only pass that performs IRREVERSIBLE outward acts — carried neither the mutex nor the stale-pipeline abort. backgroundRefresh has no guard of its own and awaits loadData + loadAvailability + an up-to-8-page inbox scan before reaching here, so a pass routinely outlives the 30s setInterval, and the window 'focus' handler can fire another at any moment. Two live ticks overlap badly: _autoSendTpl's never-double-send stamp (c.st.sent[tpl]) is written only AFTER the sendMailViaGraph await, and loadData replaces `pipeline` with objects rebuilt from the sheet — where that stamp is not yet written — so the second tick re-evaluates the same candidate to the same step and SENDS THE SAME SCRIPTED EMAIL AGAIN. Identical window on _cancelBookingHeadless (autoCancelledFor is also stamped after the await) = a double Cal.com cancellation, and the two passes together spend 20 actions against a documented cap of 10. The flag is cleared by the caller's finally (backgroundRefresh, the sole call site) so an escaping throw — patchRange outside the per-candidate try can throw — can never wedge automation off permanently. */
   if(window._seqTickRunning)return;window._seqTickRunning=true;
@@ -24400,7 +24472,7 @@ async function _seqAutomationTick(){
       const fc=_liveCandAfterAwait(c.excelRow,c);if(!fc)return;
       /* P-38 — keep the real error: the message (bounded) plus the HTTP status when there is one,
          so "expired key" can be told from "this résumé could not be read" before retrying. */
-      const _why=String(why||'').slice(0,160),_cm=/\bHTTP (\d{3})\b/.exec(_why)||/\b([45]\d\d)\b/.exec(_why);
+      const _why=String(why||'').slice(0,160),_cm=/\b(?:HTTP|status)\s*(\d{3})\b/i.exec(_why);
       fc.st.seqAutoFail={stepId:_stepId,at:new Date().toISOString(),why:_why};
       if(_cm)fc.st.seqAutoFail.code=+_cm[1];
       fc.st.log=(fc.st.log||[]).concat({t:stamp(),x:'🤖⚠ Automation could not run this step ('+(why||'failed')+') — surfaced for you'});
@@ -24894,7 +24966,8 @@ function _seqV3Action(c,info){
        of letting the candidate sit in Scheduled forever. Genuinely time-gated rows (sessions
        waiting on a booking — no automatable intent) stay scheduled. */
     {
-      const _autoOn=!!(SETTINGS.config&&SETTINGS.config.seqAutomation);
+      /* P-39: a RELEASED designation means no copy anywhere runs the robot — same as off (rule 4). */
+      const _autoOn=!!(SETTINGS.config&&SETTINGS.config.seqAutomation)&&!_robotNobody();
       /* What the tick can ACTUALLY execute — anything else marked automate would sit in
          Scheduled forever waiting for an executor that never comes (the "new candidates
          land in scheduled" bug: an automate-flagged claude step with automation ON).
@@ -25446,6 +25519,7 @@ function renderSettingsSeqV2(){
       <button class="btn-sm bg-cream" style="cursor:pointer;margin-left:auto" onclick="_seqAutomationPreview()" title="See exactly what the robot's next pass would do — who, and what action — without running anything">🔍 Preview next pass</button>
       <button class="btn-sm bg-cream" style="cursor:pointer" onclick="_seqAutomationLog()" title="Every automated action from today and yesterday, across all candidates — failures first">🤖 Last 24h</button>
     </div>
+    ${_robotCardHtml()}
     <p class="set-help" style="margin-top:6px;font-size:11px">When on: only steps marked <b>automate</b> act, max 1 action per candidate and 10 total per 30-second tick, never past an unmet gate, everything logged 🤖⚙. Includes the 1-hour interview auto-cancel. Park/decline/integration/manual steps always stay human-only. Uncheck to stop instantly.</p>
   </div>
   ${_seqStatsCard()}
