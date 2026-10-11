@@ -14324,6 +14324,7 @@ function renderWorkspace(){_memGen++;
     <button class="btn-sec bg-cream" style="margin-top:7px;width:auto;padding:7px 13px" onclick="addNote()">Add note</button></div>`;
   document.getElementById('ws-body').innerHTML=`
     ${thisStep}
+    ${autoFailCard()}
     ${aiScreenCard(true)}
     <div class="wsgrid">
       <div>${gatesCard}${_bgFindingsCard}${_reconciliationCard}${_credentialsCard}${work}${_appSnap}${docs}${activity}</div>
@@ -23773,18 +23774,23 @@ function _liveCandAfterAwait(row,fallback){
   const c=pipeline.find(x=>x.excelRow===row)||fallback;
   return (c&&c.st&&!c.st.__ajCorrupt)?c:null;
 }
+/* P-38 — every way the screen can fail leaves its REAL reason here, so the robot's fail mark
+   can say "HTTP 401 invalid x-api-key" or "no worker token" instead of the bare words
+   "Claude screen failed". Memory only; read once by the tick right after the call. */
+function _screenErr(row,why){window._lastScreenErr={row:row,why:String(why||'').slice(0,140)};}
 async function _claudeResumeScreen(row){
-  const cand=pipeline.find(x=>x.excelRow===row);if(!cand){toast('Candidate not found');return false;}
+  window._lastScreenErr=null;
+  const cand=pipeline.find(x=>x.excelRow===row);if(!cand){toast('Candidate not found');_screenErr(row,'candidate row not found');return false;}
   /* Both save paths below run cand.st=sanitizeState(cand.st) BEFORE _stCell, and sanitizeState
      deletes __ajCorrupt - so _stCell's refusal was disarmed and the screen would have written a
      ghost state over a corrupt cell. Refuse up front instead: there is nothing worth screening
      on a row whose profile has not been recovered yet. */
-  if(cand.st&&cand.st.__ajCorrupt){toast('⚠ '+(cand.name||'This candidate')+' - stored data is corrupt; recover the row before screening');return false;}
+  if(cand.st&&cand.st.__ajCorrupt){toast('⚠ '+(cand.name||'This candidate')+' - stored data is corrupt; recover the row before screening');_screenErr(row,'stored data is corrupt');return false;}
   /* Meir's rule: the rating waits for the résumé. Automatic runs are held upstream (the
      tick never calls in here without one); a MANUAL run without a résumé asks first. */
   if(!(cand.st&&cand.st.hasResume)&&!confirm('No résumé on file for '+(cand.name||'this candidate')+' — the rating normally waits until one arrives. Rate from the application data alone anyway?'))return false;
   const tok=(SETTINGS.config||{}).ziToken||'';
-  if(!tok){toast('Set the internal worker token first (Settings → 🔌 Integrations, ZoomInfo card — shared across integrations)');return false;}
+  if(!tok){toast('Set the internal worker token first (Settings → 🔌 Integrations, ZoomInfo card — shared across integrations)');_screenErr(row,'no worker token configured');return false;}
   toast('🤖 Claude is screening '+(cand.name||'candidate')+'…');
   /* Compact snapshot: structured application data only. The résumé PDF binary is NOT read —
      most caregiver signal (tenure, availability, certs, care tolerance) is in the answers. */
@@ -23839,6 +23845,7 @@ async function _claudeResumeScreen(row){
         patchRange('AJ'+liveF.excelRow,[[_stCell(_fst)]]).then(()=>{liveF.st=_fst;if(W&&W.row===row&&W.st!==liveF.st)W.st=liveF.st;}).catch(()=>{});
       }
       toast('⚠ Screen failed for '+(cand.name||'candidate')+': '+err);
+      _screenErr(row,(j._http&&String(err).indexOf('HTTP')<0?'HTTP '+j._http+' — ':'')+err);
       return false;
     }
     /* WRITE ONTO THE LIVE CARD, NOT THE CLICK-TIME ONE. The Claude call (plus the no-résumé retry)
@@ -23848,7 +23855,7 @@ async function _claudeResumeScreen(row){
        poll had just recorded (its watermark already past it, so never re-ingested) vanished. Same
        rule as _doAssignment / saveAttachment / markAllRead. */
     const live=_liveCandAfterAwait(row,cand);
-    if(!live){toast('⚠ '+(cand.name||'This candidate')+' - stored data is corrupt or the row is gone; screen result NOT saved');return false;}
+    if(!live){toast('⚠ '+(cand.name||'This candidate')+' - stored data is corrupt or the row is gone; screen result NOT saved');_screenErr(row,'row gone or corrupt after the screen ran');return false;}
     const _add=[];
     if(resumeSkipped)_add.push({t:stamp(),x:'🤖 Screened WITHOUT the résumé PDF — attaching it failed ('+String(resumeSkipped).slice(0,160)+'). Check the PDF in their folder.'});
     _add.push({t:stamp(),x:'🤖 Claude screened: '+(j.screen.verdict||'?')+' ('+(j.screen.score!=null?j.screen.score:'—')+') — '+String(j.screen.summary||'').slice(0,120)});
@@ -23862,7 +23869,7 @@ async function _claudeResumeScreen(row){
     if(W&&W.row===row){if(W.st!==live.st)W.st=live.st;renderWorkspace();}
     toast('🤖 '+(j.screen.verdict==='advance'?'✓ Advance':j.screen.verdict==='concern'?'⚠ Concern':'👁 Review')+' — score '+(j.screen.score!=null?j.screen.score:'—'));
     return true;
-  }catch(e){toast('⚠ Screen failed: '+e.message);return false;}
+  }catch(e){toast('⚠ Screen failed: '+e.message);_screenErr(row,(e&&e.message)||String(e));return false;}
 }
 /* Job-fit strip for the Claude box (Meir, 2026-09-29): when the candidate came through a
    job package, show how they measure against THAT job — requirements met/missing, distance
@@ -23893,6 +23900,49 @@ function _claudeJobFitHtml(cand){
    the candidate workspace (Meir's rule): rating + overview first, job fit included, and when
    there is no résumé yet it says plainly that the rating is WAITING for one. Without `top`
    (the checks hub copy) it renders only when a screen exists. */
+/* P-38 — "let the robot try this again". The robot marks a step it failed at and never
+   returns to it (the mark is only cleared by that same step succeeding automatically, which
+   the mark itself prevents). When the cause was shared — an expired key, a worker outage —
+   fixing the cause changed nothing for the people it touched. This card shows the recorded
+   error and clears the mark on ONE click; the next automation pass then picks the step up.
+   Nothing is executed here: retrying is the robot's, on its own gates (rule 1 — no advance). */
+function autoFailCard(){
+  try{
+    const f=W&&W.st&&W.st.seqAutoFail;if(!f||!f.stepId)return '';
+    /* A mark for a step the pointer has left is inert (the tick only honours it on that step). */
+    if(W.st.sequenceStepId&&W.st.sequenceStepId!==f.stepId)return '';
+    const seq=(SETTINGS.sequences||[]).find(q=>q&&q.id===W.st.sequenceId);
+    const step=seq&&(seq.steps||[]).find(s=>s&&s.id===f.stepId);
+    let when='';try{when=new Date(f.at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});}catch(e){}
+    const on=!!(SETTINGS.config&&SETTINGS.config.seqAutomation);
+    return `<div class="wscard" style="border-left:4px solid var(--gold-mid);background:#FFFBF2;margin-bottom:16px">
+      <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:240px">
+          <div style="font-size:13px;font-weight:700;color:var(--ink)">🤖 The robot stopped at this step${step?': '+esc(step.label||step.id):''}</div>
+          <div style="font-size:12.5px;color:var(--mid);margin-top:4px;line-height:1.5"><b>What went wrong:</b> ${esc(f.why||'no reason was recorded')}${f.code?' <span style="color:var(--soft)">(code '+esc(String(f.code))+')</span>':''}${when?' <span style="color:var(--soft)">· '+esc(when)+'</span>':''}</div>
+          <div style="font-size:11.5px;color:var(--soft);margin-top:4px;line-height:1.45">It will not try again by itself. Do the step by hand below, or — if the cause is fixed — hand it back.${on?'':' <b>Automation is switched off</b>, so a retry waits until it is on.'}</div>
+        </div>
+        <button class="btn-sm bg-cream" style="cursor:pointer;white-space:nowrap" onclick="retryAutoStepWS()">↻ Let the robot try this again</button>
+      </div>
+    </div>`;
+  }catch(e){return '';}
+}
+async function retryAutoStepWS(){
+  const w=W;if(!w||!w.st||!w.st.seqAutoFail)return;
+  if(w.st.__ajCorrupt){toast('🛑 This candidate\'s stored data is corrupted — restore the row first');return;}
+  const prev=w.st.seqAutoFail,logLen=(w.st.log||[]).length;
+  delete w.st.seqAutoFail;
+  w.st.log=(w.st.log||[]).concat({t:stamp(),x:'↻ Handed back to the robot — retry this step (was: '+String(prev.why||'failed').slice(0,80)+')'});
+  if((await _saveWFor(w,true))===false){
+    w.st.seqAutoFail=prev;w.st.log=(w.st.log||[]).slice(0,logLen);
+    toast('⚠ Not saved — the robot will still skip this step. Try again.');
+    if(W===w)renderWorkspace();
+    return;
+  }
+  toast((SETTINGS.config&&SETTINGS.config.seqAutomation)?'↻ Handed back — the robot picks it up on its next pass (about half a minute, in the tab that runs automation)':'↻ Mark cleared — the robot will try once automation is switched on');
+  if(W===w)renderWorkspace();
+  render();
+}
 function aiScreenCard(top){
   try{
     const cand=pipeline.find(x=>x.excelRow===W.row)||W;
@@ -24348,7 +24398,11 @@ async function _seqAutomationTick(){
     const _stampFail=async(why)=>{
       /* Runs after the lane's await (a send, a Claude call of tens of seconds) — stamp the LIVE card. */
       const fc=_liveCandAfterAwait(c.excelRow,c);if(!fc)return;
-      fc.st.seqAutoFail={stepId:_stepId,at:new Date().toISOString(),why:String(why||'').slice(0,120)};
+      /* P-38 — keep the real error: the message (bounded) plus the HTTP status when there is one,
+         so "expired key" can be told from "this résumé could not be read" before retrying. */
+      const _why=String(why||'').slice(0,160),_cm=/\bHTTP (\d{3})\b/.exec(_why)||/\b([45]\d\d)\b/.exec(_why);
+      fc.st.seqAutoFail={stepId:_stepId,at:new Date().toISOString(),why:_why};
+      if(_cm)fc.st.seqAutoFail.code=+_cm[1];
       fc.st.log=(fc.st.log||[]).concat({t:stamp(),x:'🤖⚠ Automation could not run this step ('+(why||'failed')+') — surfaced for you'});
       try{await patchRange('AJ'+fc.excelRow,[[_stCell(fc.st)]]);}catch(e2){console.warn('autofail stamp:',e2.message);}
     };
@@ -24445,7 +24499,10 @@ async function _seqAutomationTick(){
             await patchRange('AJ'+lc.excelRow,[[_stCell(lc.st)]]);
           }
           budget--;
-        }else await _stampFail('Claude screen failed');
+        }else{
+          const _le=window._lastScreenErr;
+          await _stampFail('Claude screen failed'+((_le&&_le.row===c.excelRow&&_le.why)?': '+_le.why:''));
+        }
       }
       /* everything else (park, decline, yardstik/other integrations, manual) stays human-only by design */
     }catch(e){console.warn('automation:',e.message);try{await _stampFail(e.message);}catch(e3){}}
