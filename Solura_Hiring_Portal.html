@@ -16062,6 +16062,13 @@ async function decideBgReport(decision){
   const note=noteEl?noteEl.value:'';
   if(!note.trim()){toast('Please add a decision note');return;}
   if(!W||!W.st.yardstik){toast('No Yardstik state');return;}
+  /* A REFUSED OR FAILED SAVE IS NOT A DECISION (same rule as advanceWS). saveW returns false and has
+     already toasted why; this used to carry on regardless - 'Marked as cleared - candidate can move to
+     Offer' painted over the failure toast and the in-memory card showed the offer gate open, while the
+     row still said flagged/decision required and the note the adjudication rests on was never stored.
+     On decline it went on to open the rejection composer for a decision that was not on file. Put the
+     state back and leave the modal (and the typed note) open so the operator can retry. */
+  const w=W,_pvY=JSON.stringify(w.st.yardstik),_pvTp=w.st.tpCheck,_pvLogN=(w.st.log||[]).length;
   W.st.yardstik.decision=decision;
   W.st.yardstik.decisionNote=note.trim();
   W.st.yardstik.decisionAt=new Date().toISOString();
@@ -16069,7 +16076,14 @@ async function decideBgReport(decision){
   W.st.yardstik.decisionRequired=false;
   W.st.tpCheck=decision==='proceed'?'clear':'flag';
   logW((decision==='proceed'?'✓ ':'✕ ')+'BG report decision: '+decision.toUpperCase()+' — '+note.trim());
-  await saveW(true);
+  const _ok=await _saveWFor(w,true);
+  if(!_ok){
+    w.st.yardstik=JSON.parse(_pvY);
+    if(_pvTp===undefined)delete w.st.tpCheck;else w.st.tpCheck=_pvTp;
+    if(Array.isArray(w.st.log)&&w.st.log.length>_pvLogN)w.st.log.length=_pvLogN;
+    return;
+  }
+  if(W!==w){closeModal();return;}
   if(decision==='decline'){
     closeModal();
     setTimeout(()=>doEmail('reject','Declined'),200);
