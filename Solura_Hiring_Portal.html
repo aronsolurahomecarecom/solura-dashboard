@@ -7938,7 +7938,10 @@ async function _runAutoSave(){
        tier flag nor an errors array, so it fell to the else below and painted "✗ Save failed /
        Unknown error" — and stuck there, because nothing re-runs until the next edit. The edits
        are still in memory and still unsaved, which is exactly what 'dirty' says. */
-    if(status&&status.cancelled){
+    if(status&&status.discarded){
+      /* P-43: nothing is pending any more — memory equals the file again. */
+      const _e=document.getElementById('autosave-status');if(_e){_e.textContent='Synced';_e.title='';}
+    }else if(status&&status.cancelled){
       _updateAutosaveStatus('dirty');
     }else if(status&&status.workerFile){
       if(_gen===_settingsDirtyGen)_settingsDirty=false; /* nothing was edited while we awaited */
@@ -7997,7 +8000,7 @@ async function saveSettings(){
     const _ln=Date.now();
     if(!window._latchWarnAt||_ln-window._latchWarnAt>10000){
       window._latchWarnAt=_ln;
-      setTimeout(()=>toast('⏸ Settings NOT saved — a settings change you cancelled is still pending. Make any edit in Settings to review it again, or reload to discard it.'),0);
+      setTimeout(()=>toast('⏸ Settings NOT saved — a settings change you cancelled is still pending. Open Settings to review it: apply it or discard it.'),0);
     }
     return {cancelled:true,latched:true,errors:['Held: a settings change was cancelled in the save preview and is still pending']};
   }
@@ -8010,8 +8013,14 @@ async function saveSettings(){
      changes on the floor (they stayed dirty until tab close, then vanished). */
   if(prefs.savePreview==='diff'&&window._settingsBaseline&&!window._suppressDiffSession&&(typeof view!=='undefined'&&view==='settings')){
     const diff=_diffConfig(window._settingsBaseline,SETTINGS);
-    if(diff.length>=4){
-      const ok=await _showSavePreview(diff);
+    /* P-43: a change that was cancelled is reviewed again however small it has become —
+       it must never slip through just because it dropped under the 4-change threshold. */
+    if(diff.length>=4||(window._settingsSaveCancelled&&diff.length)){
+      const ok=await _showSavePreview(diff,window._settingsSaveCancelled?{title:'These changes are still waiting',sub:diff.length+' setting'+(diff.length===1?'':'s')+' you cancelled earlier '+(diff.length===1?'is':'are')+' still on screen and unsaved — and nothing else saves until you decide.',noSuppress:true,cancelLabel:'Decide later'}:null);
+      if(ok==='discard'){
+        _discardPendingSettings();
+        return {cancelled:true,discarded:true};
+      }
       if(!ok){
         /* Cancel leaves the edits in memory (the operator may want to adjust rather than lose
            them) and leaves _settingsDirty set. That was harmless while dirty-at-close meant
@@ -8128,7 +8137,43 @@ function _diffConfig(before,after,prefix){
 }
 /* Show the save-preview diff modal. If user confirms, resolve(true); on cancel, resolve(false).
    Called before persisting when uiPrefs.savePreview === 'diff'. */
-function _showSavePreview(diff){
+/* P-43 — puts SETTINGS back to what the baseline (= the file) holds, for exactly the keys that
+   differ. Mirrors _diffConfig's walk rather than replaying its dotted paths (a key may contain
+   a dot). The browser-local bookkeeping keys are left alone. */
+function _revertSettingsTo(before,after,top){
+  const keys=Array.from(new Set(Object.keys(before||{}).concat(Object.keys(after||{}))));
+  for(const k of keys){
+    if(top&&(k==='_undoHistory'||k==='_savedAt'||k==='_gen'))continue;
+    const b=before?before[k]:undefined,a=after[k];
+    if(b===a)continue;
+    if(b&&a&&typeof b==='object'&&typeof a==='object'&&!Array.isArray(b)&&!Array.isArray(a)){_revertSettingsTo(b,a,false);continue;}
+    if(JSON.stringify(b)===JSON.stringify(a))continue;
+    if(b===undefined)delete after[k];else after[k]=_deepClone(b);
+  }
+}
+function _discardPendingSettings(){
+  if(!window._settingsBaseline)return false;
+  _revertSettingsTo(window._settingsBaseline,SETTINGS,true);
+  window._settingsSaveCancelled=false;
+  _settingsDirty=false;
+  if(_settingsSaveTimeout){clearTimeout(_settingsSaveTimeout);_settingsSaveTimeout=null;}
+  try{applyCustomStagesToInfo();}catch(e){}
+  try{if(typeof applyQuestionOverrides==='function')applyQuestionOverrides();}catch(e){}
+  try{if(typeof _initEmailTriggers==='function')_initEmailTriggers();}catch(e){}
+  try{if(typeof view!=='undefined'&&view==='settings')renderSettings();}catch(e){}
+  try{render();}catch(e){}
+  toast('↩ Changes discarded — settings are back to the last saved version');
+  return true;
+}
+function _savePreviewDiscardClick(btn){
+  /* Two clicks, in the page — no browser popup. */
+  if(!btn._armed){btn._armed=true;btn.textContent='Click again to discard all '+btn.getAttribute('data-n');btn.style.background='#FDECEA';btn.style.color='#8B1A1A';return;}
+  const m=document.getElementById('save-preview-modal');if(m)m.remove();
+  if(window._savePreviewResolve)window._savePreviewResolve('discard');
+}
+/* Resolves true (apply) · false (cancel — edits stay, held) · 'discard' (put the saved settings back). */
+function _showSavePreview(diff,opts){
+  opts=opts||{};
   return new Promise(resolve=>{
     if(!diff.length){resolve(true);return;} /* nothing changed, skip modal */
     const rows=diff.slice(0,40).map(d=>{
@@ -8159,15 +8204,17 @@ function _showSavePreview(diff){
       <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
         <div style="font-size:18px">\u23F8</div>
         <div>
-          <div style="font-weight:700;font-size:15px">Review changes before saving</div>
-          <div style="font-size:11.5px;color:var(--soft)">${diff.length} setting${diff.length===1?'':'s'} will change. Confirm to apply.</div>
+          <div style="font-weight:700;font-size:15px">${esc(opts.title||'Review changes before saving')}</div>
+          <div style="font-size:11.5px;color:var(--soft)">${opts.sub?esc(opts.sub):(diff.length+' setting'+(diff.length===1?'':'s')+' will change. Apply saves them · Cancel keeps them on screen, unsaved · Discard puts the saved settings back.')}</div>
         </div>
       </div>
       <div style="flex:1;overflow-y:auto">${rows}${more}</div>
       <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
-        <button class="btn-sec bg-cream" style="padding:8px 16px" onclick="document.getElementById('save-preview-modal').remove();window._savePreviewResolve&&window._savePreviewResolve(false)">Cancel</button>
-        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--soft);margin-right:auto;cursor:pointer"><input type="checkbox" id="diff-suppress-cb" style="accent-color:var(--sky-deep)"> Don't ask again this session</label>
-        <button class="btn-primary bg-grn" style="padding:8px 20px" onclick="if(document.getElementById('diff-suppress-cb')&&document.getElementById('diff-suppress-cb').checked)window._suppressDiffSession=true;document.getElementById('save-preview-modal').remove();window._savePreviewResolve&&window._savePreviewResolve(true)">Apply changes</button>
+        <button class="btn-sec bg-cream" style="padding:8px 16px" onclick="document.getElementById('save-preview-modal').remove();window._savePreviewResolve&&window._savePreviewResolve(false)">${esc(opts.cancelLabel||'Cancel')}</button>
+        <label style="display:${opts.noSuppress?'none':'flex'};align-items:center;gap:6px;font-size:11.5px;color:var(--soft);cursor:pointer"><input type="checkbox" id="diff-suppress-cb" style="accent-color:var(--sky-deep)"> Don't ask again this session</label>
+        <span style="margin-right:auto"></span>
+        <button class="btn-sec bg-cream" style="padding:8px 14px;color:#8B3D1F" data-n="${diff.length}" onclick="_savePreviewDiscardClick(this)">${esc(opts.discardLabel||'Discard these changes')}</button>
+        <button class="btn-primary bg-grn" style="padding:8px 20px" onclick="if(document.getElementById('diff-suppress-cb')&&document.getElementById('diff-suppress-cb').checked)window._suppressDiffSession=true;document.getElementById('save-preview-modal').remove();window._savePreviewResolve&&window._savePreviewResolve(true)">${esc(opts.applyLabel||'Apply changes')}</button>
       </div>
     </div>`;
     document.body.appendChild(host);
@@ -10361,7 +10408,13 @@ function setView(v){
   document.getElementById('sync-bar').style.display=v==='pipeline'?'flex':'none';
   /* KPI bar only relevant in pipeline tab — hide on inbox/calendar/active/referrals/settings */
   const kbar=document.getElementById('kbar');if(kbar)kbar.style.display=v==='pipeline'?'grid':'none';
-  if(v==='settings'){seqInit();renderSettings();}
+  if(v==='settings'){seqInit();renderSettings();
+    /* P-43 — a cancelled change is still pending: bring its review list straight back
+       (Apply · Decide later · Discard) instead of waiting for some unrelated edit. */
+    if(window._settingsSaveCancelled&&_settingsDirty)setTimeout(()=>{
+      if(view==='settings'&&window._settingsSaveCancelled&&!_settingsSaveInFlight&&!document.getElementById('save-preview-modal'))_runAutoSave();
+    },200);
+  }
   if(v==='active')renderActiveCaregivers();
   if(v==='inbox'){
     renderInbox();
