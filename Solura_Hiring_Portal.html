@@ -7192,8 +7192,16 @@ async function genPKCE(){const v=Array.from(crypto.getRandomValues(new Uint8Arra
   const ch=btoa(String.fromCharCode.apply(null,new Uint8Array(h))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');return {verifier:v,challenge:ch};}
 async function signIn(){const p=await genPKCE();sessionStorage.setItem('hpkce_v',p.verifier);
   location.href='https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/authorize?client_id='+CLIENT_ID+'&response_type=code&redirect_uri='+encodeURIComponent(REDIRECT)+'&scope='+encodeURIComponent(SCOPES)+'&code_challenge='+p.challenge+'&code_challenge_method=S256&prompt=select_account';}
-function signOut(){closeWorkbookSession();sessionStorage.removeItem('ht');sessionStorage.removeItem('hpkce_v');localStorage.removeItem('hr');tok='';driveId='';itemId='';pipeline=[];setConn(false);}
-async function refreshToken(){const rt=localStorage.getItem('hr');if(!rt)return false;
+function signOut(){_stopReconnect();closeWorkbookSession();sessionStorage.removeItem('ht');sessionStorage.removeItem('hpkce_v');localStorage.removeItem('hr');tok='';driveId='';itemId='';pipeline=[];setConn(false);}
+/* Single-flight: a burst of 401s (every gfetch in a refresh pass) used to fire one renewal each. */
+let _rtInFlight=null;
+function refreshToken(){
+  if(_rtInFlight)return _rtInFlight;
+  _rtInFlight=_refreshTokenOnce().finally(()=>{_rtInFlight=null;});
+  return _rtInFlight;
+}
+async function _refreshTokenOnce(){const rt=localStorage.getItem('hr');if(!rt)return false;
+  window._lastRefreshFail=null;
   try{const r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:SCOPES})});
     const j=await r.json().catch(()=>({}));
     if(j.access_token){tok=j.access_token;sessionStorage.setItem('ht',tok);if(j.refresh_token)localStorage.setItem('hr',j.refresh_token);return true;}
@@ -7207,8 +7215,60 @@ async function refreshToken(){const rt=localStorage.getItem('hr');if(!rt)return 
        the network, not about the token, so keep it and let the next attempt (or a reload) retry. A dead
        token kept by mistake costs one wasted request per 401 and is overwritten by the next sign-in. */
     if(r.status>=400&&r.status<500&&/invalid_grant|invalid_client|unauthorized_client|interaction_required|consent_required/i.test(String(j.error||'')))localStorage.removeItem('hr');
-  }catch(e){/* network/offline/parse - says nothing about the token; keep it */}
+    window._lastRefreshFail={status:r.status,error:String(j.error||'')};
+  }catch(e){/* network/offline/parse - says nothing about the token; keep it */window._lastRefreshFail={status:0,error:'network'};}
   return false;}
+/* ===================== P-41 — retry quietly and resume =====================
+   A renewal that fails for a TEMPORARY reason (Microsoft throttling, a minute of bad wifi, a
+   laptop waking) used to end the whole session: sign-in screen, and the robot, the inbox scan
+   and the calendar catch-up all stopped until a person came back. Now the page keeps its
+   place, shows one slim notice, and retries by itself (5s, 10s, 20s, 40s, then every minute).
+   Temporary = the saved sign-in key is still there after the failure (_refreshTokenOnce drops
+   it only when Microsoft says the key itself is dead). A dead key, or Microsoft answering a
+   plain refusal five times running, still ends in an honest sign-out. While reconnecting
+   nothing automatic runs, so an outage can never be recorded as a failed robot step. */
+let _reconnTimer=null,_reconnTries=0,_reconnRefusals=0;
+function _reconnBanner(on,txt){
+  let b=document.getElementById('reconn-bar');
+  if(!on){if(b)b.remove();return;}
+  if(!b){b=document.createElement('div');b.id='reconn-bar';
+    b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9990;background:#FEF7E8;border-bottom:1.5px solid #C59B4E;color:#5C4500;font-size:12.5px;font-weight:600;line-height:1.4;padding:7px 14px;text-align:center';
+    document.body.appendChild(b);}
+  b.textContent=txt;
+}
+function _stopReconnect(){
+  window._reconnecting=false;_reconnTries=0;_reconnRefusals=0;
+  if(_reconnTimer){clearTimeout(_reconnTimer);_reconnTimer=null;}
+  try{_reconnBanner(false);}catch(e){}
+}
+function _startReconnect(onBack){
+  if(window._reconnecting)return;
+  window._reconnecting=true;_reconnTries=0;_reconnRefusals=0;
+  const giveUp=()=>{_stopReconnect();_autoSignOut('Microsoft session expired — please sign in again');};
+  const attempt=async()=>{
+    _reconnTimer=null;
+    if(!window._reconnecting)return;
+    if(!localStorage.getItem('hr'))return giveUp();
+    _reconnTries++;
+    let ok=false;try{ok=await refreshToken();}catch(e){}
+    if(!window._reconnecting)return; /* signed out (or back) while the request was in the air */
+    if(ok){
+      _stopReconnect();toast('✓ Reconnected to Microsoft — carrying on');
+      /* A boot that died on the stale pass never found the workbook (no itemId) — finish it;
+         a session that was already up just refreshes and keeps its place. */
+      try{await (typeof onBack==='function'?onBack():(!itemId?onSignedIn():backgroundRefresh()));}catch(e){console.warn('after reconnect:',e&&e.message);}
+      return;
+    }
+    if(!localStorage.getItem('hr'))return giveUp();
+    const f=window._lastRefreshFail||{};
+    /* Microsoft ANSWERED with a refusal that is not throttling → not an outage. Bounded. */
+    if(f.status>=400&&f.status<500&&f.status!==429&&f.status!==408){if(++_reconnRefusals>=5)return giveUp();}else _reconnRefusals=0;
+    _reconnBanner(true,'Microsoft is not answering — reconnecting by itself (attempt '+_reconnTries+'). Your place is kept; nothing automatic runs until it is back.');
+    _reconnTimer=setTimeout(attempt,Math.min(60000,5000*Math.pow(2,Math.min(_reconnTries,4))));
+  };
+  _reconnBanner(true,'Lost the connection to Microsoft — reconnecting by itself. Your place is kept.');
+  _reconnTimer=setTimeout(attempt,5000);
+}
 async function handleAuthCallback(){const code=new URLSearchParams(location.search).get('code');if(!code)return false;history.replaceState({},'',REDIRECT);
   const ver=sessionStorage.getItem('hpkce_v');if(!ver){toast('Sign-in expired — try again');return true;}
   try{const r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:CLIENT_ID,code:code,redirect_uri:REDIRECT,grant_type:'authorization_code',code_verifier:ver})});
@@ -7217,8 +7277,13 @@ async function gfetch(url,opts){opts=opts||{};opts.headers=opts.headers||{};opts
   if(opts.body&&!opts.headers['Content-Type']&&!(opts.body instanceof Blob||opts.body instanceof ArrayBuffer))opts.headers['Content-Type']='application/json';
   let r=await fetch(url,opts);
   if(r.status===401){
+    if(window._reconnecting)return r; /* P-41: the reconnect loop owns renewal — no per-request retries, no sign-out */
     const refreshed=await refreshToken();
     if(refreshed){opts.headers['Authorization']='Bearer '+tok;r=await fetch(url,opts);}
+    else if(localStorage.getItem('hr')){
+      /* P-41: the key survived the failure, so this is the network or Microsoft, not the session. */
+      _startReconnect();
+    }
     else{
       /* Refresh failed — Microsoft has invalidated the session (typically after 24h of inactivity
          or 90 days absolute). Auto-sign-out so the user isn't stuck staring at a half-broken UI
@@ -24345,6 +24410,7 @@ function _robotCardHtml(){
 async function _seqAutomationTick(){
   if(!(SETTINGS.config&&SETTINGS.config.seqAutomation))return;
   if(!_robotMayRun())return; /* P-39 — standby copy, or another tab of this browser holds the lease */
+  if(window._reconnecting)return; /* P-41 — no sign-in right now: every send would fail and be stamped as a robot failure */
   if(!window.SeqEngineV2||!(SETTINGS.sequences||[]).length)return;
   /* ONE TICK AT A TIME. Every sibling heal pass carries this (_seqRepairRunning, _reconRunning) and the tick — the only pass that performs IRREVERSIBLE outward acts — carried neither the mutex nor the stale-pipeline abort. backgroundRefresh has no guard of its own and awaits loadData + loadAvailability + an up-to-8-page inbox scan before reaching here, so a pass routinely outlives the 30s setInterval, and the window 'focus' handler can fire another at any moment. Two live ticks overlap badly: _autoSendTpl's never-double-send stamp (c.st.sent[tpl]) is written only AFTER the sendMailViaGraph await, and loadData replaces `pipeline` with objects rebuilt from the sheet — where that stamp is not yet written — so the second tick re-evaluates the same candidate to the same step and SENDS THE SAME SCRIPTED EMAIL AGAIN. Identical window on _cancelBookingHeadless (autoCancelledFor is also stamped after the await) = a double Cal.com cancellation, and the two passes together spend 20 actions against a documented cap of 10. The flag is cleared by the caller's finally (backgroundRefresh, the sole call site) so an escaping throw — patchRange outside the per-candidate try can throw — can never wedge automation off permanently. */
   if(window._seqTickRunning)return;window._seqTickRunning=true;
@@ -26299,15 +26365,18 @@ async function _adFreeRow(from){
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';clearTimeout(t._t);t._t=setTimeout(()=>{t.style.opacity='0';t.style.transform='translateX(-50%) translateY(20px)';},2300);}
 (async function init(){tok=sessionStorage.getItem('ht')||'';
   if(await handleAuthCallback())return;
-  if(tok||await refreshToken())await onSignedIn();else setConn(false);
+  if(tok||await refreshToken())await onSignedIn();
+  else{setConn(false);
+    /* P-41: a saved sign-in that could not be renewed for a temporary reason comes back by itself. */
+    if(localStorage.getItem('hr'))_startReconnect(onSignedIn);}
   /* re-sync bookings when window regains focus */
-  window.addEventListener('focus',()=>{if(tok)backgroundRefresh();});
+  window.addEventListener('focus',()=>{if(tok&&!window._reconnecting)backgroundRefresh();});
   /* Periodic refresh while portal is active — catches Cal.com bookings + inbound emails without
      manual refresh. 30s cadence feels "live" without being noisy. The !_saveInFlight guard was
      dropped: the race-protector now defends against parallel writes, so a save in flight no longer
      reason to skip a poll. The Cal.com webhook + inbox poll were the most-affected by the
      previous skip (saves block them but the user expects them to be live). */
-  setInterval(()=>{if(tok&&!document.hidden)backgroundRefresh();},30000);
+  setInterval(()=>{if(tok&&!document.hidden&&!window._reconnecting)backgroundRefresh();},30000);
   /* Dirty settings closing with the tab used to just vanish (700ms debounce window + the
      old diff-modal cancel). keepalive lets the POST outlive the page. Primary-load sessions
      only — a degraded session must never flush a stale copy over the file. */
