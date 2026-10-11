@@ -7367,6 +7367,7 @@ async function onSignedIn(){setConn(true);
        admin except the hardcoded super-admin for the whole session. */
     {const _setTab=document.getElementById('tab-set');if(_setTab)_setTab.style.display=isAdmin()?'inline-flex':'none';}
     await loadData();await loadAvailability();
+    setTimeout(_offerNewerBrowserSettings,1500); /* P-44 */
     /* fire-and-forget email poll so signin isn't blocked by it. After it completes, force-render
        the inbox view if that's where the user is — otherwise the just-loaded emails sit in memory
        but the UI keeps showing the stale (often empty) state. */
@@ -7817,7 +7818,22 @@ async function loadSettings(){
              snapshots into a ~5MB localStorage quota, and the catch below is empty — so the
              QuotaExceededError that eventually follows silently kills the cache tier, the
              very last fallback. */
-          try{const _c=Object.assign({},SETTINGS);delete _c._undoHistory;localStorage.setItem('solura_settings',JSON.stringify(_c));}catch(e){}
+          /* P-44 — …unless the browser copy is NEWER than the file. That is a change this browser
+             saved locally that never reached the file (a parting save too big for the browser's
+             64 KB keepalive cap, or a file write that failed), and this line used to erase the
+             only place still holding it. Keep it, load the FILE as always (nothing is restored
+             behind the operator's back), and offer it after boot — see _offerNewerBrowserSettings. */
+          let _keepCache=false;
+          try{
+            const _raw=localStorage.getItem('solura_settings');
+            const _cc=_raw?JSON.parse(_raw):null;
+            const _ts=o=>(o&&o._savedAt&&isFinite(Date.parse(o._savedAt)))?Date.parse(o._savedAt):0;
+            if(_cc&&_ts(_cc)>_ts(data.settings)&&_ts(data.settings)>0){
+              _keepCache=true;
+              window._newerBrowserSettings={copy:_cc,cacheAt:_cc._savedAt,fileAt:data.settings._savedAt};
+            }
+          }catch(e){}
+          if(!_keepCache)try{const _c=Object.assign({},SETTINGS);delete _c._undoHistory;localStorage.setItem('solura_settings',JSON.stringify(_c));}catch(e){}
         }else{
           /* The GET SUCCEEDED and the file holds nothing. That is a different fact from "this
          session is running on a stale fallback", and the save gate below needs to tell them
@@ -7886,6 +7902,66 @@ async function loadSettings(){
   _settingsLoadComplete=true;
   /* Stash the loaded state as the baseline for save-preview diffing (see saveSettings). */
   window._settingsBaseline=(typeof _deepClone==='function')?_deepClone(SETTINGS):JSON.parse(JSON.stringify(SETTINGS));
+}
+
+/* ===================== P-44 — a newer browser copy is OFFERED, never applied =====================
+   Shown once per load, to admins, when loadSettings found the browser copy stamped later than
+   the file. Review lists exactly what differs; Restore applies it and saves through the normal
+   pipeline; Discard replaces the browser copy with the file's. "Decide later" leaves both. */
+function _newerSettingsDiff(){
+  const n=window._newerBrowserSettings;if(!n||!n.copy)return [];
+  const skip=/^(_undoHistory|_savedAt|_gen)(\.|$)/;
+  const cur=Object.assign({},SETTINGS);delete cur._undoHistory;
+  return _diffConfig(cur,n.copy).filter(d=>!skip.test(d.path));
+}
+function _offerNewerBrowserSettings(){
+  try{
+    const n=window._newerBrowserSettings;if(!n||!isAdmin())return;
+    if(((window._lastSettingsLoadStatus||{}).source)!=='workerFile')return;
+    const diff=_newerSettingsDiff();
+    if(!diff.length){ /* same content, only the stamp differed — nothing to offer */
+      _discardNewerBrowserSettings(true);return;
+    }
+    if(document.getElementById('newer-settings-bar'))return;
+    const fmt=s=>{try{return new Date(s).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});}catch(e){return String(s||'');}};
+    const b=document.createElement('div');b.id='newer-settings-bar';
+    b.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:9980;max-width:min(760px,94vw);background:#FEF7E8;border:1.5px solid #C59B4E;border-radius:11px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:11px 14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:#4A3A12;line-height:1.45';
+    b.innerHTML='<div style="flex:1;min-width:240px"><b>'+diff.length+' settings change'+(diff.length===1?'':'s')+' never reached the settings file.</b> This browser saved '+(diff.length===1?'it':'them')+' on '+esc(fmt(n.cacheAt))+'; the file was last saved '+esc(fmt(n.fileAt))+'. You are looking at the file\'s version.</div>'
+      +'<button class="btn-sm bg-grn" style="cursor:pointer;white-space:nowrap" onclick="_reviewNewerBrowserSettings()">Review them</button>'
+      +'<button class="btn-sm bg-cream" style="cursor:pointer;white-space:nowrap" onclick="document.getElementById(\'newer-settings-bar\').remove()">Later</button>';
+    document.body.appendChild(b);
+  }catch(e){console.warn('newer-settings offer:',e&&e.message);}
+}
+function _discardNewerBrowserSettings(quiet){
+  try{const _c=Object.assign({},SETTINGS);delete _c._undoHistory;localStorage.setItem('solura_settings',JSON.stringify(_c));}catch(e){}
+  window._newerBrowserSettings=null;
+  const b=document.getElementById('newer-settings-bar');if(b)b.remove();
+  if(!quiet)toast('Browser copy discarded — the settings file stands');
+}
+async function _reviewNewerBrowserSettings(){
+  const n=window._newerBrowserSettings;if(!n)return;
+  const diff=_newerSettingsDiff();
+  if(!diff.length){_discardNewerBrowserSettings(true);toast('Nothing differs any more');return;}
+  const ok=await _showSavePreview(diff,{title:'Changes this browser never got to save',sub:'Left = the settings file now · right = what this browser had. Restore applies all '+diff.length+' and saves them; Discard drops the browser copy for good.',applyLabel:'Restore these changes',discardLabel:'Discard the browser copy',cancelLabel:'Decide later',noSuppress:true});
+  if(ok==='discard'){_discardNewerBrowserSettings();return;}
+  if(!ok)return;
+  /* Apply the browser copy's differing keys onto the loaded settings (mirror of _revertSettingsTo:
+     "make SETTINGS equal to this copy"), then save through the ordinary gated pipeline. */
+  _revertSettingsTo(n.copy,SETTINGS,true);
+  try{applyCustomStagesToInfo();}catch(e){}
+  try{if(typeof applyQuestionOverrides==='function')applyQuestionOverrides();}catch(e){}
+  try{if(typeof _initEmailTriggers==='function')_initEmailTriggers();}catch(e){}
+  window._skipDiffOnce=true; /* just reviewed — do not ask a second time */
+  let st=null;try{st=await saveSettings();}finally{window._skipDiffOnce=false;}
+  if(st&&st.workerFile){
+    window._newerBrowserSettings=null;
+    const b=document.getElementById('newer-settings-bar');if(b)b.remove();
+    toast('✓ Restored and saved to the settings file');
+  }else{
+    _settingsDirty=true;_updateAutosaveStatus('dirty');
+    toast('⚠ Restored on screen but NOT saved to the file yet — '+(((st&&st.errors)||[])[0]||'try again from Settings'));
+  }
+  try{if(typeof view!=='undefined'&&view==='settings')renderSettings();render();}catch(e){}
 }
 
 /* ===================== AUTO-SAVE INFRASTRUCTURE =====================
@@ -8011,7 +8087,7 @@ async function saveSettings(){
   /* The diff modal interrupts ONLY while the operator is actually in Settings — a background
      autosave (heals, migrations) popping a modal that can be Cancelled silently dropped those
      changes on the floor (they stayed dirty until tab close, then vanished). */
-  if(prefs.savePreview==='diff'&&window._settingsBaseline&&!window._suppressDiffSession&&(typeof view!=='undefined'&&view==='settings')){
+  if(prefs.savePreview==='diff'&&window._settingsBaseline&&!window._suppressDiffSession&&!window._skipDiffOnce&&(typeof view!=='undefined'&&view==='settings')){
     const diff=_diffConfig(window._settingsBaseline,SETTINGS);
     /* P-43: a change that was cancelled is reviewed again however small it has become —
        it must never slip through just because it dropped under the 4-change threshold. */
@@ -26450,7 +26526,13 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.sty
          gate so it cannot correct itself. The edits keepalive exists to rescue were exactly
          the ones missing from the last-resort tier. Synchronous, so pagehide always completes it. */
       try{localStorage.setItem('solura_settings',JSON.stringify(persist));}catch(e){}
-      fetch(ZI_WORKER_URL+'/settings',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-Solura-Token':zt},body:JSON.stringify({settings:persist})});
+      /* P-44 — browsers cap a keepalive body at 64 KiB and reject a bigger one outright, with
+         nothing to catch and nobody left to tell. Send only a parting save that fits. When it
+         does not, the browser copy written on the line above (stamped newer than the file) is
+         the survivor: the next load sees it is newer and offers it back. */
+      const _body=JSON.stringify({settings:persist});
+      let _bytes=_body.length;try{_bytes=new Blob([_body]).size;}catch(e){}
+      if(_bytes<=60000)fetch(ZI_WORKER_URL+'/settings',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-Solura-Token':zt},body:_body});
     }catch(e){}
   });
   /* Initialize the change-request FAB badge on load. */
