@@ -7617,7 +7617,94 @@ async function loadAvailability(){
       }
     }
   }catch(e){console.warn('AK1 read threw — availability saves held:',e.message);}
-  _autoLinkUnmatchedBookings().then(()=>_backfillCalBookings()).catch(e=>console.warn('booking link/backfill:',e.message));
+  _autoLinkUnmatchedBookings().then(()=>_backfillCalBookings()).catch(e=>console.warn('booking link/backfill:',e.message))
+    .then(()=>_yardstikCatchUp()).catch(e=>console.warn('yardstik catch-up:',e&&e.message));
+}
+/* ===================== P-54 — Yardstik catch-up =====================
+   Background-check results are meant to arrive by webhook, and when the webhook goes quiet
+   (nothing landed Aug 14 → Oct 8; since then every message is refused for a signature
+   mismatch) the board froze at whatever the last click on "Refresh status" saw: Amiya Jackson
+   read "pending" with her report at final adverse, six more read "waiting" on expired
+   invitations. Meir (option 1): the same idea as the ten-minute Cal.com catch-up — every so
+   often ask Yardstik about each OPEN order and record whatever changed, with a log line saying
+   it came from the catch-up.
+   Exactly the per-candidate Refresh, automated: same status → tpCheck / decisionRequired
+   mapping, an operator's adjudication still outranks a re-read, "expired" is recorded as the
+   status and changes nothing else (what an expired check should DO is P-30, still Meir's).
+   Writes only when the status actually changed, only onto the cell this load saw, never onto
+   an open workspace or a corrupt row; a refused write puts memory back. Every 30 minutes per
+   browser; the employment-VERIFICATION report is excluded (its per-employer results are the
+   worker's job). */
+async function _yardstikCatchUp(){
+  const tok=(SETTINGS.config||{}).ziToken||'';if(!tok)return;
+  if(window._reconnecting||window._ysCatchUpRunning)return;
+  if(typeof pipeline==='undefined'||!pipeline.length)return;
+  const EVERY=30*60*1000;
+  let last=0;try{last=+localStorage.getItem('solura_ys_catchup_at')||0;}catch(e){}
+  if(Date.now()-Math.max(last,window._ysCatchUpAt||0)<EVERY)return;
+  window._ysCatchUpAt=Date.now();try{localStorage.setItem('solura_ys_catchup_at',String(Date.now()));}catch(e){}
+  window._ysCatchUpRunning=true;
+  const CLEAN=['clear','proceed','pass'],FLAG=['consider','pre_adverse','ys_qa_review','final_adverse','fail'],DEAD=['expired','canceled','cancelled'];
+  const settled=c=>{const y=c.st.yardstik,s=String(y.status||'').toLowerCase();
+    if(CLEAN.includes(s)&&c.st.tpCheck==='clear'&&!y.decisionRequired)return true;
+    if(DEAD.includes(s))return true;
+    if(FLAG.includes(s)&&y.decision)return true; /* adjudicated — Yardstik is never told, nothing more to learn */
+    return false;};
+  const _myPipe=pipeline;let changed=0,asked=0;const names=[];
+  try{
+    const open=pipeline.filter(c=>c&&c.st&&!c.st.__ajCorrupt&&!_isTerminalStage(c.stage)&&c.st.yardstik&&(c.st.yardstik.reportId||c.st.yardstik.candidateId)&&!settled(c));
+    for(const c of open){
+      if(pipeline!==_myPipe)break; /* a fresher load owns the board */
+      if(asked>=40)break;
+      if(_wsOpenOn(c.excelRow))continue;
+      const ys=c.st.yardstik;let rid=ys.reportId||'',status='',reportUrl='';
+      try{
+        asked++;
+        if(rid){
+          const r=await fetch(ZI_WORKER_URL+'/yardstik/status?reportId='+encodeURIComponent(rid),{headers:{'X-Solura-Token':tok}});
+          const d=await r.json().catch(()=>null);
+          if(!r.ok||!d||!d.status)continue;
+          status=String(d.status);reportUrl=d.reportUrl||'';
+        }else{
+          const r=await fetch(ZI_WORKER_URL+'/yardstik/report-status?candidateId='+encodeURIComponent(ys.candidateId),{headers:{'X-Solura-Token':tok}});
+          const j=await r.json().catch(()=>null);
+          if(!r.ok||!j||!Array.isArray(j.reports))continue;
+          const vRid=ys.verifyReportId,vPkg=ys.verifyPackageId;
+          const reps=j.reports.filter(x=>x&&x.id&&x.id!==vRid&&!(vPkg&&(x.packageId===vPkg||x.package_id===vPkg)));
+          if(!reps.length)continue;
+          reps.sort((a,b)=>String(b.completedAt||b.createdAt||'').localeCompare(String(a.completedAt||a.createdAt||'')));
+          rid=reps[0].id;status=String(reps[0].status||'');
+          if(!status)continue;
+        }
+      }catch(e){continue;}
+      const lc=_liveCandAfterAwait(c.excelRow,c);
+      if(!lc||!lc.st||!lc.st.yardstik||_wsOpenOn(lc.excelRow)||_isTerminalStage(lc.stage))continue;
+      const y=lc.st.yardstik;
+      if(String(y.status||'')===status&&String(y.reportId||'')===String(rid||''))continue; /* nothing new — no write, no log */
+      if(!(await _ajUnchangedSinceLoad(lc)))continue; /* webhook / another tab wrote it — next pass */
+      const snap=JSON.stringify(lc.st);
+      try{
+        const was=String(y.status||'none');
+        y.status=status;y.lastUpdate=new Date().toISOString();
+        if(rid&&!y.reportId)y.reportId=rid;
+        if(reportUrl)y.reportUrl=reportUrl;
+        const s=status.toLowerCase();let tail='';
+        if(CLEAN.includes(s)){lc.st.tpCheck='clear';y.decisionRequired=false;tail=' · check CLEAR';}
+        else if(FLAG.includes(s)&&!y.decision){lc.st.tpCheck='flag';y.decisionRequired=true;tail=' · needs a manual decision';}
+        else if(FLAG.includes(s)&&y.decision){tail=' · your '+String(y.decision).toUpperCase()+' decision stands';}
+        lc.st.log=(lc.st.log||[]).concat({t:stamp(),x:(tail.indexOf('manual')>=0?'⚠':'🛡')+' Yardstik catch-up: '+was+' → '+status+tail+' (asked Yardstik directly — no webhook message arrived)'});
+        await patchRange('AJ'+lc.excelRow,[[_stCell(lc.st)]]);
+        changed++;names.push(lc.name);
+      }catch(e){
+        try{lc.st=JSON.parse(snap);}catch(e2){}
+        console.warn('yardstik catch-up write failed row',lc.excelRow,e&&e.message);
+      }
+    }
+  }finally{window._ysCatchUpRunning=false;}
+  if(changed){
+    toast('🛡 Yardstik catch-up: '+changed+' check'+(changed===1?'':'s')+' updated — '+names.slice(0,3).join(', ')+(names.length>3?' +'+(names.length-3)+' more':''));
+    try{const _ws=document.getElementById('workspace');if(!(_ws&&_ws.classList.contains('open'))&&typeof render==='function')render();}catch(e){}
+  }
 }
 async function saveAvailability(){
   if(!_availLoadOk){
