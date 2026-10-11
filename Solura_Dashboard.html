@@ -11814,10 +11814,16 @@ async function pollIntake(){
       if(!sub||!sub.key||seen[sub.key]||_intakeSeen[sub.key])continue;
       _intakeSeen[sub.key]=true;
       var link=intakeLinkByCode(sub.code);
+      /* Caregiver-shared link from the HIRING portal (code CG-<caregiver refCode>): not in
+         this dashboard's link registry, but the lead must still say WHO sent the family —
+         a virtual link labels it without touching the registry or its fill counters. */
+      if(!link&&/^CG-/i.test(String(sub.code||''))){
+        link={platform:'Caregiver referral',method:String(sub.code).toUpperCase(),code:sub.code,_virtual:true};
+      }
       try{
         await intakeCreateLead(sub,link);
         ackKeys.push(sub.key);made++;
-        if(link){link.fills=(link.fills||0)+1;link.lastFillAt=Date.now();saveEnginesDoc().catch(function(){});}
+        if(link&&!link._virtual){link.fills=(link.fills||0)+1;link.lastFillAt=Date.now();saveEnginesDoc().catch(function(){});}
         toast('📥 New lead from '+intakeSourceString(link)+': '+(sub.name||sub.email||sub.phone||'(no name)'));
       }catch(eC){
         delete _intakeSeen[sub.key]; // retry on the next poll

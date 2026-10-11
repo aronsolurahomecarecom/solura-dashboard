@@ -10906,6 +10906,7 @@ function renderActiveCaregivers(){
         <button class="btn-sm bg-sky-l" onclick="openWorkspace(${c.excelRow})">Open profile</button>
         ${phoneClean?'<button class="btn-sm" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer" onclick="openLinkPopup(\''+gvUrl+'\',\'gvoice\',420,640)">☎ Call</button>':''}
         ${c.email?'<button class="btn-sm bg-cream" onclick="quickEmailCaregiver('+c.excelRow+')">✉ Email</button>':''}
+        <button class="btn-sm bg-cream" onclick="clientIntakeLink(${c.excelRow})" title="Their personal client-intake link — families who sign up through it are credited to them">🏠 Intake link</button>
         <button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer;margin-left:auto" onclick="fireCaregiver(${c.excelRow})" title="Offboard this caregiver — last day, reason, optional termination email">🔥 Offboard</button>
       </div>
     </div>`;
@@ -15212,7 +15213,47 @@ function referralsPreviewCard(c){
       <button class="btn-sm bg-gold" style="padding:4px 9px;font-size:11px;white-space:nowrap" onclick="copyToClipboard('${esc(refLink)}');toast('✓ Link copied')">📋</button>
     </div>`:''}
     <button class="btn-sec bg-cream" style="padding:6px 12px;font-size:12px;width:100%" onclick="setFocusedHub('rewards')">🎁 Open referrals hub →</button>
+    <button class="btn-sec bg-cream" style="margin-top:6px;padding:6px 12px;font-size:12px;width:100%" onclick="clientIntakeLink()" title="Their personal link to the client intake form — families who sign up through it are tagged with their code on the lead dashboard">🏠 Client intake link →</button>
   </div>`;
+}
+/* ── 🏠 Client intake link (Meir 2026-10-11): a caregiver-personal link to the CLIENT intake
+   form (/care/?c=CG-<refCode>). The intake form already carries ?c= into every submission and
+   the lead dashboard labels the lead "Caregiver referral · CG-XXXX" — so every family they
+   send is attributed to them (customer-referral program). Modal shows the link + copy +
+   optional prefilled email to the caregiver; the email step is skippable by design. */
+function _clientIntakeUrlFor(st){return 'https://apply.solurahomecare.com/care/?c='+encodeURIComponent('CG-'+(st&&st.refCode||''));}
+async function clientIntakeLink(r){
+  if(r!=null)loadW(r);
+  if(!W){toast('Open a candidate first');return;}
+  if(!W.st.refCode){
+    /* Old rows predating minting — same alphabet the add-drawer uses. */
+    W.st.refCode=Math.random().toString(36).replace(/[^a-z0-9]/g,'').slice(0,6).toUpperCase();
+    logW('🔑 Referral code minted for the client-intake link');
+    if(!(await saveW(true))){delete W.st.refCode;return;}
+  }
+  const url=_clientIntakeUrlFor(W.st);
+  const amt=SETTINGS.config.customerReferralAmount;
+  document.getElementById('m-title').textContent='🏠 Client intake link — '+(W.name||'');
+  document.getElementById('m-body').innerHTML=`
+    <div style="font-size:12.5px;color:var(--mid);line-height:1.55;margin-bottom:12px">${esc((W.name||'Their').split(' ')[0])}'s personal link to the <b>client intake form</b>. Every family that reaches out through it lands on the lead dashboard tagged <b>CG-${esc(W.st.refCode)}</b>${amt?' — and earns them <b>$'+esc(String(amt))+'</b> under the customer-referral program':''}.</div>
+    <div style="background:#FAF6EE;border:1px solid var(--gold-mid);border-radius:7px;padding:8px 10px;display:flex;gap:6px;align-items:center">
+      <input type="text" readonly value="${esc(url)}" style="flex:1;border:none;outline:none;background:transparent;font-family:'Courier New',monospace;font-size:11.5px;color:var(--sky-deep);min-width:0" onclick="this.select()">
+      <button class="btn-sm bg-gold" style="padding:4px 10px;font-size:11px;white-space:nowrap" onclick="copyToClipboard('${esc(url)}');toast('✓ Link copied')">📋 Copy</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button class="btn-sec" onclick="closeModal()">Close</button>
+      ${W.email&&W.email.trim()?'<button class="btn-primary bg-gold" onclick="_emailClientIntakeLink()">✉ Email them the link</button>':'<span style="font-size:11.5px;color:var(--soft);align-self:center">no email on file — copy the link and text it</span>'}
+    </div>`;
+  document.getElementById('modal').classList.add('open');
+}
+function _emailClientIntakeLink(){
+  const url=_clientIntakeUrlFor(W.st);
+  const amt=SETTINGS.config.customerReferralAmount;
+  const fname=(W.name||'there').split(' ')[0];
+  closeModal();
+  const subj='Your personal Solura client-referral link';
+  const body='Hi '+fname+',\n\nKnow a family who could use home care? You have your own personal link to our client intake form — share it with anyone looking for care:\n\n'+url+'\n\nEvery family that reaches out through your link is credited to you'+(amt?(' — you earn $'+amt+' for every client who signs on'):'')+'.\n\nText it, email it, or post it — it works anywhere.\n\nThanks,\nSolura Home Care';
+  emailModal('client_intake_link',subj,body,null);
 }
 
 function employersPreviewCard(c){
