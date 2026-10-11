@@ -171,7 +171,22 @@ function esc(s){return String(s||'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt
 function validate(){
   const ids=getCandidateIdentifiers();
   if(!ids.refCode&&!ids.email){alert('This link is missing a candidate identifier. Please use the link from the email Solura sent you.');return null;}
-  const filled=refs.filter(r=>r.firstName&&r.lastName&&r.relationship&&r.phone).map(r=>({
+  /* P-42 — a row someone STARTED must be finished or cleared; it is never dropped silently.
+     A row with nothing typed in it at all is simply an unused slot. */
+  const _t=v=>String(v==null?'':v).trim();
+  const NEED=[['firstName','a first name'],['lastName','a last name'],['relationship','their relationship to you'],['phone','a phone number']];
+  for(let i=0;i<refs.length;i++){
+    const r=refs[i]||{};
+    const touched=['firstName','lastName','relationship','phone','email','duration','bestTime','notes'].some(k=>_t(r[k]));
+    if(!touched)continue;
+    const miss=NEED.filter(([k])=>!_t(r[k])).map(([,l])=>l);
+    if(!miss.length)continue;
+    const list=miss.length===1?miss[0]:miss.slice(0,-1).join(', ')+' and '+miss[miss.length-1];
+    alert('Reference '+(i+1)+' is missing '+list+'.\n\nPlease finish it'+(refs.length>2?', or remove it with the × in its corner,':', or clear what you typed there,')+' and submit again — nothing has been sent yet.');
+    try{const card=document.querySelectorAll('#refs-container .card')[i];if(card){card.scrollIntoView({behavior:'smooth',block:'center'});card.style.outline='2px solid #C0392B';setTimeout(()=>{card.style.outline='';},6000);}}catch(e){}
+    return null;
+  }
+  const filled=refs.filter(r=>_t(r.firstName)&&_t(r.lastName)&&_t(r.relationship)&&_t(r.phone)).map(r=>({
     firstName:(r.firstName||'').trim(),
     lastName:(r.lastName||'').trim(),
     relationship:r.relationship,
