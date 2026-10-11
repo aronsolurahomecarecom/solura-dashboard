@@ -10493,6 +10493,7 @@ function renderActiveCaregivers(){
         <button class="btn-sm bg-sky-l" onclick="openWorkspace(${c.excelRow})">Open profile</button>
         ${phoneClean?'<button class="btn-sm" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer" onclick="openLinkPopup(\''+gvUrl+'\',\'gvoice\',420,640)">☎ Call</button>':''}
         ${c.email?'<button class="btn-sm bg-cream" onclick="quickEmailCaregiver('+c.excelRow+')">✉ Email</button>':''}
+        <button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer;margin-left:auto" onclick="fireCaregiver(${c.excelRow})" title="Offboard this caregiver — last day, reason, optional termination email">🔥 Offboard</button>
       </div>
     </div>`;
   }).join('');
@@ -10646,6 +10647,67 @@ async function markHiredWS(){
     return;
   }
   if(typeof render==='function')render();
+}
+/* 🔥 Offboard (Meir, 2026-10-11): fire an active caregiver — collect last day + reason,
+   optionally send the termination notice, and close the row out. The offboard itself always
+   completes (stage → Declined + st.offboarded; the Declined archive badges it 🔥 Offboarded);
+   the email is a follow-on step so skipping or cancelling the composer never leaves a
+   half-offboarded caregiver in the Active list. */
+function fireCaregiver(r){loadW(r);fireCaregiverWS();}
+function fireCaregiverWS(){
+  if(!W||W.stage!=='Hired'){toast('Only active (Hired) caregivers can be offboarded');return;}
+  document.getElementById('m-title').textContent='🔥 Offboard '+(W.name||'caregiver');
+  document.getElementById('m-body').innerHTML=`
+    <div style="font-size:12.5px;color:var(--mid);line-height:1.5;margin-bottom:14px">They leave the Active caregivers list and move to the Declined archive with an <b>Offboarded</b> tag. This doesn't send anything until you choose to below.</div>
+    <div class="set-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <label class="set-field">Last working day<input type="date" id="ob-lastday" value="${new Date().toISOString().slice(0,10)}" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px"></label>
+      <label class="set-field">Reason<input type="text" id="ob-reason" placeholder="e.g. repeated no-shows, client complaint, resigned" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px"></label>
+    </div>
+    <label class="set-field" style="display:block;margin-top:10px">Internal note (stays in the activity log, never emailed)<textarea id="ob-note" style="width:100%;min-height:64px;padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px"></textarea></label>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12.5px;cursor:pointer"><input type="checkbox" id="ob-send" checked style="width:15px;height:15px;accent-color:var(--gold-deep)"> Send them the termination notice email (opens the composer so you can review first)</label>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12.5px;cursor:pointer;color:var(--soft)"><input type="checkbox" id="ob-inc-reason" style="width:15px;height:15px;accent-color:var(--gold-deep)"> Include the reason in the email</label>
+    <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+      <button class="btn-sec" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" style="background:var(--red);color:#fff" onclick="_commitOffboard()">🔥 Offboard</button>
+    </div>`;
+  document.getElementById('modal').classList.add('open');
+}
+async function _commitOffboard(){
+  const lastDay=(document.getElementById('ob-lastday')||{}).value||new Date().toISOString().slice(0,10);
+  const reason=((document.getElementById('ob-reason')||{}).value||'').trim();
+  const note=((document.getElementById('ob-note')||{}).value||'').trim();
+  const sendEmail=!!(document.getElementById('ob-send')||{}).checked;
+  const incReason=!!(document.getElementById('ob-inc-reason')||{}).checked;
+  closeModal();
+  if(!confirm('Offboard '+(W.name||'this caregiver')+' — last day '+lastDay+(reason?', reason: '+reason:'')+'?'))return;
+  const fromStage=W.stage;
+  W.stage='Declined';
+  W.st.offboarded={at:today(),lastDay:lastDay,reason:reason||'',by:(typeof userEmail!=='undefined'?userEmail:'')||''};
+  delete W.st.manualAwaiting;
+  logW('🔥 Offboarded — last day '+lastDay+(reason?' · '+reason:''));
+  if(note)logW('🗒 Offboard note: '+note);
+  if(!(await saveW(true))){
+    W.stage=fromStage;
+    delete W.st.offboarded;
+    if(W.st&&Array.isArray(W.st.log)){W.st.log.pop();if(note)W.st.log.pop();}
+    renderWorkspace();
+    return;
+  }
+  const c=pipeline.find(x=>x.excelRow===W.row);
+  if(c){c.stage='Declined';c.row[6]='Declined';}
+  toast('🔥 Offboarded'+(sendEmail?'':' — no email sent'));
+  renderWorkspace();if(typeof render==='function')render();
+  if(sendEmail&&W.email&&W.email.trim()){
+    W.__offboard={lastDay:lastDay,reason:reason,emailReason:incReason};
+    const ldStr=new Date(lastDay+'T00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+    const t=getEffectiveTemplate('offboard_notice',W);
+    const s=String(t.s||'').replace(/\{lastDay\}/g,ldStr).replace(/\{reason\}/g,reason);
+    const b=String(t.b||'').replace(/\{lastDay\}/g,ldStr).replace(/\{reason\}/g,reason);
+    /* Already offboarded above — no advanceTo; cancelling the composer only skips the notice. */
+    setTimeout(()=>emailModal('offboard_notice',s,b,null),150);
+  }else if(sendEmail){
+    toast('No email on file — notice not sent');
+  }
 }
 /* ⚡ Fast-hire (Meir, 2026-10-09): one password-gated click that makes this person an active
    caregiver RIGHT NOW — skips every remaining step and lands them in Active caregivers.
@@ -11667,13 +11729,17 @@ function _declineInfo(c){
   }
   when=evT||kwT;why=evX||kwX;
   if(/^advanced to declined/i.test(why))why='Rejection sent';
-  if(st.withdrawn||c.stage==='Withdrawn'){
+  if(st.offboarded){
+    /* Fired/offboarded EMPLOYEE — distinct from applicant declines and withdrawals. */
+    why='Offboarded'+(st.offboarded.reason?' — '+st.offboarded.reason:'')+(st.offboarded.lastDay?' (last day '+st.offboarded.lastDay+')':'');
+    when=st.offboarded.at||when;
+  }else if(st.withdrawn||c.stage==='Withdrawn'){
     if(st.withdrawnReason)why='Withdrew — '+st.withdrawnReason;else if(!why)why='Application withdrawn';
     if(!when)when=st.withdrawnAt||'';
   }else if(st.declineReason)why=st.declineReason;
   else if(!why&&st.declineHint&&st.declineHint.reason)why=st.declineHint.reason;
   if(!when&&log.length)when=log[log.length-1].t||'';
-  return{when:when||'—',why:why||'—',withdrawn:!!st.withdrawn||c.stage==='Withdrawn'};
+  return{when:when||'—',why:why||'—',withdrawn:(!!st.withdrawn||c.stage==='Withdrawn')&&!st.offboarded,offboarded:!!st.offboarded};
 }
 /* stamp() writes "Sep 12" with no year — same future-means-last-year rule as computeIdleDays */
 function _declineSortTs(when){
@@ -11689,7 +11755,9 @@ function _declinedRowHtml(c,info){
   const email=c.email?'<div><a class="em" href="mailto:'+esc(c.email)+'" onclick="event.stopPropagation()">✉ '+esc(c.email)+'</a></div>':'';
   const _srcTag=candidateSourceLabel(c);
   const sub=_srcTag&&_srcTag!=='—'?'<div class="dm-tag" style="margin-top:5px">'+esc(_srcTag)+'</div>':'';
-  const badge=info.withdrawn
+  const badge=info.offboarded
+    ?'<span class="sbadge" style="background:#FDF0E7;color:#8B4513;border-color:#8B451333">🔥 Offboarded</span>'
+    :info.withdrawn
     ?'<span class="sbadge" style="background:#F3EFE7;color:#6B5E4A;border-color:#6B5E4A33">↩ Withdrew</span>'
     :'<span class="sbadge" style="background:#FDECEA;color:#B03025;border-color:#B0302533">✕ Declined</span>';
   return '<tr class="dr" onclick="openWorkspace('+r+')" style="opacity:.85">'
@@ -12380,6 +12448,17 @@ const TEMPLATES={
    return {
      s:expired?`Your ${name} has expired — please send the renewed copy`:`Your ${name} expires ${exp} — time to renew`,
      b:`Hi ${first(c)},\n\n${expired?'Our records show your '+name+' expired on '+exp+'.':'Your '+name+' on file with us expires on '+exp+'.'} To keep you patient-matchable and compliant with state requirements, we need an updated copy.\n\nPlease reply to this email with a photo or PDF of your renewed ${name}, including the new expiration date.\n\nIf you've already renewed it, just reply with the new card — takes 30 seconds.\n\nThanks,\nSolura Home Care`
+   };
+ },
+ offboard_notice:c=>{
+   /* Filled by the 🔥 Offboard flow: c.__offboard={lastDay,reason,emailReason}. A custom
+      override edited in Settings can use {lastDay}/{reason} tokens instead — the offboard
+      flow substitutes both before the composer opens. */
+   const ob=c.__offboard||{};
+   const ld=ob.lastDay?new Date(ob.lastDay+'T00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}):'the date we discussed';
+   return {
+     s:'Your employment with Solura Home Care',
+     b:`Hi ${first(c)},\n\nThis letter confirms that your employment with Solura Home Care ends effective ${ld}.${(ob.reason&&ob.emailReason)?('\n\nReason: '+ob.reason+'.'):''}\n\nYour final paycheck will be issued on the regular payroll schedule and covers all hours worked through your last day. Please return any Solura property (badge, keys, supplies, client materials) at your earliest convenience.\n\nIf you have questions about your final pay or paperwork, reply to this email or call the office.\n\nWe wish you the best going forward.\n\nSolura Home Care`
    };
  }
 };
@@ -13969,8 +14048,10 @@ function renderWorkspace(){_memGen++;
   const moveBtn=_stageMoveAllowed()?'<button class="btn-sm bg-cream" onclick="advanceNextStepWS()" title="Password-gated: hop to the next stage of their own sequence — no emails fire">⏭ Next step</button><button class="btn-sm bg-cream" onclick="moveToStageWS()" title="Manually place this candidate at any pipeline stage">⇄ Move to stage</button>'+(W.stage!=='Hired'?'<button class="btn-sm" style="background:#EBF5EA;border:1px solid var(--grn);color:var(--grn-deep);cursor:pointer" onclick="hireNowWS()" title="Password-gated: skip every remaining step and move them straight to Active caregivers — no emails fire">⚡ Hire now</button>':''):'';
   let quickActions='';
   if(W.stage==='Hired'||W.stage==='Declined'||W.stage==='Withdrawn'){
-    /* Terminal stages: the stage move IS the escape hatch (mistaken decline, un-hire, etc.). */
-    if(moveBtn)quickActions=`<div class="ws-quick">${moveBtn}</div>`;
+    /* Terminal stages: the stage move IS the escape hatch (mistaken decline, un-hire, etc.).
+       Hired additionally gets 🔥 Offboard — the real way OUT of Active caregivers. */
+    const fireBtn=W.stage==='Hired'?'<button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer" onclick="fireCaregiverWS()" title="Offboard this caregiver — last day, reason, optional termination email">🔥 Offboard</button>':'';
+    if(moveBtn||fireBtn)quickActions=`<div class="ws-quick">${moveBtn}${fireBtn}</div>`;
   }
   else if(W.stage!=='Hired'&&W.stage!=='Declined'&&W.stage!=='Withdrawn'){
     if(isParked){
@@ -19091,7 +19172,8 @@ const TEMPLATE_LABELS={
  missed_onboarding:'Missed onboarding — rebook',
  reject:'Rejection',missing:'Request missing info',
  request_resume:'Request résumé',
- request_updated_credential:'Request updated credential (renewal)'
+ request_updated_credential:'Request updated credential (renewal)',
+ offboard_notice:'Offboarding / termination notice'
 };
 /* Metadata about WHEN each template fires — used by the editor to surface badges and group the
    list. Empty entries mean "manual send via the email composer". The full template surface is
@@ -19113,7 +19195,8 @@ const TEMPLATE_META={
   reject:                  {badge:'',badgeCls:'',hint:'Manual send via composer.'},
   missing:                 {badge:'',badgeCls:'',hint:'Used to request missing application info.'},
   request_resume:          {badge:'NUDGE',badgeCls:'psoft',hint:'Sent when a candidate has no résumé on file.'},
-  request_updated_credential:{badge:'',badgeCls:'',hint:'Sent for credential renewals.'}
+  request_updated_credential:{badge:'',badgeCls:'',hint:'Sent for credential renewals.'},
+  offboard_notice:{badge:'',badgeCls:'',hint:'Sent by the 🔥 Offboard flow on an active caregiver. {lastDay} and {reason} are filled from the offboard form.'}
 };
 function defaultTplFor(k){
   /* Custom templates have no built-in default — they start blank. (Falling through to
