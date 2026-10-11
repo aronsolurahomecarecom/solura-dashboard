@@ -7662,6 +7662,60 @@ async function saveAvailability(){
    as her current booking and moved her from Onboarding booked back down to Interview booked
    (rule 2), after which the worker refused every onboarding booking she made. Last 5 ids only. */
 function _rememberConsumedBooking(st){if(st&&st.calBookingId){const u=String(st.calBookingId);st.consumedBookingIds=(Array.isArray(st.consumedBookingIds)?st.consumedBookingIds:[]).filter(x=>x!==u).concat(u).slice(-5);}}
+/* ===================== P-36 — what kind of meeting a Cal.com booking is =====================
+   The Cal.com EVENT-TYPE ID decides (exact, immune to renaming). The id → kind table is data:
+   SETTINGS.config.calEventKinds { "<id>": "screen" | "interview" | "onboarding" | "none" },
+   edited in Settings → Calendars. An id that is not in the table falls back to the words in
+   the event's name. KEEP _calKindFromWords IN STEP with the worker's calKindFromWords — the two
+   used to disagree (bare "second" here, "second round" there). */
+function _calKindFromWords(hay){
+  const h=String(hay||'').toLowerCase();
+  if(['onboarding','orientation','welcome','start'].some(k=>h.includes(k)))return 'onboarding';
+  if(['interview','final','in-person','in person','meet','second round','video'].some(k=>h.includes(k)))return 'interview';
+  if(['screen','phone','intro','initial','chat','call','first','consult','conversation'].some(k=>h.includes(k)))return 'screen';
+  return null;
+}
+function _calKindFor(eventTypeId,hay){
+  const m=(SETTINGS.config&&SETTINGS.config.calEventKinds)||{};
+  const v=String((eventTypeId&&m[String(eventTypeId)])||'').toLowerCase();
+  if(v==='screen'||v==='interview'||v==='onboarding'||v==='none')return v;
+  return _calKindFromWords(hay);
+}
+/* Settings card (Calendars). Its own little re-render so the URL fields above keep what is typed. */
+const _CAL_FOUND=[['6044609','Phone Screen','screen'],['6044627','Interview','interview'],['6058102','Caregiver onboarding','onboarding']]; /* read from Cal.com on 2026-10-11 — a SUGGESTION, applied only by the button */
+function _calKindsCardHtml(){
+  const m=(SETTINGS.config&&SETTINGS.config.calEventKinds)||{},lb=(SETTINGS.config&&SETTINGS.config.calEventLabels)||{};
+  const ids=Object.keys(m);
+  const opt=(v,cur)=>'<option value="'+v+'"'+(cur===v?' selected':'')+'>'+({screen:'Phone screen',interview:'Interview',onboarding:'Onboarding',none:'Not a hiring meeting'})[v]+'</option>';
+  const sel=(id,cur)=>'<select '+(id?'onchange="_calKindSet(\''+esc(id)+'\',this.value)"':'id="cek-kind"')+' style="padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">'+['screen','interview','onboarding','none'].map(v=>opt(v,cur)).join('')+'</select>';
+  const rows=ids.map(id=>'<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--border-soft);font-size:12.5px"><code style="min-width:86px">'+esc(id)+'</code><span style="flex:1;color:var(--mid)">'+esc(lb[id]||'')+'</span>'+sel(id,m[id])+'<button class="btn-sm bg-cream" style="cursor:pointer" title="Remove — this event goes back to being matched by its name" onclick="_calKindDel(\''+esc(id)+'\')">×</button></div>').join('');
+  const missing=_CAL_FOUND.filter(f=>!m[f[0]]);
+  return '<div class="wscard" id="cek-card"><h3>Which Cal.com event is which meeting</h3>'
+    +'<p class="set-help">A booking is filed as a phone screen, an interview or an onboarding by its Cal.com <b>event-type number</b> — exact, and it keeps working if you rename the event. An event that is not listed here is matched by the words in its name, as before. The number is at the end of the event\'s address in Cal.com (…/event-types/<b>6044627</b>).</p>'
+    +(rows||'<div style="font-size:12px;color:var(--soft);font-style:italic;padding:6px 0">None listed yet — every booking is matched by the words in its event name.</div>')
+    +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">'
+    +'<input id="cek-id" placeholder="Event-type number" inputmode="numeric" style="width:150px;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">'
+    +'<input id="cek-label" placeholder="Name (for your reference)" style="flex:1;min-width:140px;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:12.5px">'
+    +sel('', 'screen')+'<button class="btn-sm bg-grn" style="cursor:pointer" onclick="_calKindAdd()">+ Add</button></div>'
+    +(missing.length?'<div style="margin-top:10px;font-size:12px;color:var(--mid)">Found in your Cal.com account on Oct 11: '+missing.map(f=>'<b>'+esc(f[1])+'</b> '+esc(f[0])+' → '+esc(f[2])).join(' · ')+' <button class="btn-sm bg-cream" style="cursor:pointer;margin-left:6px" onclick="_calKindSeed()">Add '+(missing.length===1?'it':'these '+missing.length)+'</button></div>':'')
+    +'<p class="set-help" style="margin-top:10px;font-size:11px;color:var(--soft);font-style:italic">Saved automatically. The worker reads the same table once its current version is deployed; until then the portal\'s own Cal.com catch-up uses it.</p></div>';
+}
+function _calKindsRepaint(){const el=document.getElementById('cek-card');if(el)el.outerHTML=_calKindsCardHtml();}
+function _calKindSet(id,kind){SETTINGS.config.calEventKinds=SETTINGS.config.calEventKinds||{};SETTINGS.config.calEventKinds[String(id)]=kind;markSettingsDirty();_calKindsRepaint();}
+function _calKindDel(id){if(SETTINGS.config.calEventKinds)delete SETTINGS.config.calEventKinds[String(id)];if(SETTINGS.config.calEventLabels)delete SETTINGS.config.calEventLabels[String(id)];markSettingsDirty();_calKindsRepaint();}
+function _calKindAdd(){
+  const id=String((document.getElementById('cek-id')||{}).value||'').replace(/\D/g,'');
+  if(!id){toast('Type the event-type number from Cal.com');return;}
+  SETTINGS.config.calEventKinds=SETTINGS.config.calEventKinds||{};SETTINGS.config.calEventLabels=SETTINGS.config.calEventLabels||{};
+  SETTINGS.config.calEventKinds[id]=(document.getElementById('cek-kind')||{}).value||'screen';
+  const l=String((document.getElementById('cek-label')||{}).value||'').trim().slice(0,60);if(l)SETTINGS.config.calEventLabels[id]=l;
+  markSettingsDirty();_calKindsRepaint();
+}
+function _calKindSeed(){
+  SETTINGS.config.calEventKinds=SETTINGS.config.calEventKinds||{};SETTINGS.config.calEventLabels=SETTINGS.config.calEventLabels||{};
+  _CAL_FOUND.forEach(f=>{if(!SETTINGS.config.calEventKinds[f[0]]){SETTINGS.config.calEventKinds[f[0]]=f[2];SETTINGS.config.calEventLabels[f[0]]=f[1];}});
+  markSettingsDirty();_calKindsRepaint();toast('✓ Added — bookings for these events are now filed by number');
+}
 async function _backfillCalBookings(){
   try{
     const tok=(SETTINGS.config||{}).ziToken||'';if(!tok)return;
@@ -7689,6 +7743,8 @@ async function _backfillCalBookings(){
       if(cand.st.calBookingId===b.uid)continue; /* already on file */ if(b.uid&&(cand.st.consumedBookingIds||[]).indexOf(String(b.uid))>=0)continue; /* already USED - see _rememberConsumedBooking */
       const hasOtherUpcoming=cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
       if(hasOtherUpcoming)continue; /* a different live booking is already tracked — manual call */
+      const _bk=_calKindFor(b.eventTypeId,String((b.title||'')+' '+(b.eventTypeSlug||'')));
+      if(_bk==='none')continue; /* P-36: marked "not a hiring meeting" in Settings */
       /* THE WEBHOOK MAY BE WRITING THIS VERY ROW. A booking Cal.com lists but the row lacks is
          either one the webhook never delivered, or one it is delivering right now: this pass
          has just spent a worker + Cal.com round-trip since loadData read the sheet. Writing the
@@ -7707,7 +7763,7 @@ async function _backfillCalBookings(){
          definitive net under the webhook" for everyone after it. */
       try{
       cand.st.booking=b.start;
-      cand.st.bookingKind=/onboard|orientation|welcome|start/.test(hay)?'onboarding':/interview|final|in.person|meet|second|video/.test(hay)?'interview':/screen|phone|intro|initial|chat|call|first|consult/.test(hay)?'screen':null;
+      cand.st.bookingKind=_bk; /* P-36: event-type id first, words as the fallback */
       cand.st.bookingSource='cal-backfill';
       cand.st.bookingReceivedAt=new Date().toISOString();
       cand.st.calBooking=true;cand.st.calBookingId=b.uid||'';
@@ -7753,6 +7809,8 @@ async function _autoLinkUnmatchedBookings(){
     const hasUpcoming=cand&&cand.st&&cand.st.booking&&isFinite(Date.parse(cand.st.booking))&&Date.parse(cand.st.booking)>Date.now();
     if(!cand||_isTerminalStage(cand.stage)||hasUpcoming||_wsOpenOn(cand.excelRow)){keep.push(u);continue;}
     if(cand.st&&cand.st.__ajCorrupt){keep.push(u);continue;} /* rule 5 — never write over a corrupt cell */
+    const _uk=_calKindFor(u.eventTypeId,String(u.eventType||''));
+    if(_uk==='none'){keep.push(u);continue;} /* P-36: not a hiring meeting — stays in the pool for a manual decision */
     /* Never write the load-time copy over a cell that changed since (webhook, another operator's
        tab) — see _backfillCalBookings. The entry stays in the pool for the next pass. */
     if(!(await _ajUnchangedSinceLoad(cand))){keep.push(u);continue;}
@@ -7763,8 +7821,7 @@ async function _autoLinkUnmatchedBookings(){
       cand.st.bookingReceivedAt=new Date().toISOString();
       if(u.bookingId)cand.st.calBookingId=u.bookingId;
       if(u.email)cand.st.bookingAltEmail=u.email;
-      const hay=String(u.eventType||'').toLowerCase();
-      cand.st.bookingKind=/onboard|orientation|welcome|start/.test(hay)?'onboarding':/interview|final|in.person|meet|second|video/.test(hay)?'interview':/screen|phone|intro|initial|chat|call|first|consult/.test(hay)?'screen':null;
+      cand.st.bookingKind=_uk; /* P-36 */
       cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🔗 Booking auto-linked ('+(u.email||'?')+(u.eventType?' · '+u.eventType:'')+') — '+new Date(u.start).toLocaleString()});
       await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
       linked++;
@@ -22592,9 +22649,9 @@ function renderSettingsCalendars(){
     <label class="set-field">Phone screen URL<input type="text" id="cfg_calScreenUrl" placeholder="https://cal.com/your-name/phone-screen" value="${esc(SETTINGS.config.calScreenUrl||'')}"></label>
     <label class="set-field">Interview URL<input type="text" id="cfg_calInterviewUrl" placeholder="https://cal.com/your-name/interview" value="${esc(SETTINGS.config.calInterviewUrl||'')}"></label>
     <label class="set-field">Onboarding URL<input type="text" id="cfg_calOnboardingUrl" placeholder="https://cal.com/your-name/caregiver-onboarding" value="${esc(SETTINGS.config.calOnboardingUrl||'')}"></label>
-    <p class="set-help" style="margin-top:14px"><b>Important Cal.com setup:</b> name your event types so they contain the words "screen", "interview", or "onboarding" — that's how the webhook routes each booking to the right stage. Also add "Phone" as a booking question on each event so we can capture the candidate's number.</p>
+    <p class="set-help" style="margin-top:14px"><b>Cal.com setup:</b> list each hiring event in the card below so its bookings are filed by number. Any event you leave out is matched by the words "screen", "interview" or "onboarding" in its name. Also add "Phone" as a booking question on each event so we can capture the candidate's number.</p>
     <p class="set-help" style="margin-top:10px;font-size:11px;color:var(--soft);font-style:italic">All changes save automatically.</p>
-  </div>`;
+  </div>${_calKindsCardHtml()}`;
 }
 
 /* ----- BG CHECKS section ----- */
