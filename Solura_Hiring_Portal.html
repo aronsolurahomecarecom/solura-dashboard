@@ -7692,7 +7692,7 @@ async function _yardstikCatchUp(){
         if(CLEAN.includes(s)){lc.st.tpCheck='clear';y.decisionRequired=false;tail=' · check CLEAR';}
         else if(FLAG.includes(s)&&!y.decision){lc.st.tpCheck='flag';y.decisionRequired=true;tail=' · needs a manual decision';}
         else if(FLAG.includes(s)&&y.decision){tail=' · your '+String(y.decision).toUpperCase()+' decision stands';}
-        lc.st.log=(lc.st.log||[]).concat({t:stamp(),x:(tail.indexOf('manual')>=0?'⚠':'🛡')+' Yardstik catch-up: '+was+' → '+status+tail+' (asked Yardstik directly — no webhook message arrived)'});
+        lc.st.log=(lc.st.log||[]).concat({t:stamp(),x:(tail.indexOf('manual')>=0?'⚠':'🛡')+' Yardstik catch-up: '+(was===status?('report found, status still '+status):(was+' → '+status))+tail+' (asked Yardstik directly — no webhook message arrived)'});
         await patchRange('AJ'+lc.excelRow,[[_stCell(lc.st)]]);
         changed++;names.push(lc.name);
       }catch(e){
@@ -14153,7 +14153,11 @@ async function reallySend(tpl,advanceTo){
     const _curW=W;W=w;
     let _saveP,_fromStageForPdf,_seqStageFrom=null;
     try{
-    W.st.sent=W.st.sent||{};W.st.sent[tpl]=today();
+    /* P-37: a SECOND background-check request is remembered separately, so the repair panel can
+       show who has already been asked again (the first-send stamp is what the sequence reads). */
+    W.st.sent=W.st.sent||{};
+    if(tpl==='bg_request'&&(W.st.sent.bg_request||W.st.yardstik))W.st.sent.bg_request_again=today();
+    W.st.sent[tpl]=today();
     if(tpl==='interview_cert_warning')W.st.warnedForBooking=String(W.st.booking||''); /* warning is per booking — a reschedule re-arms it */
     /* Alias: a missed-stage rebook email IS functionally the rebook invite. If the user hits
        "no-show" and sends missed_screen/interview/onboarding, the sequence engine should NOT
@@ -23258,7 +23262,16 @@ function scanRaceAffected(){
     /* BG-check side: bg_request sent (or yardstik order log entry), but no yardstik state. */
     const bgSent=!!(sent.bg_request||(c.st.log||[]).some(l=>l&&l.x&&/Yardstik check ordered|BG check.*ordered/i.test(l.x)));
     const yardstikMissing=!c.st.yardstik||!c.st.yardstik.reportId;
-    if(bgSent&&yardstikMissing&&c.stage&&c.stage!=='Declined'&&c.stage!=='Hired'){
+    /* P-37 (Meir, option 2: "send the request again first, re-order only for whoever
+       responds"). The request went out and the check never became a result: either no order
+       is on record at all, or Yardstik says the invitation died (expired / cancelled) with
+       nothing submitted. A check that HAS a result — clear, or flagged and waiting on a
+       decision — is never listed (it does not need asking again; it needs deciding). */
+    const _ysS=String((c.st.yardstik&&c.st.yardstik.status)||'').toLowerCase();
+    const _ysDead=(_ysS==='expired'||_ysS==='canceled'||_ysS==='cancelled');
+    const _hasResult=c.st.tpCheck==='clear'||c.st.tpCheck==='flag'||!!(c.st.yardstik&&(c.st.yardstik.decisionRequired||c.st.yardstik.decision));
+    if((bgSent||_ysDead)&&(yardstikMissing||_ysDead)&&!_hasResult&&c.stage&&!_isTerminalStage(c.stage)){
+      c.__bgDead=_ysDead;
       bgAffected.push(c);
     }
     /* Booking side: interview_invite or screen_invite sent, candidate stage suggests they should
@@ -23281,8 +23294,12 @@ function scanRaceAffected(){
         <span style="font-size:10.5px;color:var(--soft)">${esc(c.email||'')}</span>
         <span class="pill psoft" style="font-size:9.5px">BG sent ${esc(when)}</span>
       </div>
-      <div style="font-size:11.5px;color:var(--mid);margin-bottom:7px">No Yardstik state on file. Open them in Yardstik (search by email), copy the report ID, paste below to re-link.</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+      <div style="font-size:11.5px;color:var(--mid);margin-bottom:7px">${c.__bgDead?'Yardstik says this invitation <b>expired</b> — the candidate never finished the form, so there is no check. Ask them again first (free); re-order in their workspace only if they answer.':'No Yardstik state on file. Open them in Yardstik (search by email), copy the report ID, paste below to re-link — or ask them again first (free).'}${(c.st.sent||{}).bg_request_again?' <span style="color:var(--grn-deep);font-weight:600">Asked again '+esc(String(c.st.sent.bg_request_again))+'.</span>':''}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <button class="btn-sm bg-gold" onclick="sendBgRequestAgain(${c.excelRow})" style="cursor:pointer" title="Opens the email composer with the background-check request for this candidate. Nothing is sent until you press Send.">✉ Send the BG request again…</button>
+        <button class="btn-sm" style="background:#fff;border:1px solid var(--soft);color:var(--soft);cursor:pointer;font-size:11px" onclick="openWorkspace(${c.excelRow});if(typeof closeSettings==='function')closeSettings();">open workspace</button>
+      </div>
+      <div style="display:${c.__bgDead?'none':'flex'};gap:6px;flex-wrap:wrap;align-items:center">
         <input type="text" id="race-repair-rpt-${c.excelRow}" placeholder="Paste Yardstik report ID" style="flex:1;min-width:200px;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-family:Menlo,monospace;font-size:11.5px">
         <button class="btn-sm bg-cream" onclick="restoreYardstikReportId(${c.excelRow})" style="cursor:pointer">↻ Re-link &amp; refresh</button>
         <button class="btn-sm" style="background:#fff;border:1px solid var(--soft);color:var(--soft);cursor:pointer;font-size:11px" onclick="markBgManuallyClear(${c.excelRow})" title="Skip re-linking — just mark the BG check as clear (use only if you've confirmed it cleared in Yardstik dashboard)">mark BG clear</button>
@@ -23393,6 +23410,19 @@ async function markBgManuallyClear(excelRow){
 
 /* Send a rebook email. Reuses the existing missed_screen / missed_interview / missed_onboarding
    templates since they're already structured around "pick a new time" via the Cal.com link. */
+/* P-37 — opens the composer on the background-check request for ONE candidate. It only opens:
+   the send is the operator's own click on Send, like every other composer email. */
+function sendBgRequestAgain(excelRow){
+  const c=pipeline.find(x=>x.excelRow===excelRow);
+  if(!c){toast('Candidate not found');return;}
+  if(!c.email){toast('No email address on file for '+(c.name||'this candidate'));return;}
+  openWorkspace(c.excelRow);
+  setTimeout(()=>{
+    if(!W||W.row!==excelRow)return;
+    const t=getEffectiveTemplate('bg_request',W);
+    emailModal('bg_request',t.s,t.b);
+  },300);
+}
 async function sendRebookEmail(excelRow,which){
   const c=pipeline.find(x=>x.excelRow===excelRow);
   if(!c){toast('Candidate not found');return;}
