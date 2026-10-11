@@ -11818,12 +11818,19 @@ async function pollIntake(){
          this dashboard's link registry, but the lead must still say WHO sent the family —
          a virtual link labels it without touching the registry or its fill counters. */
       if(!link&&/^CG-/i.test(String(sub.code||''))){
-        link={platform:'Caregiver referral',method:String(sub.code).toUpperCase(),code:sub.code,_virtual:true};
+        /* Plain platform, NO per-code method: every caregiver-shared lead groups under ONE
+           "Caregiver referral" source (Meir 2026-10-11) — the per-caregiver detail lives in
+           the collapsed section under Intake links and on the caregiver's own portal profile. */
+        link={platform:'Caregiver referral',method:'',code:sub.code,_virtual:true};
       }
       try{
         await intakeCreateLead(sub,link);
         ackKeys.push(sub.key);made++;
         if(link&&!link._virtual){link.fills=(link.fills||0)+1;link.lastFillAt=Date.now();saveEnginesDoc().catch(function(){});}
+        if(link&&link._virtual){
+          try{_recordCgReferral(sub);}catch(_){}
+          try{_notifyHiringCgReferral(sub);}catch(_){}
+        }
         toast('📥 New lead from '+intakeSourceString(link)+': '+(sub.name||sub.email||sub.phone||'(no name)'));
       }catch(eC){
         delete _intakeSeen[sub.key]; // retry on the next poll
@@ -11840,14 +11847,68 @@ async function pollIntake(){
   }catch(_){/* best-effort, like the mail poll */}
 }
 /* ⚡INTAKE — END */
+/* ── Caregiver-shared intake links (CG-* codes from the HIRING portal) ──
+   Aggregated here, detailed on demand; the hiring worker credits the caregiver's own
+   profile (customerReferrals) so the portal's reward activity updates automatically. */
+var HIRING_WEBHOOK='https://solura-hiring-webhook.meir-865.workers.dev';
+function cgReferrals(){
+  enginesDoc.config=enginesDoc.config||{};
+  var m=enginesDoc.config.cgReferrals;
+  if(!m)m=enginesDoc.config.cgReferrals={};
+  return m;
+}
+function _recordCgReferral(sub){
+  var code=String(sub.code||'').toUpperCase();
+  var m=cgReferrals();
+  var e=m[code]||(m[code]={fills:0,leads:[]});
+  e.fills=(e.fills||0)+1;e.lastFillAt=Date.now();
+  e.leads=e.leads||[];
+  e.leads.unshift({name:String(sub.pt||sub.name||'(no name)').slice(0,80),ts:Date.now()});
+  if(e.leads.length>20)e.leads.length=20;
+  saveEnginesDoc().catch(function(){});
+}
+function _notifyHiringCgReferral(sub){
+  /* Fire-and-forget: the hiring worker adds the customer-referral entry on the caregiver's
+     row (found by their refCode), which the portal shows on its next refresh. Failure here
+     never blocks the lead import — the aggregate above still records the fill. */
+  try{
+    fetch(HIRING_WEBHOOK+'/caregiver-referral',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({code:String(sub.code||''),clientName:String(sub.pt||sub.name||'').slice(0,120),clientPhone:String(sub.phone||'').slice(0,30)})}).catch(function(){});
+  }catch(_){}
+}
 function renderIntakeLinks(){
   var host=el('intake-links-list');if(!host)return;
   var tc=null;try{tc=trackerCfg();}catch(_){}
   var warn=el('intake-worker-warn');
   if(warn)warn.textContent=tc?'':'⚠ Set the tracker URL + token first (Settings → Data & analytics) — submissions queue on that worker.';
   var L=intakeLinks();
+  /* ONE aggregated caregiver-referral section (Meir 2026-10-11): never a row per caregiver —
+     a single collapsed block with the totals, expandable for the per-caregiver detail. */
+  var cgBlock='';
+  (function(){
+    var CG=cgReferrals();var codes=Object.keys(CG);if(!codes.length)return;
+    var total=0;codes.forEach(function(c){total+=CG[c].fills||0;});
+    codes.sort(function(a,b){return (CG[b].lastFillAt||0)-(CG[a].lastFillAt||0);});
+    cgBlock='<details style="margin-top:16px;border:1.5px solid #C59B4E;border-radius:10px;background:#FBF7EE;padding:0;overflow:hidden">'
+      +'<summary style="cursor:pointer;padding:10px 12px;font-size:12px;font-weight:800;color:#8B6500;list-style:none;display:flex;gap:8px;align-items:center">🤝 Caregiver referrals'
+      +'<span style="font-weight:600;color:var(--mid)">· '+total+' famil'+(total===1?'y':'ies')+' from '+codes.length+' caregiver'+(codes.length===1?'':'s')+'</span>'
+      +'<span style="margin-left:auto;font-weight:600;color:var(--soft);font-size:11px">open for detail ▾</span></summary>'
+      +'<div style="padding:4px 12px 10px">'
+      +codes.map(function(c){
+        var e=CG[c];
+        var names=(e.leads||[]).slice(0,5).map(function(x){return escapeHtml(x.name);}).join(', ');
+        return '<div style="border-top:1px solid var(--border);padding:8px 0;font-size:12px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">'
+          +'<code style="font-size:11px;background:var(--warm);padding:2px 8px;border-radius:6px">'+escapeHtml(c)+'</code>'
+          +'<span style="color:var(--grn);font-weight:700">'+(e.fills||0)+' fill'+((e.fills||0)!==1?'s':'')+'</span>'
+          +(e.lastFillAt?'<span style="color:var(--soft);font-size:11px">last '+new Date(e.lastFillAt).toLocaleDateString()+'</span>':'')
+          +(names?'<span style="color:var(--mid);font-size:11px;flex-basis:100%">'+names+'</span>':'')
+          +'</div>';
+      }).join('')
+      +'<div style="font-size:10.5px;color:var(--soft);margin-top:6px">Codes are CG-&lt;caregiver referral code&gt; from the hiring portal — the caregiver’s profile there shows the matching reward entry.</div>'
+      +'</div></details>';
+  })();
   if(!L.length){
-    host.innerHTML='<div style="color:var(--soft);font-size:12px">No links yet. Create one per platform — each gets its own URL, so every lead that comes in says exactly where it came from.</div>';
+    host.innerHTML='<div style="color:var(--soft);font-size:12px">No links yet. Create one per platform — each gets its own URL, so every lead that comes in says exactly where it came from.</div>'+cgBlock;
     return;
   }
   host.innerHTML=groupIntakeLinks(L).map(function(g){
@@ -11867,7 +11928,7 @@ function renderIntakeLinks(){
           +'</div>';
       }).join('')
       +'</div>';
-  }).join('');
+  }).join('')+cgBlock;
 }
 function intakeNoteChanged(ta){
   var L=intakeLinks();
