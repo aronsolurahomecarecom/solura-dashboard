@@ -7680,7 +7680,16 @@ async function _yardstikCatchUp(){
       const lc=_liveCandAfterAwait(c.excelRow,c);
       if(!lc||!lc.st||!lc.st.yardstik||_wsOpenOn(lc.excelRow)||_isTerminalStage(lc.stage))continue;
       const y=lc.st.yardstik;
-      if(String(y.status||'')===status&&String(y.reportId||'')===String(rid||''))continue; /* nothing new — no write, no log */
+      /* "Nothing new" means the status is on file AND its consequence is. Comparing the status alone
+         skipped a row whose status had landed without its mapping: r93 read "proceed" (Yardstik
+         resolved its own earlier "consider") with decisionRequired still true from the flag - so the
+         catch-up asked about her every 30 minutes for ever (never "settled" above), never wrote,
+         and "Decide on background report" stayed armed on a report with nothing left to decide.
+         The per-candidate Refresh settles exactly this case; the automated one now does too. */
+      const _s0=status.toLowerCase();
+      const _applied=CLEAN.includes(_s0)?(lc.st.tpCheck==='clear'&&!y.decisionRequired):(FLAG.includes(_s0)&&!y.decision)?(lc.st.tpCheck==='flag'&&!!y.decisionRequired):true;
+      const _hadRid=!!y.reportId;
+      if(String(y.status||'')===status&&String(y.reportId||'')===String(rid||'')&&_applied)continue; /* nothing new — no write, no log */
       if(!(await _ajUnchangedSinceLoad(lc)))continue; /* webhook / another tab wrote it — next pass */
       const snap=JSON.stringify(lc.st);
       try{
@@ -7692,7 +7701,7 @@ async function _yardstikCatchUp(){
         if(CLEAN.includes(s)){lc.st.tpCheck='clear';y.decisionRequired=false;tail=' · check CLEAR';}
         else if(FLAG.includes(s)&&!y.decision){lc.st.tpCheck='flag';y.decisionRequired=true;tail=' · needs a manual decision';}
         else if(FLAG.includes(s)&&y.decision){tail=' · your '+String(y.decision).toUpperCase()+' decision stands';}
-        lc.st.log=(lc.st.log||[]).concat({t:stamp(),x:(tail.indexOf('manual')>=0?'⚠':'🛡')+' Yardstik catch-up: '+(was===status?('report found, status still '+status):(was+' → '+status))+tail+' (asked Yardstik directly — no webhook message arrived)'});
+        lc.st.log=(lc.st.log||[]).concat({t:stamp(),x:(tail.indexOf('manual')>=0?'⚠':'🛡')+' Yardstik catch-up: '+(was===status?(_hadRid?('status '+status+' was on file but not applied'):('report found, status still '+status)):(was+' → '+status))+tail+' (asked Yardstik directly — no webhook message arrived)'});
         await patchRange('AJ'+lc.excelRow,[[_stCell(lc.st)]]);
         changed++;names.push(lc.name);
       }catch(e){
@@ -15834,11 +15843,19 @@ async function vrT2Advance(){
      vocabulary a sequence need not contain (rule 3). Move forward within their own sequence or not at all. */
   const nx=_stageAfterVerify({st:W.st,stage:W.stage});
   if(nx)return advanceWS(nx,'Independent references complete');
+  const w=W,_pvDone=(w.st.vr||{}).t2DoneAt,_pvLogN=(w.st.log||[]).length;
   W.st.vr=W.st.vr||{};W.st.vr.t2DoneAt=new Date().toISOString();
   logW('✓ Independent references complete — stage left as '+W.stage);
-  await saveW(true);
-  toast('✓ Independent references complete — stage left as '+W.stage);
-  renderWorkspace();
+  /* A refused save is not a completion (saveW has already said why): put the stamp back
+     instead of toasting success over the failure. */
+  if((await _saveWFor(w,true))===false){
+    if(_pvDone===undefined)delete w.st.vr.t2DoneAt;else w.st.vr.t2DoneAt=_pvDone;
+    if(Array.isArray(w.st.log)&&w.st.log.length>_pvLogN)w.st.log.length=_pvLogN;
+    if(W===w)renderWorkspace();
+    return;
+  }
+  toast('✓ Independent references complete — stage left as '+w.stage);
+  if(W===w)renderWorkspace();
 }
 function vrDisqualify(){if(confirm('Disqualify — employment could not be verified?'))quickDecline(W.row);} /* W.row, not W.excelRow — the latter is undefined and only worked because loadW(undefined) returns early */
 
@@ -15850,6 +15867,7 @@ function vrDisqualify(){if(confirm('Disqualify — employment could not be verif
 async function skipEmployerVerification(){
   if(!W)return;
   if(!confirm('Skip employer verification for '+W.name+'?\n\nThis waives the check (logged on the candidate) and moves them to the next stage.'))return;
+  const w=W,_pvWaived=w.st.employerVerifyWaived,_pvStage=w.stage,_pvLogN=(w.st.log||[]).length;
   W.st.employerVerifyWaived=new Date().toISOString();
   logW('⏭ Employer verification waived by '+(userEmail||'operator'));
   const cand=pipeline.find(x=>x.excelRow===W.row);
@@ -15875,9 +15893,18 @@ async function skipEmployerVerification(){
      waiver, leave column G alone (rule 2). */
   const moving=!!next&&here>=0&&here<=i;
   if(moving)W.stage=next;
-  await saveW(true);
-  toast(moving?('⏭ Verification skipped — moved to '+next):'⏭ Verification waived — stage left as '+W.stage);
-  renderWorkspace();
+  /* A refused or failed save is not a waiver: the toast said "moved to <next>" and the open
+     workspace showed the new stage and an open employersVerified gate while the row held
+     neither. Put all three back (saveW has already said why). */
+  if((await _saveWFor(w,true))===false){
+    if(_pvWaived===undefined)delete w.st.employerVerifyWaived;else w.st.employerVerifyWaived=_pvWaived;
+    w.stage=_pvStage;
+    if(Array.isArray(w.st.log)&&w.st.log.length>_pvLogN)w.st.log.length=_pvLogN;
+    if(W===w)renderWorkspace();
+    return;
+  }
+  toast(moving?('⏭ Verification skipped — moved to '+next):'⏭ Verification waived — stage left as '+w.stage);
+  if(W===w)renderWorkspace();
 }
 function verifyBlock(){
   vrInit(W.st);
@@ -16005,7 +16032,7 @@ function vrTier1View(emp,cfg){
      for the manual-only path. */
   const _vcfg=SETTINGS.config||{};
   const _hasVerify=!!(_vcfg.yardstikAccountId&&_vcfg.yardstikVerifyPackageId);
-  const _unresolved=emp.filter(e=>e&&(e.name||'').trim()&&!e.v&&!(e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running'))).length;
+  const _unresolved=emp.filter(e=>e&&(e.name||'').trim()&&!e.v&&!(e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running'||e.yStatus==='verified'||e.yStatus==='flagged'))).length;
   const _verifyBtn=(_hasVerify&&_unresolved)?`<button class="btn-sec" style="margin-top:6px;width:auto;padding:7px 13px;background:linear-gradient(135deg,#FFFCF5,#FAF6EE);border:1.5px solid var(--gold-mid);color:var(--gold-deep);cursor:pointer;font-weight:600" onclick="orderYardstikVerification()" title="Have Yardstik verify the ${_unresolved} unresolved employer${_unresolved===1?'':'s'} via the configured verification package">🛡 Verify ${_unresolved} via Yardstik</button>`:'';
   return `${srcNote}${rows}
     <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-sec bg-cream" style="margin-top:6px;width:auto;padding:7px 13px" onclick="W.st.employers=W.st.employers||[];W.st.employers.push({name:'',phone:'',v:'',source:'manual'});renderWorkspace()">+ add employer</button>${_verifyBtn}</div>
@@ -16706,8 +16733,11 @@ async function orderYardstikVerification(){
   const tok=cfg.ziToken||'';
   if(!tok){toast('Set internal worker token first in Settings → 🔌 Integrations');return;}
   /* Targets: employers without a verdict AND not already Yardstik-in-flight. Manual-cleared
-     rows are left alone — user already did the work, don't re-order on top of that. */
-  const targets=(W.st.employers||[]).filter(e=>e&&(e.name||'').trim()&&!e.v&&!(e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running')));
+     rows are left alone — user already did the work, don't re-order on top of that.
+     Nor is an employer Yardstik has ALREADY answered for (yStatus verified / flagged, waiting on
+     the one-click Accept): it has no verdict yet, so it used to count as "unresolved" and one
+     click on "Verify N via Yardstik" placed a second, billable order for a finished check. */
+  const targets=(W.st.employers||[]).filter(e=>e&&(e.name||'').trim()&&!e.v&&!(e.ySrc==='yardstik'&&(e.yStatus==='ordered'||e.yStatus==='running'||e.yStatus==='verified'||e.yStatus==='flagged')));
   if(!targets.length){toast('No unresolved employers to verify');return;}
   if(!confirm('Order Yardstik employment verification for '+targets.length+' employer'+(targets.length===1?'':'s')+'?\n\nYardstik will contact each and report back per-employer; each result then shows on its row with a one-click Accept (nothing is decided until you click).'))return;
   /* Same capture as _orderYardstikGo: after the await, the global W may be the NEXT candidate the
@@ -16742,7 +16772,16 @@ async function orderYardstikVerification(){
     w.st.yardstik.verifyOrderedAt=new Date().toISOString();
     targets.forEach(t=>{const emp=(w.st.employers||[]).find(e=>e===t);if(emp){emp.ySrc='yardstik';emp.yStatus='ordered';}});
     w.st.log=w.st.log||[];w.st.log.push({t:stamp(),x:'🔍 Employment verification ordered · '+targets.length+' employer'+(targets.length===1?'':'s')});
-    await _saveWFor(w,true);
+    /* The order is PLACED (and billable) at this point whatever the save does. A refused or failed
+       save used to be painted over by the success toast; after a reload nothing on the row said an
+       order existed, no employer was in flight, and the Order button was back for a duplicate
+       charge. Memory keeps the order (it is the truth) so the next successful save of this
+       workspace records it — and the operator is told, in a dialog that does not fade. */
+    if((await _saveWFor(w,true))===false){
+      alert('The verification order WAS placed with Yardstik for '+(w.name||'this candidate')+', but it could not be recorded on their row.\n\nDo NOT order again. Keep this workspace open and save again (any edit saves), or note the order and reload.');
+      if(W===w)renderWorkspace();
+      return;
+    }
     toast('✓ Verification ordered for '+targets.length+' employer'+(targets.length===1?'':'s'));
     /* Sequences that include a verification step advance when the order completes. */
     await _seqAdvanceIfIntent(w.row,it=>it.type==='integration'&&it.provider==='yardstik'&&/verification/.test(it.action||''),'employment verification ordered');
@@ -17174,7 +17213,8 @@ async function requestCredentialRenewal(id){
 
 async function applyBgOverride(gateKey,newValue,labelEsc){
   if(!W)return;
-  const w=W; /* the gate PATCH is awaited before the log + save: a switch meanwhile logged and saved the wrong candidate while this one's override stamp was never persisted */
+  const w=W; /* pinned: the save is awaited, and a switch meanwhile must not log/save the wrong candidate */
+  const _pvOv=JSON.stringify(w.st.bgOverrides||null),_pvGate=w.gates[gateKey],_pvLogN=(w.st.log||[]).length;
   W.st.bgOverrides=W.st.bgOverrides||{};
   /* Stash the original (candidate-claimed) value so a Revert button can restore it. */
   const origKey='_orig'+gateKey.charAt(0).toUpperCase()+gateKey.slice(1);
@@ -17185,10 +17225,19 @@ async function applyBgOverride(gateKey,newValue,labelEsc){
   /* Also write to the row's gate cell so the gate UI reflects it immediately. The candidate's
      original answer is preserved on st.bgOverrides._origXx. */
   W.gates[gateKey]=newValue;
-  const colMap={wa:'H',cr:'I',bg:'J',tr:'K',av:'L'};
-  await patchRange(colMap[gateKey]+w.row,[[newValue]]);
+  /* ONE write. The gate cell used to be PATCHed on its own first and the state saved second:
+     when that save was refused (state too large, corrupt cell) or failed, column H..L already
+     held the overridden answer with no _orig record anywhere to revert it from - the candidate's
+     own answer was gone for good - and the success toast showed regardless. saveW writes G:L and
+     AJ in the same batch, so the gate and its record now land together or not at all. */
   w.st.log=w.st.log||[];w.st.log.push({t:stamp(),x:'🛡 Applied BG override — '+(labelEsc||gateKey)+' → '+newValue+' (was '+w.st.bgOverrides[origKey]+')'});
-  await _saveWFor(w,true);
+  if((await _saveWFor(w,true))===false){
+    if(_pvOv==='null')delete w.st.bgOverrides;else w.st.bgOverrides=JSON.parse(_pvOv);
+    w.gates[gateKey]=_pvGate;
+    if(Array.isArray(w.st.log)&&w.st.log.length>_pvLogN)w.st.log.length=_pvLogN;
+    if(W===w)renderWorkspace();
+    return;
+  }
   toast('✓ Override applied to gate "'+gateKey+'"');
   if(W===w)renderWorkspace();
   render();
@@ -17208,16 +17257,20 @@ async function dismissBgConflict(gateKey){
 async function revertBgOverride(gateKey){
   if(!W||!W.st.bgOverrides)return;
   const w=W; /* see applyBgOverride */
+  const _pvOv=JSON.stringify(w.st.bgOverrides),_pvGate=w.gates[gateKey],_pvLogN=(w.st.log||[]).length;
   const origKey='_orig'+gateKey.charAt(0).toUpperCase()+gateKey.slice(1);
   const orig=W.st.bgOverrides[origKey]||'';
   delete W.st.bgOverrides[gateKey];
   delete W.st.bgOverrides[origKey];
   /* Restore the original gate value */
   W.gates[gateKey]=orig;
-  const colMap={wa:'H',cr:'I',bg:'J',tr:'K',av:'L'};
-  await patchRange(colMap[gateKey]+w.row,[[orig]]);
   w.st.log=w.st.log||[];w.st.log.push({t:stamp(),x:'↺ Reverted BG override on "'+gateKey+'" — restored candidate\'s claim ('+orig+')'});
-  await _saveWFor(w,true);
+  if((await _saveWFor(w,true))===false){ /* one write, rolled back when refused - see applyBgOverride */
+    w.st.bgOverrides=JSON.parse(_pvOv);w.gates[gateKey]=_pvGate;
+    if(Array.isArray(w.st.log)&&w.st.log.length>_pvLogN)w.st.log.length=_pvLogN;
+    if(W===w)renderWorkspace();
+    return;
+  }
   toast('Override reverted');
   if(W===w)renderWorkspace();
   render();
@@ -23350,6 +23403,7 @@ async function restoreYardstikReportId(excelRow){
   const tok=(SETTINGS.config||{}).ziToken||'';
   if(!tok){toast('Set internal worker token first');return;}
   c.st=c.st||{};
+  const _pvY=JSON.stringify(c.st.yardstik||null),_pvTp=c.st.tpCheck,_pvLogN=(c.st.log||[]).length;
   c.st.yardstik=c.st.yardstik||{};
   c.st.yardstik.reportId=reportId;
   c.st.yardstik.orderedAt=c.st.yardstik.orderedAt||new Date().toISOString();
@@ -23389,7 +23443,14 @@ async function restoreYardstikReportId(excelRow){
   }
   try{
     await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
-  }catch(e){toast('✗ Re-link NOT saved: '+e.message);return;}
+  }catch(e){
+    /* NOT saved means NOT linked: memory kept the report id, status and tpCheck, so the board showed
+       the check as linked (even CLEAR, offer gate open) until the next reload silently took it back. */
+    if(_pvY==='null')delete c.st.yardstik;else c.st.yardstik=JSON.parse(_pvY);
+    if(_pvTp===undefined)delete c.st.tpCheck;else c.st.tpCheck=_pvTp;
+    if(Array.isArray(c.st.log)&&c.st.log.length>_pvLogN)c.st.log.length=_pvLogN;
+    toast('✗ Re-link NOT saved: '+e.message);return;
+  }
   /* Mirror into an open workspace — see markBgManuallyClear below for why W can be holding this row. */
   if(W&&W.row===c.excelRow&&W.st!==c.st)W.st=c.st;
   toast(fetchErr?('✓ Re-linked '+esc(c.name)+' — saved, but the status fetch failed: '+String(fetchErr).slice(0,60)):('✓ Re-linked '+esc(c.name)+' · status '+(data&&data.status||'pending')));
@@ -23404,9 +23465,19 @@ async function markBgManuallyClear(excelRow){
   if(!c){toast('Candidate not found');return;}
   if(!confirm('Mark BG check as CLEAR for '+c.name+'?\n\nUse this only if you have already confirmed in the Yardstik dashboard that the report came back clear. This clears the "not started" symptom without re-linking the live Yardstik report.'))return;
   c.st=c.st||{};
+  const _pvTp=c.st.tpCheck,_pvLogN=(c.st.log||[]).length;
   c.st.tpCheck='clear';
   c.st.log=c.st.log||[];c.st.log.push({t:stamp(),x:'🩹 BG check manually marked clear via race repair'});
-  await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+  /* The write was unguarded: _stCell's refusal (corrupt / oversized cell) or a failed PATCH threw out
+     of this handler with no message at all, and memory kept tpCheck 'clear' - the Offer hard gate
+     open on the board for a clearance the sheet never received. */
+  try{
+    await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+  }catch(e){
+    if(_pvTp===undefined)delete c.st.tpCheck;else c.st.tpCheck=_pvTp;
+    if(Array.isArray(c.st.log)&&c.st.log.length>_pvLogN)c.st.log.length=_pvLogN;
+    toast('✗ BG clear NOT saved: '+((e&&e.message)||e));return;
+  }
   /* Same deep-copy hazard as _sendNudgeHeadless/_staleCallDone: W is never nulled (closeWorkspace clears
      only wsRow) and this race-repair panel offers openWorkspace on the very rows it lists, so the operator
      can be holding a pre-repair snapshot. Unmirrored, the next Save reverts tpCheck to '' and the Offer
