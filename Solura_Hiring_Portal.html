@@ -2698,6 +2698,29 @@ input[type="text"]:focus:not(#search),input[type="search"]:focus:not(#search){ba
     }
   }
 
+  // findRepeatedTemplates(sequence) -> [{templateKey, stepIds[], labels[]}]
+  // P-40 (editor rule, NOT part of validateSequence — the host validates stored
+  // sequences on load and must never start rejecting one already in service).
+  // The host records "this template went to them" per TEMPLATE for the
+  // candidate's lifetime, so a template placed on two email steps would only
+  // ever go out once. The editor refuses to save that; a reminder gets its own
+  // copy of the template.
+  function findRepeatedTemplates(sequence) {
+    var seen = {}, order = [];
+    var steps = (sequence && Array.isArray(sequence.steps)) ? sequence.steps : [];
+    for (var i = 0; i < steps.length; i++) {
+      var st = steps[i];
+      if (!st || st.kind !== 'email' || !st.email || !st.email.templateKey) continue;
+      var k = st.email.templateKey;
+      if (!seen[k]) { seen[k] = { templateKey: k, stepIds: [], labels: [] }; order.push(k); }
+      seen[k].stepIds.push(st.id);
+      seen[k].labels.push(st.label || st.id);
+    }
+    var out = [];
+    for (var j = 0; j < order.length; j++) if (seen[order[j]].stepIds.length > 1) out.push(seen[order[j]]);
+    return out;
+  }
+
   // validateSequence(sequence) -> {ok, errors[], stepErrors:{stepId:[msg]}}
   // errors[] keeps the v2 flat-string shape; stepErrors powers the canvas
   // editor's on-step error rendering.
@@ -3142,7 +3165,10 @@ input[type="text"]:focus:not(#search),input[type="search"]:focus:not(#search){ba
   var CATALOG_ACTIONS = {
     'send-email':    { kind: 'email',          label: 'Send email',            icon: '✉️', group: 'comms',
                        /* No per-email auto-send toggle: "Automate this step" is the ONE control (P-7). */
-                       params: [{ key: 'templateKey', type: 'template', label: 'Template', required: true, path: 'email.templateKey' }] },
+                       /* P-49 — the "no reply yet" nudge for THIS email. Read by the host's nudge
+                          banner / Nudge all / silence ladder; blank = the host's built-in table. */
+                       params: [{ key: 'templateKey', type: 'template', label: 'Template', required: true, path: 'email.templateKey' },
+                                { key: 'nudgeTemplateKey', type: 'template', label: 'Nudge if no reply (optional)', path: 'email.nudgeTemplateKey' }] },
     'wait':          { kind: 'wait',           label: 'Wait / awaiting',       icon: '⏳', group: 'flow',
                        params: [{ key: 'trigger', type: 'trigger', label: 'Wake on', required: true, path: 'wait.trigger' },
                                 { key: 'nudgeTemplate', type: 'template', label: 'Nudge template (optional)', path: 'wait.nudge.templateKey' },
@@ -4096,6 +4122,16 @@ input[type="text"]:focus:not(#search),input[type="search"]:focus:not(#search){ba
     function deleteSequence() {
       var seq = selected();
       if (!seq) return;
+      // P-45 — a job package that names this sequence would silently fall back to
+      // the default flow. Refuse, and say which job to re-point first.
+      var users = [];
+      try { users = (typeof opts.sequenceUsers === 'function' ? opts.sequenceUsers(seq.id) : null) || []; } catch (e) { users = []; }
+      if (users.length) {
+        window.alert('Not deleted — "' + seq.name + '" is still the sequence for ' +
+          (users.length === 1 ? 'the job "' + users[0] + '"' : users.length + ' jobs: ' + users.join(', ')) +
+          '.\n\nOpen ' + (users.length === 1 ? 'that job' : 'each job') + ' in Settings → Jobs, pick a different sequence there, then delete this one.');
+        return;
+      }
       if (!window.confirm('Delete sequence "' + seq.name + '"? Candidates already on it keep their pointer and will surface a repair flag.')) return;
       state.sequences = state.sequences.filter(function (s) { return s !== seq; });
       state.assignments = state.assignments.filter(function (a) { return !a || a.sequenceId !== seq.id; });
@@ -4111,6 +4147,11 @@ input[type="text"]:focus:not(#search),input[type="search"]:focus:not(#search){ba
       state.sequences.forEach(function (s) {
         var v = validateSequence(s);
         if (!v.ok) bad.push(s.name + ': ' + v.errors[0] + (v.errors.length > 1 ? ' (+' + (v.errors.length - 1) + ' more)' : ''));
+        // P-40 — one template, one email step. See findRepeatedTemplates.
+        findRepeatedTemplates(s).forEach(function (r) {
+          bad.push(s.name + ': the template "' + tplLabel(r.templateKey) + '" is used by ' + r.stepIds.length + ' email steps (' + r.labels.join(', ') +
+            '). It would only ever be sent once per candidate — give the later step its own copy of the template.');
+        });
       });
       state.packs.forEach(function (p) {
         var v = validatePack(p);
@@ -5141,6 +5182,7 @@ input[type="text"]:focus:not(#search),input[type="search"]:focus:not(#search){ba
     assignSequence: assignSequence,
     advanceStep: advanceStep,
     validateSequence: validateSequence,
+    findRepeatedTemplates: findRepeatedTemplates,
     exportSequence: exportSequence,
     importSequence: importSequence,
     resolveSequenceFor: resolveSequenceFor,
@@ -11292,6 +11334,46 @@ function computeIdleDays(c){
    same continuum but uses only the highest-stakes invitation stages. */
 const NUDGE_STAGES=['Screen invite','Ask references','Verify employers','References','Interview invite','Onboarding','Applied'];
 
+/* P-49 — the nudge an email step names for itself, in the candidate's OWN sequence.
+   Walks BACKWARD from their pointer to the nearest email step and returns that step's
+   email.nudgeTemplateKey (or null). The walk may pass the stage step for the stage they
+   are standing at (an invite email usually sits just before the stage it leads to) but
+   stops at any OTHER stage step, so a quiet candidate is never nudged with an earlier
+   stage's reminder. No step ids or stage names are assumed (rule 3). */
+function _stepNudgeTplFor(c){
+  try{
+    const st=c&&c.st;if(!st||!st.sequenceId||!st.sequenceStepId)return null;
+    const seq=(SETTINGS.sequences||[]).find(q=>q&&q.id===st.sequenceId);
+    if(!seq||!Array.isArray(seq.steps))return null;
+    const byId={};seq.steps.forEach(s=>{if(s&&s.id)byId[s.id]=s;});
+    if(!byId[st.sequenceStepId])return null;
+    const preds={};
+    const link=(from,to)=>{if(to!=null&&byId[to])(preds[to]=preds[to]||[]).push(from);};
+    seq.steps.forEach(s=>{if(!s||!s.id)return;link(s.id,s.next);if(s.kind==='branch'&&s.branch){link(s.id,s.branch.then);link(s.id,s.branch.else);}});
+    const seen={};let frontier=[st.sequenceStepId];
+    for(let depth=0;depth<40&&frontier.length;depth++){
+      const next=[];
+      for(const id of frontier){
+        if(seen[id])continue;seen[id]=1;
+        const s=byId[id];if(!s)continue;
+        if(s.kind==='email'&&s.email&&s.email.templateKey){
+          const k=s.email.nudgeTemplateKey;
+          return (k&&typeof getEffectiveTemplate==='function')?k:null;
+        }
+        if(s.kind==='stage'&&s.stage&&s.stage.setStage&&s.stage.setStage!==c.stage)continue;
+        (preds[id]||[]).forEach(p=>next.push(p));
+      }
+      frontier=next;
+    }
+  }catch(e){}
+  return null;
+}
+/* The nudge for THIS candidate: their email step's own choice first, the fixed stage
+   table as the fallback for steps that name none. */
+function _nudgeTplForCand(c){
+  return _stepNudgeTplFor(c)||_nudgeTplFor(c&&c.stage);
+}
+
 /* Match nudge-template to stage so a single "Send nudge" works contextually */
 function _nudgeTplFor(stage){
   if(stage==='Screen invite')return 'screen_nudge';
@@ -11308,7 +11390,9 @@ function _nudgeTplFor(stage){
 function needsNudge(c){
   const ndays=(SETTINGS.config&&SETTINGS.config.nudgeDays)||3;
   const rdays=(SETTINGS.config&&SETTINGS.config.autoRejectDays)||14;
-  if(!NUDGE_STAGES.includes(c.stage))return false;
+  /* P-49 — a stage the fixed table has never heard of is still nudgeable when the email
+     step that led there names its own nudge template. */
+  if(!NUDGE_STAGES.includes(c.stage)&&!_stepNudgeTplFor(c))return false;
   /* ONE outward-contact rule, shared with the robot. _tickOutwardHold holds a send when
      the operator has the ball — the candidate is parked in awaiting, or their reply is
      sitting unread — and the nudge banner was the last outward path that ignored it, so
@@ -11488,7 +11572,7 @@ async function _sendNudgeHeadless(c){
   /* Refuse BEFORE sending: _stCell refuses a corrupt row after the email is already out, leaving no
      record of it — so the same candidate is offered (or batch-sent) the nudge again and again. */
   if(c.st&&c.st.__ajCorrupt)throw new Error('stored data corrupted — restore the row first');
-  const tpl=_nudgeTplFor(c.stage);
+  const tpl=_nudgeTplForCand(c);
   if(!tpl)throw new Error('no nudge template for '+c.stage);
   const t=getEffectiveTemplate(tpl,c);
   const subj=substituteLive(t.s||'',c);
@@ -11548,7 +11632,7 @@ function _renderNudgeStepper(){
   const c=pipeline.find(x=>x.excelRow===q[i]);
   if(!c){window._nudgeI=i+1;return _renderNudgeStepper();}
   if(!host){host=document.createElement('div');host.id='nudge-stepper';host.style.cssText='position:fixed;inset:0;background:rgba(20,18,14,.45);display:flex;align-items:center;justify-content:center;z-index:9999';host.onclick=function(e){if(e.target===host)_nudgeStepClose();};document.body.appendChild(host);}
-  const tpl=_nudgeTplFor(c.stage);const t=tpl?getEffectiveTemplate(tpl,c):{s:'',b:''};
+  const tpl=_nudgeTplForCand(c);const t=tpl?getEffectiveTemplate(tpl,c):{s:'',b:''};
   const subj=esc(substituteLive(t.s||'',c));
   const body=esc(substituteLive(t.b||'',c)).replace(/\n/g,'<br>');
   const days=computeIdleDays(c);
@@ -11586,7 +11670,7 @@ function _nudgeStepClose(){const h=document.getElementById('nudge-stepper');if(h
 function sendNudge(row){
 
   const c=pipeline.find(x=>x.excelRow===row);if(!c)return;
-  const tpl=_nudgeTplFor(c.stage)||'request_resume';
+  const tpl=_nudgeTplForCand(c)||'request_resume';
   loadW(row);doEmail(tpl);
 }
 function renderAutoRejectBanner(){
@@ -25345,6 +25429,11 @@ function _mountSeqEditorV2(){
     /* Rule 8 — the inspector renders these source rules read-only with "managed by job",
        so the job card stays the only place their binding can be changed. */
     lockedAssignmentCodes:_jobOwnedCodes(),
+    /* P-45 — the editor refuses to delete a sequence a job package still names. Read live
+       on each click so a job re-pointed while the editor is open is seen. */
+    sequenceUsers:function(seqId){
+      return (Array.isArray(SETTINGS.jobs)?SETTINGS.jobs:[]).filter(j=>j&&j.sequenceId===seqId).map(j=>j.name||j.id);
+    },
     packs:SETTINGS.actionPacks,
     templatesList:_seqTemplatesList(),
     triggerList:_seqTriggerList(),
