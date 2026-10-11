@@ -9258,6 +9258,24 @@ async function _reconcileBookingStages(){
       }catch(e){console.warn('kind-mismatch correction failed:',c.name,e.message);}
       continue;
     }
+    /* P-53 (Meir, option 1) — same rule as the worker: an ONBOARDING booking from a candidate
+       whose offer is on record as sent counts as the offer stage, wherever column G still says
+       they are (Chloe Petersen: offer sent by hand at Interview booked, both onboarding bookings
+       refused). The advance is the result of the offer going out and the booking arriving. */
+    if(kind==='onboarding'&&c.stage!=='Onboarding booked'&&!(advanceMap[c.stage]&&advanceMap[c.stage][0]==='onboarding')&&isFinite(t)&&t>=Date.now()-48*3600*1000){
+      const _op=_offerSentOnRecord(c);
+      if(_op){
+        try{
+          const _was=c.stage;
+          await patchRange('G'+c.excelRow,[['Onboarding booked']]);
+          c.stage='Onboarding booked';c.row[6]='Onboarding booked';
+          c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stage caught up '+_was+' → Onboarding booked — onboarding booked ('+new Date(t).toLocaleString()+') and the offer is on record as sent ('+_op.key+(_op.on?' · '+_op.on:'')+')'});
+          await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+          n++;
+        }catch(e){console.warn('offer-on-record catch-up failed:',c.name,e.message);}
+        continue;
+      }
+    }
     const rule=advanceMap[c.stage];if(!rule)continue;
     if(!isFinite(t)||t<Date.now()-48*3600*1000)continue;
     if(!(kind===rule[0]||(kind==null&&(c.stage==='Screen invite'||c.stage==='Applied'))))continue;
@@ -13651,6 +13669,7 @@ function emailModal(tpl,subj,body,advanceTo){
         <div id="e-attach-list" style="margin-top:8px"></div>
       </div>
 
+      ${_stageMoveNoticeHtml(tpl,advanceTo)}
       ${showParkOpt?`<div style="display:flex;flex-direction:column;gap:10px">
         <label style="display:flex;align-items:center;gap:8px;padding:10px 13px;background:#FAF6EE;border:1px solid var(--gold-mid);border-radius:8px;cursor:pointer;font-size:12.5px;color:var(--mid)"><input type="checkbox" id="e-park" style="cursor:pointer;width:15px;height:15px;accent-color:#8B6500;margin:0"><span>\u23F8 <b>Park in awaiting</b> after sending</span></label>
         ${_watchForPicker('esend',[])}
@@ -13834,6 +13853,115 @@ function loadPresetIntoComposer(key,advanceTo){
 /* Stage a template send should advance to — terminal semantics live with the TEMPLATE (data),
    not with whichever button opened the composer. Callers pass their own advanceTo as the
    fallback for flow templates. */
+/* ===================== P-53 — a stage email sent by hand moves the stage =====================
+   Meir: "so should be the case with any type of email regarding any stage unless otherwise
+   specified on the moment" — with a built-in notice (never a browser popup) saying the send
+   will move the stage. Sequence-agnostic: the stage an email "belongs to" is read from the
+   candidate's OWN sequence — the stage step the email step leads straight into, else the stage
+   step it sits under. FORWARD ONLY: a re-send of an earlier stage's email never demotes anyone. */
+function _stageForTemplate(c,tpl){
+  try{
+    const st=c&&c.st;if(!st||!st.sequenceId||!tpl)return null;
+    const seq=(SETTINGS.sequences||[]).find(q=>q&&q.id===st.sequenceId);
+    if(!seq||!Array.isArray(seq.steps))return null;
+    const byId={};seq.steps.forEach(s=>{if(s&&s.id)byId[s.id]=s;});
+    const isStage=s=>s&&s.kind==='stage'&&s.stage&&s.stage.setStage;
+    const preds={};seq.steps.forEach(s=>{if(!s||!s.id)return;[s.next,s.kind==='branch'&&s.branch?s.branch.then:null,s.kind==='branch'&&s.branch?s.branch.else:null].forEach(t=>{if(t!=null&&byId[t])(preds[t]=preds[t]||[]).push(s.id);});});
+    const emails=seq.steps.filter(s=>s&&s.kind==='email'&&s.email&&s.email.templateKey===tpl);
+    for(const e of emails){
+      /* leads straight into a stage step */
+      const nx=e.next!=null?byId[e.next]:null;
+      if(isStage(nx))return {stage:nx.stage.setStage,stepId:nx.id,seq:seq};
+      /* else: the stage step it sits under (nearest one behind it) */
+      const seen={};let frontier=[e.id];
+      for(let d=0;d<40&&frontier.length;d++){
+        const next=[];
+        for(const id of frontier){
+          if(seen[id])continue;seen[id]=1;
+          const s=byId[id];if(!s)continue;
+          if(isStage(s))return {stage:s.stage.setStage,stepId:s.id,seq:seq};
+          (preds[id]||[]).forEach(p=>next.push(p));
+        }
+        frontier=next;
+      }
+    }
+  }catch(e){}
+  return null;
+}
+/* What a send of `tpl` to this candidate will do to their stage, decided when the composer
+   opens → {to,from,via:'explicit'|'sequence',optOut} or null (no move). */
+function _sendStageMove(c,tpl,advanceTo){
+  try{
+    if(!c)return null;
+    const from=c.stage;
+    const exp=_tplAdvanceTo(tpl,advanceTo);
+    if(exp)return exp!==from?{to:exp,from:from,via:'explicit',optOut:false}:null;
+    if(typeof _isTerminalStage==='function'&&_isTerminalStage(from))return null;
+    const hit=_stageForTemplate(c,tpl);
+    if(!hit||hit.stage===from)return null;
+    const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
+    if(!flow.includes(hit.stage))return null;
+    /* forward only — by the sequence's own links AND the board's stage order (a no-show loop
+       makes an earlier invite stage "reachable" again; that is not forward) */
+    const cur=(hit.seq.steps||[]).find(s=>s&&s.kind==='stage'&&s.stage&&s.stage.setStage===from);
+    if(!cur||cur.id===hit.stepId||!_seqReachesDownstream(hit.seq,cur.id,hit.stepId))return null;
+    const fi=flow.indexOf(from),ti=flow.indexOf(hit.stage);
+    if(fi>=0&&ti>=0&&ti<=fi)return null;
+    /* Is this simply the step they are standing on? Then the move is the sequence itself and
+       cannot be declined for one send (the engine would set the stage on its next pass anyway). */
+    let onStep=false;
+    try{
+      const base=(typeof pipeline!=='undefined'?pipeline.find(x=>x.excelRow===(c.row||c.excelRow)):null);
+      const ev=window.SeqBuilderV3.evaluate(hit.seq,Object.assign({},base||{},{stage:c.stage,st:c.st}),_seqTriggerEval,undefined,(typeof _seqHostCtx==='function')?_seqHostCtx():undefined);
+      const it=(ev.intents||[])[0];
+      onStep=!!(it&&it.type==='send-email'&&it.templateKey===tpl);
+    }catch(e){}
+    return {to:hit.stage,from:from,via:'sequence',optOut:!onStep,stepId:hit.stepId};
+  }catch(e){return null;}
+}
+function _stageMoveNoticeHtml(tpl,advanceTo){
+  const mv=_sendStageMove(W,tpl,advanceTo);if(!mv)return '';
+  const first=String((W&&W.name)||'them').split(' ')[0]||'them';
+  const why=mv.via==='explicit'?(mv.to==='Declined'?'a rejection closes the candidate':'that is what this email does'):(mv.optOut?'this email belongs to that stage in their sequence':'it is the next step in their sequence');
+  return `<div id="e-stagemove" style="padding:10px 13px;background:#EBF3FB;border:1px solid var(--sky);border-radius:8px;font-size:12.5px;color:var(--mid);line-height:1.5">
+        ➜ <b>Sending this moves ${esc(first)} to “${esc(mv.to)}”</b> <span style="color:var(--soft)">(now: ${esc(mv.from)})</span> — ${why}.
+        ${mv.optOut?`<label style="display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer"><input type="checkbox" id="e-nomove" style="cursor:pointer;width:15px;height:15px;accent-color:var(--sky-deep);margin:0"><span>Keep ${esc(first)} at “${esc(mv.from)}” for this send</span></label>`:''}
+      </div>`;
+}
+/* The offer is "on record as sent" when any email that leads into / sits at the offer stages
+   of the candidate's OWN sequence carries a sent stamp (classic names as the fallback).
+   Mirror of the worker's offerSentOnRecord — keep the two in step. */
+function _offerSentOnRecord(c){
+  const st=(c&&c.st)||{},sent=(st.sent&&typeof st.sent==='object')?st.sent:{};
+  const keys=['offer','onboarding','onboarding_invite'];
+  try{
+    const seq=(SETTINGS.sequences||[]).find(q=>q&&q.id===st.sequenceId);
+    if(seq&&Array.isArray(seq.steps)){
+      const byId={};seq.steps.forEach(s=>{if(s&&s.id)byId[s.id]=s;});
+      const succ=s=>{const o=[];if(s.kind==='branch'&&s.branch){if(byId[s.branch.then])o.push(s.branch.then);if(byId[s.branch.else])o.push(s.branch.else);}if(s.next!=null&&byId[s.next])o.push(s.next);return o;};
+      const preds={};seq.steps.forEach(s=>{if(s&&s.id)succ(s).forEach(t=>{(preds[t]=preds[t]||[]).push(s.id);});});
+      const isStage=s=>s&&s.kind==='stage'&&s.stage&&s.stage.setStage;
+      seq.steps.filter(s=>isStage(s)&&['Offer','Onboarding'].includes(s.stage.setStage)).forEach(start=>{
+        [preds,null].forEach(dir=>{
+          const seen={};let frontier=[start.id];
+          for(let d=0;d<40&&frontier.length;d++){
+            const next=[];
+            frontier.forEach(id=>{
+              if(seen[id])return;seen[id]=1;
+              const s=byId[id];if(!s)return;
+              if(s!==start&&isStage(s))return;
+              if(s.kind==='email'&&s.email&&s.email.templateKey&&keys.indexOf(s.email.templateKey)<0)keys.push(s.email.templateKey);
+              (dir?(dir[id]||[]):succ(s)).forEach(n=>next.push(n));
+            });
+            frontier=next;
+          }
+        });
+      });
+    }
+  }catch(e){}
+  for(const k of keys)if(sent[k])return {key:k,on:String(sent[k])};
+  return null;
+}
 function _tplAdvanceTo(tpl,fallback){
   if(tpl==='reject')return 'Declined';
   return fallback||'';
@@ -13924,6 +14052,10 @@ async function reallySend(tpl,advanceTo){
   const _msResume=!!(document.getElementById('ms-resume-cb')||{}).checked;
   const _msAvail=!!(document.getElementById('ms-avail-cb')||{}).checked;
   const _watchFor=(typeof _readWatchForPicker==='function')?_readWatchForPicker('esend'):[];
+  /* P-53: what this send will do to the stage, and whether the operator declined it for this one
+     send — both read NOW (W is still this candidate; the checkbox is still this composer's). */
+  const _noMove=!!(document.getElementById('e-nomove')||{}).checked;
+  const _mv=(W===w)?_sendStageMove(w,tpl,advanceTo):null;
   const b=document.getElementById('sendbtn');b.disabled=true;b.innerHTML='<span class="spin"></span> Sending…';
   try{
     /* Every composer email ships in the branded shell (unless already shelled / a full HTML doc). */
@@ -14090,6 +14222,26 @@ async function reallySend(tpl,advanceTo){
         }
       }
     }catch(_se){console.warn('seq post-send advance:',_se);}
+    /* P-53 — the email was a STAGE email sent by hand from somewhere else in the flow (the
+       bridge above only moves the stage when the pointer is standing on this very step). The
+       send happened; the stage follows it, unless the operator ticked "keep them at …" on the
+       composer's notice. Pointer re-placed inside their own sequence (rule 6). */
+    try{
+      if(_mv&&_mv.via==='sequence'&&_mv.optOut&&!_noMove&&!advanceTo&&W.stage===_mv.from&&W.stage!==_mv.to){
+        _seqStageFrom=W.stage;
+        W.stage=_mv.to;
+        W.st.due=(_mv.to==='Screen invite'||_mv.to==='Interview invite')?plusDays(3):today();
+        const _sq53=(SETTINGS.sequences||[]).find(q=>q&&q.id===W.st.sequenceId);
+        if(_sq53&&typeof _classicPointerFor==='function'){
+          const _b53=(typeof pipeline!=='undefined'?pipeline.find(x=>x.excelRow===W.row):null);
+          const _p53=_classicPointerFor(Object.assign({},_b53||{},{stage:W.stage,st:W.st}),_sq53);
+          if(_p53&&_p53!==W.st.sequenceStepId){W.st.sequenceStepId=_p53;W.st.sequenceHistory=(W.st.sequenceHistory||[]).concat({stepId:_p53,at:new Date().toISOString()});}
+        }
+        logW('➜ Stage moved '+_mv.from+' → '+_mv.to+' — '+String(tpl).replace(/_/g,' ')+' was sent by hand, and that email belongs to '+_mv.to);
+      }else if(_mv&&_mv.optOut&&_noMove){
+        logW('➜ Stage kept at '+W.stage+' for this send (would have moved to '+_mv.to+')');
+      }
+    }catch(_e53){console.warn('P-53 stage move:',_e53);}
     _fromStageForPdf=W.stage;
     if(advanceTo){W.stage=advanceTo;if(advanceTo==='Screen invite'||advanceTo==='Interview invite')W.st.due=plusDays(3);else W.st.due=today();logW('Advanced to '+advanceTo);if(advanceTo==='Declined'&&W.st.declineHint)delete W.st.declineHint;}
     _saveP=saveW(true);
