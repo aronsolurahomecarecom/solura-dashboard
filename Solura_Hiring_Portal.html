@@ -14010,9 +14010,12 @@ function _stageMoveNoticeHtml(tpl,advanceTo){
   const mv=_sendStageMove(W,tpl,advanceTo);if(!mv)return '';
   const first=String((W&&W.name)||'them').split(' ')[0]||'them';
   const why=mv.via==='explicit'?(mv.to==='Declined'?'a rejection closes the candidate':'that is what this email does'):(mv.optOut?'this email belongs to that stage in their sequence':'it is the next step in their sequence');
+  /* A RE-send (this template already went to them once) is a follow-up, not a step forward:
+     the "keep them here" box starts ticked, so a reminder never moves a stage by default. */
+  const _resend=!!(W&&W.st&&W.st.sent&&W.st.sent[tpl]);
   return `<div id="e-stagemove" style="padding:10px 13px;background:#EBF3FB;border:1px solid var(--sky);border-radius:8px;font-size:12.5px;color:var(--mid);line-height:1.5">
         ➜ <b>Sending this moves ${esc(first)} to “${esc(mv.to)}”</b> <span style="color:var(--soft)">(now: ${esc(mv.from)})</span> — ${why}.
-        ${mv.optOut?`<label style="display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer"><input type="checkbox" id="e-nomove" style="cursor:pointer;width:15px;height:15px;accent-color:var(--sky-deep);margin:0"><span>Keep ${esc(first)} at “${esc(mv.from)}” for this send</span></label>`:''}
+        ${mv.optOut?`<label style="display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer"><input type="checkbox" id="e-nomove" ${_resend?'checked':''} style="cursor:pointer;width:15px;height:15px;accent-color:var(--sky-deep);margin:0"><span>Keep ${esc(first)} at “${esc(mv.from)}” for this send${_resend?' <span style="color:var(--soft)">(ticked because they have been sent this email before — untick to move them)</span>':''}</span></label>`:''}
       </div>`;
 }
 /* The offer is "on record as sent" when any email that leads into / sits at the offer stages
@@ -23421,6 +23424,9 @@ function sendBgRequestAgain(excelRow){
     if(!W||W.row!==excelRow)return;
     const t=getEffectiveTemplate('bg_request',W);
     emailModal('bg_request',t.s,t.b);
+    /* Asking AGAIN is a follow-up — it must not move anyone's stage by default (P-53's notice
+       still shows what would happen; the box can be unticked). */
+    const _nm=document.getElementById('e-nomove');if(_nm)_nm.checked=true;
   },300);
 }
 async function sendRebookEmail(excelRow,which){
