@@ -9922,9 +9922,11 @@ function _orientationDone(c){
   if(st.noShowFor)return false; /* current booking is marked no-show — they did NOT attend */
   const b=new Date(st.booking).getTime();
   /* They JOINED (worker MEETING_STARTED stamp, or the manual ✓ Showed up button) and the
-     call started over an hour ago — it happened. Covers the gap until MEETING_ENDED stamps
-     flow (and meetings whose end event never arrives at all). */
-  if(st.meetingStartedFor&&String(st.meetingStartedFor)===String(st.booking)&&!isNaN(b)&&Date.now()>b+60*60000)return true;
+     call started 45+ minutes ago — it happened. Covers the gap until MEETING_ENDED stamps
+     flow (and meetings whose end event never arrives at all). 45 min, not 60: orientations
+     run 30–45, and the card appearing during an unusually long call is harmless — the
+     operator is on that very call. */
+  if(st.meetingStartedFor&&String(st.meetingStartedFor)===String(st.booking)&&!isNaN(b)&&Date.now()>b+45*60000)return true;
   if(st.meetingEndedAt){
     if(st.meetingEndedFor&&String(st.meetingEndedFor)!==String(st.booking))return false; /* stamp belongs to an older booking */
     const e=new Date(st.meetingEndedAt).getTime();
@@ -26019,6 +26021,15 @@ function _seqV3Action(c,info){
     if(ev.bucket==='awaiting'&&ev.currentStep&&ev.currentStep.kind==='wait'&&cand.st&&cand.st.booking){
       const _tb=getActiveSequence().find(s4=>s4.key===c.stage&&s4.timeBased);
       if(_tb)return _sequenceBookingStage(c,_tb,info);
+    }
+    /* Orientation attended and over → ✓ Mark hired, for EVERY step kind (Jada 2026-10-12:
+       classic flow models the orientation as a SESSION step, which carries its own time
+       choreography in the engine — the mark-hired branch inside _sequenceBookingStage never
+       ran for her). One rule, any sequence: stage Onboarding booked + evidence the call
+       happened + start time passed. */
+    if(c.stage==='Onboarding booked'&&cand.st&&cand.st.booking&&_orientationDone(cand)){
+      const _m6=minsUntil(cand.st.booking);
+      if(_m6!=null&&_m6<0)return{bucket:'action',timing:{txt:'Orientation done — mark them hired',pill:'pg',date:_fmtBooking(cand.st.booking)},info:info,primary:{kind:'mark-hired',label:'✓ Mark hired',cls:'grn'}};
     }
     /* A wall we cannot pass until a CHECK clears belongs in Checks running (Meir 2026-10-09),
        not in Action needed ("requirement not met" + a Park button) or Awaiting candidate.
