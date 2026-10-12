@@ -9921,6 +9921,10 @@ function _orientationDone(c){
   if(!st.booking)return false;
   if(st.noShowFor)return false; /* current booking is marked no-show — they did NOT attend */
   const b=new Date(st.booking).getTime();
+  /* They JOINED (worker MEETING_STARTED stamp, or the manual ✓ Showed up button) and the
+     call started over an hour ago — it happened. Covers the gap until MEETING_ENDED stamps
+     flow (and meetings whose end event never arrives at all). */
+  if(st.meetingStartedFor&&String(st.meetingStartedFor)===String(st.booking)&&!isNaN(b)&&Date.now()>b+60*60000)return true;
   if(st.meetingEndedAt){
     if(st.meetingEndedFor&&String(st.meetingEndedFor)!==String(st.booking))return false; /* stamp belongs to an older booking */
     const e=new Date(st.meetingEndedAt).getTime();
@@ -13006,10 +13010,19 @@ function _manualBookingPill(){
   if(W.st.booking){
     const when=new Date(W.st.booking);
     const dateStr=when.toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    /* ✓ Showed up — manual attendance stamp (Meir 2026-10-12, after Jada's false "missed"):
+       writes the same per-booking meetingStartedAt/For the worker's MEETING_STARTED stamp
+       does, so the no-show presumption stands down and the post-call hire flow has its
+       evidence — works today, with or without Cal's signal. Offered from 10 minutes before
+       the start; hidden once this booking is already marked. */
+    const _m5=minsUntil(W.st.booking);
+    const _joinedAlready=!!(W.st.meetingStartedFor&&String(W.st.meetingStartedFor)===String(W.st.booking||''));
+    const showBtn=(_m5!=null&&_m5<=10&&!_joinedAlready)?`<button class="btn-sm" style="font-size:10.5px;padding:3px 9px;background:#EBF5EA;border:1px solid var(--grn);color:var(--grn-deep);cursor:pointer;font-weight:700" onclick="_markShowedUp()" title="They joined the meeting — kills the no-show presumption for this booking">✓ Showed up</button>`:(_joinedAlready?`<span style="font-size:10.5px;color:var(--grn-deep);font-weight:700">✓ joined</span>`:'');
     return `<div style="margin-top:10px;background:#F0F7F0;border:1px solid var(--grn);border-radius:8px;padding:8px 11px;display:flex;align-items:center;gap:8px;font-size:12px">
       <span style="font-size:14px">📅</span>
       <span style="color:var(--grn-deep);font-weight:600">Scheduled: ${esc(dateStr)}</span>
       <div style="flex:1"></div>
+      ${showBtn}
       <button class="btn-sm bg-cream" style="font-size:10.5px;padding:3px 9px" onclick="setManualBookingTime()" title="Change time">edit</button>
       <button class="btn-sm" style="font-size:10.5px;padding:3px 9px;color:var(--red);border:1px solid var(--red);background:#fff" onclick="clearManualBookingTime()" title="Remove this scheduled time">×</button>
     </div>`;
@@ -13020,6 +13033,22 @@ function _manualBookingPill(){
     <div style="flex:1"></div>
     <button class="btn-sm" style="font-size:10.5px;padding:3px 9px;background:var(--gold-mid);color:#fff;border:none;cursor:pointer;font-weight:600" onclick="setManualBookingTime()">+ Set time manually</button>
   </div>`;
+}
+async function _markShowedUp(){
+  if(!W||!W.st.booking){toast('No booking on file');return;}
+  const w=W,_prevAt=w.st.meetingStartedAt,_prevFor=w.st.meetingStartedFor;
+  w.st.meetingStartedAt=new Date().toISOString();
+  w.st.meetingStartedFor=w.st.booking;
+  logW('✓ Showed up — marked manually');
+  if(!(await saveW(true))){
+    if(_prevAt)w.st.meetingStartedAt=_prevAt;else delete w.st.meetingStartedAt;
+    if(_prevFor)w.st.meetingStartedFor=_prevFor;else delete w.st.meetingStartedFor;
+    if(w.st&&Array.isArray(w.st.log))w.st.log.pop();
+    renderWorkspace();
+    return;
+  }
+  toast('✓ Marked as showed up');
+  renderWorkspace();if(typeof render==='function')render();
 }
 async function setManualBookingTime(){
   if(!W)return;
