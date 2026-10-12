@@ -93,7 +93,13 @@ const W = mk(extractInnerHtml);
   ok(/id="email-send-btn-top"[^>]*style="display:none/.test(html) && /id="email-claude-btn-bottom"[^>]*style="display:none/.test(html), 'defaults match the classic layout before any JS runs');
   ok(/try\{updateComposerTopButtons\(\);\}catch\(_\)\{\}\s*\n\s*el\('modal-email'\)\.classList\.add\('open'\)/.test(html), 'every composer open re-decides the layout');
   ok(/updateComposerTopButtons\(\);\}catch\(_\)\{\} \/\/ 📰 applied → Send takes the top slot/.test(html), 'clicking 📰 mid-compose flips the slot too');
-  ok(/function emailSendButtonsBusy\(on\)/.test(html) && /b2\.textContent=on\?'Sending\\u2026':'Send via Outlook'/.test(html.replace(/\\/g, '\\\\')) || /Sending/.test(html.slice(html.indexOf('function emailSendButtonsBusy'), html.indexOf('function emailSendButtonsBusy') + 400)), 'both buttons share one busy state');
+  ok(/function emailSendButtonsBusy\(on\)/.test(html) && /Sending/.test(html.slice(html.indexOf('function emailSendButtonsBusy'), html.indexOf('function emailSendButtonsBusy') + 500)), 'both buttons share one busy state');
+  // B-1012-128: in nurture mode the two Sends mean two ROUTES
+  ok(/sTop\.textContent='Send';/.test(html), "the top button says just Send — it never promises Outlook (nurture routes via Resend)");
+  ok(/&&!_forceOutlook/.test(html.slice(html.indexOf('var _viaResend='), html.indexOf('var _viaResend=') + 300)), 'the bottom button bypasses Resend: forced sends go via Outlook');
+  ok(/_forceOutlook=\(t&&t\.id==='email-send-btn'\);/.test(html), 'WHICH button was clicked decides the route');
+  ok(/_forceOutlook=false;    \/\/ fresh composer → routing back to automatic/.test(html), 'a fresh composer resets the routing choice');
+  ok(/if\(!on\)\{try\{updateComposerTopButtons\(\);\}catch\(_\)\{\}\}/.test(html), 'after a send the top label restores per mode, not to a hardcoded string');
   const sendFn = html.slice(html.indexOf('async function sendEmail()'), html.indexOf('async function sendEmail()') + 20000);
   ok(/emailSendButtonsBusy\(true\)/.test(sendFn), 'send disables BOTH buttons');
   ok((html.match(/emailSendButtonsBusy\(false\)/g) || []).length >= 3, 'every exit path (errors, early returns, finally) re-enables both');

@@ -1905,7 +1905,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1012-127';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1012-128';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -9203,6 +9203,9 @@ function declawDesignHtml(html){
 // Per-send wrapper override (Meir, Oct 6 2026): the 🎁 Wrap chip in the
 // composer flips it on the spot. null = automatic; resets on every open.
 var _shellOverride=null;
+// The BOTTOM send button is a hard Outlook send even in nurture mode
+// (set per click; the top button keeps the automatic Resend routing).
+var _forceOutlook=false;
 // THE one decision point for whether the shell wraps a send.
 function shellWillApply(o){
   if(!o.hasShell)return false;
@@ -12753,6 +12756,7 @@ function openEmail(ri,opts){
   _shellSuppressed=false;
   _claudeHtmlDraft=false; // fresh composer → no stale Claude-draft wrap flag
   _shellOverride=null;    // fresh composer → wrap decision back to automatic
+  _forceOutlook=false;    // fresh composer → routing back to automatic
   var tbR=el('claude-tweak-bar');if(tbR){tbR.style.display='none';}
   var tiR=el('claude-tweak-input');if(tiR)tiR.value='';
   // Unsubscribed: manual 1:1 email is Meir's call, but the state is loud —
@@ -13195,7 +13199,13 @@ function updateComposerTopButtons(){
   var ri=parseInt(el('modal-email').dataset.ri,10);
   var weekly=!!(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri);
   var sTop=el('email-send-btn-top'),cTop=el('email-claude-btn-top'),cBot=el('email-claude-btn-bottom');
-  if(sTop)sTop.style.display=weekly?'':'none';
+  if(sTop){
+    sTop.style.display=weekly?'':'none';
+    // Nurture sends route via Resend, so the top button never promises
+    // Outlook — only the bottom one says (and guarantees) that.
+    sTop.textContent='Send';
+    sTop.title=weekly?'Send the nurture letter the automatic way (Resend when configured). The bottom button forces Outlook instead.':'';
+  }
   if(cTop)cTop.style.display=weekly?'none':'';
   if(cBot)cBot.style.display=weekly?'':'none';
 }
@@ -13204,8 +13214,9 @@ function updateComposerTopButtons(){
 function emailSendButtonsBusy(on){
   var b1=el('email-send-btn'),b2=el('email-send-btn-top'),sp=el('email-spin');
   if(b1)b1.disabled=on;
-  if(b2){b2.disabled=on;b2.textContent=on?'Sending…':'Send via Outlook';}
+  if(b2){b2.disabled=on;if(on)b2.textContent='Sending…';}
   if(sp)sp.style.display=on?'flex':'none';
+  if(!on){try{updateComposerTopButtons();}catch(_){}} // restores the mode label
 }
 async function sendEmail(){
   var ri=parseInt(el('modal-email').dataset.ri,10);
@@ -13356,6 +13367,7 @@ async function sendEmail(){
   // breaks. Replies and inline-image emails stay on Graph (threading and
   // cid: images need it).
   var _viaResend=!!(_weeklyAppliedFor&&_weeklyAppliedFor.ri===ri&&!_emailReplyTo
+    &&!_forceOutlook
     &&resendCfg()&&!emailAttachments.some(function(a){return a.isInline;}));
   if(_viaResend&&isUnsubscribed(ri)){
     emailSendButtonsBusy(false);
@@ -15907,6 +15919,10 @@ function onClick(ev){
     case 'open-script': if(ri!=null)openScript(ri); break;
     case 'send-sms': sendSMS(); break;
     case 'send-email':
+      // WHICH button chose the route: the bottom one is a hard Outlook
+      // send (it says so); the top one takes the automatic path, which
+      // for the weekly nurture means Resend.
+      _forceOutlook=(t&&t.id==='email-send-btn');
       Promise.resolve(sendEmail()).catch(function(eS){
         traceOp({kind:'send-FAIL',err:String(eS&&eS.message||eS).slice(0,200)});
         showErr(String(eS&&eS.message||eS));
