@@ -735,6 +735,12 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <button type="button" data-action="email-fmt" data-fmt="removeFormat" title="Clear formatting" style="margin-left:auto;color:var(--soft)">Tx</button>
       </div>
       <div id="email-body" class="email-body" contenteditable="true" spellcheck="true"></div>
+      <div id="claude-tweak-bar" style="display:none;gap:8px;align-items:center;margin-top:8px;padding:8px 10px;border:1.5px dashed #7C5CBF;border-radius:10px;background:#F4F1FB">
+        <span style="font-size:11px;font-weight:800;color:#5B4BAA;white-space:nowrap">✨ Tweak</span>
+        <input id="claude-tweak-input" placeholder="Tell Claude what to change — shorter, warmer, mention the fall, fix the second paragraph…" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('claude-tweak-btn').click();}" style="flex:1;padding:7px 10px;border:1.5px solid #CFC6EA;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;outline:none">
+        <button type="button" id="claude-tweak-btn" data-action="claude-tweak" style="padding:7px 14px;background:linear-gradient(135deg,#7C5CBF,#5B4BAA);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap">Revise</button>
+        <div id="claude-tweak-spin" style="display:none;align-items:center;gap:5px;font-size:11px;color:#5B4BAA"><div class="mspin"></div>Revising…</div>
+      </div>
       <div class="email-attach-row">
         <label class="email-attach-btn" title="Attach a file (max 150MB per file)">
           <input type="file" id="email-attach-input" multiple style="display:none">
@@ -1899,7 +1905,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1011-126';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1012-127';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -11473,6 +11479,8 @@ async function claudeGenerate(){
         _claudeHtmlDraft=true; // send path: wrap even if it LOOKS like a design
       }
       try{updateShellToggle();}catch(_){}
+      // A draft is in — offer the ✨ Tweak loop right under it
+      var tb0=el('claude-tweak-bar');if(tb0)tb0.style.display='flex';
     }
     traceOp({kind:'generate',instrLen:instructions.length,instrHead:instructions.slice(0,120),
       trainingDocs:(function(){try{return collectTrainingBlocks().filter(function(b){return b.type==='document'||b.type==='image';}).length;}catch(_){return -1;}})(),
@@ -11489,6 +11497,86 @@ async function claudeGenerate(){
   }finally{
     if(spin)spin.style.display='none';
     if(btn)btn.disabled=false;
+  }
+}
+
+/* ─── ✨ Tweak loop: feedback on Claude's OUTPUT, revised in place ──────
+ * After a draft lands in the composer, a one-line note ("shorter",
+ * "mention the fall", "warmer ending") sends the CURRENT subject + body
+ * back with the note; Claude revises rather than rewriting from scratch,
+ * and the result replaces the draft through the same apply pipeline.
+ * ─────────────────────────────────────────────────────────────────────── */
+/* ⚡CLTWEAK — BEGIN (sliced by tests/cltweak.test.mjs) */
+function claudeTweakPrompt(subj,bodyHtml,instruction){
+  return 'Below is the CURRENT draft of an email you wrote for Meir. He wants it revised, not rewritten from scratch: keep everything that works, change only what his note asks for (and whatever that change forces).\n\n'
+    +'CURRENT SUBJECT:\n'+subj
+    +'\n\nCURRENT BODY (HTML):\n'+bodyHtml
+    +'\n\n=== MEIR\'S REVISION NOTE — HIGHEST PRIORITY ===\n'+instruction+'\n=== END NOTE ===\n'
+    +'Return the full revised email in the same JSON format as always ({"subject","body","format"}). The body must be the COMPLETE revised email, not a diff or a description of changes.';
+}
+/* ⚡CLTWEAK — END */
+async function claudeTweak(){
+  var ri=parseInt(el('modal-email').dataset.ri,10);
+  var instruction=String((el('claude-tweak-input')||{}).value||'').trim();
+  if(!instruction){toast('Type what to change first — shorter, warmer, mention the fall…');return;}
+  var key='';try{key=localStorage.getItem('claudeApiKey')||'';}catch(_){}
+  if(!key){try{key=(enginesDoc&&enginesDoc.config&&enginesDoc.config.claudeApiKey)||'';}catch(_){}}
+  if(!key){toast('Add your Anthropic API key — Settings → Claude AI');return;}
+  var btn=el('claude-tweak-btn'),spin=el('claude-tweak-spin');
+  if(btn)btn.disabled=true;
+  if(spin)spin.style.display='inline-flex';
+  try{
+    var bodyEl=el('email-body');
+    var curSubj=String((el('email-subj')||{}).value||'');
+    var curBody=_emailRawHtml||String(bodyEl?bodyEl.innerHTML:'');
+    if(!curBody.trim())throw new Error('Nothing to tweak — the body is empty');
+    var system=buildClaudeSystemPrompt(buildClaudeSystemTraining());
+    var context='';try{context=buildClaudeEmailContext(ri,{replyTo:_emailReplyTo});}catch(_){}
+    var res=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{
+        'content-type':'application/json',
+        'x-api-key':key,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body:JSON.stringify({
+        model:cfg('claudeModel')||'claude-sonnet-4-6',
+        max_tokens:4000,
+        temperature:0.3,
+        system:system,
+        messages:[{role:'user',content:[
+          {type:'text',text:'Lead context (for grounding only — the draft below already uses it):\n'+context},
+          {type:'text',text:claudeTweakPrompt(curSubj,curBody,instruction)}
+        ]}]
+      })
+    });
+    if(!res.ok){
+      var ej=await res.json().catch(function(){return{};});
+      var msg=(ej.error&&ej.error.message)||('API error '+res.status);
+      if(res.status===401)msg='API key rejected — check it in Settings → Claude AI';
+      throw new Error(msg);
+    }
+    var data=await res.json();
+    var text=(data.content||[]).map(function(b2){return b2.type==='text'?b2.text:'';}).join('');
+    var draft=parseClaudeEmailJSON(text);
+    if(el('email-subj')&&draft.subject)el('email-subj').value=draft.subject;
+    emailClearRawHtml({keepBody:true});
+    var newHtml=(draft.format==='html'||looksLikeHtml(draft.body))
+      ?adaptDraftFragment(sanitizeDraftHtml(draft.body))
+      :emailPlainToHtml(draft.body);
+    if(isFullDesignHtml(newHtml))newHtml=declawDesignHtml(newHtml);
+    if(bodyEl)bodyEl.innerHTML=newHtml;
+    _claudeHtmlDraft=true; // still a Claude draft: the shell wraps it at send
+    try{updateShellToggle();}catch(_){}
+    el('claude-tweak-input').value='';
+    toast('✨ Tweaked — review before sending');
+    traceOp({kind:'tweak',instrHead:instruction.slice(0,120),draftHead:String(draft.body||'').replace(/\s+/g,' ').slice(0,160)});
+  }catch(e){
+    showErr('Tweak failed: '+e.message);
+  }finally{
+    if(btn)btn.disabled=false;
+    if(spin)spin.style.display='none';
   }
 }
 
@@ -12665,6 +12753,8 @@ function openEmail(ri,opts){
   _shellSuppressed=false;
   _claudeHtmlDraft=false; // fresh composer → no stale Claude-draft wrap flag
   _shellOverride=null;    // fresh composer → wrap decision back to automatic
+  var tbR=el('claude-tweak-bar');if(tbR){tbR.style.display='none';}
+  var tiR=el('claude-tweak-input');if(tiR)tiR.value='';
   // Unsubscribed: manual 1:1 email is Meir's call, but the state is loud —
   // and the automated weekly nurture draft never auto-loads for them.
   var unsubBan=el('email-unsub-banner');
@@ -15734,6 +15824,9 @@ function onClick(ev){
       break;
     case 'int-save':
       Promise.resolve(intSave()).catch(function(eI){showErr('Interview save failed: '+String(eI&&eI.message||eI));});
+      break;
+    case 'claude-tweak':
+      Promise.resolve(claudeTweak()).catch(function(eT){showErr('Tweak failed: '+String(eT&&eT.message||eT));});
       break;
     case 'as-cancel':
       Promise.resolve(asCancel()).catch(function(eC){showErr('Cancel failed: '+String(eC&&eC.message||eC));});
