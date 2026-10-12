@@ -22527,7 +22527,18 @@ function renderSettingsSourceLinks(){
       const url=_sourceLinkUrl(l.code);
       const inactive=l.active===false;
       const _ab=_abAgg[l.code];
-      const _abDetail=_ab&&_ab.total?('<details style="margin-top:4px"><summary style="cursor:pointer;font-size:10.5px;color:#8B6500;font-weight:700;list-style:none">⏸ '+(+_ab.total||0)+' stopped mid-application — where ▾</summary><div style="font-size:10.5px;color:var(--mid);padding:4px 0 0 10px">'+Object.entries(_ab.sections||{}).sort((a,b)=>(+b[1]||0)-(+a[1]||0)).map(([sec,n])=>esc(sec)+' · <b>'+(+n||0)+'</b>').join('<br>')+'</div></details>'):'';
+      /* Anonymous profile of the people who stopped — certs/tenure/experience counter maps
+         aggregated by the worker. Pure stats: no names ever reach AN1 by construction. */
+      const _abStatsHtml=(function(){
+        const st2=_ab&&_ab.stats;if(!st2||typeof st2!=='object')return '';
+        const YRS={'0':'none','u1':'<1 yr','12':'1–2 yrs','35':'3–5 yrs','5p':'5+ yrs'};
+        const lbl=(map,k)=>(map==='years'||map==='longest')?(YRS[k]||k):(map==='settings'&&typeof _WORK_SETTING_LABELS!=='undefined'&&_WORK_SETTING_LABELS[k])?_WORK_SETTING_LABELS[k]:k;
+        const line=(title,map)=>{const m2=st2[map];if(!m2||typeof m2!=='object')return '';const es=Object.entries(m2).sort((a,b)=>(+b[1]||0)-(+a[1]||0)).slice(0,6);return es.length?'<div><b>'+title+':</b> '+es.map(([k,n])=>esc(String(lbl(map,k)))+' '+(+n||0)).join(' · ')+'</div>':'';};
+        const bits=[line('Certs','creds'),line('Years','years'),line('Longest job','longest'),line('Expertise','expertise'),line('Settings','settings'),line('Languages','languages'),line('ZIP area','zipArea'),line('Shifts offered','shifts'),
+          (+st2.hasResume?'<div><b>Had a résumé attached:</b> '+(+st2.hasResume)+'</div>':''),(+st2.liveIn?'<div><b>Live-in willing:</b> '+(+st2.liveIn)+'</div>':'')].filter(Boolean);
+        return bits.length?'<div style="margin-top:5px;padding-top:5px;border-top:1px dashed var(--border);color:var(--soft)"><div style="font-weight:700;color:#8B6500;margin-bottom:2px">Profile of those who stopped</div>'+bits.join('')+'</div>':'';
+      })();
+      const _abDetail=_ab&&_ab.total?('<details style="margin-top:4px"><summary style="cursor:pointer;font-size:10.5px;color:#8B6500;font-weight:700;list-style:none">⏸ '+(+_ab.total||0)+' stopped mid-application — where ▾</summary><div style="font-size:10.5px;color:var(--mid);padding:4px 0 0 10px">'+Object.entries(_ab.sections||{}).sort((a,b)=>(+b[1]||0)-(+a[1]||0)).map(([sec,n])=>esc(sec)+' · <b>'+(+n||0)+'</b>').join('<br>')+_abStatsHtml+'</div></details>'):'';
       return `<div style="display:grid;grid-template-columns:1fr 90px 90px 90px 90px 90px auto;gap:10px;padding:9px 12px;border-top:1px solid var(--border-soft);align-items:center;font-size:12.5px;${inactive?'opacity:.5':''}">
         <div>
           <div style="font-weight:600;color:var(--ink)">${esc(l.method||'—')}</div>
