@@ -26373,11 +26373,34 @@ function _fcV3Shell(){
       <div style="flex:1"></div>
       <button class="btn-sm bg-cream" style="cursor:pointer" onclick="window._fcJobScope=null;renderSettings()">← Back to the global form</button>
     </div>`:'';
+  /* Scope switcher (Meir 2026-10-12): open — or CREATE — any job's custom form right here,
+     not only via the job package's 📋 button. Both routes edit the same
+     SETTINGS.jobFormConfigs[jobId] object through the scope-aware _fc(), so there is nothing
+     to "sync" — there is only one form per job, whichever door you came in through. */
+  const _fcJobs=(SETTINGS.jobs||[]);
+  const scopeSwitch=_fcJobs.length?`<div style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap">
+      <span style="font-size:11.5px;font-weight:700;color:var(--mid)">Editing:</span>
+      <select onchange="_fcSwitchScope(this.value)" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12px;background:#fff;max-width:420px">
+        <option value="">— Global form (every job without a custom one) —</option>
+        ${_fcJobs.map(j=>{const has=!!(SETTINGS.jobFormConfigs&&SETTINGS.jobFormConfigs[j.id]);return `<option value="${esc(j.id)}" ${window._fcJobScope===j.id?'selected':''}>${esc(j.name)}${j.client?' · '+esc(j.client):''}${has?' — custom form':' — create custom form…'}</option>`;}).join('')}
+      </select>
+    </div>`:'';
   return `${scopeBanner}<div class="wscard" style="padding:12px 16px">
     <h3>📋 Application form ${scopeJob?'<span style="color:var(--gold-deep)">— '+esc(scopeJob.name)+'</span> ':''}<span style="font-size:11px;color:var(--soft);font-weight:600">live two-pane editor · what candidates see at apply.solurahomecare.com</span></h3>
     <p class="set-help">Drag questions to reorder, click one to edit. Scoring totals update live per dimension and per column; the right pane previews the form exactly as candidates see it — scoring and gates are never sent to the form. Changes auto-save and go live within <b>5 minutes</b>.</p>
+    ${scopeSwitch}
   </div>
   <div id="sux3-fc-mount"></div>`;
+}
+function _fcSwitchScope(v){
+  if(!v){window._fcJobScope=null;renderSettings();return;}
+  const j=(SETTINGS.jobs||[]).find(x=>x.id===v);
+  if(!j){toast('Job not found');return;}
+  const has=!!(SETTINGS.jobFormConfigs&&SETTINGS.jobFormConfigs[v]);
+  if(!has&&!confirm('Create a custom application form for "'+(j.name||'this job')+'"?\n\nIt starts as a copy of the global form; your edits then apply only to candidates applying through this job’s links. The job package switches to it automatically.')){renderSettings();return;}
+  window._fcJobScope=v;
+  if(!has){_fc();_fcStamp();toast('\u{1F4CB} Custom form created for '+(j.name||'job')+' — editing it now');}
+  renderSettings();
 }
 function _mountFormConfigV3(){
   const el=document.getElementById('sux3-fc-mount');
