@@ -10058,7 +10058,17 @@ function action(c){
        can appear as soon as Cal reports (Cal waits 8 minutes) rather than at the 15-minute
        guess. The count still happens only on the click, so it happens once. */
     const _calSaid=!!c.st.calNoShowFor&&c.st.calNoShowFor===String(c.st.booking||'');
-    if(_msTpl&&_m4!=null&&(_m4<=-15||(_calSaid&&_m4<=0))&&!_sentThisBooking&&c.st.autoCancelledFor!==String(c.st.booking||'')&&!(c.st.emails||[]).some(e2=>!e2.seen)){
+    /* A meeting that STARTED (or ended) is not a no-show, full stop — Jada Ivy was ON her
+       onboarding call when the 15-minute guess called her missed (2026-10-12). The worker
+       stamps meetingStartedFor/meetingEndedFor per booking from Cal's own events; with
+       either present only Cal's explicit never-joined signal could re-raise this, and that
+       can't coexist with a started stamp for the same booking. Without any signals, the
+       bare time-guess now waits until any plausible meeting would be over (75 min), because
+       silence 15 minutes in just as likely means "the call is running and everyone's busy".
+       Cal's confirmed never-joined still surfaces immediately. */
+    const _started=!!(c.st.meetingStartedFor&&String(c.st.meetingStartedFor)===String(c.st.booking||''));
+    const _endedOk=!!(c.st.meetingEndedFor&&String(c.st.meetingEndedFor)===String(c.st.booking||''));
+    if(_msTpl&&_m4!=null&&!_started&&!_endedOk&&((_calSaid&&_m4<=0)||(!_calSaid&&_m4<=-75))&&!_sentThisBooking&&c.st.autoCancelledFor!==String(c.st.booking||'')&&!(c.st.emails||[]).some(e2=>!e2.seen)){
       const _ago=-_m4<60?Math.round(-_m4)+'m ago':-_m4<2880?Math.round(-_m4/60)+'h ago':Math.round(-_m4/1440)+'d ago';
       return{bucket:'action',timing:{txt:(_calSaid?'📵 Cal Video: never joined — video call was ':'📵 Looks like a no-show — video call was ')+_ago,pill:'pbad',date:_fmtBooking(c.st.booking)},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'noshow-rebook',stage:c.stage,label:'📵 No-show — send rebook email',cls:'red'}};
     }
