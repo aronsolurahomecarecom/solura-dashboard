@@ -748,9 +748,36 @@ async function submitForm(e){
   }
 }
 
+/* ── Mid-application abandonment beacon (Meir 2026-10-12) ──
+   Tracks the LAST section the candidate touched; if the page is being torn down with real
+   progress and no submit, one beacon reports {sourceCode, section} so the portal's link
+   metrics can show where applications die. pagehide only — visibilitychange fires on a mere
+   tab switch and would count people who come back and finish. One beacon per visit. */
+let _lastSection='',_appSubmitted=false;
+function _secTrack(e){
+  try{
+    const card=e.target&&e.target.closest?e.target.closest('.card'):null;
+    if(!card||card.id==='ai-fill-card')return;
+    const h=card.querySelector('h2');
+    if(h&&h.textContent)_lastSection=h.textContent.trim().slice(0,60);
+  }catch(_){}
+}
+document.addEventListener('input',_secTrack,true);
+document.addEventListener('change',_secTrack,true);
+function _abandonBeacon(){
+  try{
+    if(_appSubmitted||!_lastSection)return;
+    if(sessionStorage.getItem('solura_abandon_sent'))return;
+    sessionStorage.setItem('solura_abandon_sent','1');
+    navigator.sendBeacon(WEBHOOK_URL,JSON.stringify({kind:'APPLICATION_ABANDONED',sourceCode:(typeof SOURCE_CODE!=='undefined'&&SOURCE_CODE)||'',section:_lastSection}));
+  }catch(_){}
+}
+window.addEventListener('pagehide',_abandonBeacon);
+
 /* Renders the post-submit confirmation screen. When a refCode comes back, shows the referral
    block with the candidate's personal share link + a copy button. */
 function showDonePage(firstName,refCode){
+  _appSubmitted=true;
   /* #16 — build the referral link from THIS page's own address (origin + pathname). The candidate
      is literally on the working form when this runs, so the link is correct by construction — no
      hardcoded URL to drift when the file moves or the domain changes. (The old hardcoded bare-root

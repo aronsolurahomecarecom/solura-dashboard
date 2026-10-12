@@ -22472,8 +22472,24 @@ function _sourceLinkStats(){
     .sort((a,b)=>b.applied-a.applied);
 }
 
+/* Mid-application abandonment aggregate — written by the worker to cell AN1 from the form's
+   pagehide beacons; shape {v:1,byCode:{code:{total,lastAt,sections:{name:count}}}}. Cached
+   5 minutes; the first load re-renders the section once it arrives. */
+async function _loadAbandonAgg(){
+  if(window._abandonAggAt&&Date.now()-window._abandonAggAt<300000)return window._abandonAgg;
+  try{
+    const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AN1')?$select=values");
+    const j=await r.json();
+    const raw=j&&j.values&&j.values[0]&&j.values[0][0];
+    window._abandonAgg=raw?JSON.parse(raw):null;
+  }catch(e){window._abandonAgg=null;}
+  window._abandonAggAt=Date.now();
+  return window._abandonAgg;
+}
 function renderSettingsSourceLinks(){
   const links=(SETTINGS.config&&SETTINGS.config.sourceLinks)||[];
+  if(!window._abandonAggAt){_loadAbandonAgg().then(()=>{if(typeof settingsSection!=='undefined'&&settingsSection==='sourcelinks')renderSettings();});}
+  const _abAgg=(window._abandonAgg&&window._abandonAgg.byCode)||{};
   /* Group by platform so the list stays organized as you add more. Sort platforms alphabetically,
      methods within each also alphabetically. */
   const byPlatform={};
@@ -22487,16 +22503,20 @@ function renderSettingsSourceLinks(){
       const s=statsByCode[l.code]||{applied:0,screened:0,hired:0,withdrawn:0,withdrawnForm:0,conversionScreenPct:0,conversionHirePct:0,withdrawnPct:0};
       const url=_sourceLinkUrl(l.code);
       const inactive=l.active===false;
-      return `<div style="display:grid;grid-template-columns:1fr 90px 90px 90px 90px auto;gap:10px;padding:9px 12px;border-top:1px solid var(--border-soft);align-items:center;font-size:12.5px;${inactive?'opacity:.5':''}">
+      const _ab=_abAgg[l.code];
+      const _abDetail=_ab&&_ab.total?('<details style="margin-top:4px"><summary style="cursor:pointer;font-size:10.5px;color:#8B6500;font-weight:700;list-style:none">⏸ '+_ab.total+' stopped mid-application — where ▾</summary><div style="font-size:10.5px;color:var(--mid);padding:4px 0 0 10px">'+Object.entries(_ab.sections||{}).sort((a,b)=>b[1]-a[1]).map(([sec,n])=>esc(sec)+' · <b>'+n+'</b>').join('<br>')+'</div></details>'):'';
+      return `<div style="display:grid;grid-template-columns:1fr 90px 90px 90px 90px 90px auto;gap:10px;padding:9px 12px;border-top:1px solid var(--border-soft);align-items:center;font-size:12.5px;${inactive?'opacity:.5':''}">
         <div>
           <div style="font-weight:600;color:var(--ink)">${esc(l.method||'—')}</div>
           <div style="font-size:10px;color:var(--gold-deep);margin-top:1px">${(typeof _srcSeqInline==='function')?_srcSeqInline(l):''}</div>
           <div style="font-size:10.5px;color:var(--soft);margin-top:2px">code <span style="font-family:ui-monospace,SF Mono,Consolas,monospace;background:var(--cream);padding:1px 5px;border-radius:3px">${esc(l.code)}</span>${l.wage?' \u00b7 <b style="color:var(--grn-deep)">'+esc(l.wage)+'</b>':''}${l.prn?' \u00b7 <b style="color:#7A4C9E">\u{1F319} PRN</b>':''}${l.notes?' \u00b7 '+esc(l.notes):''}${inactive?' \u00b7 <b>inactive</b>':''}</div>
+          ${_abDetail}
         </div>
         <div style="text-align:center"><b>${s.applied}</b><div style="font-size:10px;color:var(--soft)">applied</div></div>
         <div style="text-align:center"><b>${s.screened}</b><div style="font-size:10px;color:var(--soft)">screened ${s.applied?'('+s.conversionScreenPct+'%)':''}</div></div>
         <div style="text-align:center"><b>${s.hired}</b><div style="font-size:10px;color:var(--soft)">hired ${s.applied?'('+s.conversionHirePct+'%)':''}</div></div>
         <div style="text-align:center"><b style="${s.withdrawn?'color:var(--red)':''}">${s.withdrawn||0}</b><div style="font-size:10px;color:var(--soft)">withdrew ${s.applied&&s.withdrawn?'('+s.withdrawnPct+'%)':''}</div>${s.withdrawnForm?'<div style="font-size:10px;color:var(--gold-deep);font-weight:700" title="Used the withdraw button on the application confirmation page">'+s.withdrawnForm+' via form</div>':''}</div>
+        <div style="text-align:center"><b style="${_ab&&_ab.total?'color:#8B6500':''}">${(_ab&&_ab.total)||0}</b><div style="font-size:10px;color:var(--soft)" title="Started the application through this link but left before submitting — expand under the method name for the per-section breakdown">stopped</div></div>
         <div style="display:flex;gap:5px">
           <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcCopy('${esc(l.code)}',this)" title="Copy the tracking URL">\u{1F517} copy</button>
           ${l.jobId?'':`<button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcEdit('${esc(l.id)}')" title="Edit platform, method, pay, notes">\u270E edit</button>`}
@@ -22512,8 +22532,8 @@ function renderSettingsSourceLinks(){
         <b style="flex:1">${esc(platform)}</b>
         <span style="font-size:11px;color:var(--soft)">${byPlatform[platform].length} link${byPlatform[platform].length===1?'':'s'} \u00b7 ${platformTotal} applied</span>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 90px 90px 90px 90px auto;gap:10px;padding:6px 12px;font-size:10px;color:var(--soft);font-weight:700;text-transform:uppercase;letter-spacing:.05em">
-        <div>Method</div><div style="text-align:center">Applied</div><div style="text-align:center">Screened</div><div style="text-align:center">Hired</div><div style="text-align:center">Withdrew</div><div></div>
+      <div style="display:grid;grid-template-columns:1fr 90px 90px 90px 90px 90px auto;gap:10px;padding:6px 12px;font-size:10px;color:var(--soft);font-weight:700;text-transform:uppercase;letter-spacing:.05em">
+        <div>Method</div><div style="text-align:center">Applied</div><div style="text-align:center">Screened</div><div style="text-align:center">Hired</div><div style="text-align:center">Withdrew</div><div style="text-align:center">Stopped</div><div></div>
       </div>
       ${rows}
     </div>`;
