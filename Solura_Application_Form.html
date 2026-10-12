@@ -717,6 +717,10 @@ async function submitForm(e){
 
   const btn=document.querySelector('.submit');
   btn.disabled=true;btn.textContent='Submitting…';
+  /* The application is on the wire: a page closed or backgrounded-to-death while the request
+     is in flight is NOT an abandonment (the worker still files it). Cleared again on every
+     path that leaves the candidate back on the form. */
+  _appSubmitting=true;
 
   try{
     const r=await fetch(WEBHOOK_URL,{
@@ -729,6 +733,7 @@ async function submitForm(e){
       let msg='A candidate with this email or phone is already in our system.';
       try{const j=await r.json();if(j&&j.message)msg=j.message;}catch(e){}
       btn.disabled=false;btn.textContent='Submit application';
+      _appSubmitting=false;
       alert(msg);return;
     }
     if(!r.ok){const t=await r.text().catch(()=>'');throw new Error('Server returned '+r.status+': '+t.slice(0,160));}
@@ -739,6 +744,7 @@ async function submitForm(e){
     window.scrollTo(0,0);
   }catch(err){
     btn.disabled=false;btn.textContent='Submit application';
+    _appSubmitting=false;
     console.error('Submit error:',err);
     const isNetwork=(err&&err.name==='TypeError'&&/fetch/i.test(err.message||''));
     const detail=isNetwork
@@ -753,7 +759,7 @@ async function submitForm(e){
    progress and no submit, one beacon reports {sourceCode, section} so the portal's link
    metrics can show where applications die. pagehide only — visibilitychange fires on a mere
    tab switch and would count people who come back and finish. One beacon per visit. */
-let _lastSection='',_appSubmitted=false;
+let _lastSection='',_appSubmitted=false,_appSubmitting=false;
 function _secTrack(e){
   try{
     const card=e.target&&e.target.closest?e.target.closest('.card'):null;
@@ -766,7 +772,7 @@ document.addEventListener('input',_secTrack,true);
 document.addEventListener('change',_secTrack,true);
 function _abandonBeacon(){
   try{
-    if(_appSubmitted||!_lastSection)return;
+    if(_appSubmitted||_appSubmitting||!_lastSection)return;
     if(sessionStorage.getItem('solura_abandon_sent'))return;
     sessionStorage.setItem('solura_abandon_sent','1');
     navigator.sendBeacon(WEBHOOK_URL,JSON.stringify({kind:'APPLICATION_ABANDONED',sourceCode:(typeof SOURCE_CODE!=='undefined'&&SOURCE_CODE)||'',section:_lastSection}));

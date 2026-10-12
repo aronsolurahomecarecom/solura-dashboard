@@ -9919,7 +9919,17 @@ function sequenceAction(c,info){
 function _orientationDone(c){
   const st=(c&&c.st)||{};
   if(!st.booking)return false;
-  if(st.noShowFor)return false; /* current booking is marked no-show — they did NOT attend */
+  /* The CURRENT booking is marked no-show — they did NOT attend. st.noShowFor is the worker's
+     stamp of the LAST booking Cal marked (its Cal uid, or the start time when Cal sent none)
+     and a rebooking never clears it, so a bare truthiness test vetoed every later meeting
+     for life: one missed phone screen in the past and the attended orientation could never
+     raise ✓ Mark hired. Per booking, like every other stamp here: it counts only when it
+     names this booking (uid or start time), or when this is a Cal booking whose id we do
+     not have and so cannot tell apart. */
+  if(st.noShowFor){
+    const _ns=String(st.noShowFor);
+    if(_ns===String(st.calBookingId||'')||_ns===String(st.booking)||(!st.calBookingId&&st.calBooking))return false;
+  }
   const b=new Date(st.booking).getTime();
   /* They JOINED (worker MEETING_STARTED stamp, or the manual ✓ Showed up button) and the
      call started 45+ minutes ago — it happened. Covers the gap until MEETING_ENDED stamps
@@ -9932,6 +9942,13 @@ function _orientationDone(c){
     const e=new Date(st.meetingEndedAt).getTime();
     if(!isNaN(b)&&!isNaN(e)&&e>=b-30*60000)return true;
   }
+  return _meetingEndedLogged(st);
+}
+/* The deployed worker's only trace of MEETING_ENDED: a '▣ Meeting ended' log line stamped on
+   the booking's own day (log stamps carry no time). */
+function _meetingEndedLogged(st){
+  if(!st||!st.booking)return false;
+  const b=new Date(st.booking).getTime();
   const want=isNaN(b)?'':new Date(st.booking).toLocaleDateString('en-US',{month:'short',day:'numeric'});
   return !!want&&(st.log||[]).some(e2=>/▣ Meeting ended/.test(e2.x||'')&&e2.t===want);
 }
@@ -10073,7 +10090,13 @@ function action(c){
        silence 15 minutes in just as likely means "the call is running and everyone's busy".
        Cal's confirmed never-joined still surfaces immediately. */
     const _started=!!(c.st.meetingStartedFor&&String(c.st.meetingStartedFor)===String(c.st.booking||''));
-    const _endedOk=!!(c.st.meetingEndedFor&&String(c.st.meetingEndedFor)===String(c.st.booking||''));
+    /* The DEPLOYED worker writes no meetingEndedFor stamp — its only trace of MEETING_ENDED is
+       the '▣ Meeting ended' log line, which _orientationDone already accepts as evidence.
+       Without the same test here this guess (it runs before the sequence card) took the row
+       back at +75 min: an attended video orientation showed ✓ Mark hired for half an hour and
+       then flipped to "Looks like a no-show". Cal's explicit never-joined still outranks a
+       day-granular log line. */
+    const _endedOk=!!(c.st.meetingEndedFor&&String(c.st.meetingEndedFor)===String(c.st.booking||''))||(!_calSaid&&_meetingEndedLogged(c.st));
     if(_msTpl&&_m4!=null&&!_started&&!_endedOk&&((_calSaid&&_m4<=0)||(!_calSaid&&_m4<=-75))&&!_sentThisBooking&&c.st.autoCancelledFor!==String(c.st.booking||'')&&!(c.st.emails||[]).some(e2=>!e2.seen)){
       const _ago=-_m4<60?Math.round(-_m4)+'m ago':-_m4<2880?Math.round(-_m4/60)+'h ago':Math.round(-_m4/1440)+'d ago';
       return{bucket:'action',timing:{txt:(_calSaid?'📵 Cal Video: never joined — video call was ':'📵 Looks like a no-show — video call was ')+_ago,pill:'pbad',date:_fmtBooking(c.st.booking)},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'noshow-rebook',stage:c.stage,label:'📵 No-show — send rebook email',cls:'red'}};
@@ -22504,7 +22527,7 @@ function renderSettingsSourceLinks(){
       const url=_sourceLinkUrl(l.code);
       const inactive=l.active===false;
       const _ab=_abAgg[l.code];
-      const _abDetail=_ab&&_ab.total?('<details style="margin-top:4px"><summary style="cursor:pointer;font-size:10.5px;color:#8B6500;font-weight:700;list-style:none">⏸ '+_ab.total+' stopped mid-application — where ▾</summary><div style="font-size:10.5px;color:var(--mid);padding:4px 0 0 10px">'+Object.entries(_ab.sections||{}).sort((a,b)=>b[1]-a[1]).map(([sec,n])=>esc(sec)+' · <b>'+n+'</b>').join('<br>')+'</div></details>'):'';
+      const _abDetail=_ab&&_ab.total?('<details style="margin-top:4px"><summary style="cursor:pointer;font-size:10.5px;color:#8B6500;font-weight:700;list-style:none">⏸ '+(+_ab.total||0)+' stopped mid-application — where ▾</summary><div style="font-size:10.5px;color:var(--mid);padding:4px 0 0 10px">'+Object.entries(_ab.sections||{}).sort((a,b)=>(+b[1]||0)-(+a[1]||0)).map(([sec,n])=>esc(sec)+' · <b>'+(+n||0)+'</b>').join('<br>')+'</div></details>'):'';
       return `<div style="display:grid;grid-template-columns:1fr 90px 90px 90px 90px 90px auto;gap:10px;padding:9px 12px;border-top:1px solid var(--border-soft);align-items:center;font-size:12.5px;${inactive?'opacity:.5':''}">
         <div>
           <div style="font-weight:600;color:var(--ink)">${esc(l.method||'—')}</div>
@@ -22516,7 +22539,7 @@ function renderSettingsSourceLinks(){
         <div style="text-align:center"><b>${s.screened}</b><div style="font-size:10px;color:var(--soft)">screened ${s.applied?'('+s.conversionScreenPct+'%)':''}</div></div>
         <div style="text-align:center"><b>${s.hired}</b><div style="font-size:10px;color:var(--soft)">hired ${s.applied?'('+s.conversionHirePct+'%)':''}</div></div>
         <div style="text-align:center"><b style="${s.withdrawn?'color:var(--red)':''}">${s.withdrawn||0}</b><div style="font-size:10px;color:var(--soft)">withdrew ${s.applied&&s.withdrawn?'('+s.withdrawnPct+'%)':''}</div>${s.withdrawnForm?'<div style="font-size:10px;color:var(--gold-deep);font-weight:700" title="Used the withdraw button on the application confirmation page">'+s.withdrawnForm+' via form</div>':''}</div>
-        <div style="text-align:center"><b style="${_ab&&_ab.total?'color:#8B6500':''}">${(_ab&&_ab.total)||0}</b><div style="font-size:10px;color:var(--soft)" title="Started the application through this link but left before submitting — expand under the method name for the per-section breakdown">stopped</div></div>
+        <div style="text-align:center"><b style="${_ab&&_ab.total?'color:#8B6500':''}">${(_ab&&+_ab.total)||0}</b><div style="font-size:10px;color:var(--soft)" title="Started the application through this link but left before submitting — expand under the method name for the per-section breakdown">stopped</div></div>
         <div style="display:flex;gap:5px">
           <button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcCopy('${esc(l.code)}',this)" title="Copy the tracking URL">\u{1F517} copy</button>
           ${l.jobId?'':`<button class="btn-sm bg-cream" style="cursor:pointer;font-size:10.5px" onclick="_srcEdit('${esc(l.id)}')" title="Edit platform, method, pay, notes">\u270E edit</button>`}
