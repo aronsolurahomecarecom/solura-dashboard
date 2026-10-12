@@ -1905,7 +1905,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1012-128';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1012-129';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -8748,7 +8748,8 @@ function renderSchedMail(){
     return;
   }
   host.innerHTML=L.map(function(r){
-    var nm='';try{nm=String((rows[r.ri]||[])[C.NM]||(rows[r.ri]||[])[C.DM]||'').trim();}catch(_){}
+    // Lead name via the ADDRESS — the stored ri goes stale when rows shift
+    var nm='';try{var riN=riForEmail(r.to);if(riN>-1)nm=String((rows[riN]||[])[C.NM]||(rows[riN]||[])[C.DM]||'').trim();}catch(_){}
     var when=new Date(r.dueAt).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
     return '<div style="border:1.5px solid '+(r.stuck?'var(--red)':'var(--border)')+';border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
       +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12.5px">'+escapeHtml(nm||r.to)+' — '+escapeHtml(r.subj||'(no subject)')+'</div>'
@@ -8971,34 +8972,38 @@ async function openMailbox(){
   // ⏰ Scheduled-email receipts ride the tab too: a lead surfaces even if
   // they never wrote in — pending ones say when they send, sent ones show
   // their open status. Expanding the row shows the full receipt list.
+  // Keyed by the RECIPIENT ADDRESS — stored row numbers go stale when the
+  // sheet shifts, and that slid outgoing history onto the wrong leads.
   var schedRows={};
   try{
     scheduledEmails().forEach(function(r9){
-      if(!r9||r9.ri==null)return;
+      if(!r9||!r9.to)return;
+      var e9=normEmail(r9.to);
       var when9=new Date(r9.dueAt).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
-      var cur=schedRows[r9.ri];
-      if(!cur||r9.dueAt>cur.ts)schedRows[r9.ri]={ts:r9.dueAt,subj:r9.subj,label:'⏰ sends '+when9};
+      var cur=schedRows[e9];
+      if(!cur||r9.dueAt>cur.ts)schedRows[e9]={ts:r9.dueAt,subj:r9.subj,label:'⏰ sends '+when9};
     });
   }catch(_){}
   try{
     var o9=sentStore();
     Object.keys(o9).forEach(function(k9){
       var rec=o9[k9];
-      if(!rec||rec.kind!=='scheduled')return;
+      if(!rec||rec.kind!=='scheduled'||!rec.email)return;
       var lbl=rec.openedAt
         ?('📤 sent · ✓ opened'+((rec.opens||0)>1?' ×'+rec.opens:''))
         :'📤 sent · not opened yet';
-      var cur2=schedRows[rec.ri];
-      if(!cur2||rec.ts>cur2.ts)schedRows[rec.ri]={ts:rec.ts,subj:rec.subj,label:lbl};
+      var cur2=schedRows[normEmail(rec.email)];
+      if(!cur2||rec.ts>cur2.ts)schedRows[normEmail(rec.email)]={ts:rec.ts,subj:rec.subj,label:lbl};
     });
   }catch(_){}
-  var haveRi={};
-  items.forEach(function(x){haveRi[x.ri]=true;});
-  Object.keys(schedRows).forEach(function(riK){
-    var ri9=parseInt(riK,10);
-    if(haveRi[ri9])return; // lead already listed via inbound — expand shows receipts
-    var s9=schedRows[riK];
-    items.push({ri:ri9,email:normEmail((rows[ri9]||[])[C.EM]),
+  var haveEm={};
+  items.forEach(function(x){haveEm[x.email]=true;});
+  Object.keys(schedRows).forEach(function(emK){
+    if(haveEm[emK])return; // lead already listed via inbound — expand shows receipts
+    var ri9=riForEmail(emK);
+    if(ri9<0)return; // address no longer on the sheet
+    var s9=schedRows[emK];
+    items.push({ri:ri9,email:emK,
       latest:{subject:s9.subj||'(no subject)',preview:s9.label,receivedTs:s9.ts},
       latestTs:s9.ts,unread:0,sched:true});
   });
@@ -9732,10 +9737,25 @@ function markEmailOpened(id,isDoc){
   saveSentStore(o);
   return rec;
 }
+// The CURRENT row index for an email address — row numbers shift when the
+// sheet is sorted or a row is added/removed, so nothing display-side may
+// trust a stored ri. The address is the stable key.
+function riForEmail(em){
+  var e=normEmail(em);
+  if(!e)return -1;
+  for(var i=DATA_START;i<rows.length;i++){
+    if(normEmail((rows[i]||[])[C.EM])===e)return i;
+  }
+  return -1;
+}
 function sentEmailsFor(ri){
   var o=sentStore();
+  // Match by the RECIPIENT ADDRESS, not the stored row number: rows shift
+  // (sorts, deletions, intake inserts) and ri-keyed history slid onto
+  // neighboring leads. Records without an address fall back to ri.
+  var em=normEmail((rows[ri]||[])[C.EM]);
   return Object.keys(o).map(function(k){return o[k];})
-    .filter(function(r2){return r2.ri===ri;})
+    .filter(function(r2){return em?(normEmail(r2.email)===em):(r2.ri===ri);})
     .sort(function(a,b){return b.ts-a.ts;});
 }
 async function stampCommsOpen(rec){

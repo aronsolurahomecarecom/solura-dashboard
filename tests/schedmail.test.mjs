@@ -87,8 +87,8 @@ const S = mk(enginesDoc);
   ok(/scheduled:'⏰ scheduled'/.test(html), 'scheduled sends get their own chip in the sent-emails list');
   const mbx = html.slice(html.indexOf('async function openMailbox'), html.indexOf('function renderMailboxList'));
   ok(/scheduledEmails\(\)\.forEach/.test(mbx) && /⏰ sends '\+when9/.test(mbx.replace(/\\u23f0/g, '⏰')) || /sends '\+when9/.test(mbx), '📧 Email tab: pending scheduled emails surface their lead with the send time');
-  ok(/rec\.kind!=='scheduled'\)return;/.test(mbx) && /not opened yet/.test(mbx) && /opened'\+/.test(mbx), '📧 Email tab: sent scheduled emails show their read-receipt status on the row');
-  ok(/if\(haveRi\[ri9\]\)return; \/\/ lead already listed via inbound/.test(mbx), 'leads with inbound mail are not duplicated — their fold already shows receipts');
+  ok(/rec\.kind!=='scheduled'\|\|!rec\.email\)return;/.test(mbx) && /not opened yet/.test(mbx) && /opened'\+/.test(mbx), '📧 Email tab: sent scheduled emails show their read-receipt status on the row');
+  ok(/if\(haveEm\[emK\]\)return; \/\/ lead already listed via inbound/.test(mbx) && /riForEmail\(emK\)/.test(mbx), 'no duplicates, and the row resolves by ADDRESS (row numbers go stale)');
 }
 
 console.log('\nScheduled mail: ' + PASS + ' passed, ' + FAIL + ' failed');

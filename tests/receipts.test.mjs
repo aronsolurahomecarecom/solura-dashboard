@@ -90,6 +90,13 @@ function build(pixelOn) {
 
 // ── display locks ──
 {
+  // B-1012-129: attribution is by ADDRESS, never by stored row number —
+  // sheet sorts/inserts/deletions were sliding history onto neighbors.
+  const sef = html.slice(html.indexOf('function sentEmailsFor'), html.indexOf('async function stampCommsOpen'));
+  ok(/var em=normEmail\(\(rows\[ri\]\|\|\[\]\)\[C\.EM\]\)/.test(sef) && /em\?\(normEmail\(r2\.email\)===em\):\(r2\.ri===ri\)/.test(sef), 'sent history matches the recipient ADDRESS; stored ri is only a fallback');
+  ok(/function riForEmail/.test(html) && /stored ri goes stale when rows shift/.test(html), 'scheduled lists resolve the lead by address too');
+  const mbxSched = html.slice(html.indexOf('var schedRows={};'), html.indexOf('items.sort(mailboxOrder)'));
+  ok(/normEmail\(r9\.to\)/.test(mbxSched) && /normEmail\(rec\.email\)/.test(mbxSched) && /riForEmail\(emK\)/.test(mbxSched), 'Email-tab scheduled rows key by address and re-resolve the row at render');
   ok(/recordSentEmail\(id,ri,email,subj,commsRow,variant,kind\)/.test(html) && /kind:String\(kind\|\|''\)/.test(html), 'sent store persists the kind');
   ok(/emailKindChip\(rec\.kind\)/.test(html), 'the sent-emails list labels invoice / assessment sends');
   ok(/typeof renderSentEmailsFor==='function'\?renderSentEmailsFor\(ri\):''/.test(html), 'the Email tab fold shows read receipts alongside their messages');
