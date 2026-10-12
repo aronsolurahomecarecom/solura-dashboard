@@ -10544,6 +10544,20 @@ function renderFilterPanel(){
         <button class="fp-close" onclick="toggleFilterPanel()" title="Close">×</button>
       </div>
 
+      <details class="fp-section" ${isOpen('bulkjob')} ontoggle="_saveFilterOpen('bulkjob',this.open)">
+        <summary><span class="fp-label">🧳 Move filtered into a job</span></summary>
+        <div class="fp-content">
+          <div style="font-size:11px;color:var(--soft);line-height:1.5;margin-bottom:8px">Moves every candidate matching the active filters into a job package — whether or not they applied to it. They keep their sequence, stage, and original source; the job takes over rating (requirements, drive time, wage). Hired/Declined are skipped.</div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <select id="fp-bulk-job" style="flex:1;min-width:160px;padding:7px 9px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12px">
+              <option value="">— pick a job —</option>
+              ${(SETTINGS.jobs||[]).map(j=>`<option value="${esc(j.id)}">${esc(j.name)}${j.client?' · '+esc(j.client):''}</option>`).join('')}
+            </select>
+            <button class="btn-sm bg-grn" style="cursor:pointer;padding:7px 14px" onclick="bulkAssignJob()">Move filtered →</button>
+          </div>
+        </div>
+      </details>
+
       <details class="fp-section" ${isOpen('availability')} ontoggle="_saveFilterOpen('availability',this.open)">
         <summary><span class="fp-label">Availability</span></summary>
         <div class="fp-content">
@@ -14630,6 +14644,7 @@ function questionsHubSideRail(c){
     <div class="kvrow"><span class="lbl">Address</span><span class="val" style="text-align:right;font-size:11.5px">${esc(addr)}</span></div>
     <div class="kvrow"><span class="lbl">Source</span><span class="val">${esc(candidateSourceLabel(c))}${c.st&&c.st.sourceCode?' <span style="font-family:ui-monospace,SF Mono,Consolas,monospace;font-size:10px;color:var(--soft);background:var(--cream);padding:1px 5px;border-radius:3px;margin-left:4px">'+esc(c.st.sourceCode)+'</span>':''}</span></div>
     <button class="btn-sec bg-cream" style="margin-top:8px;padding:6px 12px;font-size:12px;width:100%" onclick="setFocusedHub('application')">✎ Edit application data</button>
+    <button class="btn-sec bg-cream" style="margin-top:6px;padding:6px 12px;font-size:12px;width:100%" onclick="assignJobWS()" title="Move them into a job package — even one they didn't apply to. Sequence and stage stay put.">🧳 Assign to job →</button>
     ${c.stage==='Hired'?'<button class="btn-sec bg-cream" style="margin-top:6px;padding:6px 12px;font-size:12px;width:100%" onclick="setFocusedHub(\'functions\')" title="Which care functions their certifications allow">🧰 Eligible functions →</button>':''}
   </div>`;
 
@@ -22547,9 +22562,80 @@ function _srcSaveEdit(id){
    runs off the same data as before. This is the primary way to bind sequence + pay to a
    link; the Source links section remains for raw/legacy links. */
 function _jobFor(c){
+  /* Explicit assignment outranks the apply-link inference (Meir 2026-10-12: move people
+     into a job package even though they didn't apply to it). st.jobId is set by the
+     workspace "Assign to job" control or the filter panel's bulk move; sourceCode keeps
+     carrying WHERE they came from, untouched, so link metrics stay honest. */
+  if(c&&c.st&&c.st.jobId){
+    const j=(SETTINGS.jobs||[]).find(x=>x&&x.id===c.st.jobId);
+    if(j)return j;
+  }
   const code=c&&c.st&&c.st.sourceCode;
   if(!code)return null;
   return (SETTINGS.jobs||[]).find(j=>(j.links||[]).some(l=>l.code===code)||j.code===code)||null;
+}
+/* ── Assign to job (single candidate) ── */
+function assignJobWS(){
+  if(!W){toast('Open a candidate first');return;}
+  const jobs=(SETTINGS.jobs||[]);
+  if(!jobs.length){toast('No job packages yet — create one in Settings → Job packages');return;}
+  const cur=_jobFor(pipeline.find(x=>x.excelRow===W.row)||{st:W.st});
+  const explicit=W.st.jobId||'';
+  document.getElementById('m-title').textContent='🧳 Assign to job — '+(W.name||'');
+  document.getElementById('m-body').innerHTML=`
+    <div style="font-size:12.5px;color:var(--mid);line-height:1.5;margin-bottom:12px">Current: <b>${esc(cur?cur.name:'none')}</b>${cur&&!explicit?' <span style="color:var(--soft)">(via their apply link)</span>':''}.<br>
+    <span style="font-size:11.5px;color:var(--soft)">They keep their sequence and stage — this sets which job rates them (requirements, drive time, wage) and groups them under the package. Their original source stays untouched.</span></div>
+    <select id="aj-job-sel" style="width:100%;padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      <option value="">— no explicit job (fall back to their apply link) —</option>
+      ${jobs.map(j=>`<option value="${esc(j.id)}" ${explicit===j.id?'selected':''}>${esc(j.name)}${j.client?' · '+esc(j.client):''}</option>`).join('')}
+    </select>
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button class="btn-sec" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary bg-grn" onclick="_commitAssignJob()">🧳 Assign</button>
+    </div>`;
+  document.getElementById('modal').classList.add('open');
+}
+async function _commitAssignJob(){
+  const sel=document.getElementById('aj-job-sel');
+  if(!sel)return;
+  const jid=sel.value;
+  closeModal();
+  const prev=W.st.jobId||'';
+  if(jid===prev){toast('No change');return;}
+  const jb=jid?(SETTINGS.jobs||[]).find(j=>j.id===jid):null;
+  if(jid)W.st.jobId=jid;else delete W.st.jobId;
+  logW(jid?('🧳 Moved into job "'+(jb?jb.name:jid)+'"'):'🧳 Explicit job assignment cleared — back to their apply link');
+  if(!(await saveW(true))){
+    if(prev)W.st.jobId=prev;else delete W.st.jobId;
+    if(W.st&&Array.isArray(W.st.log))W.st.log.pop();
+    renderWorkspace();
+    return;
+  }
+  toast(jid?('🧳 '+(jb?jb.name:'Assigned')):'🧳 Cleared');
+  renderWorkspace();if(typeof render==='function')render();
+}
+/* ── Bulk: move every candidate matching the active filters into a job ── */
+async function bulkAssignJob(){
+  const sel=document.getElementById('fp-bulk-job');
+  if(!sel||!sel.value){toast('Pick a job first');return;}
+  if(!filterCount()){toast('Set at least one filter first — this moves EVERYONE who matches');return;}
+  const jb=(SETTINGS.jobs||[]).find(j=>j.id===sel.value);
+  if(!jb){toast('Job not found');return;}
+  const targets=(pipeline||[]).filter(c=>matchFilters(c)&&!_isTerminalStage(c.stage)&&!(c.st&&c.st.__ajCorrupt)&&(c.st&&c.st.jobId)!==jb.id);
+  if(!targets.length){toast('No filtered candidates to move (terminal stages are skipped)');return;}
+  if(!confirm('Move '+targets.length+' filtered candidate'+(targets.length===1?'':'s')+' into "'+jb.name+'"?\n\nThey keep their sequences and stages — this sets which job rates and groups them. Hired/Declined are skipped.'))return;
+  let done=0,failed=0;
+  for(const c of targets){
+    try{
+      if(_wsOpenOn(c.excelRow))continue; /* never write under an open workspace */
+      c.st.jobId=jb.id;
+      c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧳 Moved into job "'+jb.name+'" (bulk, filtered)'});
+      await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+      done++;
+    }catch(e){failed++;console.warn('bulk job assign row '+c.excelRow+':',e.message);}
+  }
+  toast('🧳 '+done+' moved into '+jb.name+(failed?' · '+failed+' failed (see console)':''));
+  if(typeof render==='function')render();
 }
 /* Every source code owned by a job package. Rule 8: job packages are the single control
    surface for their links, so anything editing sequenceAssignments wholesale has to know
