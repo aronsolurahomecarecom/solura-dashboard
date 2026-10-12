@@ -11093,24 +11093,37 @@ async function _commitOffboard(){
   const sendEmail=!!(document.getElementById('ob-send')||{}).checked;
   const incReason=!!(document.getElementById('ob-inc-reason')||{}).checked;
   closeModal();
+  if(!W||W.stage!=='Hired')return;
   if(!confirm('Offboard '+(W.name||'this caregiver')+' — last day '+lastDay+(reason?', reason: '+reason:'')+'?'))return;
-  const fromStage=W.stage;
-  W.stage='Declined';
-  W.st.offboarded={at:today(),lastDay:lastDay,reason:reason||'',by:(typeof userEmail!=='undefined'?userEmail:'')||''};
-  delete W.st.manualAwaiting;
+  /* Pinned across the save (same rule as hireNowWS / advanceWS): everything after the await
+     used to read the global W, which is whoever the operator opened meanwhile — THAT card was
+     painted Declined in memory (and written so by their next save), a failed save rolled the
+     offboard back on them instead, and the termination notice composer opened addressed to them. */
+  const w=W;
+  const fromStage=w.stage,_hadPark=w.st.manualAwaiting;
+  w.stage='Declined';
+  w.st.offboarded={at:today(),lastDay:lastDay,reason:reason||'',by:(typeof userEmail!=='undefined'?userEmail:'')||''};
+  delete w.st.manualAwaiting;
   logW('🔥 Offboarded — last day '+lastDay+(reason?' · '+reason:''));
   if(note)logW('🗒 Offboard note: '+note);
-  if(!(await saveW(true))){
-    W.stage=fromStage;
-    delete W.st.offboarded;
-    if(W.st&&Array.isArray(W.st.log)){W.st.log.pop();if(note)W.st.log.pop();}
-    renderWorkspace();
+  if(!(await _saveWFor(w,true))){
+    w.stage=fromStage;
+    delete w.st.offboarded;
+    if(_hadPark!==undefined)w.st.manualAwaiting=_hadPark;
+    if(w.st&&Array.isArray(w.st.log)){w.st.log.pop();if(note)w.st.log.pop();}
+    if(W===w)renderWorkspace();
     return;
   }
-  const c=pipeline.find(x=>x.excelRow===W.row);
+  const c=pipeline.find(x=>x.excelRow===w.row);
   if(c){c.stage='Declined';c.row[6]='Declined';}
   toast('🔥 Offboarded'+(sendEmail?'':' — no email sent'));
-  renderWorkspace();if(typeof render==='function')render();
+  if(W===w)renderWorkspace();
+  if(typeof render==='function')render();
+  if(W!==w){
+    /* the offboard is saved; the notice is composed from the open workspace, which is no longer theirs */
+    if(sendEmail)alert((w.name||'The caregiver')+' is offboarded, but the termination notice was NOT opened because another profile was opened during the save. Open '+(w.name||'them')+' from the Declined archive to email the notice.');
+    return;
+  }
   if(sendEmail&&W.email&&W.email.trim()){
     W.__offboard={lastDay:lastDay,reason:reason,emailReason:incReason};
     const ldStr=new Date(lastDay+'T00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
@@ -15227,9 +15240,19 @@ async function clientIntakeLink(r){
   if(!W){toast('Open a candidate first');return;}
   if(!W.st.refCode){
     /* Old rows predating minting — same alphabet the add-drawer uses. */
-    W.st.refCode=Math.random().toString(36).replace(/[^a-z0-9]/g,'').slice(0,6).toUpperCase();
+    /* Pinned across the save: W is replaced the moment another candidate is opened, and the
+       lines after the await used to act on whoever that was — a failed save deleted THEIR
+       referral code from memory (their next save then wiped it from the sheet, killing every
+       link they had already shared), and a successful one showed their link under this title. */
+    const w=W;
+    w.st.refCode=Math.random().toString(36).replace(/[^a-z0-9]/g,'').slice(0,6).toUpperCase();
     logW('🔑 Referral code minted for the client-intake link');
-    if(!(await saveW(true))){delete W.st.refCode;return;}
+    if(!(await _saveWFor(w,true))){
+      delete w.st.refCode;
+      if(Array.isArray(w.st.log))w.st.log.pop();
+      return;
+    }
+    if(W!==w)return;
   }
   const url=_clientIntakeUrlFor(W.st);
   const amt=SETTINGS.config.customerReferralAmount;
@@ -17501,44 +17524,75 @@ async function _reconcileReferralMilestones(){
   if(!SETTINGS.config||!SETTINGS.config.referralEnabled)return;
   const byRefCode={};
   (pipeline||[]).forEach(x=>{if(x.st&&x.st.refCode)byRefCode[x.st.refCode]=x;});
-  const dirty=new Map(); /* excelRow -> referrer */
+  /* PLAN first, touching nothing: which referrers are missing a milestone their referred
+     candidates' stages already show. The credit used to be applied to the referrer's
+     load-time copy right here and that whole copy PATCHed over AJ with no look at the live
+     cell — every other load-time writer (adoption, backfill, auto-link, compaction, the
+     Yardstik catch-up) checks first, because a webhook or another tab may have written the
+     row since this session read it, and this pass runs after the inbox poll, the longest
+     await in the refresh. A failed write also left the credit in memory only. */
+  const _needs=(referrer,c)=>{
+    const entry=(referrer.st.referrals||[]).find(r=>r.refCode===c.st.refCode);
+    const hist=(entry&&entry.history)||[];
+    const screenedNow=_REF_SCREENED_STAGES.has(c.stage),hiredNow=c.stage==='Hired';
+    return {screened:screenedNow&&!hist.some(h=>h.event==='screened'),hired:hiredNow&&!hist.some(h=>h.event==='hired'),hiredNow:hiredNow};
+  };
+  const plan=new Map(); /* referrer excelRow -> {referrer,cands[]} */
   (pipeline||[]).forEach(c=>{
     const st=c&&c.st;
     if(!st||!st.referredBy||!st.refCode||st.__ajCorrupt)return;
     const referrer=byRefCode[st.referredBy];
-    if(!referrer||referrer.st.__ajCorrupt||_wsOpenOn(referrer.excelRow))return;
-    const screenedNow=_REF_SCREENED_STAGES.has(c.stage);
-    const hiredNow=c.stage==='Hired';
-    if(!screenedNow&&!hiredNow)return;
-    referrer.st.referrals=referrer.st.referrals||[];
-    let entry=referrer.st.referrals.find(r=>r.refCode===st.refCode);
-    if(!entry){
-      entry={refCode:st.refCode,name:c.name,email:c.email,status:'submitted',submittedAt:new Date().toISOString(),history:[{event:'submitted',at:new Date().toISOString()}]};
-      referrer.st.referrals.push(entry);
-      dirty.set(referrer.excelRow,referrer);
-    }
-    entry.history=entry.history||[];
-    referrer.st.referralCount=referrer.st.referralCount||{submitted:0,screened:0,hired:0};
-    if(screenedNow&&!entry.history.some(h=>h.event==='screened')){
-      entry.status=hiredNow?'hired':'screened';
-      entry.history.push({event:'screened',at:new Date().toISOString()});
-      referrer.st.referralCount.screened=(referrer.st.referralCount.screened||0)+1;
-      referrer.st.log=(referrer.st.log||[]).concat({t:stamp(),x:'🎁 Referral milestone: '+c.name+' completed phone screen'});
-      dirty.set(referrer.excelRow,referrer);
-    }
-    if(hiredNow&&!entry.history.some(h=>h.event==='hired')){
-      entry.status='hired';
-      entry.history.push({event:'hired',at:new Date().toISOString()});
-      referrer.st.referralCount.hired=(referrer.st.referralCount.hired||0)+1;
-      referrer.st.log=(referrer.st.log||[]).concat({t:stamp(),x:'🎁 Referral milestone: '+c.name+' was hired!'});
-      dirty.set(referrer.excelRow,referrer);
-    }
+    if(!referrer||referrer===c||!referrer.st||referrer.st.__ajCorrupt||_wsOpenOn(referrer.excelRow))return;
+    const nd=_needs(referrer,c);
+    if(!nd.screened&&!nd.hired)return;
+    if(!plan.has(referrer.excelRow))plan.set(referrer.excelRow,{referrer:referrer,cands:[]});
+    plan.get(referrer.excelRow).cands.push(c);
   });
-  for(const referrer of dirty.values()){
-    try{await patchRange('AJ'+referrer.excelRow,[[_stCell(referrer.st)]]);}
-    catch(e){console.warn('Referral reconcile save failed (row '+referrer.excelRow+'):',e.message);}
+  if(!plan.size)return;
+  const _myPipe=pipeline;
+  let n=0;
+  for(const p of plan.values()){
+    const referrer=p.referrer;
+    if(!(await _ajUnchangedSinceLoad(referrer)))continue; /* changed underneath us — next refresh re-derives */
+    if(pipeline!==_myPipe)return;
+    if(_wsOpenOn(referrer.excelRow))continue; /* opened during the read above */
+    const snap=JSON.stringify(referrer.st);
+    try{
+      p.cands.forEach(c=>{
+        const nd=_needs(referrer,c);
+        if(!nd.screened&&!nd.hired)return;
+        referrer.st.referrals=referrer.st.referrals||[];
+        let entry=referrer.st.referrals.find(r=>r.refCode===c.st.refCode);
+        if(!entry){
+          entry={refCode:c.st.refCode,name:c.name,email:c.email,status:'submitted',submittedAt:new Date().toISOString(),history:[{event:'submitted',at:new Date().toISOString()}]};
+          referrer.st.referrals.push(entry);
+        }
+        entry.history=entry.history||[];
+        referrer.st.referralCount=referrer.st.referralCount||{submitted:0,screened:0,hired:0};
+        if(nd.screened){
+          entry.status=nd.hiredNow?'hired':'screened';
+          entry.history.push({event:'screened',at:new Date().toISOString()});
+          referrer.st.referralCount.screened=(referrer.st.referralCount.screened||0)+1;
+          referrer.st.log=(referrer.st.log||[]).concat({t:stamp(),x:'🎁 Referral milestone: '+c.name+' completed phone screen'});
+        }
+        if(nd.hired){
+          entry.status='hired';
+          entry.history.push({event:'hired',at:new Date().toISOString()});
+          referrer.st.referralCount.hired=(referrer.st.referralCount.hired||0)+1;
+          referrer.st.log=(referrer.st.log||[]).concat({t:stamp(),x:'🎁 Referral milestone: '+c.name+' was hired!'});
+        }
+      });
+      const j=_stCell(referrer.st);
+      await patchRange('AJ'+referrer.excelRow,[[j]]);
+      referrer.row[35]=j; /* the row cache IS the cell — later unchanged-checks compare against it */
+      n++;
+    }catch(e){
+      /* not on the sheet → not in memory either, or the reward card shows a credit a reload removes */
+      try{referrer.st=JSON.parse(snap);}catch(_e){}
+      console.warn('Referral reconcile save failed (row '+referrer.excelRow+'):',e.message);
+    }
   }
-  if(dirty.size)console.log('🎁 Referral reconcile: credited milestones on '+dirty.size+' referrer row(s)');
+  if(n)console.log('🎁 Referral reconcile: credited milestones on '+n+' referrer row(s)');
 }
 /* ===================== email detail view + attachment upload ===================== */
 let _emailCache={}; /* messageId -> full message object (cached during session) */
