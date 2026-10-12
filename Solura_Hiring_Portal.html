@@ -10895,9 +10895,9 @@ function renderActiveCaregivers(){
     </div>`;
     return;
   }
-  const cards=hired.map(c=>{
+  const _cgCard=c=>{
     const reqClear=c.st.reqCheck==='clear';
-    const statusPill=reqClear?'<span class="pill pg">Patient-matchable</span>':'<span class="pill pa">Required check pending</span>';
+    const statusPill=(c.st.prn?'<span class="pill" style="background:#F1EAF8;color:#7A4C9E;border:1px solid #C9A8E8">🌙 PRN</span> ':'')+(reqClear?'<span class="pill pg">Patient-matchable</span>':'<span class="pill pa">Required check pending</span>');
     const lastCheckin=(c.st.checkins||[])[0];
     const lastCheckinAge=lastCheckin?Math.floor((Date.now()-new Date(lastCheckin.t).getTime())/(1000*60*60*24)):null;
     const phoneClean=(c.phone||'').replace(/[^0-9]/g,'');
@@ -10921,14 +10921,41 @@ function renderActiveCaregivers(){
         ${phoneClean?'<button class="btn-sm" style="background:linear-gradient(135deg,#4285F4,#1A73E8);color:#fff;border:none;cursor:pointer" onclick="openLinkPopup(\''+gvUrl+'\',\'gvoice\',420,640)">☎ Call</button>':''}
         ${c.email?'<button class="btn-sm bg-cream" onclick="quickEmailCaregiver('+c.excelRow+')">✉ Email</button>':''}
         <button class="btn-sm bg-cream" onclick="clientIntakeLink(${c.excelRow})" title="Their personal client-intake link — families who sign up through it are credited to them">🏠 Intake link</button>
+        <button class="btn-sm bg-cream" onclick="_togglePrn(${c.excelRow})" title="${c.st.prn?'Move to the regular active roster':'Move to the PRN (as-needed) pool'}">⇄ ${c.st.prn?'Regular':'PRN'}</button>
         <button class="btn-sm" style="background:#fff;border:1px solid var(--red);color:var(--red);cursor:pointer;margin-left:auto" onclick="fireCaregiver(${c.excelRow})" title="Offboard this caregiver — last day, reason, optional termination email">🔥 Offboard</button>
       </div>
     </div>`;
-  }).join('');
+  };
+  /* PRN (as-needed) caregivers live in their own section (Meir 2026-10-12) — st.prn is
+     stamped at hire when the job/link is PRN-aimed, or flipped here with the ⇄ button. */
+  const regular=hired.filter(c=>!(c.st&&c.st.prn));
+  const prn=hired.filter(c=>c.st&&c.st.prn);
   container.innerHTML=`<div class="active-shell">
-    <div class="active-head"><h1>Active caregivers</h1><span class="active-count">${hired.length} caregiver${hired.length===1?'':'s'}</span></div>
-    <div class="active-grid">${cards}</div>
+    <div class="active-head"><h1>Active caregivers</h1><span class="active-count">${regular.length} caregiver${regular.length===1?'':'s'}${prn.length?' + '+prn.length+' PRN':''}</span></div>
+    <div class="active-grid">${regular.length?regular.map(_cgCard).join(''):'<div style="color:var(--soft);font-size:13px;padding:14px">No regular-roster caregivers.</div>'}</div>
+    ${prn.length?`<div class="active-head" style="margin-top:26px"><h1 style="font-size:21px">🌙 PRN pool — as needed</h1><span class="active-count">${prn.length} caregiver${prn.length===1?'':'s'}</span></div>
+    <div class="active-grid">${prn.map(_cgCard).join('')}</div>`:''}
   </div>`;
+}
+async function _togglePrn(row){
+  const c=pipeline.find(x=>x.excelRow===row);
+  if(!c||c.st.__ajCorrupt)return;
+  c.st.prn=!c.st.prn;
+  if(!c.st.prn)delete c.st.prn;
+  c.st.log=(c.st.log||[]).concat({t:stamp(),x:c.st.prn?'🌙 Moved to the PRN pool':'👥 Moved to the regular active roster'});
+  try{await patchRange('AJ'+row,[[_stCell(c.st)]]);toast(c.st.prn?'🌙 PRN':'👥 Regular roster');}
+  catch(e){c.st.prn=!c.st.prn;if(!c.st.prn)delete c.st.prn;c.st.log.pop();toast('Save failed: '+e.message);}
+  renderActiveCaregivers();
+}
+/* Where is this candidate HEADED on hire — PRN or regular? Explicit stamp wins; else the
+   job package, else their source link. */
+function _prnDestined(c){
+  if(c&&c.st&&typeof c.st.prn==='boolean')return c.st.prn;
+  const jb=(typeof _jobFor==='function')?_jobFor(c):null;
+  if(jb&&jb.prn)return true;
+  const code=c&&c.st&&c.st.sourceCode;
+  if(code){const l=(SETTINGS.config&&SETTINGS.config.sourceLinks||[]).find(x=>x.code===code);if(l&&l.prn)return true;}
+  return false;
 }
 function quickEmailCaregiver(row){loadW(row);openCustomEmail();}
 
@@ -11070,8 +11097,12 @@ async function markHiredWS(){
      the save it painted THAT person Hired. saveW already rebuilds the right card on success. */
   const w=W,_hadHired=w.st.hiredDate;
   w.st.hiredDate=_hadHired||today();
-  if(!(await advanceWS('Hired','🎉 Hired — orientation complete'))){
+  /* PRN-aimed job/link → they land in the PRN pool, not the regular roster. */
+  const _wasPrn=typeof w.st.prn==='boolean';
+  if(typeof _prnDestined==='function'&&_prnDestined(pipeline.find(x=>x.excelRow===w.row)||{st:w.st}))w.st.prn=true;
+  if(!(await advanceWS('Hired','🎉 Hired — orientation complete'+(w.st.prn?' · PRN pool':'')))){
     if(_hadHired)w.st.hiredDate=_hadHired;else delete w.st.hiredDate;
+    if(!_wasPrn)delete w.st.prn;
     return;
   }
   if(typeof render==='function')render();
@@ -11168,16 +11199,19 @@ async function hireNowWS(){
   /* `w` pins THIS candidate across the save: the global W is replaced the moment the operator
      opens someone else, and everything below the await used to act on whoever was open THEN —
      a failed save rolled the wrong person's stage back, a good one painted them Hired. */
-  const w=W,fromStage=w.stage,_hadHired=w.st.hiredDate,_hadPark=w.st.manualAwaiting;
+  const w=W,fromStage=w.stage,_hadHired=w.st.hiredDate,_hadPark=w.st.manualAwaiting,_wasPrn=typeof w.st.prn==='boolean';
   w.stage='Hired';
   w.st.hiredDate=w.st.hiredDate||today();
   delete w.st.manualAwaiting;
-  logW('⚡ Fast-hired from '+fromStage+' — moved straight to Active caregivers');
+  /* PRN-aimed job/link → straight into the PRN pool. */
+  if(typeof _prnDestined==='function'&&_prnDestined(pipeline.find(x=>x.excelRow===w.row)||{st:w.st}))w.st.prn=true;
+  logW('⚡ Fast-hired from '+fromStage+' — moved straight to Active caregivers'+(w.st.prn?' (PRN pool)':''));
   if(!(await _saveWFor(w,true))){
     /* Put back exactly what was there — a pre-existing hiredDate and a park both survive. */
     w.stage=fromStage;
     if(_hadHired)w.st.hiredDate=_hadHired;else delete w.st.hiredDate;
     if(_hadPark)w.st.manualAwaiting=_hadPark;
+    if(!_wasPrn)delete w.st.prn;
     if(w.st&&Array.isArray(w.st.log))w.st.log.pop();
     if(W===w)renderWorkspace();
     return;
@@ -22411,7 +22445,7 @@ function renderSettingsSourceLinks(){
         <div>
           <div style="font-weight:600;color:var(--ink)">${esc(l.method||'—')}</div>
           <div style="font-size:10px;color:var(--gold-deep);margin-top:1px">${(typeof _srcSeqInline==='function')?_srcSeqInline(l):''}</div>
-          <div style="font-size:10.5px;color:var(--soft);margin-top:2px">code <span style="font-family:ui-monospace,SF Mono,Consolas,monospace;background:var(--cream);padding:1px 5px;border-radius:3px">${esc(l.code)}</span>${l.wage?' \u00b7 <b style="color:var(--grn-deep)">'+esc(l.wage)+'</b>':''}${l.notes?' \u00b7 '+esc(l.notes):''}${inactive?' \u00b7 <b>inactive</b>':''}</div>
+          <div style="font-size:10.5px;color:var(--soft);margin-top:2px">code <span style="font-family:ui-monospace,SF Mono,Consolas,monospace;background:var(--cream);padding:1px 5px;border-radius:3px">${esc(l.code)}</span>${l.wage?' \u00b7 <b style="color:var(--grn-deep)">'+esc(l.wage)+'</b>':''}${l.prn?' \u00b7 <b style="color:#7A4C9E">\u{1F319} PRN</b>':''}${l.notes?' \u00b7 '+esc(l.notes):''}${inactive?' \u00b7 <b>inactive</b>':''}</div>
         </div>
         <div style="text-align:center"><b>${s.applied}</b><div style="font-size:10px;color:var(--soft)">applied</div></div>
         <div style="text-align:center"><b>${s.screened}</b><div style="font-size:10px;color:var(--soft)">screened ${s.applied?'('+s.conversionScreenPct+'%)':''}</div></div>
@@ -22456,6 +22490,7 @@ function renderSettingsSourceLinks(){
       <label class="set-field"><span>Method</span><input type="text" id="src-new-method" placeholder="Sponsored post" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px"></label>
       <label class="set-field"><span>Notes <span style="color:var(--soft);font-size:10px">(optional)</span></span><input type="text" id="src-new-notes" placeholder="Cleveland targeting" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px"></label>
       <label class="set-field"><span>Wage <span style="color:var(--soft);font-size:10px">(optional — fills {wage} in emails for this source)</span></span><input type="text" id="src-new-wage" placeholder="$16–18/hr" style="padding:8px 11px;border:1.5px solid var(--border);border-radius:7px;font-family:inherit;font-size:12.5px"></label>
+      <label class="set-field" style="flex-direction:row;align-items:center;gap:8px;align-self:end;cursor:pointer"><input type="checkbox" id="src-new-prn" style="width:15px;height:15px;accent-color:#7A4C9E"><span style="font-size:12px">🌙 PRN / as-needed — hires land in the PRN pool</span></label>
       <div style="align-self:end"><button class="btn-primary bg-grn" style="padding:8px 16px;height:38px" onclick="_srcCreate()">+ Create link</button></div>
     </div>
   </div>
@@ -22490,6 +22525,7 @@ async function _srcCreate(){
     id:_sourceLinkId(),code:code,
     platform:platform.trim(),method:method.trim(),notes:notes.trim(),
     wage:wage,
+    prn:!!(document.getElementById('src-new-prn')||{}).checked,
     createdAt:new Date().toISOString(),active:true
   });
   markSettingsDirty();
@@ -22538,6 +22574,7 @@ function _srcEdit(id){
       <label style="font-size:12px;color:var(--mid)">Pay (fills {pay}/{wage} for this link's candidates)<input id="se-wage" type="text" value="${esc(l.wage||'')}" placeholder="e.g. $16–$18/hr" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Notes<input id="se-notes" type="text" value="${esc(l.notes||'')}" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
     </div>
+    <label style="font-size:12px;color:var(--mid);display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer"><input id="se-prn" type="checkbox" ${l.prn?'checked':''} style="width:15px;height:15px;accent-color:#7A4C9E"> <span>🌙 <b>PRN / as-needed</b> — hires from this link land in the PRN pool</span></label>
     <div style="margin-top:10px;padding:8px 11px;background:var(--cream);border-radius:7px;font-size:11.5px">🔗 <span style="font-family:ui-monospace,monospace">${esc(_sourceLinkUrl(l.code))}</span> <span style="color:var(--soft)">— the URL never changes, posted links keep working</span></div>
     <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
       <button class="btn-sec" onclick="closeModal()">Cancel</button>
@@ -22552,6 +22589,8 @@ function _srcSaveEdit(id){
   const platform=g('se-platform'),method=g('se-method');
   if(!platform){toast('Platform required');return;} /* method stays optional — legacy links routinely have none, and requiring it made them uneditable */
   l.platform=platform;l.method=method;l.wage=g('se-wage');l.notes=g('se-notes');
+  l.prn=!!(document.getElementById('se-prn')||{}).checked;
+  if(!l.prn)delete l.prn;
   markSettingsDirty();closeModal();renderSettings();
   toast('✓ Link updated');
 }
@@ -22896,6 +22935,7 @@ function _jobOpenModal(id){
       <label style="font-size:12px;color:var(--mid)">Client ZIP (drives the distance math)<input id="job-zip" type="text" value="${esc(j.zip||'')}" placeholder="e.g. 44122" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Max drive time for THIS job, minutes (blank = the general default${Number(SETTINGS.config&&SETTINGS.config.maxDriveMin)>0?', currently '+SETTINGS.config.maxDriveMin:', currently 30'})<input id="job-maxdrive" type="number" min="1" value="${esc(j.maxDriveMin||'')}" placeholder="e.g. 25" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--mid)">Notes<input id="job-notes" type="text" value="${esc(j.notes||'')}" placeholder="anything about this posting" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--mid);display:flex;align-items:center;gap:8px;margin-top:18px;cursor:pointer"><input id="job-prn" type="checkbox" ${j.prn?'checked':''} style="width:15px;height:15px;accent-color:#7A4C9E"> <span>🌙 <b>PRN / as-needed position</b> — hires from this job land in the PRN pool, not the regular roster</span></label>
       <label style="font-size:12px;color:var(--mid)">Application form<select id="job-form" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;margin-top:4px;background:#fff">
         <option value="__GLOBAL__">— the global form —</option>
         <option value="__CUSTOM__" ${(SETTINGS.jobFormConfigs&&SETTINGS.jobFormConfigs[j.id])?'selected':''}>Custom form for this job</option>
@@ -23003,6 +23043,7 @@ function _jobSave(){
   _jobLinks(j);
   j.name=name;j.client=g('job-client');j.wage=g('job-wage');j.address=g('job-address');j.zip=g('job-zip');j.notes=g('job-notes');
   j.maxDriveMin=Number(g('job-maxdrive'))>0?Number(g('job-maxdrive')):'';
+  j.prn=!!(document.getElementById('job-prn')||{}).checked;
   /* The address is the human truth; the ZIP drives the distance math. A pasted address
      containing a ZIP fills an empty ZIP field automatically so distance just works. */
   if(!j.zip&&j.address){const zm=/\b(\d{5})\b/.exec(j.address);if(zm)j.zip=zm[1];}
