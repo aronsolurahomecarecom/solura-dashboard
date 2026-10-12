@@ -10939,13 +10939,18 @@ function renderActiveCaregivers(){
 }
 async function _togglePrn(row){
   const c=pipeline.find(x=>x.excelRow===row);
-  if(!c||c.st.__ajCorrupt)return;
+  if(!c||!c.st||c.st.__ajCorrupt)return;
+  /* Direct AJ write of the load-time copy: only onto the cell this session actually loaded
+     (a referral credit, reward entry or mail merge may have landed on a hired row since), and
+     never under an open workspace whose own save would put the old value straight back. */
+  if(_wsOpenOn(row)){toast('Close their workspace first');return;}
+  if(!(await _ajUnchangedSinceLoad(c))||pipeline.find(x=>x.excelRow===row)!==c){toast('Their record changed since this page loaded — try again in a moment');return;}
   c.st.prn=!c.st.prn;
   if(!c.st.prn)delete c.st.prn;
   c.st.log=(c.st.log||[]).concat({t:stamp(),x:c.st.prn?'🌙 Moved to the PRN pool':'👥 Moved to the regular active roster'});
-  try{await patchRange('AJ'+row,[[_stCell(c.st)]]);toast(c.st.prn?'🌙 PRN':'👥 Regular roster');}
+  try{const cell=_stCell(c.st);await patchRange('AJ'+row,[[cell]]);if(Array.isArray(c.row)&&c.row.length>35)c.row[35]=cell;toast(c.st.prn?'🌙 PRN':'👥 Regular roster');}
   catch(e){c.st.prn=!c.st.prn;if(!c.st.prn)delete c.st.prn;c.st.log.pop();toast('Save failed: '+e.message);}
-  renderActiveCaregivers();
+  if(view==='active')renderActiveCaregivers(); /* the write awaits — they may have left the view */
 }
 /* Where is this candidate HEADED on hire — PRN or regular? Explicit stamp wins; else the
    job package, else their source link. */
@@ -22642,19 +22647,25 @@ async function _commitAssignJob(){
   if(!sel)return;
   const jid=sel.value;
   closeModal();
-  const prev=W.st.jobId||'';
+  /* `w` pins THIS candidate across the save (same rule as hireNowWS): the global W is replaced
+     the moment the operator opens someone else, and the rollback below used to strip the job
+     off — and pop the last log line of — whoever was open by then. */
+  const w=W;
+  if(!w||!w.st)return;
+  const prev=w.st.jobId||'';
   if(jid===prev){toast('No change');return;}
   const jb=jid?(SETTINGS.jobs||[]).find(j=>j.id===jid):null;
-  if(jid)W.st.jobId=jid;else delete W.st.jobId;
+  if(jid)w.st.jobId=jid;else delete w.st.jobId;
   logW(jid?('🧳 Moved into job "'+(jb?jb.name:jid)+'"'):'🧳 Explicit job assignment cleared — back to their apply link');
-  if(!(await saveW(true))){
-    if(prev)W.st.jobId=prev;else delete W.st.jobId;
-    if(W.st&&Array.isArray(W.st.log))W.st.log.pop();
-    renderWorkspace();
+  if(!(await _saveWFor(w,true))){
+    if(prev)w.st.jobId=prev;else delete w.st.jobId;
+    if(w.st&&Array.isArray(w.st.log))w.st.log.pop();
+    if(W===w)renderWorkspace();
     return;
   }
   toast(jid?('🧳 '+(jb?jb.name:'Assigned')):'🧳 Cleared');
-  renderWorkspace();if(typeof render==='function')render();
+  if(W===w)renderWorkspace();
+  if(typeof render==='function'){const _ws=document.getElementById('workspace');if(!(_ws&&_ws.classList&&_ws.classList.contains('open')))render();}
 }
 /* ── Bulk: move every candidate matching the active filters into a job ── */
 async function bulkAssignJob(){
@@ -22666,17 +22677,37 @@ async function bulkAssignJob(){
   const targets=(pipeline||[]).filter(c=>matchFilters(c)&&!_isTerminalStage(c.stage)&&!(c.st&&c.st.__ajCorrupt)&&(c.st&&c.st.jobId)!==jb.id);
   if(!targets.length){toast('No filtered candidates to move (terminal stages are skipped)');return;}
   if(!confirm('Move '+targets.length+' filtered candidate'+(targets.length===1?'':'s')+' into "'+jb.name+'"?\n\nThey keep their sequences and stages — this sets which job rates and groups them. Hired/Declined are skipped.'))return;
-  let done=0,failed=0;
-  for(const c of targets){
+  /* Sequential AJ writes across many awaits, on rows picked at click time. Three things the
+     first cut skipped, each already the rule for every other bulk/heal writer:
+       · the 30s loadData swaps `pipeline` mid-loop — the click-time card becomes an orphan
+         whose st predates whatever landed since, so each row is re-found LIVE;
+       · the cell may have changed since this session loaded it (webhook, inbox poll, another
+         tab) — writing the load-time copy drops that, so only an unchanged cell is written
+         (_ajUnchangedSinceLoad), the rest are reported and left for a re-run;
+       · a failed write left jobId + the log line in memory, so the board rated the candidate
+         against a job the sheet never recorded — memory is restored. */
+  const rows=targets.map(c=>c.excelRow);
+  let done=0,failed=0,skipped=0;
+  for(const row of rows){
+    const c=pipeline.find(x=>x.excelRow===row);
+    if(!c||!c.st||c.st.__ajCorrupt||_isTerminalStage(c.stage)||c.st.jobId===jb.id)continue;
+    if(_wsOpenOn(row)){skipped++;continue;} /* never write under an open workspace */
+    if(!(await _ajUnchangedSinceLoad(c))||pipeline.find(x=>x.excelRow===row)!==c){skipped++;continue;}
+    const _prevJob=c.st.jobId,_prevLog=c.st.log;
     try{
-      if(_wsOpenOn(c.excelRow))continue; /* never write under an open workspace */
       c.st.jobId=jb.id;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧳 Moved into job "'+jb.name+'" (bulk, filtered)'});
-      await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+      const cell=_stCell(c.st);
+      await patchRange('AJ'+row,[[cell]]);
+      if(Array.isArray(c.row)&&c.row.length>35)c.row[35]=cell;
       done++;
-    }catch(e){failed++;console.warn('bulk job assign row '+c.excelRow+':',e.message);}
+    }catch(e){
+      if(_prevJob)c.st.jobId=_prevJob;else delete c.st.jobId;
+      c.st.log=_prevLog;
+      failed++;console.warn('bulk job assign row '+row+':',e.message);
+    }
   }
-  toast('🧳 '+done+' moved into '+jb.name+(failed?' · '+failed+' failed (see console)':''));
+  toast('🧳 '+done+' moved into '+jb.name+(skipped?' · '+skipped+' skipped (open, or changed since load — run it again)':'')+(failed?' · '+failed+' failed (see console)':''));
   if(typeof render==='function')render();
 }
 /* Every source code owned by a job package. Rule 8: job packages are the single control
@@ -22820,7 +22851,12 @@ async function _jobRequirementsPass(){
          policy, but it would also move candidates the job never pointed anywhere, in bulk, as
          a page-load side effect — that is Meir's call, not a bug fix. */
       let _routed=false;
-      if(defSeq&&jb.sequenceId&&jb.sequenceId!==defSeq.id&&c.st.sequenceId!==defSeq.id){
+      /* `!c.st.jobId`: an EXPLICIT job assignment (assignJobWS / bulkAssignJob, 2026-10-12)
+         promises "they keep their sequence and stage" — the job only takes over rating. Such a
+         candidate was never on this job's flow, so there is nothing to route them OFF; re-pointing
+         them here changed their sequence as a page-load side effect of a move that said it
+         would not (rule 6). They are still flagged and logged below. */
+      if(defSeq&&jb.sequenceId&&jb.sequenceId!==defSeq.id&&c.st.sequenceId!==defSeq.id&&!c.st.jobId){
         const ptr=_classicPointerFor(c,defSeq); /* null for an empty default — keep their sequence rather than dangle */
         if(ptr){
           c.st.sequenceId=defSeq.id;c.st.sequenceStepId=ptr;
