@@ -1905,7 +1905,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1012-129';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1012-130';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -2405,6 +2405,62 @@ function resolveEngineIdWithRules(ri,rules){
   }
   return effectiveDefaultId();
 }
+/* ⚡LEADKEY — BEGIN (sliced by tests/leadkey.test.mjs)
+ * 🔑 Stable per-lead key for every per-lead map in the synced engines doc
+ * (followUpTimes, engineOverrides, assessors, assessments, interviews,
+ * leadFacts). Those maps were keyed by String(ri) — and row numbers shift
+ * whenever the sheet is sorted or a row is inserted/deleted, so the entries
+ * silently slid onto neighboring leads (the same staleness B-1012-129 fixed
+ * for sent-email attribution). The key is the lead's IDENTITY instead:
+ * email, else phone, else client name. The normalizations are inlined and
+ * FROZEN here — these strings persist as keys inside Solura_Engines.json,
+ * so changing them would orphan every stored value. */
+function leadKey(ri){
+  var r=rows[ri]||[];
+  var em=String(r[C.EM]==null?'':r[C.EM]).trim().toLowerCase();
+  if(em)return 'em:'+em;
+  var ph=String(r[C.PH]==null?'':r[C.PH]).replace(/\D/g,'');
+  if(ph.length>10)ph=ph.slice(-10); // last 10, like the voice worker
+  if(ph)return 'ph:'+ph;
+  var nm=String(r[C.NM]||r[C.DM]||'').trim().toLowerCase().replace(/\s+/g,' ');
+  if(nm)return 'nm:'+nm;
+  // Nothing identifying on the row (or the sheet isn't loaded yet): keep
+  // the legacy row key and NEVER migrate onto it — a pre-load migration
+  // would strand the entry once the real row appears.
+  return String(ri);
+}
+// Every read/write/delete on a per-lead map goes through these. Legacy
+// String(ri) entries migrate lazily: the first read that finds the old key
+// but not the stable one moves the value over using the row the sheet
+// shows TODAY, then a debounced save persists the move so a later sort
+// can't replay it against shifted rows.
+function leadMapGet(map,ri){
+  if(!map)return undefined;
+  var k=leadKey(ri),o=String(ri);
+  if(k!==o&&!(k in map)&&(o in map)){
+    map[k]=map[o];delete map[o];
+    queueLeadKeyMigrationSave();
+  }
+  return map[k];
+}
+function leadMapSet(map,ri,val){
+  var k=leadKey(ri);
+  if(k!==String(ri))delete map[String(ri)]; // the legacy key dies with the first write
+  map[k]=val;
+}
+function leadMapDelete(map,ri){
+  delete map[leadKey(ri)];
+  delete map[String(ri)];
+}
+var _leadKeyMigrT=null;
+function queueLeadKeyMigrationSave(){
+  if(_leadKeyMigrT)return;
+  _leadKeyMigrT=setTimeout(function(){
+    _leadKeyMigrT=null;
+    try{saveEnginesDoc().catch(function(){/* overwrite guard or network — the move rides the next normal save */});}catch(_){}
+  },4000);
+}
+/* ⚡LEADKEY — END */
 function engineOverrides(){
   enginesDoc.config=enginesDoc.config||{};
   enginesDoc.config.engineOverrides=enginesDoc.config.engineOverrides||{};
@@ -2429,13 +2485,13 @@ async function setTrack(ri,letter,conf,opts){
   }
   await writeRow(ri,u);
   if(ENGINES[engId]){
-    engineOverrides()[String(ri)]=engId;
+    leadMapSet(engineOverrides(),ri,engId);
     try{await saveEnginesDoc();}catch(_){}
   }
 }
 function engineIdFor(ri){
   // Per-lead override (set when restarting onto a specific engine) beats rules.
-  var ov=engineOverrides()[String(ri)];
+  var ov=leadMapGet(engineOverrides(),ri);
   if(ov&&ENGINES[ov])return ov;
   return resolveEngineIdWithRules(ri,enginesDoc.assignments||[]);
 }
@@ -2456,7 +2512,7 @@ function statusRuleMatches(ri){
 function isExcludedLead(ri){
   if(!isExcluded((rows[ri]||[])[C.ST]))return false;
   if(statusRuleMatches(ri))return false;
-  var ov=engineOverrides()[String(ri)];
+  var ov=leadMapGet(engineOverrides(),ri);
   if(ov&&ENGINES[ov])return false; // deliberately placed on an engine → visible
   return true;
 }
@@ -2498,7 +2554,7 @@ function allRuleMatchedLeads(){
     // status (Lost etc.) supersedes stale off-seq state: a Lost lead claimed
     // by a rule belongs on its engine, not parked as an active conversation.
     if(isOffSequence(i)&&!isExcluded(r[C.ST]))continue;
-    var ov=engineOverrides()[String(i)];
+    var ov=leadMapGet(engineOverrides(),i);
     var claimed=(ov&&ENGINES[ov])||statusRuleMatches(i)||
       resolveEngineIdWithRules(i,enginesDoc.assignments||[])!==effectiveDefaultId();
     if(claimed)out.push({ri:i,engineId:engineIdFor(i)});
@@ -3330,7 +3386,7 @@ function emailFacts(){enginesDoc.config=enginesDoc.config||{};enginesDoc.config.
 function leadFactsAll(){enginesDoc.leadFacts=enginesDoc.leadFacts||{};return enginesDoc.leadFacts;}
 // Per-lead value wins; general prefill is the fallback.
 function leadFact(ri,key){
-  var lf=(enginesDoc.leadFacts||{})[String(ri)]||{};
+  var lf=leadMapGet(leadFactsAll(),ri)||{};
   var v=lf[key];
   if(v==null||String(v).trim()==='')v=((enginesDoc.config||{}).emailFacts||{})[key];
   return v==null?'':String(v);
@@ -3340,7 +3396,7 @@ function leadFact(ri,key){
 function fillFacts(s,ri){
   s=String(s||'');
   var gf=(enginesDoc.config||{}).emailFacts||{};
-  var lf=(ri!=null&&ri>=0)?(((enginesDoc.leadFacts||{})[String(ri)])||{}):{};
+  var lf=(ri!=null&&ri>=0)?(leadMapGet(leadFactsAll(),ri)||{}):{};
   var keys={};
   Object.keys(gf).forEach(function(k){keys[k]=1;});
   Object.keys(lf).forEach(function(k){keys[k]=1;});
@@ -3452,6 +3508,8 @@ function presetsForLead(ri){
 }
 // 🔁 The scheduled assessment per lead (synced doc): what reschedules read.
 function schedAssessments(){enginesDoc.assessments=enginesDoc.assessments||{};return enginesDoc.assessments;}
+// The assessor named when the assessment was scheduled, per lead (synced doc).
+function assessors(){enginesDoc.assessors=enginesDoc.assessors||{};return enginesDoc.assessors;}
 // A booking made BEFORE tracking existed (or whose record was lost) is
 // reconstructed from what the sheet already knows: the status, Follow-Up
 // date, the queue time, the assessor handoff, and the location in the
@@ -3465,8 +3523,8 @@ function reconstructBooking(ri){
   var iso=d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
   var b={date:iso,time:'',location:'',virtual:false,assessor:'',dur:90,
     eventId:'',joinUrl:'',invited:false,icsUid:'',icsSeq:0,legacy:true};
-  try{b.time=followUpTimes()[String(ri)]||'';}catch(_){}
-  try{b.assessor=(enginesDoc.assessors||{})[String(ri)]||'';}catch(_){}
+  try{b.time=leadMapGet(followUpTimes(),ri)||'';}catch(_){}
+  try{b.assessor=leadMapGet(assessors(),ri)||'';}catch(_){}
   var m=String(r[C.NT]||'').match(/(?:📅|🔁)[^\n]*?@\s*(💻\s*)?([^·\n]+)/);
   if(m){
     b.location=String(m[2]||'').trim();
@@ -3476,7 +3534,7 @@ function reconstructBooking(ri){
   return b;
 }
 function bookingFor(ri){
-  var s=schedAssessments()[String(ri)];
+  var s=leadMapGet(schedAssessments(),ri);
   return (s&&s.date)?s:reconstructBooking(ri);
 }
 /* 🅰🅱🅲 retrack + loss-reason runtime */
@@ -3596,7 +3654,7 @@ function openIntSched(ri){
   var vh=el('int-virtual-hint');if(vh)vh.style.display='none';
   el('int-out').textContent='';
   // 🔁 An existing booking makes the next save a reschedule
-  var prev=interviews()[String(ri)];
+  var prev=leadMapGet(interviews(),ri);
   var note=el('int-resched-note');
   if(prev&&prev.date){
     el('int-date').value=prev.date;el('int-time').value=prev.time||'';
@@ -3623,7 +3681,7 @@ async function intSave(){
   out.style.color='var(--mid)';out.textContent='Scheduling…';
   try{
     var nm=String(r[C.NM]||'').trim(),dmName=String(r[C.DM]||nm).trim();
-    var prev=interviews()[String(ri)]||null;
+    var prev=leadMapGet(interviews(),ri)||null;
     var isResched=!!(prev&&prev.date);
     var prevWhen=isResched?(invPrettyDate(prev.date)+(prev.time?(' at '+asmtPrettyTime(prev.time)):'')):'';
     // Calendar event first (virtual needs the join link before the email).
@@ -3713,10 +3771,10 @@ async function intSave(){
     u[C.NT]=exN?(stamp+'\n\n'+exN):stamp;
     await writeRow(ri,u);
     try{
-      if(f.time){followUpTimes()[String(ri)]=f.time;}
-      interviews()[String(ri)]={date:f.date,time:f.time,location:finalLoc,virtual:isVirtual,dur:f.dur,
+      if(f.time){leadMapSet(followUpTimes(),ri,f.time);}
+      leadMapSet(interviews(),ri,{date:f.date,time:f.time,location:finalLoc,virtual:isVirtual,dur:f.dur,
         eventId:evId||(prev&&prev.eventId)||'',joinUrl:joinUrl||(isVirtual&&prev?(prev.joinUrl||''):''),
-        icsUid:icsUidUsed||(prev&&prev.icsUid)||'',icsSeq:icsSeqUsed||((prev&&prev.icsSeq)||0)};
+        icsUid:icsUidUsed||(prev&&prev.icsUid)||'',icsSeq:icsSeqUsed||((prev&&prev.icsSeq)||0)});
       saveEnginesDoc().catch(function(){});
     }catch(_){}
     logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
@@ -3892,8 +3950,8 @@ async function asCancel(){
       }
     }
     // 4) Clear the booking + the queue time gate
-    try{delete schedAssessments()[String(ri)];}catch(_){}
-    try{delete followUpTimes()[String(ri)];}catch(_){}
+    try{leadMapDelete(schedAssessments(),ri);}catch(_){}
+    try{leadMapDelete(followUpTimes(),ri);}catch(_){}
     try{saveEnginesDoc().catch(function(){});}catch(_){}
     var _cnLog=logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
       contact:sent?to:'',subject:sent?('Cancelled: assessment on '+invPrettyDate(prevA.date)):'Assessment cancelled',
@@ -4050,10 +4108,9 @@ async function asSave(){
     // the in-home assessment form (🏥 Start Assessment prefills from it).
     try{
       var docDirty=false;
-      if(f.time){followUpTimes()[String(ri)]=f.time;docDirty=true;}
+      if(f.time){leadMapSet(followUpTimes(),ri,f.time);docDirty=true;}
       if(f.assessor){
-        enginesDoc.assessors=enginesDoc.assessors||{};
-        enginesDoc.assessors[String(ri)]=f.assessor;
+        leadMapSet(assessors(),ri,f.assessor);
         docDirty=true;
       }
       if(docDirty)saveEnginesDoc().catch(function(){});
@@ -4091,12 +4148,12 @@ async function asSave(){
     }
     // 🔁 Remember the booking so the next open is a reschedule
     try{
-      schedAssessments()[String(ri)]={date:f.date,time:f.time,location:finalLoc,virtual:isVirtual,
+      leadMapSet(schedAssessments(),ri,{date:f.date,time:f.time,location:finalLoc,virtual:isVirtual,
         assessor:f.assessor,dur:calDur,
         eventId:evId||(prevA&&prevA.eventId)||'',
         joinUrl:joinUrl||(isVirtual&&prevA?(prevA.joinUrl||''):''),
         icsUid:icsUidUsed||(prevA&&prevA.icsUid)||'',
-        icsSeq:icsSeqUsed||((prevA&&prevA.icsSeq)||0)};
+        icsSeq:icsSeqUsed||((prevA&&prevA.icsSeq)||0)});
       saveEnginesDoc().catch(function(){});
     }catch(_){}
     var _asLog=logComms(commsEntryForLead(ri,{direction:'out',channel:sent?'email':'note',
@@ -5074,7 +5131,7 @@ function whenToShow(ri){
   var w=whenToShowCore(ri);
   try{
     if(w&&w.bucket==='now'){
-      var at=parseTimeStr(followUpTimes()[String(ri)]);
+      var at=parseTimeStr(leadMapGet(followUpTimes(),ri));
       if(at==null){var a9=currentAction(ri);if(a9&&a9.at!=null)at=a9.at;}
       if(at!=null&&nowDecimalHour()<at){
         var td=localToday();
@@ -5977,7 +6034,7 @@ function openEp(ri,mode,opts){
       +'</div>'
       +'<div class="la-grid g3">'
       +epLockField('Pay Type',vPT,'<select class="ep-pay">'+payOpts+'</select>')
-      +'<div class="la-f"><label>Next Follow-Up</label><div style="display:flex;gap:6px"><input type="date" class="ep-fu" value="'+escapeHtml(nfDate?ds(nfDate):ds(def3))+'"><input type="time" class="ep-fut" style="width:104px" title="Callback time (optional — hides in Later Today until then)" value="'+escapeHtml(followUpTimes()[String(ri)]||'')+'"></div></div>'
+      +'<div class="la-f"><label>Next Follow-Up</label><div style="display:flex;gap:6px"><input type="date" class="ep-fu" value="'+escapeHtml(nfDate?ds(nfDate):ds(def3))+'"><input type="time" class="ep-fut" style="width:104px" title="Callback time (optional — hides in Later Today until then)" value="'+escapeHtml(leadMapGet(followUpTimes(),ri)||'')+'"></div></div>'
       +'<div class="la-f"><label>Next Method</label><select class="ep-nsm"><option value="">\u2014 select \u2014</option>'+NSM_OPS.map(function(s){return '<option'+(s===curNSM?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
       +'</div>'
       +'<div class="la-grid g1">'
@@ -6010,7 +6067,7 @@ function openEp(ri,mode,opts){
     html='<div class="la-banner gold">Adjust this lead\u2019s next step, log a note, or change status.</div>'
       +'<div class="la-grid g4">'
       +'<div class="la-f"><label>Status</label><select class="ep-st">'+statusOpts+'</select></div>'
-      +'<div class="la-f"><label>Next Follow-Up</label><div style="display:flex;gap:6px"><input type="date" class="ep-fu" value="'+escapeHtml(curFu?ds(curFu):'')+'"><input type="time" class="ep-fut" style="width:104px" title="Callback time (optional — hides in Later Today until then)" value="'+escapeHtml(followUpTimes()[String(ri)]||'')+'"></div></div>'
+      +'<div class="la-f"><label>Next Follow-Up</label><div style="display:flex;gap:6px"><input type="date" class="ep-fu" value="'+escapeHtml(curFu?ds(curFu):'')+'"><input type="time" class="ep-fut" style="width:104px" title="Callback time (optional — hides in Later Today until then)" value="'+escapeHtml(leadMapGet(followUpTimes(),ri)||'')+'"></div></div>'
       +'<div class="la-f"><label>Method Used</label><select class="ep-mt">'+moptsForDone+'</select></div>'
       +'<div class="la-f"><label>Next Suggested Method</label><select class="ep-nsm"><option value="">\u2014 select \u2014</option>'+NSM_OPS.map(function(s){return '<option value="'+escapeHtml(s)+'"'+(s===curNSM?' selected':'')+'>'+escapeHtml(s)+'</option>';}).join('')+'</select></div>'
       +'</div>'
@@ -6190,8 +6247,8 @@ async function saveEp(ri,mode){
     if(futEl){
       var ftv=String(futEl.value||'').trim();
       var fMap=followUpTimes();
-      var fPrev=fMap[String(ri)]||'';
-      if(ftv)fMap[String(ri)]=ftv;else delete fMap[String(ri)];
+      var fPrev=leadMapGet(fMap,ri)||'';
+      if(ftv)leadMapSet(fMap,ri,ftv);else leadMapDelete(fMap,ri);
       if(fPrev!==(ftv||''))saveEnginesDoc().catch(function(){});
     }
     if(!Object.keys(u).length){closeEp(ri);return;}
@@ -11662,8 +11719,8 @@ async function doRestartSeq(ri,stepIdx){
   try{
     // Persist/clear the per-lead engine override
     var ovs=engineOverrides();
-    if(engId!==ruleId){ovs[String(ri)]=engId;}
-    else{delete ovs[String(ri)];}
+    if(engId!==ruleId){leadMapSet(ovs,ri,engId);}
+    else{leadMapDelete(ovs,ri);}
     await saveEnginesDoc();
     await writeRow(ri,u);
     closeModal('modal-restart');
@@ -11747,7 +11804,7 @@ async function saveAddLead(){
     // Point the lead at its track engine when the track engines are imported
     try{
       var tEng=TRACK_ENGINE_IDS[_alRoute.track];
-      if(ENGINES[tEng]){engineOverrides()[String(ri)]=tEng;saveEnginesDoc().catch(function(){});}
+      if(ENGINES[tEng]){leadMapSet(engineOverrides(),ri,tEng);saveEnginesDoc().catch(function(){});}
     }catch(_){}
     closeModal('modal-addlead');
     toast('\u2713 '+name+' added \u2014 Track '+_alRoute.track+' ('+_alRoute.conf+'), Phase 1 starts now');
@@ -11901,7 +11958,7 @@ async function intakeCreateLead(sub,link){
   try{
     var route=routeTrackPure({rel:sub.rel||'',clientName:sub.pt||sub.name||'',dm:sub.name||''});
     var tEng=TRACK_ENGINE_IDS[route.track];
-    if(ENGINES[tEng]){engineOverrides()[String(ri)]=tEng;saveEnginesDoc().catch(function(){});}
+    if(ENGINES[tEng]){leadMapSet(engineOverrides(),ri,tEng);saveEnginesDoc().catch(function(){});}
   }catch(_){}
   try{logComms(commsEntryForLead(ri,{direction:'in',channel:'note',
     contact:sub.email||sub.phone||'',subject:'Intake form submission',
@@ -14260,7 +14317,7 @@ function openAssessment(ri){
   // pre-fills the form — falls back to Meir when none was logged.
   var schedAssessor='Meir Schwimer';
   try{
-    var sa=(enginesDoc.assessors||{})[String(ri)];
+    var sa=leadMapGet(assessors(),ri);
     if(sa&&String(sa).trim())schedAssessor=String(sa).trim();
   }catch(_){}
   asmtState={
@@ -15778,8 +15835,9 @@ function onClick(ev){
         var rv=String((el('inv-rate')||{}).value||'').trim();
         if(!rv){toast('Type a rate first, then pin it');return;}
         var lf=leadFactsAll();
-        lf[String(ri9)]=lf[String(ri9)]||{};
-        lf[String(ri9)].billRate=rv;
+        var facts9=leadMapGet(lf,ri9)||{};
+        facts9.billRate=rv;
+        leadMapSet(lf,ri9,facts9);
         var nm9=String((rows[ri9]||[])[C.NM]||(rows[ri9]||[])[C.DM]||'this client').trim();
         saveEnginesDoc().then(function(){toast('📌 $'+rv+'/hr saved as '+nm9+'’s rate — future invoices fill it automatically');})
           .catch(function(e){showErr('Rate pin did not reach OneDrive ('+e.message+').');});

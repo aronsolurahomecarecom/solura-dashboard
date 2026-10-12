@@ -14,10 +14,15 @@ const b = html.indexOf('/* ⚡PRESETS — BEGIN');
 const e = html.indexOf('/* ⚡PRESETS — END */');
 if (b < 0 || e < 0) throw new Error('PRESETS markers missing');
 const src = html.slice(html.indexOf('*/', b) + 2, e);
+// leadFact/fillFacts read through the stable-key helpers — slice ⚡LEADKEY too
+const kb = html.indexOf('/* ⚡LEADKEY — BEGIN');
+const ke = html.indexOf('/* ⚡LEADKEY — END */');
+if (kb < 0 || ke < 0) throw new Error('LEADKEY markers missing');
+const keySrc = html.slice(html.indexOf('*/', kb) + 2, ke);
 const doc = { config: {}, engines: [] };
-const mk = new Function('enginesDoc',
-  src + '\nreturn {emailPresets,emailFacts,leadFactsAll,leadFact,fillFacts,presetMatch,splitCommaList,pdfTemplates,pdfFieldXY,pdfSafeName};');
-const P = mk(doc);
+const mk = new Function('enginesDoc', 'rows', 'C',
+  keySrc + src + '\nreturn {emailPresets,emailFacts,leadFactsAll,leadFact,fillFacts,presetMatch,splitCommaList,pdfTemplates,pdfFieldXY,pdfSafeName,leadKey,leadMapGet};');
+const P = mk(doc, [], { NM: 2, PH: 3, EM: 4, DM: 14 });
 
 // ── prefills: general + per-lead override ──
 P.emailFacts().billRate = '30';

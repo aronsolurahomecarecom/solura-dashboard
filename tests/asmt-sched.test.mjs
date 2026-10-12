@@ -67,8 +67,8 @@ ok(dflt.indexOf('{dm}') > -1 && dflt.indexOf('{pt}') > -1, 'name tokens survive 
   ok(filled.indexOf('A few notes for the visit') > -1 && filled.indexOf('#f2efe8') > -1, 'notes render as the brand highlight box');
 }
 // ── assessor handoff: scheduler → assessment form ──
-ok(/enginesDoc\.assessors\[String\(ri\)\]=f\.assessor/.test(html), 'scheduler saves the assessor per lead (synced doc)');
-ok(/\(enginesDoc\.assessors\|\|\{\}\)\[String\(ri\)\]/.test(html), 'openAssessment reads the scheduled assessor');
+ok(/leadMapSet\(assessors\(\),ri,f\.assessor\)/.test(html), 'scheduler saves the assessor per lead (synced doc, stable key)');
+ok(/var sa=leadMapGet\(assessors\(\),ri\);/.test(html), 'openAssessment reads the scheduled assessor');
 ok(/assessor:schedAssessor,\s*\n\s*assessor_signed_name:schedAssessor/.test(html), 'form prefills BOTH assessor fields from the scheduled name');
 
 // ── 🕳 never send an empty confirmation (B-0915-89) ──
@@ -224,7 +224,7 @@ ok(/cfg\('asmtIntakeTo'\)\|\|''\)\.trim\(\)\|\|'intake@solurahomecare\.com'/.tes
   const sv = html.slice(html.indexOf('async function asSave'), html.indexOf('async function asSave') + 14000);
   ok(/var isResched=!!\(prevA&&prevA\.date\);/.test(sv), 'an existing booking makes the save a reschedule');
   ok(/method:'PATCH'/.test(sv), 'same-mode reschedule MOVES the existing event (PATCH) — Teams link + participant survive');
-  ok(/function reconstructBooking\(ri\)/.test(html) && /followUpTimes\(\)\[String\(ri\)\]\|\|''/.test(html) && /\(enginesDoc\.assessors\|\|\{\}\)\[String\(ri\)\]/.test(html), 'reconstruction pulls date from NF, time from the queue gate, assessor from the handoff');
+  ok(/function reconstructBooking\(ri\)/.test(html) && /leadMapGet\(followUpTimes\(\),ri\)\|\|''/.test(html) && /leadMapGet\(assessors\(\),ri\)\|\|''/.test(html), 'reconstruction pulls date from NF, time from the queue gate, assessor from the handoff');
   ok(/var prevA=bookingFor\(ri\);/.test(html), 'the scheduler prefills from stored OR reconstructed bookings');
   ok(/method:'DELETE'/.test(sv) && /Mode flipped/.test(sv), 'mode flip retires the old event before creating the new one');
   ok(/em\.subject='Rescheduled: '\+em\.subject;/.test(sv), 'reschedule email subject says Rescheduled');
@@ -234,7 +234,7 @@ ok(/cfg\('asmtIntakeTo'\)\|\|''\)\.trim\(\)\|\|'intake@solurahomecare\.com'/.tes
   ok(/var sameMode=isResched&&moveId&&/.test(sv), 'a found event moves exactly like a tracked one');
   ok(/Assessment RESCHEDULED — was '\+prevWhen\+' → now '\+when/.test(sv), 'sheet note records old time → new time');
   ok(/outcome:isResched\?'assessment-rescheduled':'assessment-scheduled'/.test(sv), 'Comms Log distinguishes reschedules');
-  ok(/schedAssessments\(\)\[String\(ri\)\]=\{date:f\.date/.test(sv), 'the booking is remembered (synced doc) for the NEXT reschedule');
+  ok(/leadMapSet\(schedAssessments\(\),ri,\{date:f\.date/.test(sv), 'the booking is remembered (synced doc, stable key) for the NEXT reschedule');
   ok(/uid:\(prevA&&prevA\.icsUid\)\|\|null,sequence:icsSeqUsed/.test(sv), '.ics reschedules reuse the UID with a bumped sequence');
 }
 ok(/id="as-resched-note"/.test(html) && /Rescheduling\.<\/b> Currently:/.test(html), 'the scheduler shows the current booking when reopening');
@@ -256,7 +256,7 @@ ok(/data-action="open-asmt-sched" data-ri="'\+ri\+'" title="Reschedule the asses
   const cv = html.slice(html.indexOf('async function asCancel'), html.indexOf('async function asSave'));
   ok(/u\[C\.ST\]='Active Conversation';/.test(cv) && /u\[C\.NF\]=fd\(localToday\(\)\)/.test(cv), 'the lead reverts to an active conversation, due today for the rebooking call');
   ok(/Assessment CANCELLED — was '\+prevWhen/.test(cv), 'the record stamps what was cancelled');
-  ok(/delete schedAssessments\(\)\[String\(ri\)\]/.test(cv) && /delete followUpTimes\(\)\[String\(ri\)\]/.test(cv), 'the booking and the queue time gate are cleared');
+  ok(/leadMapDelete\(schedAssessments\(\),ri\)/.test(cv) && /leadMapDelete\(followUpTimes\(\),ri\)/.test(cv), 'the booking and the queue time gate are cleared (legacy row key included)');
   ok(/outcome:'assessment-cancelled'/.test(cv), 'Comms Log records the cancellation');
   ok(/method:'DELETE'/.test(cv) && /calendarView/.test(cv), 'his calendar event is deleted — stored id or found on the date');
   ok(/Cancelled, but the email failed/.test(cv), 'an email failure never blocks the cancellation, and says so');
@@ -281,7 +281,7 @@ ok(/id="modal-asmt-sched"/.test(html) && /data-action="as-save"/.test(html) && /
 ok(/data-action="open-asmt-sched" data-ri/.test(html), '📅 launch button rides the Responded/Update dialog footer');
 ok(/u\[C\.ST\]='Assessment Scheduled'/.test(html), 'save stamps the status that unlocks 🏥 Start Assessment');
 ok(/u\[C\.NF\]=f\.date/.test(html), 'Follow-Up moves to the assessment date');
-ok(/followUpTimes\(\)\[String\(ri\)\]=f\.time/.test(html), 'assessment time gates the due-now queue');
+ok(/leadMapSet\(followUpTimes\(\),ri,f\.time\)/.test(html), 'assessment time gates the due-now queue');
 ok(/'assessment-scheduled'/.test(html), 'Comms Log row written with its own outcome');
 ok(/Saved to the sheet, but the email failed/.test(html), 'email failure after a successful sheet write says exactly that');
 ok(/data-cfg="asmtSchedSubject"/.test(html) && /data-cfg="asmtSchedTemplate"/.test(html), 'subject + template editable in Settings → Email');

@@ -51,7 +51,7 @@ ok(I.interviews() === enginesDoc.interviews && typeof I.interviews() === 'object
 {
   const sv = src.slice(src.indexOf('async function intSave'));
   ok(/u\[C\.ST\]='Interview Scheduled';/.test(sv) && /u\[C\.NF\]=f\.date;/.test(sv), 'THE STAGE IS SET: status Interview Scheduled, follow-up on the interview date');
-  ok(/followUpTimes\(\)\[String\(ri\)\]=f\.time/.test(sv), 'the interview time gates the queue like assessments do');
+  ok(/leadMapSet\(followUpTimes\(\),ri,f\.time\)/.test(sv), 'the interview time gates the queue like assessments do');
   ok(!/attendees/.test(sv), 'ONE email, ONE event: the lead is never an attendee');
   ok(/isOnlineMeeting=true;ev\.onlineMeetingProvider='teamsForBusiness'/.test(sv), 'virtual + blank location auto-creates a Teams meeting');
   ok(/uid:\(prev&&prev\.icsUid\)\|\|null,sequence:icsSeqUsed/.test(sv) && /\(\(prev&&prev\.icsSeq\)\|\|0\)\+1/.test(sv), 'reschedules reuse the UID with a bumped SEQUENCE so calendars replace the slot');
@@ -59,7 +59,7 @@ ok(I.interviews() === enginesDoc.interviews && typeof I.interviews() === 'object
   ok(/sameMode/.test(sv) && /method:'PATCH'/.test(sv), 'same-mode reschedules MOVE the existing event (Teams link survives)');
   ok(/outcome:isResched\?'interview-rescheduled':'interview-scheduled'/.test(sv), 'comms log records which one happened');
   ok(/stage set to Interview Scheduled/.test(sv), 'the toast names the consequence');
-  ok(/interviews\(\)\[String\(ri\)\]=\{date:f\.date/.test(sv), 'the booking is remembered — the next open is a reschedule');
+  ok(/leadMapSet\(interviews\(\),ri,\{date:f\.date/.test(sv), 'the booking is remembered (stable key) — the next open is a reschedule');
 }
 
 // ── source locks: wiring ──

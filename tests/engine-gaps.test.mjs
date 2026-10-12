@@ -96,7 +96,7 @@ ok(G.parseTimeStr('') === null && G.parseTimeStr('25:00') === null && G.parseTim
   ok(t.seq[3].at === 9.25, 'interval entry carries a time');
 }
 ok(/function whenToShowCore\(ri\)\{/.test(html) && /var w=whenToShowCore\(ri\);/.test(html), 'whenToShow wraps the core with the time gate');
-ok(/parseTimeStr\(followUpTimes\(\)\[String\(ri\)\]\)/.test(html), 'per-lead callback time beats the step time');
+ok(/parseTimeStr\(leadMapGet\(followUpTimes\(\),ri\)\)/.test(html), 'per-lead callback time beats the step time');
 ok(/bucket:'later',at:new Date\(td\.getFullYear\(\)/.test(html), 'a timed step waits in Later Today until its clock time');
 ok((html.match(/class="ep-fut"/g) || []).length === 3, 'callback time input present in Done, Responded, and Update dialogs');
 ok(/if\(fPrev!==\(ftv\|\|''\)\)saveEnginesDoc\(\)/.test(html), 'callback time persists to the synced doc only when changed');
