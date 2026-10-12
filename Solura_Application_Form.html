@@ -770,12 +770,38 @@ function _secTrack(e){
 }
 document.addEventListener('input',_secTrack,true);
 document.addEventListener('change',_secTrack,true);
+/* Anonymous profile snapshot riding the abandonment beacon (Meir: certs, tenure, experience —
+   anything non-personal that's useful as statistics later). Built from the answers object
+   directly, so name/phone/email/employer names can never ride along by construction. ZIP is
+   reduced to its 3-digit area. */
+function _abandonStats(){
+  try{
+    const a=(typeof ans==='object'&&ans)||{};
+    const f=document.getElementById('form');
+    const zipEl=f&&f.elements&&f.elements.zip;
+    const zip=String((zipEl&&zipEl.value)||'').replace(/\D/g,'');
+    const rEl=document.getElementById('resume');
+    let sh=0;try{sh=(typeof dayShifts!=='undefined'&&dayShifts)?(Array.isArray(dayShifts)?dayShifts.length:Object.keys(dayShifts).length):0;}catch(_){}
+    return {
+      creds:(a.cred||[]).slice(0,10),
+      expertise:(a.expertise||[]).slice(0,10),
+      settings:(a.settings||[]).slice(0,10),
+      languages:(a.languages||[]).slice(0,6),
+      years:a.years||'',
+      longest:a.longest||'',
+      zipArea:zip?zip.slice(0,3):'',
+      shifts:sh,
+      liveIn:!!(typeof liveIn!=='undefined'&&liveIn),
+      hasResume:!!(rEl&&rEl.files&&rEl.files[0])
+    };
+  }catch(_){return {};}
+}
 function _abandonBeacon(){
   try{
     if(_appSubmitted||_appSubmitting||!_lastSection)return;
     if(sessionStorage.getItem('solura_abandon_sent'))return;
     sessionStorage.setItem('solura_abandon_sent','1');
-    navigator.sendBeacon(WEBHOOK_URL,JSON.stringify({kind:'APPLICATION_ABANDONED',sourceCode:(typeof SOURCE_CODE!=='undefined'&&SOURCE_CODE)||'',section:_lastSection}));
+    navigator.sendBeacon(WEBHOOK_URL,JSON.stringify({kind:'APPLICATION_ABANDONED',sourceCode:(typeof SOURCE_CODE!=='undefined'&&SOURCE_CODE)||'',section:_lastSection,stats:_abandonStats()}));
   }catch(_){}
 }
 window.addEventListener('pagehide',_abandonBeacon);
