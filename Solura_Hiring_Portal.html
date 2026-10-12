@@ -14726,14 +14726,17 @@ function renderWorkspace(){_memGen++;
   const certList=(W.st.certs||[]).map(x=>'<span class="cbadge" style="margin:0 4px 4px 0">'+esc(x)+'</span>').join('');
   const dl=W.st.licenseNum||W.st.license?(W.st.licenseState||'')+' '+(W.st.licenseNum||W.st.license||''):'—';
   const addr=W.st.address||'—';
+  const _idJob=(typeof _jobFor==='function')?_jobFor(pipeline.find(x=>x.excelRow===W.row)||{st:W.st}):null;
   const identity=`<div class="wscard"><h3>Identity</h3>
     <div class="kvrow"><span class="lbl">Source</span><span class="val">${esc(W.source||'—')}</span></div>
+    <div class="kvrow"><span class="lbl">Job</span><span class="val">${_idJob?esc(_idJob.name)+(W.st.jobId?'':' <span style="color:var(--soft);font-size:10px">(via link)</span>'):'—'}</span></div>
     <div class="kvrow"><span class="lbl">Address</span><span class="val" style="font-size:11.5px">${esc(addr)}</span></div>
     <div class="kvrow"><span class="lbl">ZIP</span><span class="val">${esc(W.st.zip||'—')}</span></div>
     <div class="kvrow"><span class="lbl">Driver's license</span><span class="val">${esc(dl)}</span></div>
     <div class="kvrow"><span class="lbl">Pay range</span><span class="val">${payRange()}</span></div>
     ${certList?'<div style="margin-top:10px"><h4>Certificates</h4>'+certList+'</div>':''}
     ${pills?'<div style="margin-top:10px"><h4>Expertise</h4>'+pills+'</div>':''}
+    <button class="btn-sec bg-cream" style="margin-top:10px;padding:6px 12px;font-size:12px;width:100%" onclick="assignJobWS()" title="Move them into a job package — even one they didn't apply to. Sequence and stage stay put.">🧳 Assign to job →</button>
     </div>`;
   /* Score rundown — show the 3 top-contributing dimensions for Q and R, plus any active negatives
      (missing gates, no-shows, missing certs). Helps explain WHY the candidate landed where they
