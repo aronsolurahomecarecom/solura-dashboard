@@ -113,5 +113,19 @@ const W = mk(extractInnerHtml);
   ok(/m\[1\]===BUILD\|\|m\[1\]===_buildWatchSeen\)return/.test(html), 'same build (or already-announced) = no banner nagging');
 }
 
+// ── 📰→✉ blank-start for nurture leads (B-1013-133) ──
+{
+  ok(/id="weekly-applied-bar"/.test(html) && /data-action="email-start-blank"/.test(html) && /Start blank instead/.test(html), 'the loaded nurture letter announces itself with a one-click blank-start');
+  const fn = html.slice(html.indexOf('function emailStartBlank'), html.indexOf('// The subject-row slot is MODE-AWARE'));
+  ok(/_weeklyAppliedFor=null;/.test(fn) && /_shellSuppressed=false;/.test(fn), 'blank-start clears the weekly state (layout + shell snap back to classic)');
+  ok(/emailAttachments\.filter\(function\(a\)\{return !a\._weekly;\}\)/.test(fn), "the letter's PDF comes off with it");
+  ok(/bodyEl\.innerHTML=sig\?emailPlainToHtml\(sig\):''/.test(fn), 'the blank body keeps the signature');
+  ok(/updateComposerTopButtons/.test(fn) && /updateShellToggle/.test(fn), 'buttons and the wrap chip re-decide after the switch');
+  ok(/brings it back/.test(fn), 'the toast says 📰 undoes it');
+  ok(/var wab=el\('weekly-applied-bar'\);if\(wab\)wab\.style\.display='block'; \/\/ offer the blank-start out/.test(html), 'applying the weekly (auto or 📰) shows the bar');
+  ok(/var wabR=el\('weekly-applied-bar'\);if\(wabR\)wabR\.style\.display='none';/.test(html), 'a fresh composer hides it');
+  ok(/case 'email-start-blank': emailStartBlank\(\); break;/.test(html), 'click case wired');
+}
+
 console.log('\nClaude wrap: ' + PASS + ' passed, ' + FAIL + ' failed');
 process.exit(FAIL ? 1 : 0);

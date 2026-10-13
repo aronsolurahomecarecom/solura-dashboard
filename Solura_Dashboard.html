@@ -703,6 +703,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
     <div class="mhead"><div class="mtitle">Send Email</div><button class="mclose" data-action="close-modal" data-mid="modal-email">✕</button></div>
     <div class="mbody">
       <div id="email-reply-note" style="display:none;font-size:12px;background:var(--sky-pale);border:1px solid var(--sky-mid);color:var(--sky-deep);border-radius:8px;padding:8px 12px;margin-bottom:10px"></div>
+      <div id="weekly-applied-bar" style="display:none;font-size:12px;background:var(--gold-pale);border:1px solid var(--gold);color:#8B6500;border-radius:8px;padding:8px 12px;margin-bottom:10px">📰 This week's nurture letter is loaded. <b data-action="email-start-blank" style="cursor:pointer;text-decoration:underline">Start blank instead</b></div>
       <div id="email-unsub-banner" style="display:none;font-size:12px;font-weight:600;background:#FDECEA;border:1.5px solid #E57373;color:#B71C1C;border-radius:8px;padding:9px 12px;margin-bottom:10px"></div>
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--soft);margin-bottom:4px">To</div>
       <div id="email-to" style="font-size:12px;color:var(--mid);margin-bottom:12px;padding:8px 10px;background:var(--cream);border-radius:8px"></div>
@@ -1905,7 +1906,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1013-132';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1013-133';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -9603,6 +9604,7 @@ function applyWeeklyDraft(ri,opts){
     }
   }
   try{updateComposerTopButtons();}catch(_){} // 📰 applied → Send takes the top slot
+  var wab=el('weekly-applied-bar');if(wab)wab.style.display='block'; // offer the blank-start out
   var age=setAgeDays(set);
   var stale=age!=null&&age>(parseInt(set.refreshDays,10)||8);
   var multi=liveVariantsOf(set).length>1;
@@ -12867,6 +12869,7 @@ function openEmail(ri,opts){
   _forceOutlook=false;    // fresh composer → routing back to automatic
   var tbR=el('claude-tweak-bar');if(tbR){tbR.style.display='none';}
   var tiR=el('claude-tweak-input');if(tiR)tiR.value='';
+  var wabR=el('weekly-applied-bar');if(wabR)wabR.style.display='none';
   // Unsubscribed: manual 1:1 email is Meir's call, but the state is loud —
   // and the automated weekly nurture draft never auto-loads for them.
   var unsubBan=el('email-unsub-banner');
@@ -13299,6 +13302,28 @@ function emailBuildShareBlock(shared){
   +'</div>';
 }
 
+// 📰 → ✉ Blank-start: strips the preloaded nurture letter so a nurture
+// lead can get a fresh, personal email. Clears the weekly state (layout
+// snaps back to classic), removes the letter's PDF, leaves the signature.
+function emailStartBlank(){
+  _weeklyAppliedFor=null;
+  _shellSuppressed=false;
+  _claudeHtmlDraft=false;
+  _shellOverride=null;
+  emailClearRawHtml({keepBody:true});
+  var sj=el('email-subj');if(sj)sj.value='';
+  var bodyEl=el('email-body');
+  if(bodyEl){
+    var sig=String(cfg('emailSignature')||'').trim();
+    bodyEl.innerHTML=sig?emailPlainToHtml(sig):'';
+  }
+  emailAttachments=emailAttachments.filter(function(a){return !a._weekly;});
+  try{emailRenderAttachList();}catch(_){}
+  var wab=el('weekly-applied-bar');if(wab)wab.style.display='none';
+  try{updateComposerTopButtons();}catch(_){}
+  try{updateShellToggle();}catch(_){}
+  toast('✉ Blank composer — the weekly letter is off for this email (📰 brings it back)');
+}
 // The subject-row slot is MODE-AWARE (Meir, Oct 9 2026): the weekly
 // nurture letter puts Send up top (its length makes scrolling painful)
 // and ✨ Claude drops to the bottom row; every other compose keeps the
@@ -15949,6 +15974,7 @@ function onClick(ev){
     case 'claude-tweak':
       Promise.resolve(claudeTweak()).catch(function(eT){showErr('Tweak failed: '+String(eT&&eT.message||eT));});
       break;
+    case 'email-start-blank': emailStartBlank(); break;
     case 'as-cancel':
       Promise.resolve(asCancel()).catch(function(eC){showErr('Cancel failed: '+String(eC&&eC.message||eC));});
       break;
