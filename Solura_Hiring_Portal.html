@@ -24640,6 +24640,25 @@ async function _seqCommitState(cand,patch){
   await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
   if(W&&W.row===cand.excelRow&&W.st!==cand.st)W.st=cand.st;
 }
+/* The commit for pointer moves the RENDER derives by itself (stage snap, bookkeeping walk).
+   Those fire on the first load that sees a webhook's new column G - and the worker writes G
+   and AJ as two separate PATCHes (booking created: G then AJ; cancelled and withdrawn the
+   same). A load that lands between the two holds the NEW stage with the OLD state, snaps the
+   pointer, and _seqCommitState then put that old state back over the cell the worker had
+   just finished: stage "Screen booked" with no booking, no Cal id, no meeting link. Same
+   rule adoption and every heal pass already follow: write only when the live cell is still
+   the one this load read (_ajUnchangedSinceLoad); otherwise write nothing and let the next
+   load derive the move again from fresh state (onSkip re-arms the caller's once-guard).
+   Explicit operator actions keep _seqCommitState. */
+async function _seqCommitDerived(cand,onSkip){
+  if(!cand||!cand.st||cand.st.__ajCorrupt)return false;
+  if(!(await _ajUnchangedSinceLoad(cand))){try{if(onSkip)onSkip();}catch(e){}return false;}
+  const cell=_stCell(cand.st);
+  await patchRange('AJ'+cand.excelRow,[[cell]]);
+  if(Array.isArray(cand.row))cand.row[35]=cell; /* a second derived move in this same load compares against our own write */
+  if(W&&W.row===cand.excelRow&&W.st!==cand.st)W.st=cand.st;
+  return true;
+}
 /* Resolve + assign a sequence for a candidate (tag-for-life; explicit action). */
 async function _seqAssignTo(row,sequenceId){
   const cand=pipeline.find(x=>x.excelRow===row);if(!cand){toast('Candidate not found');return;}
@@ -25258,6 +25277,21 @@ function _tickLiveAfterSend(c,tpl){
   if(ln)lc.st.log=(lc.st.log||[]).concat(ln);
   return lc;
 }
+/* THE ROBOT ACTS ONLY ON WHAT THE SHEET STILL SAYS. A tick runs at the END of backgroundRefresh -
+   after loadData, the availability load and an inbox scan of up to 8 pages - so the card it holds
+   is seconds to tens of seconds old, and every lane below ends in an AJ write of that copy (the
+   send lanes after an outward act as well). Anything the worker wrote in between was put back:
+   an applicant who pressed "Withdraw my application" on the confirmation page while the robot was
+   still walking them (Claude screen -> invite -> stage) got the screen invite anyway, the robot's
+   set-stage wrote column G over Declined, and its AJ write erased st.withdrawn; a booking or a
+   reschedule that landed in the gap was erased the same way, and the T-30 lane could cancel a
+   booking the candidate had just moved. One cheap read per candidate the robot is ABOUT to act on
+   (never per row, never for a held row): the live AJ cell must still equal the one this load read
+   (_ajUnchangedSinceLoad - the rule adoption and every heal pass follow). Changed or unreadable ->
+   do nothing this pass; the next load brings the fresh row. */
+async function _tickFresh(c){
+  try{return await _ajUnchangedSinceLoad(c);}catch(e){return false;}
+}
 function _tickOutwardHold(c){
   if(!c||!c.st)return '';
   if(c.st.manualAwaiting)return 'parked in awaiting by you';
@@ -25437,6 +25471,11 @@ async function _seqAutomationTick(){
         if(!(await _bgFormBlocksConfirmed(c)))missingAny=false;
         if(pipeline!==_myPipe)return; /* the board was reloaded during the question - same abort as the loop head */
       }
+      /* An outward act is due this pass -> the row must still be the one this load read (see _tickFresh). */
+      if(m!=null&&missingAny&&((m<=60&&m>30&&!_certWarnSentFor(c)&&!_tA[_wk])||(m<=30&&m>0&&!_tA[_ck]))){
+        if(!(await _tickFresh(c)))continue;
+        if(pipeline!==_myPipe)return;
+      }
       if(m!=null&&m<=60&&m>30&&missingAny&&!_certWarnSentFor(c)&&!_tA[_wk]){
         let _warnSent=false,_warnErr='';
         try{ _warnSent=await _autoSendTpl(c,'interview_cert_warning',true); } /* _certWarnSentFor above is the per-booking gate */
@@ -25546,6 +25585,7 @@ async function _seqAutomationTick(){
            (rule 1), not a button. */
         if(window._tickActs&&window._tickActs['seq|'+c.excelRow+'|'+it.templateKey])continue; /* this session sent it; the row held here can predate that write */
         if(c.st.sent&&c.st.sent[it.templateKey]){
+          if(!(await _tickFresh(c)))continue;
           _clearFail();
           const adv0=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
           if(!adv0.error){
@@ -25560,6 +25600,7 @@ async function _seqAutomationTick(){
            releasing the park or reading the reply lets the very next tick send it). */
         if(_tickOutwardHold(c))continue;
         /* Name the actual blocker: 'email not sent' was also what an already-sent step got. */
+        if(!(await _tickFresh(c)))continue; /* before the fail stamp too - it writes this copy */
         if(!c.email){await _stampFail('no email address on file');continue;}
         if(await _autoSendTpl(c,it.templateKey)){window._tickActs=window._tickActs||{};window._tickActs['seq|'+c.excelRow+'|'+it.templateKey]=1;
           const _sc=_tickLiveAfterSend(c,it.templateKey); /* live card - see _tickLiveAfterSend */
@@ -25577,6 +25618,7 @@ async function _seqAutomationTick(){
         }else await _stampFail('email not sent');
       }else if(it.type==='set-stage'){
         const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
+        if(!(await _tickFresh(c)))continue; /* column G is written from this copy - never over a stage the worker just set */
         if(flow.includes(it.stage)){
           _clearFail();
           await patchRange('G'+c.excelRow,[[it.stage]]);
@@ -25593,6 +25635,7 @@ async function _seqAutomationTick(){
            P-1 migration re-placed pointers onto this step for candidates screened weeks ago,
            and the tick re-screened them. The work exists — just move the pointer past it. */
         if(c.st.aiScreen){
+          if(!(await _tickFresh(c)))continue;
           const adv0=window.SeqEngineV2.advanceStep(seq,c,_seqTriggerEval);
           if(!adv0.error){
             Object.assign(c.st,adv0.partialState||{});
@@ -25606,6 +25649,7 @@ async function _seqAutomationTick(){
            no-résumé override already shows the request/await row, and the résumé's arrival
            (poll, assignment, folder detect) is what releases this. */
         if(!c.st.hasResume)continue;
+        if(!(await _tickFresh(c)))continue;
         /* Advisory-only AI screen (~1¢) — safe to automate when the step opts in. Runs the
            screen, advances on success; a failure hands the card to a human INSTEAD of
            silently re-failing every 30 seconds. */
@@ -25944,7 +25988,7 @@ function _seqV3Action(c,info){
               window._snapOnce[_sk]=1;
               cand.st.sequenceHistory=(cand.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
               cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Pointer snapped to stage '+c.stage+' → '+ptr});
-              _seqCommitState(cand,{}).catch(e2=>console.warn('stage snap persist:',e2));
+              _seqCommitDerived(cand,()=>{delete window._snapOnce[_sk];}).catch(e2=>console.warn('stage snap persist:',e2));
             }
           }else if(cand!==c){
             /* ONLY the ephemeral copy. When cand===c the else was reached with a workspace open
@@ -26008,7 +26052,7 @@ function _seqV3Action(c,info){
           window._walkOnce[_wk]=1;
           cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🧬 Sequence advanced '+(walked===1?'a step':walked+' steps')+' — condition met'});
         }
-        _seqCommitState(cand,{}).catch(e2=>console.warn('sequence walk persist:',e2));
+        _seqCommitDerived(cand,()=>{delete window._walkOnce[_wk];}).catch(e2=>console.warn('sequence walk persist:',e2));
       }
     }
     /* Kill-switch honesty: a step marked automate buckets as 'scheduled', but with the master
