@@ -7391,13 +7391,34 @@ function pulseOff(){_saveInFlight=Math.max(0,_saveInFlight-1);if(_saveInFlight==
    worker's token-gated /sb/mirror (the service key never touches the browser). Pure
    fire-and-forget: the sheet remains truth, a mirror failure changes nothing here.
    Inert until the worker has its SUPABASE_* env vars. */
+let _sbMirrorHoldUntil=0;
 function _sbMirror(patches){
   try{
+    if(Date.now()<_sbMirrorHoldUntil)return;
     const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
     if(!tok||!patches||!patches.length)return;
-    const send=patches.filter(p=>p&&/^(AJ\d+|G\d+|AI\d+|C\d+:L\d+|N\d+:Y\d+)$/.test(String(p.addr||'')));
+    /* Shapes the portal really writes. saveW — the main workspace save — writes G:L and AI:AJ
+       (never bare G / AI / AJ), and identity edits write single C/D/E/F cells; the first filter
+       listed none of those, so the commonest write of all (stage + gates + answers + state on
+       every workspace save) was never mirrored. AI:AJ is split into the two single-cell shapes
+       so it is understood by any worker that has the route; G:L and C–F go as written. */
+    const send=[];
+    patches.forEach(p=>{
+      if(!p)return;const a=String(p.addr||'');let m;
+      if((m=/^AI(\d+):AJ\1$/.exec(a))){const v=(p.values&&p.values[0])||[];
+        send.push({addr:'AI'+m[1],values:[[v[0]]]},{addr:'AJ'+m[1],values:[[v[1]]]});return;}
+      if(/^(AJ\d+|G\d+|AI\d+|[C-F]\d+|C\d+:L\d+|G\d+:L\d+|N\d+:Y\d+)$/.test(a))send.push({addr:a,values:p.values});
+    });
     if(!send.length)return;
-    fetch(ZI_WORKER_URL+'/sb/mirror',{method:'POST',headers:{'Content-Type':'application/json','X-Solura-Token':tok},body:JSON.stringify({patches:send.map(p=>({addr:p.addr,values:p.values}))})}).catch(()=>{});
+    /* A worker that predates /sb/mirror has no such route: the POST falls through to its Cal.com
+       webhook path, is refused as an unsigned webhook and costs a CAL_SIG_REJECTED line in the
+       20-line AM1 log. So read the reply: anything but the route's own {ok:…} JSON, or
+       {inactive:true} (no SUPABASE_* vars yet), parks the mirror for 30 minutes instead of
+       knocking on every single sheet write. */
+    fetch(ZI_WORKER_URL+'/sb/mirror',{method:'POST',headers:{'Content-Type':'application/json','X-Solura-Token':tok},body:JSON.stringify({patches:send})})
+      .then(r=>r.text()).then(t=>{let j=null;try{j=JSON.parse(t);}catch(e){}
+        if(!j||typeof j.ok!=='boolean'||j.inactive)_sbMirrorHoldUntil=Date.now()+30*60000;})
+      .catch(()=>{_sbMirrorHoldUntil=Date.now()+5*60000;});
   }catch(e){}
 }
 async function patchRange(addr,values){const base=GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET;
@@ -12876,6 +12897,18 @@ async function saveW(silent){const row=W.row,bl=v=>(v==null?'':v);
     const _ny=[bl(W.q.rel),bl(W.q.com),bl(W.q.jud),bl(W.q.doc),bl(W.q.ref),bl(W.q.cmp),bl(W.q.phn),'',bl(W.r.ten),bl(W.r.prx),bl(W.r.ava),bl(W.r.exp)];
     const _aj=[JSON.stringify(W.answers||{}),stJson];
     const _payloads=[{addr:'G'+row+':L'+row,values:[_gl]},{addr:'N'+row+':Y'+row,values:[_ny]},{addr:'AI'+row+':AJ'+row,values:[_aj]}];
+    /* A row whose state cell was EMPTY when the board loaded may be an application the worker
+       was still writing (it writes the name first and the state a second or two later). This
+       workspace copy is then a blank default, and saving it replaces the whole profile that has
+       since landed. Only for that one case — load-time AJ empty — look at the live cell first.
+       (Kept AFTER everything above: _saveWFor relies on saveW reading W only before its first
+       await, and nothing below this line touches W.) */
+    {const _lc=pipeline.find(c=>c.excelRow===row);
+     if(_lc&&Array.isArray(_lc.row)&&(_lc.row[35]==null||_lc.row[35]==='')&&!(await _ajUnchangedSinceLoad(_lc))){
+       toast('⚠ Not saved — this candidate\'s record changed since the board loaded (their application may have still been arriving). Refreshing — reopen them in a moment.');
+       console.warn('saveW refused: row',row,'had an empty state cell at load and the live cell differs (or could not be read)');
+       try{loadData();}catch(e){}
+       return false;}}
     /* One $batch round-trip instead of 3 sequential PATCHes. Falls back to the proven sequential
        path on any batch error — writes are idempotent, so re-writing after a partial batch is safe. */
     try{ await patchRangesBatch(_payloads); }
@@ -14597,11 +14630,25 @@ function openWorkspace(r,jump){wsRow=r;loadW(r);renderWorkspace(jump);
          only c.st means the next saveW rewrites AJ from W.st WITHOUT the stamp and the
          same stale event re-surfaces this candidate forever. */
       if(W&&W.row===r&&W.st)W.st.lastAwaitingReview=c.st.lastAwaitingReview;
-      /* Persist this stamp so refreshes don't re-surface them */
-      patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(err=>console.warn('Awaiting review stamp:',err.message));
     }
-    detectResumeInFolder(c).catch(e=>console.warn(e.message));
-    ensureApplicationPdf(c).catch(e=>console.warn(e.message));
+    /* Three background writes follow an open, and none of them is the operator's decision:
+       the review stamp, a résumé found in the folder, the application PDF flag. Each used to
+       write this card's LOAD-TIME state straight over AJ, all three at once. A card loaded
+       while the worker was still writing a new application (name visible, AJ not yet there)
+       holds an empty default state — opening it put that emptiness over the whole profile the
+       worker had just written (answers, employers, refCode, source code: row 214, Oct 13).
+       Now: one after another, and each writes only if the live cell still equals what the
+       load read (_ajUnchangedSinceLoad), syncing row[35] so the next one compares against it. */
+    const _stamped=!!(c.st&&c.st.manualAwaiting);
+    (async()=>{
+      if(_stamped){
+        try{
+          if(await _ajUnchangedSinceLoad(c)){const cell=_stCell(c.st);await patchRange('AJ'+c.excelRow,[[cell]]);if(Array.isArray(c.row))c.row[35]=cell;}
+        }catch(err){console.warn('Awaiting review stamp:',err.message);}
+      }
+      try{await detectResumeInFolder(c);}catch(e){console.warn(e.message);}
+      try{await ensureApplicationPdf(c);}catch(e){console.warn(e.message);}
+    })();
   }
 }
 
@@ -14624,6 +14671,12 @@ async function detectResumeInFolder(c){
     const resume=items.find(f=>/resume|cv|curriculum/i.test(f.name))
       ||items.find(f=>/\.(pdf|docx?)$/i.test(f.name)&&!isReport(f.name));
     if(resume){
+      /* Background write: only onto the card the board holds NOW, and only if the live cell
+         still equals what that card's load read. Otherwise leave it for the next open. */
+      const _live=pipeline.find(x=>x.excelRow===c.excelRow);
+      if(_live&&_live!==c)return;
+      if(c.st&&c.st.__ajCorrupt)return;
+      if(!(await _ajUnchangedSinceLoad(c)))return;
       c.st=c.st||{};
       c.st.hasResume=true;
       c.st.resumeFile=resume.name;
@@ -14649,7 +14702,7 @@ async function detectResumeInFolder(c){
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'✓ Auto-released — résumé received'});
         }
       }
-      await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+      {const _cell=_stCell(c.st);await patchRange('AJ'+c.excelRow,[[_cell]]);if(Array.isArray(c.row))c.row[35]=_cell;}
       if(W&&W.row===c.excelRow){W.st=c.st;W.gates=W.gates||{};}
       render();
       if(W&&W.row===c.excelRow)renderWorkspace();
@@ -19363,6 +19416,11 @@ function generateApplicationPdf(c){
 async function ensureApplicationPdf(c){
   if(!c)return;
   if(c.st&&c.st.hasApplicationPdf)return;
+  /* Nothing stored for this row at load = no application to print. A card loaded while the
+     worker was mid-write would otherwise file a blank "application" in the candidate's folder
+     and then write its empty state over the real one (row 214, Oct 13). */
+  if(Array.isArray(c.row)&&(c.row[35]==null||c.row[35]===''))return;
+  if(c.st&&c.st.__ajCorrupt)return;
   try{
     c.st=c.st||{};
     /* Custom application template (Settings → Document templates) renders through the editable
@@ -19376,8 +19434,17 @@ async function ensureApplicationPdf(c){
       const blob=generateApplicationPdf(c);
       await uploadPdfToOnboarding(c.name,'application-'+((c.st&&c.st.appliedDate)||today())+'.pdf',blob);
     }
+    /* The render + upload took seconds. Write the flag only onto the card the board holds now,
+       and only if the live cell still equals what its load read — this used to put the
+       open-time copy back over a booking or reply that landed meanwhile. A skipped flag just
+       means the PDF is regenerated (same filename) on a later open. */
+    const _live=pipeline.find(x=>x.excelRow===c.excelRow);
+    if((_live&&_live!==c)||!(await _ajUnchangedSinceLoad(c))){delete c.st.applicationPdfUrl;return;}
     c.st.hasApplicationPdf=true;
-    await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+    {const _cell=_stCell(c.st);await patchRange('AJ'+c.excelRow,[[_cell]]);if(Array.isArray(c.row))c.row[35]=_cell;}
+    /* The open workspace holds its own deep copy — without the flag there, its next save
+       drops it and every later open regenerates the PDF. */
+    if(W&&W.row===c.excelRow&&W.st&&W.st!==c.st){W.st.hasApplicationPdf=true;if(c.st.applicationPdfUrl)W.st.applicationPdfUrl=c.st.applicationPdfUrl;}
   }catch(e){console.warn('Application PDF gen failed:',e.message);}
 }
 function generateActivityLogPdf(c){
