@@ -88,6 +88,13 @@ const S = mk();
   ok(/function GHL_KEY\(\)/.test(refDash) && /localStorage\.getItem\('ghlApiKey'\)/.test(refDash), "referral dashboard reads the SAME localStorage 'ghlApiKey' (same origin, one key)");
   ok(/No GoHighLevel API key on this browser/.test(refDash), 'referral dashboard fails loud with a pointer when the key is missing');
   ok((refDash.match(/Bearer '\+GHL_KEY\(\)/g) || []).length >= 3, 'every referral-dashboard GHL call uses the function, none a constant');
+
+  // B-1013-131: a REJECTED key must never masquerade as "contact not found"
+  const resolver = html.slice(html.indexOf('async function ghlFindOrCreateContact'), html.indexOf('/* ─── ⏰ Scheduled texts'));
+  ok((resolver.match(/sr\.status===401\|\|sr\.status===403\)throw new Error\(KEY_BAD\)|r2\.status===401\|\|r2\.status===403\)throw new Error\(KEY_BAD\)|cr\.status===401\|\|cr\.status===403\)throw new Error\(KEY_BAD\)/g) || []).length === 3, 'all three GHL lookups throw loud on 401/403 — no silent fall-through to the HCG popup');
+  ok(/GoHighLevel rejected the API key/.test(resolver) && /paste the NEW key in Settings/.test(resolver), 'the error says exactly what to do after a key rotation');
+  ok((resolver.match(/if\(e&&e\.message===KEY_BAD\)throw e;/g) || []).length === 3, 'network hiccups stay quiet; only the auth failure escapes');
+  ok(/GoHighLevel rejected the API key/.test(refDash) && (refDash.match(/throw new Error\(KEY_BAD\)/g) || []).length === 3, 'the referral dashboard gets the same loud auth failure');
 }
 
 console.log('\nScheduled SMS: ' + PASS + ' passed, ' + FAIL + ' failed');

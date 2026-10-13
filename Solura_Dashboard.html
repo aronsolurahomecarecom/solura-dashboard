@@ -1905,7 +1905,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1012-130';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1013-131';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -12214,6 +12214,9 @@ function openSMS(ri){
 async function ghlFindOrCreateContact(ri,clean){
   if(!GHL_KEY())throw new Error('No GoHighLevel API key — add it in Settings → SMS');
   var cid=null;
+  // A REJECTED key must say so — swallowed 401s used to read as "contact
+  // not found" and silently dumped sends to the HCG popup.
+  var KEY_BAD='GoHighLevel rejected the API key. If you rotated it, paste the NEW key in Settings → SMS (and update the worker’s GHL_API_KEY secret for scheduled texts).';
   var ghlHeaders={Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Accept':'application/json'};
   function fetchTO(url,opts,ms){
     var ctrl=new AbortController();
@@ -12222,20 +12225,23 @@ async function ghlFindOrCreateContact(ri,clean){
   }
   try{
     var sr=await fetchTO(GHL_BASE+'/contacts/search/duplicate?locationId='+GHL_LOC+'&number='+encodeURIComponent('+'+clean),{headers:ghlHeaders});
+    if(sr.status===401||sr.status===403)throw new Error(KEY_BAD);
     if(sr.ok){var sj=await sr.json();if(sj.contact)cid=sj.contact.id;}
-  }catch(e){}
+  }catch(e){if(e&&e.message===KEY_BAD)throw e;}
   if(!cid){
     try{
       var r2=await fetchTO(GHL_BASE+'/contacts/?locationId='+GHL_LOC+'&query='+encodeURIComponent('+'+clean),{headers:ghlHeaders});
+      if(r2.status===401||r2.status===403)throw new Error(KEY_BAD);
       if(r2.ok){var j2=await r2.json();if(j2.contacts&&j2.contacts.length>0)cid=j2.contacts[0].id;}
-    }catch(e){}
+    }catch(e){if(e&&e.message===KEY_BAD)throw e;}
   }
   if(!cid){
     var r3=rows[ri]||[];
     try{
       var cr=await fetchTO(GHL_BASE+'/contacts/',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({locationId:GHL_LOC,firstName:String(r3[C.NM]||'').split(' ')[0],phone:'+'+clean,email:String(r3[C.EM]||'')})});
+      if(cr.status===401||cr.status===403)throw new Error(KEY_BAD);
       if(cr.ok){var cj=await cr.json();cid=cj.contact?cj.contact.id:null;}
-    }catch(e){}
+    }catch(e){if(e&&e.message===KEY_BAD)throw e;}
   }
   return cid;
 }
