@@ -1183,7 +1183,14 @@ var REDIRECT=location.href.split('?')[0].split('#')[0];
 var GR='https://graph.microsoft.com/v1.0';
 var GHL_BASE='https://services.leadconnectorhq.com';
 var GHL_LOC='kWlzzI2WZaes2GnQf7DV';
-var GHL_KEY='pit-5df912ec-7542-4dc8-af5b-272472ba84e9';
+// GHL private-integration token lives ONLY in this browser's localStorage,
+// shared with the main dashboard (same origin) — NEVER in this file: the
+// page's source is public on GitHub Pages. Set it once in the main
+// dashboard's Settings → SMS on this browser.
+function GHL_KEY(){
+  try{var v=localStorage.getItem('ghlApiKey');if(v)return v;}catch(_){}
+  return '';
+}
 var FN='Solura_Referral_Tracker.xlsx';
 var PHONE_DISPLAY='(216) 770-4886';
 
@@ -4779,7 +4786,8 @@ async function sendSMS(){
   try{
     var clean=phone.replace(/\D/g,'');if(clean.length===10)clean='1'+clean;
     var cid=null;
-    var ghlHeaders={Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Accept':'application/json'};
+    if(!GHL_KEY())throw new Error('No GoHighLevel API key on this browser — open the main dashboard once and add it in Settings → SMS');
+    var ghlHeaders={Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Accept':'application/json'};
     function fetchTO(url,opts,ms){
       var ctrl=new AbortController();
       var tid=setTimeout(function(){ctrl.abort();},ms||6000);
@@ -4798,7 +4806,7 @@ async function sendSMS(){
     if(!cid){
       var r3=rows[ri]||[];
       try{
-        var cr=await fetchTO(GHL_BASE+'/contacts/',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({locationId:GHL_LOC,firstName:String(r3[C.NM]||'').split(' ')[0],phone:'+'+clean,email:String(r3[C.EM]||'')})});
+        var cr=await fetchTO(GHL_BASE+'/contacts/',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({locationId:GHL_LOC,firstName:String(r3[C.NM]||'').split(' ')[0],phone:'+'+clean,email:String(r3[C.EM]||'')})});
         if(cr.ok){var cj=await cr.json();cid=cj.contact?cj.contact.id:null;}
       }catch(e){}
     }
@@ -4808,7 +4816,7 @@ async function sendSMS(){
       el('modal-sms').classList.remove('open');
       return;
     }
-    var smsr=await fetch(GHL_BASE+'/conversations/messages',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY,Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({type:'SMS',contactId:cid,locationId:GHL_LOC,message:msg})});
+    var smsr=await fetch(GHL_BASE+'/conversations/messages',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({type:'SMS',contactId:cid,locationId:GHL_LOC,message:msg})});
     if(!smsr.ok){var se=await smsr.json().catch(function(){return{};});throw new Error('SMS failed: '+(se.message||smsr.status));}
     el('modal-sms').classList.remove('open');
     toast('✓ SMS sent');

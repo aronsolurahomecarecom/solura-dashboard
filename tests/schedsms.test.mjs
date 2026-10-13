@@ -68,5 +68,27 @@ const S = mk();
   ok(/hasGhlKey===false/.test(html) && /texts will NOT send until you add it/.test(html), 'a missing worker secret is flagged in the queue list');
 }
 
+// ── 🔑 GHL key consistency + no-leak guard (B-1013) ──
+{
+  const fs = await import('node:fs');
+  const root = join(here, '..');
+  // ONE canonical browser-side source: localStorage ghlApiKey (+ synced
+  // config fallback in the main dashboard). The worker holds its own copy
+  // as the GHL_API_KEY secret. NOTHING is ever hardcoded in a public file.
+  const publicFiles = fs.readdirSync(root).filter((f) => /\.(html|js)$/i.test(f));
+  const leaks = [];
+  for (const f of publicFiles) {
+    const t = fs.readFileSync(join(root, f), 'utf8');
+    if (/pit-[0-9a-f]{4,}/i.test(t)) leaks.push(f);
+  }
+  ok(leaks.length === 0, 'NO file in the public repo holds a literal GHL key (found in: ' + leaks.join(', ') + ')');
+  ok(/localStorage\.getItem\('ghlApiKey'\)/.test(html) && /enginesDoc\.config\.ghlApiKey/.test(html), "main dashboard reads localStorage 'ghlApiKey' with the synced-config fallback");
+  ok(/localStorage\.setItem\('ghlApiKey'/.test(html) && /enginesDoc\.config\.ghlApiKey=t\.value\.trim\(\)/.test(html), 'saving the key in Settings writes BOTH sources');
+  const refDash = fs.readFileSync(join(root, 'Solura_Referral_Dashboard.html'), 'utf8');
+  ok(/function GHL_KEY\(\)/.test(refDash) && /localStorage\.getItem\('ghlApiKey'\)/.test(refDash), "referral dashboard reads the SAME localStorage 'ghlApiKey' (same origin, one key)");
+  ok(/No GoHighLevel API key on this browser/.test(refDash), 'referral dashboard fails loud with a pointer when the key is missing');
+  ok((refDash.match(/Bearer '\+GHL_KEY\(\)/g) || []).length >= 3, 'every referral-dashboard GHL call uses the function, none a constant');
+}
+
 console.log('\nScheduled SMS: ' + PASS + ' passed, ' + FAIL + ' failed');
 process.exit(FAIL ? 1 : 0);
