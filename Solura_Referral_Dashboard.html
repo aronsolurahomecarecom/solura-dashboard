@@ -4806,12 +4806,24 @@ async function sendSMS(){
         if(r2.ok){var j2=await r2.json();if(j2.contacts&&j2.contacts.length>0)cid=j2.contacts[0].id;}
       }catch(e){if(e&&e.message===KEY_BAD)throw e;}
     }
+    // A contact can exist under the EMAIL with a different phone — check
+    // before creating, or the create collides on the duplicate.
+    var leadEm=String((rows[ri]||[])[C.EM]||'').trim().toLowerCase();
+    if(!cid&&leadEm){
+      try{
+        var se=await fetchTO(GHL_BASE+'/contacts/search/duplicate?locationId='+GHL_LOC+'&email='+encodeURIComponent(leadEm),{headers:ghlHeaders});
+        if(se.status===401||se.status===403)throw new Error(KEY_BAD);
+        if(se.ok){var sje=await se.json();if(sje.contact)cid=sje.contact.id;}
+      }catch(e){if(e&&e.message===KEY_BAD)throw e;}
+    }
     if(!cid){
       var r3=rows[ri]||[];
       try{
         var cr=await fetchTO(GHL_BASE+'/contacts/',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({locationId:GHL_LOC,firstName:String(r3[C.NM]||'').split(' ')[0],phone:'+'+clean,email:String(r3[C.EM]||'')})});
         if(cr.status===401||cr.status===403)throw new Error(KEY_BAD);
-        if(cr.ok){var cj=await cr.json();cid=cj.contact?cj.contact.id:null;}
+        var cj=await cr.json().catch(function(){return{};});
+        if(cr.ok)cid=cj.contact?cj.contact.id:null;
+        else if(cj&&cj.meta&&cj.meta.contactId)cid=cj.meta.contactId;
       }catch(e){if(e&&e.message===KEY_BAD)throw e;}
     }
     if(!cid){

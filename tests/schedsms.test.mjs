@@ -58,7 +58,7 @@ const S = mk();
   ok(/await ghlFindOrCreateContact\(ri,clean\)/.test(flow), 'the GHL contact is resolved AT SCHEDULING time (shared with the live send)');
   ok(/\/sms\/schedule\?token=/.test(flow) && /outcome:'scheduled-sms'/.test(flow) && /advanceLead\(ri,'SMS'\)/.test(flow), 'queueing logs the comms entry and advances the sequence');
   ok(/even if your laptop is off/.test(flow), 'the toast names the consequence plainly');
-  ok(/var cid=await ghlFindOrCreateContact\(ri,clean\);\s*\n\s*if\(!cid\)\{\s*\n\s*toast\('Opening HCG/.test(html), 'sendSMS uses the SAME shared contact resolver (no drift)');
+  ok(/var cid=await ghlFindOrCreateContact\(ri,clean\);\s*\n\s*if\(!cid\)\{\s*\n\s*toast\('No HCG contact for \+/.test(html), 'sendSMS uses the SAME shared contact resolver, and the popup toast names the miss');
   const poll = html.slice(html.indexOf('async function pollSmsResults'), html.indexOf('async function renderSchedSms'));
   ok(/outcome:'scheduled-sms-sent'/.test(poll) && /outcome:'scheduled-sms-failed'/.test(poll) && /FAILED/.test(poll), 'sent and failed results both land in the comms log, failures loud');
   ok(/\/sms\/results\/ack\?token=/.test(poll), 'results are acked so they never double-log');
@@ -93,8 +93,16 @@ const S = mk();
   const resolver = html.slice(html.indexOf('async function ghlFindOrCreateContact'), html.indexOf('/* ─── ⏰ Scheduled texts'));
   ok((resolver.match(/sr\.status===401\|\|sr\.status===403\)throw new Error\(KEY_BAD\)|r2\.status===401\|\|r2\.status===403\)throw new Error\(KEY_BAD\)|cr\.status===401\|\|cr\.status===403\)throw new Error\(KEY_BAD\)/g) || []).length === 3, 'all three GHL lookups throw loud on 401/403 — no silent fall-through to the HCG popup');
   ok(/GoHighLevel rejected the API key/.test(resolver) && /paste the NEW key in Settings/.test(resolver), 'the error says exactly what to do after a key rotation');
-  ok((resolver.match(/if\(e&&e\.message===KEY_BAD\)throw e;/g) || []).length === 3, 'network hiccups stay quiet; only the auth failure escapes');
-  ok(/GoHighLevel rejected the API key/.test(refDash) && (refDash.match(/throw new Error\(KEY_BAD\)/g) || []).length === 3, 'the referral dashboard gets the same loud auth failure');
+  ok((resolver.match(/if\(e&&e\.message===KEY_BAD\)throw e;/g) || []).length === 5, 'network hiccups stay quiet in all five lookups; only the auth failure escapes');
+  ok(/GoHighLevel rejected the API key/.test(refDash) && (refDash.match(/throw new Error\(KEY_BAD\)/g) || []).length >= 3, 'the referral dashboard gets the same loud auth failure');
+
+  // B-1013-132: a contact that exists under the EMAIL must be found — phone
+  // misses were colliding on create and silently dumping to the HCG popup
+  const resolver2 = html.slice(html.indexOf('async function ghlFindOrCreateContact'), html.indexOf('/* ─── ⏰ Scheduled texts'));
+  ok(/search\/duplicate\?locationId='\+GHL_LOC\+'&email='/.test(resolver2) && /query='\+encodeURIComponent\(leadEm\)/.test(resolver2), 'the resolver falls back to EMAIL lookups before creating');
+  ok(/cj\.meta&&cj\.meta\.contactId\)cid=cj\.meta\.contactId/.test(resolver2), "GHL's duplicate rejection names the existing contact — it gets used, not swallowed");
+  ok(/_ghlMiss=String\(\(cj&&cj\.message\)/.test(resolver2) && /_ghlMiss\?\(' \('\+_ghlMiss\+'\)'\)/.test(html), 'when it still misses, the popup toast says WHY');
+  ok(/search\/duplicate\?locationId='\+GHL_LOC\+'&email='/.test(refDash) && /cj\.meta\.contactId/.test(refDash), 'the referral dashboard gets the email fallback + duplicate recovery too');
 }
 
 console.log('\nScheduled SMS: ' + PASS + ' passed, ' + FAIL + ' failed');

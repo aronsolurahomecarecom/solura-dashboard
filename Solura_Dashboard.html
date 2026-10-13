@@ -1905,7 +1905,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1013-131';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1013-132';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -12214,6 +12214,7 @@ function openSMS(ri){
 async function ghlFindOrCreateContact(ri,clean){
   if(!GHL_KEY())throw new Error('No GoHighLevel API key — add it in Settings → SMS');
   var cid=null;
+  _ghlMiss='';
   // A REJECTED key must say so — swallowed 401s used to read as "contact
   // not found" and silently dumped sends to the HCG popup.
   var KEY_BAD='GoHighLevel rejected the API key. If you rotated it, paste the NEW key in Settings → SMS (and update the worker’s GHL_API_KEY secret for scheduled texts).';
@@ -12235,16 +12236,40 @@ async function ghlFindOrCreateContact(ri,clean){
       if(r2.ok){var j2=await r2.json();if(j2.contacts&&j2.contacts.length>0)cid=j2.contacts[0].id;}
     }catch(e){if(e&&e.message===KEY_BAD)throw e;}
   }
+  // Phone searches can miss a contact that EXISTS under the lead's email
+  // (different or missing phone on the GHL side) — look her up by email
+  // before trying to create, or the create collides on the duplicate.
+  var leadEm=normEmail((rows[ri]||[])[C.EM]);
+  if(!cid&&leadEm){
+    try{
+      var se=await fetchTO(GHL_BASE+'/contacts/search/duplicate?locationId='+GHL_LOC+'&email='+encodeURIComponent(leadEm),{headers:ghlHeaders});
+      if(se.status===401||se.status===403)throw new Error(KEY_BAD);
+      if(se.ok){var sje=await se.json();if(sje.contact)cid=sje.contact.id;}
+    }catch(e){if(e&&e.message===KEY_BAD)throw e;}
+  }
+  if(!cid&&leadEm){
+    try{
+      var qe=await fetchTO(GHL_BASE+'/contacts/?locationId='+GHL_LOC+'&query='+encodeURIComponent(leadEm),{headers:ghlHeaders});
+      if(qe.status===401||qe.status===403)throw new Error(KEY_BAD);
+      if(qe.ok){var jqe=await qe.json();if(jqe.contacts&&jqe.contacts.length>0)cid=jqe.contacts[0].id;}
+    }catch(e){if(e&&e.message===KEY_BAD)throw e;}
+  }
   if(!cid){
     var r3=rows[ri]||[];
     try{
       var cr=await fetchTO(GHL_BASE+'/contacts/',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify({locationId:GHL_LOC,firstName:String(r3[C.NM]||'').split(' ')[0],phone:'+'+clean,email:String(r3[C.EM]||'')})});
       if(cr.status===401||cr.status===403)throw new Error(KEY_BAD);
-      if(cr.ok){var cj=await cr.json();cid=cj.contact?cj.contact.id:null;}
+      var cj=await cr.json().catch(function(){return{};});
+      if(cr.ok)cid=cj.contact?cj.contact.id:null;
+      // GHL's duplicate rejection NAMES the existing contact — use it
+      else if(cj&&cj.meta&&cj.meta.contactId)cid=cj.meta.contactId;
+      else _ghlMiss=String((cj&&cj.message)||('create '+cr.status)).slice(0,120);
     }catch(e){if(e&&e.message===KEY_BAD)throw e;}
   }
   return cid;
 }
+// Why the last resolve came up empty — shown next to the HCG popup fallback
+var _ghlMiss='';
 /* ─── ⏰ Scheduled texts: worker cron sends them, laptop on or off ─────
  * The dashboard resolves the GHL contact NOW, queues {due, contactId,
  * message} on the tracking worker, and the worker's cron trigger sends
@@ -12279,7 +12304,7 @@ async function schedSmsFromComposer(dueTs){
   try{
     var clean=phone.replace(/\D/g,'');if(clean.length===10)clean='1'+clean;
     var cid=await ghlFindOrCreateContact(ri,clean);
-    if(!cid){say('var(--red)','✗ Could not match this number in HomeCareGrow — send it live instead.');return;}
+    if(!cid){say('var(--red)','✗ Could not match this number in HomeCareGrow'+(_ghlMiss?(' ('+_ghlMiss+')'):'')+' — send it live instead.');return;}
     var leadName='';try{leadName=String((rows[ri]||[])[C.NM]||(rows[ri]||[])[C.DM]||'').trim();}catch(_){}
     var payload=smsQueuePayload({dueTs:dueTs,contactId:cid,locationId:GHL_LOC,msg:msg,phone:phone,leadName:leadName,ri:ri});
     var r=await fetch(tc.url+'/sms/schedule?token='+encodeURIComponent(tc.token),{method:'POST',body:JSON.stringify(payload)});
@@ -12379,7 +12404,7 @@ async function sendSMS(){
     var clean=phone.replace(/\D/g,'');if(clean.length===10)clean='1'+clean;
     var cid=await ghlFindOrCreateContact(ri,clean);
     if(!cid){
-      toast('Opening HCG to send manually…');
+      toast('No HCG contact for +'+clean+(_ghlMiss?(' ('+_ghlMiss+')'):'')+' — opening HCG to send manually…');
       window.open('https://app.homecaregrow.io/v2/location/'+GHL_LOC+'/contacts?search='+encodeURIComponent('+'+clean),'hcg','width=1200,height=800,noopener');
       el('modal-sms').classList.remove('open');
       return;
