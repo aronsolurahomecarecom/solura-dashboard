@@ -7386,6 +7386,20 @@ async function onSignedIn(){setConn(true);
 let _saveInFlight=0;
 function pulseOn(){_saveInFlight++;document.getElementById('save-pulse').classList.add('on');}
 function pulseOff(){_saveInFlight=Math.max(0,_saveInFlight-1);if(_saveInFlight===0)document.getElementById('save-pulse').classList.remove('on');}
+/* ── Supabase dual-write mirror (Phase 1) ──
+   Every successful sheet write the PORTAL makes is shadowed to Supabase through the
+   worker's token-gated /sb/mirror (the service key never touches the browser). Pure
+   fire-and-forget: the sheet remains truth, a mirror failure changes nothing here.
+   Inert until the worker has its SUPABASE_* env vars. */
+function _sbMirror(patches){
+  try{
+    const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
+    if(!tok||!patches||!patches.length)return;
+    const send=patches.filter(p=>p&&/^(AJ\d+|G\d+|AI\d+|C\d+:L\d+|N\d+:Y\d+)$/.test(String(p.addr||'')));
+    if(!send.length)return;
+    fetch(ZI_WORKER_URL+'/sb/mirror',{method:'POST',headers:{'Content-Type':'application/json','X-Solura-Token':tok},body:JSON.stringify({patches:send.map(p=>({addr:p.addr,values:p.values}))})}).catch(()=>{});
+  }catch(e){}
+}
 async function patchRange(addr,values){const base=GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET;
   const sid=await getWorkbookSession();
   const headers=sid?{'workbook-session-id':sid}:{};
@@ -7393,6 +7407,7 @@ async function patchRange(addr,values){const base=GR+'/drives/'+driveId+'/items/
   try{
     const r=await gfetch(base+"/range(address='"+addr+"')",{method:'PATCH',body:JSON.stringify({values:values}),headers:headers});
     if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error((e.error&&e.error.message)||r.status);}
+    _sbMirror([{addr:addr,values:values}]);
   }finally{pulseOff();}
 }
 
@@ -7418,6 +7433,7 @@ async function patchRangesBatch(payloads){
     const data=await resp.json().catch(()=>({}));
     const bad=(data.responses||[]).filter(x=>x.status>=400);
     if(bad.length)throw new Error(bad.map(b=>'#'+b.id+' '+b.status+((b.body&&b.body.error&&b.body.error.message)?(' '+b.body.error.message):'')).join('; '));
+    _sbMirror(payloads);
   }finally{pulseOff();}
 }
 async function getWorkbookSession(){
