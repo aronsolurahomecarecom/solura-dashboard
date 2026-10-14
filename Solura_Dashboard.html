@@ -685,7 +685,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div id="sms-spin" style="display:none;align-items:center;gap:5px;font-size:11px;color:var(--soft)"><div class="mspin"></div>Sending…</div>
       </div>
       <div id="sms-sched-panel" style="display:none;margin-top:10px;padding:12px;border:1.5px dashed var(--gold);border-radius:10px;background:#FDF9F1">
-        <div style="font-size:11.5px;font-weight:700;color:#8B6500;margin-bottom:8px">⏰ Our worker sends it at this time, even if your laptop is off.</div>
+        <div style="font-size:11.5px;font-weight:700;color:#8B6500;margin-bottom:8px">⏰ HomeCareGrow holds it and sends at this time, even if your laptop is off.</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input type="date" id="sms-sched-date" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">
           <input type="time" id="sms-sched-time" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px">
@@ -1605,9 +1605,9 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div id="schedmail-list"></div>
         <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:#8B6500;margin:20px 0 8px">📱 Scheduled texts</div>
         <div style="font-size:12px;color:var(--mid);line-height:1.6;margin-bottom:8px">
-          Queued on the tracking worker; its cron trigger sends them via HomeCareGrow at the set time — laptop on or off.
-          One-time setup on the worker: paste v7.4, add the <b>GHL_API_KEY</b> secret (the same key as Settings → SMS),
-          and add a Cron Trigger of <code>*/5 * * * *</code>.
+          Scheduled through HomeCareGrow itself: GHL holds each message and sends it at the set time — laptop on or off.
+          No worker, no cron, nothing to set up beyond the API key in Settings → SMS. Cancelling here pulls the message
+          back before it goes out.
         </div>
         <button class="ee-mini" data-action="schedsms-test" style="margin-bottom:8px">🔌 Test text scheduling</button>
         <pre id="schedsms-test-out" style="font-size:11px;color:var(--mid);white-space:pre-wrap;font-family:inherit;margin:0 0 10px"></pre>
@@ -1912,7 +1912,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1014-135';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1014-136';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -8833,12 +8833,12 @@ function startInboundPolling(){
   pollInboundMail();
   pollNdrMail().catch(function(){});
   schedCheckPastDue().catch(function(){});
-  pollSmsResults().catch(function(){});
+  schedSmsCheckPastDue().catch(function(){});
   inboundEmailPollTimer=setInterval(function(){
     pollInboundMail();
     pollNdrMail().catch(function(){});
     schedCheckPastDue().catch(function(){}); // ⏰ confirm Exchange sent what was due
-    pollSmsResults().catch(function(){});    // 📱 collect the cron's sent/failed texts
+    schedSmsCheckPastDue().catch(function(){}); // 📱 confirm GHL sent what was due
   },INBOUND_POLL_MS);
 }
 function stopInboundPolling(){
@@ -12279,25 +12279,35 @@ async function ghlFindOrCreateContact(ri,clean){
 }
 // Why the last resolve came up empty — shown next to the HCG popup fallback
 var _ghlMiss='';
-/* ─── ⏰ Scheduled texts: worker cron sends them, laptop on or off ─────
- * The dashboard resolves the GHL contact NOW, queues {due, contactId,
- * message} on the tracking worker, and the worker's cron trigger sends
- * via GoHighLevel at the due time. Results wait on the worker until the
- * dashboard picks them up (comms log + toast). Needs worker v7.4 with
- * the GHL_API_KEY secret and a cron trigger.
+/* ─── ⏰ Scheduled texts: GHL native hold-and-send ──────────────────────
+ * POST /conversations/messages with scheduledTimestamp (UTC SECONDS) and
+ * GoHighLevel itself delivers at the due time — laptop on or off, no
+ * worker, no cron. Cancel = DELETE /conversations/messages/{id}/schedule.
+ * Records live in the synced config; the standing poll verifies past-due
+ * ones against GHL. (The worker's /sms/* queue remains deployed but
+ * unused — superseded by this native path in B-1014-136.)
  * ─────────────────────────────────────────────────────────────────────── */
 /* ⚡SCHEDSMS — BEGIN (sliced by tests/schedsms.test.mjs) */
 function smsSchedValidate(o){
   if(!o.phone)return 'No phone number on this lead.';
   if(!String(o.msg||'').trim())return 'Write the text first.';
-  if(!o.hasTracker)return 'Set the tracker URL + token first (Settings → Data & analytics) — scheduled texts queue there.';
   if(!(o.dueTs>o.now+60*1000))return 'Pick a time at least a minute in the future.';
   return null;
 }
-function smsQueuePayload(o){
-  return {due:o.dueTs,contactId:o.contactId,locationId:o.locationId,
-    message:String(o.msg||'').slice(0,1000),phone:o.phone,
-    leadName:String(o.leadName||'').slice(0,120),ri:o.ri};
+// GHL holds and sends natively: scheduledTimestamp is UTC SECONDS per the
+// official docs (a 10-digit value) — milliseconds would land in the year
+// 58000, and a past value sends immediately.
+function smsSchedGhlPayload(o){
+  return {type:'SMS',contactId:o.contactId,locationId:o.locationId,
+    message:String(o.msg||'').slice(0,1000),
+    scheduledTimestamp:Math.floor(o.dueTs/1000)};
+}
+// Pending native schedules live in the synced config, like scheduled emails
+function scheduledSmsRecs(){
+  enginesDoc.config=enginesDoc.config||{};
+  var L=enginesDoc.config.scheduledSms;
+  if(!L)L=enginesDoc.config.scheduledSms=[];
+  return L;
 }
 /* ⚡SCHEDSMS — END */
 async function schedSmsFromComposer(dueTs){
@@ -12306,142 +12316,119 @@ async function schedSmsFromComposer(dueTs){
   var ri=parseInt(el('modal-sms').dataset.ri,10);
   var phone=String((rows[ri]||[])[C.PH]||'').trim();
   var msg=el('sms-text').value;
-  var tc=null;try{tc=trackerCfg();}catch(_){}
-  var err=smsSchedValidate({phone:phone,msg:msg,hasTracker:!!(tc&&tc.token),dueTs:dueTs,now:Date.now()});
+  var err=smsSchedValidate({phone:phone,msg:msg,dueTs:dueTs,now:Date.now()});
   if(err){say('var(--red)','✗ '+err);return;}
   say('var(--mid)','Scheduling…');
   try{
     var clean=phone.replace(/\D/g,'');if(clean.length===10)clean='1'+clean;
     var cid=await ghlFindOrCreateContact(ri,clean);
     if(!cid){say('var(--red)','✗ Could not match this number in HomeCareGrow'+(_ghlMiss?(' ('+_ghlMiss+')'):'')+' — send it live instead.');return;}
-    var leadName='';try{leadName=String((rows[ri]||[])[C.NM]||(rows[ri]||[])[C.DM]||'').trim();}catch(_){}
-    var payload=smsQueuePayload({dueTs:dueTs,contactId:cid,locationId:GHL_LOC,msg:msg,phone:phone,leadName:leadName,ri:ri});
-    var r=await fetch(tc.url+'/sms/schedule?token='+encodeURIComponent(tc.token),{method:'POST',body:JSON.stringify(payload)});
+    // Native hold-and-send: GHL keeps the message and delivers it at the
+    // due time, laptop on or off — same idea as Exchange deferred emails.
+    var payload=smsSchedGhlPayload({dueTs:dueTs,contactId:cid,locationId:GHL_LOC,msg:msg});
+    var r=await fetch(GHL_BASE+'/conversations/messages',{method:'POST',headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Content-Type':'application/json'},body:JSON.stringify(payload)});
     var j=await r.json().catch(function(){return{};});
-    if(!(r.ok&&j.ok))throw new Error(j.error||('worker '+r.status+' — it may need the v7.4 code pasted in'));
+    if(!r.ok)throw new Error(j.message||('GHL '+r.status));
+    var msgId=String(j.messageId||j.id||((j.message&&j.message.id)||''));
+    if(!msgId)throw new Error('GHL accepted it but returned no message id — check the Conversations tab in HCG');
+    var leadName='';try{leadName=String((rows[ri]||[])[C.NM]||(rows[ri]||[])[C.DM]||'').trim();}catch(_){}
+    scheduledSmsRecs().push({id:msgId,ri:ri,to:phone,leadName:leadName,msg:String(msg).slice(0,300),dueAt:dueTs,createdAt:Date.now()});
+    saveEnginesDoc().catch(function(){});
     var whenStr=new Date(dueTs).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
     logComms(commsEntryForLead(ri,{direction:'out',channel:'sms',contact:phone,subject:'',
-      preview:'Scheduled for '+whenStr+' — the worker sends it even with the laptop off · '+String(msg).slice(0,200),
+      preview:'Scheduled for '+whenStr+' — HomeCareGrow sends it even with the laptop off · '+String(msg).slice(0,200),
       outcome:'scheduled-sms'}));
     var u=advanceLead(ri,'SMS');
     if(u){try{await writeRow(ri,u);}catch(_){}}
     var sp=el('sms-sched-panel');if(sp)sp.style.display='none';
     el('modal-sms').classList.remove('open');
-    toast('⏰ Text scheduled — the worker sends it '+whenStr+', even if your laptop is off');
+    toast('⏰ Text scheduled — HomeCareGrow sends it '+whenStr+', even if your laptop is off');
+    try{renderSchedSms();}catch(_){}
     try{await buildUI();}catch(_){}
   }catch(e){say('var(--red)','✗ '+e.message);}
 }
-// Results the cron left behind: toast + comms-log each, then ack-delete.
-var _smsResultsBusy=false;
-async function pollSmsResults(){
-  if(_smsResultsBusy)return;
-  var tc=null;try{tc=trackerCfg();}catch(_){}
-  if(!tc||!tc.token)return;
-  _smsResultsBusy=true;
+// Past-due native schedules: still marked scheduled in GHL = stuck; gone
+// or sent = clean the record with a toast.
+var _schedSmsChecking=false;
+async function schedSmsCheckPastDue(){
+  if(_schedSmsChecking||!GHL_KEY())return;
+  var due=scheduledSmsRecs().filter(function(r){return r&&r.dueAt&&r.dueAt<Date.now()-2*60*1000;});
+  if(!due.length)return;
+  _schedSmsChecking=true;
   try{
-    var r=await fetch(tc.url+'/sms/results?token='+encodeURIComponent(tc.token)+'&t='+Date.now());
-    if(!r.ok)return;
-    var j=await r.json();
-    var results=(j&&j.results)||[];
-    if(!results.length)return;
-    var ackKeys=[];
-    for(var i=0;i<results.length;i++){
-      var res=results[i];
-      if(!res||!res.key)continue;
-      ackKeys.push(res.key);
-      var who=res.leadName||res.phone||'';
-      if(res.ok){
-        toast('✓ Scheduled text to '+who+' went out');
-        logComms(commsEntryForLead(res.ri,{direction:'out',channel:'sms',contact:res.phone||'',subject:'',
-          preview:String(res.message||'').slice(0,300),outcome:'scheduled-sms-sent'}));
-      }else{
-        showErr('⚠ Scheduled text to '+who+' FAILED: '+(res.error||'unknown')+' — send it live');
-        logComms(commsEntryForLead(res.ri,{direction:'out',channel:'sms',contact:res.phone||'',subject:'',
-          preview:'FAILED scheduled text ('+(res.error||'unknown')+') · '+String(res.message||'').slice(0,200),
-          outcome:'scheduled-sms-failed'}));
+    var changed=false;
+    for(var i=0;i<due.length;i++){
+      var rec=due[i];
+      var stillScheduled=false;
+      try{
+        var r=await fetch(GHL_BASE+'/conversations/messages/'+encodeURIComponent(rec.id),{headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Accept':'application/json'}});
+        if(r.ok){
+          var j=await r.json().catch(function(){return{};});
+          var st9=String((j.message&&j.message.status)||j.status||'').toLowerCase();
+          stillScheduled=(st9==='scheduled');
+        }
+      }catch(_){}
+      if(stillScheduled){if(!rec.stuck){rec.stuck=true;changed=true;}}
+      else{
+        var L=scheduledSmsRecs(),ix=L.indexOf(rec);
+        if(ix>-1){L.splice(ix,1);changed=true;}
+        toast('✓ Scheduled text to '+(rec.leadName||rec.to||'')+' went out');
+        logComms(commsEntryForLead(rec.ri,{direction:'out',channel:'sms',contact:rec.to||'',subject:'',
+          preview:String(rec.msg||'').slice(0,300),outcome:'scheduled-sms-sent'}));
       }
     }
-    if(ackKeys.length){
-      try{await fetch(tc.url+'/sms/results/ack?token='+encodeURIComponent(tc.token),{method:'POST',body:JSON.stringify({keys:ackKeys})});}catch(_){}
-    }
-    try{renderSchedSms();}catch(_){}
-  }catch(_){/* best-effort */}
-  finally{_smsResultsBusy=false;}
+    if(changed){saveEnginesDoc().catch(function(){});try{renderSchedSms();}catch(_){}}
+  }finally{_schedSmsChecking=false;}
 }
-async function renderSchedSms(){
-  var host=el('schedsms-list');if(!host)return;
-  var tc=null;try{tc=trackerCfg();}catch(_){}
-  if(!tc||!tc.token){host.innerHTML='<div style="color:var(--soft);font-size:12px">Set the tracker URL + token first (Data & analytics).</div>';return;}
-  host.innerHTML='<div style="color:var(--soft);font-size:12px">Checking the queue…</div>';
-  try{
-    var r=await fetch(tc.url+'/sms/list?token='+encodeURIComponent(tc.token)+'&t='+Date.now());
-    if(r.status===404){host.innerHTML='<div style="color:var(--red);font-size:12px">✗ The worker is outdated — paste solura-track-worker.js (v7.4) over it in Cloudflare and Deploy, add the GHL_API_KEY secret, and add a Cron Trigger of */5 * * * *.</div>';return;}
-    if(!r.ok){host.innerHTML='<div style="color:var(--red);font-size:12px">✗ Worker answered '+r.status+'.</div>';return;}
-    var j=await r.json();
-    var items=(j&&j.sms)||[];
-    var keyWarn=(j&&j.hasGhlKey===false)?'<div style="color:var(--red);font-size:12px;margin-bottom:8px">⚠ The worker has no GHL_API_KEY secret yet — texts will NOT send until you add it (Cloudflare → Worker → Settings → Variables).</div>':'';
-    if(!items.length){host.innerHTML=keyWarn+'<div style="color:var(--soft);font-size:12px">No texts queued. Open a lead’s SMS and use 🕒 Schedule.</div>';return;}
-    host.innerHTML=keyWarn+items.map(function(it){
-      var when=new Date(it.due).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
-      return '<div style="border:1.5px solid '+(it.attempts?'var(--red)':'var(--border)')+';border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
-        +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12.5px">'+escapeHtml(it.leadName||it.phone||'')+'</div>'
-        +'<div style="font-size:11px;color:var(--mid)">⏰ '+when+' · '+escapeHtml(String(it.message||'').slice(0,90))
-        +(it.attempts?' · <b style="color:var(--red)">'+it.attempts+' failed attempt'+(it.attempts!==1?'s':'')+(it.lastError?(': '+escapeHtml(it.lastError)):'')+'</b>':'')
-        +'</div></div>'
-        +'<button class="ee-mini" data-action="schedsms-del" data-key="'+escapeHtml(it.key)+'">✕ Cancel</button>'
-        +'</div>';
-    }).join('');
-  }catch(e){host.innerHTML='<div style="color:var(--red);font-size:12px">✗ Could not reach the worker.</div>';}
-}
-// Walks the whole text-scheduling chain and names the exact failing step:
-// config → worker version/secret → a real queue write → immediate cancel.
+// Walks the native text-scheduling chain and names the failing step:
+// browser key, GHL auth, and whether anything is pending.
 async function schedSmsSelfTest(){
   var out=el('schedsms-test-out');
   function line(t2){if(out)out.textContent+=t2+'\n';}
   if(out)out.textContent='';
-  var tc=null;try{tc=trackerCfg();}catch(_){}
-  if(!tc){line('1. Tracker config: ✗ no tracker URL saved (Data & analytics)');return;}
-  if(!tc.token){line('1. Tracker config: ✗ URL saved but the TOKEN is empty (Data & analytics)');return;}
-  line('1. Tracker config: ✓ '+tc.url);
-  var cronKnown=false;
+  if(!GHL_KEY()){line('1. Browser GHL key: ✗ missing — Settings → SMS');return;}
+  line('1. Browser GHL key: ✓ present');
   try{
-    var p=await fetch(tc.url+'/ping?t='+Date.now());
-    var pj=await p.json();
-    if(!pj.ok){line('2. Worker: ✗ answered but not ok');return;}
-    line('2. Worker: ✓ v'+pj.v+' · KV '+(pj.hasKV?'✓':'✗')+' · GHL secret '+(pj.hasGhlKey?'✓':'✗ (add GHL_API_KEY in Cloudflare)'));
-    if(!/^7\.[4-9]|^[89]\./.test(String(pj.v)))line('   ⚠ version below 7.4 — paste the latest solura-track-worker.js');
-    if('cronLast' in pj){
-      cronKnown=true;
-      if(pj.cronLast>0){
-        var mins=Math.round((Date.now()-pj.cronLast)/60000);
-        if(mins<=15)line('2b. Cron trigger: ✓ last ran '+mins+' min ago — queued texts WILL send');
-        else line('2b. Cron trigger: ⚠ last ran '+mins+' min ago — it may have been removed (expect every ~5 min)');
-      }else{
-        line('2b. Cron trigger: ✗ has NEVER run — add it in Cloudflare → Worker → Settings → Triggers: */5 * * * *');
-      }
-    }
-  }catch(e){line('2. Worker: ✗ unreachable ('+e.message+')');return;}
-  if(!GHL_KEY()){line('3. Browser GHL key: ✗ missing — Settings → SMS');}else{line('3. Browser GHL key: ✓ present');}
-  try{
-    var r=await fetch(tc.url+'/sms/schedule?token='+encodeURIComponent(tc.token),{method:'POST',body:JSON.stringify({
-      due:Date.now()+60*60*1000,contactId:'selftest',locationId:GHL_LOC,message:'self-test (auto-cancelled)',phone:'',leadName:'(self test)',ri:-1})});
-    var j=await r.json().catch(function(){return{};});
-    if(r.status===401){line('4. Queue write: ✗ 401 unauthorized — the tracker TOKEN here does not match the worker’s TRACK_TOKEN secret');return;}
-    if(r.status===404){line('4. Queue write: ✗ 404 — the deployed worker has no /sms/schedule (paste the latest code)');return;}
-    if(!(r.ok&&j.ok&&j.key)){line('4. Queue write: ✗ '+r.status+' '+(j.error||''));return;}
-    line('4. Queue write: ✓ queued as '+j.key);
-    var c=await fetch(tc.url+'/sms/cancel?token='+encodeURIComponent(tc.token),{method:'POST',body:JSON.stringify({key:j.key})});
-    line('5. Cancel: '+(c.ok?'✓ test entry removed':('✗ '+c.status+' — delete smsq key manually in KV')));
-    line('✓ The pipeline works. If a real schedule still fails, the red message in the SMS panel names the step (usually the GHL contact match).'+(cronKnown?'':' Queued texts only SEND if the Cron Trigger (*/5 * * * *) is added on the worker — paste worker v7.5 to make this test verify that too.'));
-  }catch(e){line('4. Queue write: ✗ '+e.message);}
+    var r=await fetch(GHL_BASE+'/contacts/search/duplicate?locationId='+GHL_LOC+'&number='+encodeURIComponent('+10000000000'),{headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Accept':'application/json'}});
+    if(r.status===401||r.status===403){line('2. GHL auth: ✗ the key was REJECTED — paste the current one in Settings → SMS');return;}
+    line('2. GHL auth: ✓ accepted ('+r.status+')');
+  }catch(e){line('2. GHL auth: ✗ could not reach GoHighLevel ('+e.message+')');return;}
+  var pend=scheduledSmsRecs().length;
+  line('3. Pending scheduled texts: '+pend);
+  line('✓ Texts schedule through HomeCareGrow itself (scheduledTimestamp) — no worker, no cron needed. GHL holds each message and sends it at the set time, laptop on or off.');
 }
-async function schedSmsCancel(key){
-  var tc=null;try{tc=trackerCfg();}catch(_){}
-  if(!tc||!tc.token)return;
+function renderSchedSms(){
+  var host=el('schedsms-list');if(!host)return;
+  var L=scheduledSmsRecs().slice().sort(function(a,b){return a.dueAt-b.dueAt;});
+  if(!L.length){
+    host.innerHTML='<div style="color:var(--soft);font-size:12px">No texts scheduled. Open a lead’s SMS and use 🕒 Schedule — HomeCareGrow holds it and sends at the set time.</div>';
+    return;
+  }
+  host.innerHTML=L.map(function(it){
+    var when=new Date(it.dueAt).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    return '<div style="border:1.5px solid '+(it.stuck?'var(--red)':'var(--border)')+';border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+      +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12.5px">'+escapeHtml(it.leadName||it.to||'')+'</div>'
+      +'<div style="font-size:11px;color:var(--mid)">⏰ '+when+' · '+escapeHtml(String(it.msg||'').slice(0,90))
+      +(it.stuck?' · <b style="color:var(--red)">past due but still marked scheduled — check the conversation in HCG</b>':'')
+      +'</div></div>'
+      +'<button class="ee-mini" data-action="schedsms-del" data-key="'+escapeHtml(it.id)+'">✕ Cancel</button>'
+      +'</div>';
+  }).join('');
+}
+// Cancel = GHL's own un-schedule endpoint; an already-sent message 404s.
+async function schedSmsCancel(id){
+  var L=scheduledSmsRecs(),idx=-1;
+  for(var i=0;i<L.length;i++)if(L[i].id===id){idx=i;break;}
+  if(idx<0)return;
   try{
-    var r=await fetch(tc.url+'/sms/cancel?token='+encodeURIComponent(tc.token),{method:'POST',body:JSON.stringify({key:key})});
-    if(r.ok){toast('🗑 Scheduled text cancelled');renderSchedSms();}
-    else toast('⚠ Could not cancel ('+r.status+')');
+    var r=await fetch(GHL_BASE+'/conversations/messages/'+encodeURIComponent(id)+'/schedule',{method:'DELETE',headers:{Authorization:'Bearer '+GHL_KEY(),Version:'2021-07-28','Accept':'application/json'}});
+    if(r.ok||r.status===404){
+      L.splice(idx,1);saveEnginesDoc().catch(function(){});renderSchedSms();
+      toast(r.status===404?'That one already went out — nothing left to cancel':'🗑 Scheduled text cancelled — it will not send');
+    }else{
+      var j=await r.json().catch(function(){return{};});
+      toast('⚠ Could not cancel ('+(j.message||r.status)+')');
+    }
   }catch(e){toast('⚠ Could not cancel: '+e.message);}
 }
 async function sendSMS(){
