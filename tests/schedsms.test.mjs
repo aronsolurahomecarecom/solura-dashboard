@@ -105,5 +105,14 @@ const S = mk();
   ok(/search\/duplicate\?locationId='\+GHL_LOC\+'&email='/.test(refDash) && /cj\.meta\.contactId/.test(refDash), 'the referral dashboard gets the email fallback + duplicate recovery too');
 }
 
+// ── 🔌 text-scheduling self-test (B-1014-134) ──
+{
+  ok(/data-action="schedsms-test"/.test(html) && /async function schedSmsSelfTest/.test(html), 'one-click self-test in Settings walks the whole chain');
+  const st = html.slice(html.indexOf('async function schedSmsSelfTest'), html.indexOf('async function schedSmsCancel'));
+  ok(/Tracker config/.test(st) && /GHL secret/.test(st) && /Queue write/.test(st) && /Cancel/.test(st), 'it checks config, worker version + secret, a real queue write, and cleans up after itself');
+  ok(/401 unauthorized/.test(st) && /TRACK_TOKEN/.test(st) && /404/.test(st), 'token mismatch and outdated worker each get named plainly');
+  ok(/Cron Trigger/.test(st), 'it says the one thing it cannot prove: the cron trigger');
+}
+
 console.log('\nScheduled SMS: ' + PASS + ' passed, ' + FAIL + ' failed');
 process.exit(FAIL ? 1 : 0);

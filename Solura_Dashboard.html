@@ -903,6 +903,10 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
     <div class="mbody">
       <div style="font-size:12px;color:var(--mid);margin-bottom:12px;line-height:1.5">One tap — this builds the loss-reason numbers nobody in the industry publishes.</div>
       <div id="loss-btns" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input type="text" id="loss-custom" maxlength="200" placeholder="Or write it in your own words…" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('loss-custom-btn').click();}" style="flex:1;padding:9px 11px;border:1.5px solid var(--border);border-radius:9px;font-family:inherit;font-size:12px;outline:none">
+        <button id="loss-custom-btn" data-action="loss-custom" style="padding:9px 14px;background:var(--gold);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Save</button>
+      </div>
       <button data-action="close-modal" data-mid="modal-loss" style="margin-top:10px;padding:8px 12px;background:none;border:none;color:var(--soft);font-size:11.5px;cursor:pointer;font-family:inherit">Skip for now</button>
     </div>
   </div>
@@ -1605,6 +1609,8 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           One-time setup on the worker: paste v7.4, add the <b>GHL_API_KEY</b> secret (the same key as Settings → SMS),
           and add a Cron Trigger of <code>*/5 * * * *</code>.
         </div>
+        <button class="ee-mini" data-action="schedsms-test" style="margin-bottom:8px">🔌 Test text scheduling</button>
+        <pre id="schedsms-test-out" style="font-size:11px;color:var(--mid);white-space:pre-wrap;font-family:inherit;margin:0 0 10px"></pre>
         <div id="schedsms-list"></div>
       </section>
       <section class="st-sec" id="st-sec-voiceagent" hidden>
@@ -1906,7 +1912,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1013-133';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1014-134';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -3547,6 +3553,7 @@ function openLossReason(ri){
   if(host)host.innerHTML=LOSS_REASONS.map(function(v){
     return '<button data-action="loss-pick" data-v="'+escapeHtml(v)+'" style="padding:10px 8px;border:1.5px solid var(--border);border-radius:9px;background:none;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">'+escapeHtml(v)+'</button>';
   }).join('');
+  var lc9=el('loss-custom');if(lc9)lc9.value='';
   el('modal-loss').classList.add('open');
 }
 /* 📝 Lead editor runtime */
@@ -12386,6 +12393,37 @@ async function renderSchedSms(){
     }).join('');
   }catch(e){host.innerHTML='<div style="color:var(--red);font-size:12px">✗ Could not reach the worker.</div>';}
 }
+// Walks the whole text-scheduling chain and names the exact failing step:
+// config → worker version/secret → a real queue write → immediate cancel.
+async function schedSmsSelfTest(){
+  var out=el('schedsms-test-out');
+  function line(t2){if(out)out.textContent+=t2+'\n';}
+  if(out)out.textContent='';
+  var tc=null;try{tc=trackerCfg();}catch(_){}
+  if(!tc){line('1. Tracker config: ✗ no tracker URL saved (Data & analytics)');return;}
+  if(!tc.token){line('1. Tracker config: ✗ URL saved but the TOKEN is empty (Data & analytics)');return;}
+  line('1. Tracker config: ✓ '+tc.url);
+  try{
+    var p=await fetch(tc.url+'/ping?t='+Date.now());
+    var pj=await p.json();
+    if(!pj.ok){line('2. Worker: ✗ answered but not ok');return;}
+    line('2. Worker: ✓ v'+pj.v+' · KV '+(pj.hasKV?'✓':'✗')+' · GHL secret '+(pj.hasGhlKey?'✓':'✗ (add GHL_API_KEY in Cloudflare)'));
+    if(!/^7\.[4-9]|^[89]\./.test(String(pj.v)))line('   ⚠ version below 7.4 — paste the latest solura-track-worker.js');
+  }catch(e){line('2. Worker: ✗ unreachable ('+e.message+')');return;}
+  if(!GHL_KEY()){line('3. Browser GHL key: ✗ missing — Settings → SMS');}else{line('3. Browser GHL key: ✓ present');}
+  try{
+    var r=await fetch(tc.url+'/sms/schedule?token='+encodeURIComponent(tc.token),{method:'POST',body:JSON.stringify({
+      due:Date.now()+60*60*1000,contactId:'selftest',locationId:GHL_LOC,message:'self-test (auto-cancelled)',phone:'',leadName:'(self test)',ri:-1})});
+    var j=await r.json().catch(function(){return{};});
+    if(r.status===401){line('4. Queue write: ✗ 401 unauthorized — the tracker TOKEN here does not match the worker’s TRACK_TOKEN secret');return;}
+    if(r.status===404){line('4. Queue write: ✗ 404 — the deployed worker has no /sms/schedule (paste the latest code)');return;}
+    if(!(r.ok&&j.ok&&j.key)){line('4. Queue write: ✗ '+r.status+' '+(j.error||''));return;}
+    line('4. Queue write: ✓ queued as '+j.key);
+    var c=await fetch(tc.url+'/sms/cancel?token='+encodeURIComponent(tc.token),{method:'POST',body:JSON.stringify({key:j.key})});
+    line('5. Cancel: '+(c.ok?'✓ test entry removed':('✗ '+c.status+' — delete smsq key manually in KV')));
+    line('✓ The pipeline works. If a real schedule still fails, the red message in the SMS panel names the step (usually the GHL contact match). Queued texts only SEND if the Cron Trigger (*/5 * * * *) is added on the worker — that part can only be proven by a real send.');
+  }catch(e){line('4. Queue write: ✗ '+e.message);}
+}
 async function schedSmsCancel(key){
   var tc=null;try{tc=trackerCfg();}catch(_){}
   if(!tc||!tc.token)return;
@@ -15926,6 +15964,18 @@ function onClick(ev){
         _lossRi=-1;
       })();
       break;
+    case 'loss-custom':
+      (function(){
+        var ri9=_lossRi;if(ri9<0)return;
+        var txt=String(((el('loss-custom')||{}).value||'')).trim();
+        if(!txt){toast('Write the reason first — or tap one of the presets');return;}
+        var u9={};u9[C.LOSS]=txt;
+        el('modal-loss').classList.remove('open');
+        writeRow(ri9,u9).then(function(){toast('Loss reason recorded: '+txt.slice(0,60));})
+          .catch(function(e){showErr('Loss reason failed: '+e.message);});
+        _lossRi=-1;
+      })();
+      break;
     case 'trigger-done':
       (function(){
         var ri9=parseInt(t.dataset.ri,10);
@@ -16190,6 +16240,7 @@ function onClick(ev){
       })();
       break;
     case 'schedsms-del': schedSmsCancel(t.dataset.key); break;
+    case 'schedsms-test': schedSmsSelfTest().catch(function(e){showErr(e.message);}); break;
     case 'use-weekly':
       var _wri=parseInt(el('modal-email').dataset.ri,10);
       if(!isNaN(_wri))applyWeeklyDraft(_wri);

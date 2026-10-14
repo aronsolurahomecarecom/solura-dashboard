@@ -127,5 +127,15 @@ const W = mk(extractInnerHtml);
   ok(/case 'email-start-blank': emailStartBlank\(\); break;/.test(html), 'click case wired');
 }
 
+// ── ✍ custom loss reason (B-1014-134) ──
+{
+  ok(/id="loss-custom"/.test(html) && /data-action="loss-custom"/.test(html) && /Or write it in your own words/.test(html), 'the loss modal takes a hand-written reason beside the presets');
+  const cc = html.slice(html.indexOf("case 'loss-custom':"), html.indexOf("case 'loss-custom':") + 700);
+  ok(/u9\[C\.LOSS\]=txt;/.test(cc), 'the typed reason lands in the same Loss Reason column as the presets');
+  ok(/Write the reason first/.test(cc), 'an empty save is nudged, not silently dropped');
+  ok(/loss-custom-btn'\)\.click\(\)/.test(html), 'Enter submits the typed reason');
+  ok(/var lc9=el\('loss-custom'\);if\(lc9\)lc9\.value='';/.test(html), 'the input clears on every open — no stale reason carries over');
+}
+
 console.log('\nClaude wrap: ' + PASS + ' passed, ' + FAIL + ' failed');
 process.exit(FAIL ? 1 : 0);
