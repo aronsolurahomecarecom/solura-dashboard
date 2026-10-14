@@ -7902,7 +7902,7 @@ async function _backfillCalBookings(){
       cand.st.calBooking=true;cand.st.calBookingId=b.uid||'';
       if(b.attendeeEmail&&String(cand.email||'').toLowerCase()!==b.attendeeEmail)cand.st.bookingAltEmail=b.attendeeEmail;
       cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🔗 Booking backfilled from Cal.com ('+(b.title||b.eventTypeSlug||'?')+') — '+new Date(t).toLocaleString()+' · the webhook never delivered this one'});
-      await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
+      {const _cell=_stCell(cand.st);await patchRange('AJ'+cand.excelRow,[[_cell]]);if(Array.isArray(cand.row))cand.row[35]=_cell;} /* the stage catch-up that follows compares the sheet against this cache */
       linked++;
       }catch(e){console.warn('cal backfill row',cand.excelRow,'failed:',e.message);}
     }
@@ -7956,7 +7956,7 @@ async function _autoLinkUnmatchedBookings(){
       if(u.email)cand.st.bookingAltEmail=u.email;
       cand.st.bookingKind=_uk; /* P-36 */
       cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🔗 Booking auto-linked ('+(u.email||'?')+(u.eventType?' · '+u.eventType:'')+') — '+new Date(u.start).toLocaleString()});
-      await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
+      {const _cell=_stCell(cand.st);await patchRange('AJ'+cand.excelRow,[[_cell]]);if(Array.isArray(cand.row))cand.row[35]=_cell;} /* same - see _backfillCalBookings */
       linked++;
     }catch(e){console.warn('auto-link failed:',u.email,e.message);keep.push(u);}
   }
@@ -9254,6 +9254,11 @@ async function _seqV3RepairPass(){
       if(c.st.sequenceId&&cur&&!badSeq(cur)){
         const rp=_classicPointerFor(c,cur);
         if(!rp)continue; /* their stage isn't in their sequence (e.g. legacy References lane) — leave alone */
+        /* Same rule as the adoption below: this fires for a whole cohort at once (one sequence
+           edit re-mints step ids), one AJ write each, and it wrote the load-time copy over
+           whatever a webhook or another tab had written to the row since the load. */
+        if(!(await _ajUnchangedSinceLoad(c)))continue;
+        if(pipeline!==_myPipe)return;
         c.st.sequenceStepId=rp;
         c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:rp,at:new Date().toISOString()});
         c.st.log=(c.st.log||[]).concat({t:stamp(),x:'🧬 Pointer re-placed in "'+cur.name+'" (step was edited away) → '+rp});
@@ -9340,6 +9345,20 @@ async function _reconcileBookingStages(){
     'Interview invite':['interview','Interview booked'],
     'Offer':['onboarding','Onboarding booked'],'Onboarding':['onboarding','Onboarding booked']};
   const bookedStages=['Screen booked','Interview booked','Onboarding booked'];
+  /* EVERY WRITE BELOW IS A LOAD-TIME COPY, and three of the four also write column G. This pass
+     heads the heal chain of every load and runs again after the Cal.com backfill and the
+     auto-link, each a worker round-trip later - and it was the one pass in that chain still
+     writing without asking what the sheet says now (adoption, the backfill, the auto-link, the
+     job pass, compaction, the render snap and the robot all ask). What it put back: an applicant
+     who pressed Withdraw while their booking was being caught up went from Declined back to
+     "Screen booked" with st.withdrawn erased; a reschedule or cancellation the webhook wrote in
+     the gap was replaced by the old booking; an inbox reply merged by another tab was dropped.
+     Changed or unreadable -> leave the row; the next load (30s) decides again from fresh state. */
+  const _live=async c=>{
+    const ok=await _stageAndAjUnchangedSinceLoad(c);
+    return ok&&pipeline===_myPipe&&!_wsOpenOn(c.excelRow);
+  };
+  const _putAJ=async c=>{const cell=_stCell(c.st);await patchRange('AJ'+c.excelRow,[[cell]]);if(Array.isArray(c.row))c.row[35]=cell;};
   /* Re-entrancy (load chain + post-backfill + post-link can overlap): one instance at a
      time; abort if loadData swapped the pipeline array out from under this instance. */
   if(window._reconRunning)return;window._reconRunning=true;
@@ -9356,10 +9375,11 @@ async function _reconcileBookingStages(){
        run (or died) — clear it so it can never satisfy a later hasBooking wait or pose as
        the next meeting's time. Booked stages keep theirs for the overdue "log result" row. */
     if(isFinite(t)&&t<Date.now()-48*3600*1000&&bookedStages.indexOf(c.stage)<0){
+      if(c.st.__ajCorrupt||!(await _live(c)))continue;
       try{
         c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stale booking cleared ('+new Date(t).toLocaleString()+') — already consumed'});
         delete c.st.booking;delete c.st.meetingUrl;delete c.st.calBooking;delete c.st.calBookingId;delete c.st.bookingKind;
-        await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+        await _putAJ(c);
         swept++;
       }catch(e){console.warn('stale booking sweep failed:',c.name,e.message);}
       continue;
@@ -9374,6 +9394,7 @@ async function _reconcileBookingStages(){
     const _down={'Interview booked':{screen:'Screen booked'},'Onboarding booked':{screen:'Screen booked',interview:'Interview booked'}}[c.stage];
     if(_down&&kind&&_down[kind]&&isFinite(t)&&t>=Date.now()-48*3600*1000){
       const to=_down[kind];
+      if(c.st.__ajCorrupt||!(await _live(c)))continue;
       try{
         await patchRange('G'+c.excelRow,[[to]]);
         c.stage=to;c.row[6]=to;
@@ -9386,7 +9407,7 @@ async function _reconcileBookingStages(){
             c.st.sequenceHistory=(c.st.sequenceHistory||[]).concat({stepId:ptr,at:new Date().toISOString()});
           }
         }
-        await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+        await _putAJ(c);
         n++;
       }catch(e){console.warn('kind-mismatch correction failed:',c.name,e.message);}
       continue;
@@ -9398,12 +9419,13 @@ async function _reconcileBookingStages(){
     if(kind==='onboarding'&&c.stage!=='Onboarding booked'&&!(advanceMap[c.stage]&&advanceMap[c.stage][0]==='onboarding')&&isFinite(t)&&t>=Date.now()-48*3600*1000){
       const _op=_offerSentOnRecord(c);
       if(_op){
+        if(c.st.__ajCorrupt||!(await _live(c)))continue;
         try{
           const _was=c.stage;
           await patchRange('G'+c.excelRow,[['Onboarding booked']]);
           c.stage='Onboarding booked';c.row[6]='Onboarding booked';
           c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stage caught up '+_was+' → Onboarding booked — onboarding booked ('+new Date(t).toLocaleString()+') and the offer is on record as sent ('+_op.key+(_op.on?' · '+_op.on:'')+')'});
-          await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+          await _putAJ(c);
           n++;
         }catch(e){console.warn('offer-on-record catch-up failed:',c.name,e.message);}
         continue;
@@ -9413,11 +9435,12 @@ async function _reconcileBookingStages(){
     if(!isFinite(t)||t<Date.now()-48*3600*1000)continue;
     if(!(kind===rule[0]||(kind==null&&(c.stage==='Screen invite'||c.stage==='Applied'))))continue;
     const next=rule[1];
+    if(c.st.__ajCorrupt||!(await _live(c)))continue;
     try{
       await patchRange('G'+c.excelRow,[[next]]);
       c.stage=next;c.row[6]=next;
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'📅 Stage caught up to '+(kind||'screen')+' booking ('+new Date(t).toLocaleString()+') → '+next});
-      await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+      await _putAJ(c);
       n++;
     }catch(e){console.warn('booking stage catch-up failed:',c.name,e.message);}
   }
@@ -18683,6 +18706,24 @@ async function _ajUnchangedSinceLoad(c){
     return String(raw==null?'':raw)===String(c.row[35]==null?'':c.row[35]);
   }catch(e){
     console.warn('AJ unchanged-check row',c&&c.excelRow,'failed:',e&&e.message);
+    return false;
+  }
+}
+/* Same question for a pass that writes column G as well: is the STAGE and the state on the sheet
+   still what this load read? The worker moves a stage as two PATCHes, G first and AJ after it
+   (booking created, cancelled, withdrawn), so between them the AJ cell alone still looks
+   untouched. One read of G..AJ answers both. false = changed or unreadable, write nothing. */
+async function _stageAndAjUnchangedSinceLoad(c){
+  try{
+    if(!c||!c.excelRow||!Array.isArray(c.row))return false;
+    const sid=await getWorkbookSession();const h=sid?{'workbook-session-id':sid}:{};
+    const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+"/range(address='G"+c.excelRow+":AJ"+c.excelRow+"')?$select=values",{headers:h});
+    if(!r.ok)return false;
+    const row=((await r.json()).values||[[]])[0]||[];
+    const S=v=>String(v==null?'':v);
+    return row.length===30&&S(row[0])===S(c.row[6])&&S(row[29])===S(c.row[35]);
+  }catch(e){
+    console.warn('G/AJ unchanged-check row',c&&c.excelRow,'failed:',e&&e.message);
     return false;
   }
 }
