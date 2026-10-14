@@ -103,11 +103,14 @@ const F = mk(
   ok(/FP_SID = \/\^\[a-z0-9\]\{8,20\}\$\//.test(worker) && /if \(!FP_SID\.test\(fpsid\)\) return json\(\{ ok: true \}, 200\);/.test(worker), 'bad session ids get a cheerful ok and no write — bots learn nothing');
   ok(/if \(fstep > \(frec\.step \|\| 0\)\) frec\.step = Math\.min\(fstep, 3\);/.test(worker), 'the furthest step is sticky and capped');
   ok(/if \(fb\.done\) frec\.done = true;/.test(worker), 'done is sticky — a late pulse cannot un-finish a session');
-  ok(/'fp:' \+ fpsid/.test(worker) && /expirationTtl: FP_TTL/.test(worker) && /FP_TTL = 30 \* 24 \* 3600/.test(worker), 'one record per session, 30-day TTL');
+  ok(/'fp:' \+ fpsid/.test(worker), 'one record per session');
+  const fpulseBlock = worker.slice(worker.indexOf("path === '/fpulse'"), worker.indexOf("path === '/fpulse/list'"));
+  ok(!/expirationTtl/.test(fpulseBlock) && !/FP_TTL/.test(worker), 'fill records carry NO TTL — the history is kept forever');
+  ok(/fnames\.sort\(\)\.reverse\(\);/.test(worker), 'with permanent records, the list returns the NEWEST 300, not the oldest');
   ok(/path === '\/fpulse\/list'/.test(worker) && /fltok !== env\.TRACK_TOKEN\) return json\(\{ error: 'unauthorized' \}, 401/.test(worker), 'the list endpoint needs the dashboard token');
   ok(/fdone\.done = true; fdone\.lastAt = Date\.now\(\);/.test(worker), 'a real submission closes its fill session even if the done pulse never lands');
   ok(/fills: fillCount/.test(worker), '/ping reports the session count');
-  ok(/7\.6-fill-pulse/.test(worker), 'worker version bumped');
+  ok(/7\.7-keep-fills/.test(worker), 'worker version bumped');
 }
 
 // ── dashboard locks: the funnel panel ──

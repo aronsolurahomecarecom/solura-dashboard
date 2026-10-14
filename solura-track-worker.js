@@ -22,11 +22,14 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = '7.6-fill-pulse'; // 7.6: form-abandonment tracking — the intake
+var VERSION = '7.7-keep-fills'; // 7.7: fill records are kept FOREVER (no
+// TTL) — Meir wants the full history, so /fpulse/list returns the newest
+// 300 sessions and older ones stay in KV untouched.
+// 7.6: form-abandonment tracking — the intake
 // form POSTs anonymous fill pulses to /fpulse (session id, furthest step,
-// last field touched, done flag); one KV record per session (fp:<sid>,
-// 30-day TTL), /intake marks its session finished, and the dashboard reads
-// them all back via /fpulse/list (TRACK_TOKEN) to show who started the
+// last field touched, done flag); one KV record per session (fp:<sid>),
+// /intake marks its session finished, and the dashboard reads
+// them back via /fpulse/list (TRACK_TOKEN) to show who started the
 // form and exactly where they quit. No typed values ride the pulses.
 // 7.5: the cron handler stamps cron_last in
 // KV on every run and /ping reports it — so the dashboard's self-test can
@@ -73,7 +76,7 @@ var CORS = {
   'Access-Control-Allow-Headers': 'Content-Type'
 };
 var INTAKE_TTL = 30 * 24 * 3600; // unclaimed submissions live 30 days
-var FP_TTL = 30 * 24 * 3600;     // fill-pulse sessions live 30 days
+// Fill-pulse sessions have NO TTL: the funnel history is kept forever.
 var FP_SID = /^[a-z0-9]{8,20}$/; // the form's session ids — anything else is noise
 
 function kvOf(env) {
@@ -344,7 +347,7 @@ export default {
       if (FP_SID.test(fsid)) {
         try {
           var fdone = await kv.get('fp:' + fsid, 'json');
-          if (fdone) { fdone.done = true; fdone.lastAt = Date.now(); await kv.put('fp:' + fsid, JSON.stringify(fdone), { expirationTtl: FP_TTL }); }
+          if (fdone) { fdone.done = true; fdone.lastAt = Date.now(); await kv.put('fp:' + fsid, JSON.stringify(fdone)); }
         } catch (_) {}
       }
       return json({ ok: true }, 200);
@@ -368,7 +371,7 @@ export default {
       if (fstep > (frec.step || 0)) frec.step = Math.min(fstep, 3); // furthest step is sticky
       if (fb.last) frec.last = String(fb.last).slice(0, 30);
       if (fb.done) frec.done = true;                               // done is sticky too
-      try { await kv.put(fkey, JSON.stringify(frec), { expirationTtl: FP_TTL }); } catch (_) {}
+      try { await kv.put(fkey, JSON.stringify(frec)); } catch (_) {} // no TTL: kept forever
       return json({ ok: true }, 200);
     }
 
@@ -380,6 +383,10 @@ export default {
       if (kv) {
         try {
           var fnames = await listAllKeys(kv, 'fp:');
+          // Session ids start with a base36 timestamp, so reverse-sorted
+          // names = newest sessions first. Records are kept forever; the
+          // response caps at the newest 300, older history stays in KV.
+          fnames.sort().reverse();
           for (var fi = 0; fi < fnames.length && fi < 300; fi++) {
             var fv = await kv.get(fnames[fi], 'json');
             if (fv) fills.push(fv);
