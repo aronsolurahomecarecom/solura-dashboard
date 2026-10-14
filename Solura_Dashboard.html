@@ -1912,7 +1912,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1014-134';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1014-135';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -12403,12 +12403,23 @@ async function schedSmsSelfTest(){
   if(!tc){line('1. Tracker config: ✗ no tracker URL saved (Data & analytics)');return;}
   if(!tc.token){line('1. Tracker config: ✗ URL saved but the TOKEN is empty (Data & analytics)');return;}
   line('1. Tracker config: ✓ '+tc.url);
+  var cronKnown=false;
   try{
     var p=await fetch(tc.url+'/ping?t='+Date.now());
     var pj=await p.json();
     if(!pj.ok){line('2. Worker: ✗ answered but not ok');return;}
     line('2. Worker: ✓ v'+pj.v+' · KV '+(pj.hasKV?'✓':'✗')+' · GHL secret '+(pj.hasGhlKey?'✓':'✗ (add GHL_API_KEY in Cloudflare)'));
     if(!/^7\.[4-9]|^[89]\./.test(String(pj.v)))line('   ⚠ version below 7.4 — paste the latest solura-track-worker.js');
+    if('cronLast' in pj){
+      cronKnown=true;
+      if(pj.cronLast>0){
+        var mins=Math.round((Date.now()-pj.cronLast)/60000);
+        if(mins<=15)line('2b. Cron trigger: ✓ last ran '+mins+' min ago — queued texts WILL send');
+        else line('2b. Cron trigger: ⚠ last ran '+mins+' min ago — it may have been removed (expect every ~5 min)');
+      }else{
+        line('2b. Cron trigger: ✗ has NEVER run — add it in Cloudflare → Worker → Settings → Triggers: */5 * * * *');
+      }
+    }
   }catch(e){line('2. Worker: ✗ unreachable ('+e.message+')');return;}
   if(!GHL_KEY()){line('3. Browser GHL key: ✗ missing — Settings → SMS');}else{line('3. Browser GHL key: ✓ present');}
   try{
@@ -12421,7 +12432,7 @@ async function schedSmsSelfTest(){
     line('4. Queue write: ✓ queued as '+j.key);
     var c=await fetch(tc.url+'/sms/cancel?token='+encodeURIComponent(tc.token),{method:'POST',body:JSON.stringify({key:j.key})});
     line('5. Cancel: '+(c.ok?'✓ test entry removed':('✗ '+c.status+' — delete smsq key manually in KV')));
-    line('✓ The pipeline works. If a real schedule still fails, the red message in the SMS panel names the step (usually the GHL contact match). Queued texts only SEND if the Cron Trigger (*/5 * * * *) is added on the worker — that part can only be proven by a real send.');
+    line('✓ The pipeline works. If a real schedule still fails, the red message in the SMS panel names the step (usually the GHL contact match).'+(cronKnown?'':' Queued texts only SEND if the Cron Trigger (*/5 * * * *) is added on the worker — paste worker v7.5 to make this test verify that too.'));
   }catch(e){line('4. Queue write: ✗ '+e.message);}
 }
 async function schedSmsCancel(key){

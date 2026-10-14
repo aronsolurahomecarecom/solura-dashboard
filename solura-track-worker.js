@@ -22,7 +22,11 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = '7.4-sched-sms'; // 7.4: scheduled TEXTS — the dashboard queues
+var VERSION = '7.5-cron-pulse'; // 7.5: the cron handler stamps cron_last in
+// KV on every run and /ping reports it — so the dashboard's self-test can
+// PROVE whether the Cron Trigger is actually configured, instead of
+// "can only be proven by a real send".
+// 7.4: scheduled TEXTS — the dashboard queues
 // them here (/sms/schedule), a CRON TRIGGER sends due ones via GoHighLevel
 // using the GHL_API_KEY secret, results wait in /sms/results until the
 // dashboard acks them. Setup: add the GHL_API_KEY secret (same key as
@@ -148,14 +152,15 @@ export default {
     }
 
     if (path === '/ping') {
-      var selfCount = 0, pend = 0, intakeCount = 0, smsCount = 0;
+      var selfCount = 0, pend = 0, intakeCount = 0, smsCount = 0, cronLast = 0;
       if (kv) {
         try { selfCount = (await listAllKeys(kv, 'self:')).length; } catch (_) {}
         try { pend = (await listAllKeys(kv, 'ev:')).length; } catch (_) {}
         try { intakeCount = (await listAllKeys(kv, 'intake:')).length; } catch (_) {}
         try { smsCount = (await listAllKeys(kv, 'smsq:')).length; } catch (_) {}
+        try { cronLast = parseInt(await kv.get('cron_last'), 10) || 0; } catch (_) {}
       }
-      return json({ ok: true, v: VERSION, hasToken: !!env.TRACK_TOKEN, hasKV: !!kv, events: pend, selfOpens: selfCount, intake: intakeCount, smsQueue: smsCount, hasGhlKey: !!env.GHL_API_KEY }, 200, cb);
+      return json({ ok: true, v: VERSION, hasToken: !!env.TRACK_TOKEN, hasKV: !!kv, events: pend, selfOpens: selfCount, intake: intakeCount, smsQueue: smsCount, hasGhlKey: !!env.GHL_API_KEY, cronLast: cronLast }, 200, cb);
     }
 
     /* ── pixel ── */
@@ -447,6 +452,8 @@ export default {
     var kv = kvOf(env);
     if (!kv) return;
     var now = Date.now();
+    // Heartbeat: proves the Cron Trigger exists (read back via /ping)
+    try { await kv.put('cron_last', String(now)); } catch (_) {}
     var names;
     try { names = await listAllKeys(kv, 'smsq:'); } catch (_) { return; }
     var due = names.filter(function (k) { return tsOfKey(k) <= now; });

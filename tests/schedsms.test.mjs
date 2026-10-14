@@ -111,7 +111,10 @@ const S = mk();
   const st = html.slice(html.indexOf('async function schedSmsSelfTest'), html.indexOf('async function schedSmsCancel'));
   ok(/Tracker config/.test(st) && /GHL secret/.test(st) && /Queue write/.test(st) && /Cancel/.test(st), 'it checks config, worker version + secret, a real queue write, and cleans up after itself');
   ok(/401 unauthorized/.test(st) && /TRACK_TOKEN/.test(st) && /404/.test(st), 'token mismatch and outdated worker each get named plainly');
-  ok(/Cron Trigger/.test(st), 'it says the one thing it cannot prove: the cron trigger');
+  ok(/Cron Trigger/.test(st), 'the cron trigger is addressed either way');
+  // B-1014-135: the cron trigger became PROVABLE via the worker heartbeat
+  ok(/cron_last/.test(worker) && /cronLast: cronLast/.test(worker), 'the cron handler stamps a heartbeat and /ping reports it');
+  ok(/has NEVER run/.test(st) && /last ran '\+mins\+' min ago/.test(st), 'the self-test reads the heartbeat: never ran vs minutes ago');
 }
 
 console.log('\nScheduled SMS: ' + PASS + ' passed, ' + FAIL + ' failed');
