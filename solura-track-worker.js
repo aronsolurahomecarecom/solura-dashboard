@@ -22,7 +22,13 @@
  * filtered self-open (3-day TTL, diagnostics) · owner_ips = {ip: lastSeen}
  * ─────────────────────────────────────────────────────────────────────── */
 
-var VERSION = '7.5-cron-pulse'; // 7.5: the cron handler stamps cron_last in
+var VERSION = '7.6-fill-pulse'; // 7.6: form-abandonment tracking — the intake
+// form POSTs anonymous fill pulses to /fpulse (session id, furthest step,
+// last field touched, done flag); one KV record per session (fp:<sid>,
+// 30-day TTL), /intake marks its session finished, and the dashboard reads
+// them all back via /fpulse/list (TRACK_TOKEN) to show who started the
+// form and exactly where they quit. No typed values ride the pulses.
+// 7.5: the cron handler stamps cron_last in
 // KV on every run and /ping reports it — so the dashboard's self-test can
 // PROVE whether the Cron Trigger is actually configured, instead of
 // "can only be proven by a real send".
@@ -67,6 +73,8 @@ var CORS = {
   'Access-Control-Allow-Headers': 'Content-Type'
 };
 var INTAKE_TTL = 30 * 24 * 3600; // unclaimed submissions live 30 days
+var FP_TTL = 30 * 24 * 3600;     // fill-pulse sessions live 30 days
+var FP_SID = /^[a-z0-9]{8,20}$/; // the form's session ids — anything else is noise
 
 function kvOf(env) {
   // Binding name varies by install — find the first KV-shaped binding.
@@ -152,15 +160,16 @@ export default {
     }
 
     if (path === '/ping') {
-      var selfCount = 0, pend = 0, intakeCount = 0, smsCount = 0, cronLast = 0;
+      var selfCount = 0, pend = 0, intakeCount = 0, smsCount = 0, cronLast = 0, fillCount = 0;
       if (kv) {
         try { selfCount = (await listAllKeys(kv, 'self:')).length; } catch (_) {}
         try { pend = (await listAllKeys(kv, 'ev:')).length; } catch (_) {}
         try { intakeCount = (await listAllKeys(kv, 'intake:')).length; } catch (_) {}
         try { smsCount = (await listAllKeys(kv, 'smsq:')).length; } catch (_) {}
         try { cronLast = parseInt(await kv.get('cron_last'), 10) || 0; } catch (_) {}
+        try { fillCount = (await listAllKeys(kv, 'fp:')).length; } catch (_) {}
       }
-      return json({ ok: true, v: VERSION, hasToken: !!env.TRACK_TOKEN, hasKV: !!kv, events: pend, selfOpens: selfCount, intake: intakeCount, smsQueue: smsCount, hasGhlKey: !!env.GHL_API_KEY, cronLast: cronLast }, 200, cb);
+      return json({ ok: true, v: VERSION, hasToken: !!env.TRACK_TOKEN, hasKV: !!kv, events: pend, selfOpens: selfCount, intake: intakeCount, smsQueue: smsCount, hasGhlKey: !!env.GHL_API_KEY, cronLast: cronLast, fills: fillCount }, 200, cb);
     }
 
     /* ── pixel ── */
@@ -329,7 +338,55 @@ export default {
       var ikey = 'intake:' + sub.ts + ':' + Math.random().toString(36).slice(2, 8);
       try { await kv.put(ikey, JSON.stringify(sub), { expirationTtl: INTAKE_TTL }); }
       catch (_) { return json({ error: 'could not save, please call us' }, 500); }
+      // Belt and suspenders: a real submission closes its fill session even
+      // if the form's own "done" pulse never lands (tab killed mid-thanks).
+      var fsid = String(ib.sid || '');
+      if (FP_SID.test(fsid)) {
+        try {
+          var fdone = await kv.get('fp:' + fsid, 'json');
+          if (fdone) { fdone.done = true; fdone.lastAt = Date.now(); await kv.put('fp:' + fsid, JSON.stringify(fdone), { expirationTtl: FP_TTL }); }
+        } catch (_) {}
+      }
       return json({ ok: true }, 200);
+    }
+
+    /* ── public fill pulse: who STARTED the form and where they stopped ──
+     * No token — the form itself sends these. Anonymous by design: session
+     * id, link code, furthest step, last field touched, done flag. Never a
+     * typed value. Bad session ids get a cheerful ok and no write. */
+    if (path === '/fpulse' && req.method === 'POST') {
+      if (!kv) return json({ ok: true }, 200);
+      var fb = await readJson(req);
+      var fpsid = fb ? String(fb.sid || '') : '';
+      if (!FP_SID.test(fpsid)) return json({ ok: true }, 200);
+      var fkey = 'fp:' + fpsid;
+      var frec = null;
+      try { frec = await kv.get(fkey, 'json'); } catch (_) {}
+      if (!frec) frec = { sid: fpsid, firstAt: Date.now(), code: String(fb.code || '').slice(0, 40) };
+      frec.lastAt = Date.now();
+      var fstep = parseInt(fb.step, 10) || 1;
+      if (fstep > (frec.step || 0)) frec.step = Math.min(fstep, 3); // furthest step is sticky
+      if (fb.last) frec.last = String(fb.last).slice(0, 30);
+      if (fb.done) frec.done = true;                               // done is sticky too
+      try { await kv.put(fkey, JSON.stringify(frec), { expirationTtl: FP_TTL }); } catch (_) {}
+      return json({ ok: true }, 200);
+    }
+
+    /* ── dashboard: every fill session, finished or abandoned (token) ── */
+    if (path === '/fpulse/list') {
+      var fltok = url.searchParams.get('token') || '';
+      if (!env.TRACK_TOKEN || fltok !== env.TRACK_TOKEN) return json({ error: 'unauthorized' }, 401, cb);
+      var fills = [];
+      if (kv) {
+        try {
+          var fnames = await listAllKeys(kv, 'fp:');
+          for (var fi = 0; fi < fnames.length && fi < 300; fi++) {
+            var fv = await kv.get(fnames[fi], 'json');
+            if (fv) fills.push(fv);
+          }
+        } catch (_) {}
+      }
+      return json({ ok: true, fills: fills }, 200, cb);
     }
 
     /* ── dashboard: pull queued submissions (token) ── */

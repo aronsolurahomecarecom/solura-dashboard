@@ -356,6 +356,45 @@
   // records which consent mechanism + wording was live at submission.
   var SMS_CONSENT_VERSION='sms-v2-submit-2026-10';
 
+  /* fill pulse: lets the office see starts and where people stop.
+     Anonymous: a random session id, the furthest step, and the last field
+     touched. No typed values ever leave the page before the person submits.
+     The pulse fires on first interaction, on step changes, on a 20s tick
+     while something changed, and (the one that matters) via sendBeacon
+     the instant the tab hides or closes, which IS the quit signal. */
+  var tp={sid:'',step:1,last:'',done:false,dirty:false,started:false};
+  try{tp.sid=sessionStorage.getItem('solura_fill_sid')||'';}catch(_){}
+  function tpSend(){
+    if(!tp.sid||!WORKER)return;
+    tp.dirty=false;
+    var body=JSON.stringify({sid:tp.sid,code:CODE,step:tp.step,last:tp.last,done:tp.done});
+    try{
+      if(navigator.sendBeacon&&navigator.sendBeacon(WORKER+'/fpulse',new Blob([body],{type:'application/json'})))return;
+    }catch(_){}
+    try{fetch(WORKER+'/fpulse',{method:'POST',headers:{'Content-Type':'application/json'},body:body,keepalive:true}).catch(function(){});}catch(_){}
+  }
+  function tpTouch(spot){
+    if(!tp.started){
+      tp.started=true;
+      if(!tp.sid){
+        tp.sid=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+        try{sessionStorage.setItem('solura_fill_sid',tp.sid);}catch(_){}
+      }
+      tp.last=spot||'';
+      tpSend(); // the "someone started" ping, sent right away
+      return;
+    }
+    if(spot)tp.last=spot;
+    tp.dirty=true;
+  }
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden'&&tp.started&&!tp.done)tpSend();});
+  window.addEventListener('pagehide',function(){if(tp.started&&!tp.done)tpSend();});
+  setInterval(function(){if(tp.dirty)tpSend();},20000);
+  document.addEventListener('focusin',function(ev){
+    var t=ev.target,FM={'i-zip':'zip','i-first':'first','i-last':'last','i-phone':'phone','i-email':'email','i-ptfirst':'ptfirst','i-ptlast':'ptlast','i-notes':'notes','i-refname':'refname','i-reforg':'reforg','i-refphone':'refphone','i-refclient':'refclient','i-refnote':'refnote'};
+    if(t&&t.id&&FM[t.id])tpTouch(FM[t.id]);
+  });
+
   // Option lists: [value for the sheet, label shown]. Sheet-side the labels
   // land in cells Meir reads, so labels travel, codes stay here.
   var RECIP=[['Parent','My parent'],['Spouse','My spouse or partner'],['Self','Myself'],['Other family','Someone else'],['Client/Patient',"I'm a professional referring a client"]];
@@ -406,6 +445,7 @@
         :('<span class="box" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7.5l3 3 6-7" stroke="#faf8f4" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg></span><span></span>');
       b.querySelector('span:last-child').textContent=o[1];
       b.addEventListener('click',function(){
+        tpTouch(key); // tap cards count as filling, same as typed fields
         if(multi){
           var i=st[key].indexOf(o[0]);
           if(i>-1)st[key].splice(i,1);else st[key].push(o[0]);
@@ -441,6 +481,12 @@
     ['step1','step2','step3','referral','refdone','done'].forEach(function(s){el(s).hidden=(s!==screen);});
     cur=screen;
     var n=STEPNUM[screen]||0;
+    // Reaching a new step (or the referral form) is a checkpoint worth
+    // pulsing immediately: "got to step 2" survives even a crashed tab.
+    if(tp.started){
+      if(n>tp.step){tp.step=n;tpSend();}
+      else if(screen==='referral'){tp.last='referral';tpSend();}
+    }
     el('progress').hidden=!n;
     el('backrow').hidden=!(n>1);
     if(n){
@@ -494,10 +540,11 @@
       setErr(errHost,'This link is missing its connection. Please call us at (216) 770-4886 and we will take your details right away.');return;
     }
     btn.disabled=true;btn.textContent='Sending...';
+    payload.sid=tp.sid; // ties the submission to its fill session (the worker marks it finished)
     fetch(WORKER+'/intake',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
       .then(function(r){return r.json().catch(function(){return {};}).then(function(j){return {ok:r.ok,j:j};});})
       .then(function(res){
-        if(res.ok&&res.j&&res.j.ok){onOk();}
+        if(res.ok&&res.j&&res.j.ok){tp.done=true;tp.last='done';tpSend();onOk();}
         else{
           btn.disabled=false;btn.textContent=idleLabel;
           setErr(errHost,(res.j&&res.j.error)||'Something went wrong on our end. Please try again, or call (216) 770-4886.');
