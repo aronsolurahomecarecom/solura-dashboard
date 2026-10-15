@@ -7900,6 +7900,7 @@ async function _backfillCalBookings(){
       cand.st.bookingSource='cal-backfill';
       cand.st.bookingReceivedAt=new Date().toISOString();
       cand.st.calBooking=true;cand.st.calBookingId=b.uid||'';
+      if(b.meetingUrl)cand.st.meetingUrl=b.meetingUrl; /* without it the no-show detector never arms (Shanay 2026-10-15) */
       if(b.attendeeEmail&&String(cand.email||'').toLowerCase()!==b.attendeeEmail)cand.st.bookingAltEmail=b.attendeeEmail;
       cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🔗 Booking backfilled from Cal.com ('+(b.title||b.eventTypeSlug||'?')+') — '+new Date(t).toLocaleString()+' · the webhook never delivered this one'});
       {const _cell=_stCell(cand.st);await patchRange('AJ'+cand.excelRow,[[_cell]]);if(Array.isArray(cand.row))cand.row[35]=_cell;} /* the stage catch-up that follows compares the sheet against this cache */
@@ -9979,6 +9980,12 @@ function sequenceAction(c,info){
 function _orientationDone(c){
   const st=(c&&c.st)||{};
   if(!st.booking)return false;
+  /* Operator truth first: the manual ✓ Showed up button stamps showedUpFor per booking,
+     and the person who was ON the call outranks every automatic signal. */
+  if(st.showedUpFor&&String(st.showedUpFor)===String(st.booking))return true;
+  /* Cal explicitly said the guest never joined THIS booking — not attended, whatever the
+     started/ended stamps say (those fire for host-only meetings too). */
+  if(st.calNoShowFor&&String(st.calNoShowFor)===String(st.booking))return false;
   /* The CURRENT booking is marked no-show — they did NOT attend. st.noShowFor is the worker's
      stamp of the LAST booking Cal marked (its Cal uid, or the start time when Cal sent none)
      and a rebooking never clears it, so a bare truthiness test vetoed every later meeting
@@ -10122,7 +10129,11 @@ function action(c){
      surface the rebook flow as the row's action. Suggests only: the click runs the normal
      📵 flow (count, stage revert, park, composer opens — nothing sends itself). Phone
      screens are excluded: a phone call carries no join signal, and calls often run long. */
-  if(c&&c.st&&c.st.booking&&c.st.meetingUrl&&c.stage!=='Hired'&&c.stage!=='Declined'&&c.stage!=='Withdrawn'){
+  /* Armed for any booking with a video link — and for CAL-SOURCED onboarding bookings even
+     without one: backfilled bookings (webhook never delivered) carry no meetingUrl, which
+     left Shanay's missed orientation invisible to this detector (2026-10-15). Orientations
+     are video meetings in this setup; manual hand-typed bookings stay excluded. */
+  if(c&&c.st&&c.st.booking&&(c.st.meetingUrl||(c.st.calBooking&&c.stage==='Onboarding booked'))&&c.stage!=='Hired'&&c.stage!=='Declined'&&c.stage!=='Withdrawn'){
     const _msTpl={'Screen booked':'missed_screen','Interview booked':'missed_interview','Onboarding booked':'missed_onboarding'}[c.stage];
     const _m4=minsUntil(c.st.booking);
     /* The rebook email suppresses this card only when it belongs to THIS booking. st.sent is a
@@ -10157,7 +10168,13 @@ function action(c){
        then flipped to "Looks like a no-show". Cal's explicit never-joined still outranks a
        day-granular log line. */
     const _endedOk=!!(c.st.meetingEndedFor&&String(c.st.meetingEndedFor)===String(c.st.booking||''))||(!_calSaid&&_meetingEndedLogged(c.st));
-    if(_msTpl&&_m4!=null&&!_started&&!_endedOk&&((_calSaid&&_m4<=0)||(!_calSaid&&_m4<=-75))&&!_sentThisBooking&&c.st.autoCancelledFor!==String(c.st.booking||'')&&!(c.st.emails||[]).some(e2=>!e2.seen)){
+    /* Cal's explicit never-joined OUTRANKS the started/ended stamps: MEETING_STARTED and
+       MEETING_ENDED fire when the HOST joins alone too, so a host-only meeting must not
+       read as attendance (the Jada fix over-suppressed here). Only the operator's manual
+       ✓ Showed up (st.showedUpFor, per booking) outranks Cal — they were on the call and
+       know. */
+    const _manualShow=!!(c.st.showedUpFor&&String(c.st.showedUpFor)===String(c.st.booking||''));
+    if(_msTpl&&_m4!=null&&!_manualShow&&((_calSaid&&_m4<=0)||(!_calSaid&&!_started&&!_endedOk&&_m4<=-75))&&!_sentThisBooking&&c.st.autoCancelledFor!==String(c.st.booking||'')&&!(c.st.emails||[]).some(e2=>!e2.seen)){
       const _ago=-_m4<60?Math.round(-_m4)+'m ago':-_m4<2880?Math.round(-_m4/60)+'h ago':Math.round(-_m4/1440)+'d ago';
       return{bucket:'action',timing:{txt:(_calSaid?'📵 Cal Video: never joined — video call was ':'📵 Looks like a no-show — video call was ')+_ago,pill:'pbad',date:_fmtBooking(c.st.booking)},info:STAGEINFO[c.stage]||STAGEINFO['Applied'],primary:{kind:'noshow-rebook',stage:c.stage,label:'📵 No-show — send rebook email',cls:'red'}};
     }
@@ -13133,13 +13150,15 @@ function _manualBookingPill(){
 }
 async function _markShowedUp(){
   if(!W||!W.st.booking){toast('No booking on file');return;}
-  const w=W,_prevAt=w.st.meetingStartedAt,_prevFor=w.st.meetingStartedFor;
+  const w=W,_prevAt=w.st.meetingStartedAt,_prevFor=w.st.meetingStartedFor,_prevShow=w.st.showedUpFor;
   w.st.meetingStartedAt=new Date().toISOString();
   w.st.meetingStartedFor=w.st.booking;
+  w.st.showedUpFor=w.st.booking; /* operator-attested attendance — outranks Cal's host-only signals */
   logW('✓ Showed up — marked manually');
   if(!(await saveW(true))){
     if(_prevAt)w.st.meetingStartedAt=_prevAt;else delete w.st.meetingStartedAt;
     if(_prevFor)w.st.meetingStartedFor=_prevFor;else delete w.st.meetingStartedFor;
+    if(_prevShow)w.st.showedUpFor=_prevShow;else delete w.st.showedUpFor;
     if(w.st&&Array.isArray(w.st.log))w.st.log.pop();
     renderWorkspace();
     return;
