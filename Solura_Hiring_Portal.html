@@ -7601,7 +7601,11 @@ function watchForBounce(recipient,candidateRow){
       if(bounce){
         toast('⚠ Email may not have reached '+recipient);
         /* log on the candidate */
-        const c=pipeline.find(x=>x.excelRow===candidateRow);
+        let c=pipeline.find(x=>x.excelRow===candidateRow);
+        /* The card is up to one refresh old (30s) and the write below replaces the WHOLE cell:
+           a booking or withdrawal the worker wrote since that load would be put back. Write only
+           over the cell this card was read from; otherwise re-read the row first. */
+        if(c&&!(await _ajUnchangedSinceLoad(c))){await refreshRow(candidateRow);c=pipeline.find(x=>x.excelRow===candidateRow);if(c&&!(await _ajUnchangedSinceLoad(c)))c=null;}
         if(c){
           try{
             const row=c.excelRow;
@@ -9113,7 +9117,10 @@ async function loadData(){
     if(touched){
       /* Fire-and-forget persist — load shouldn't block. Single write per candidate covers both
          the awaiting heal and the email sweep, so the two can't race on the same AJ cell. */
-      patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]).catch(e=>console.warn('Heal/sweep write failed for row '+c.excelRow+':',e.message));
+      /* _stCell can still THROW synchronously (state over the cap after every trim); inside the
+         argument that escaped the loop and skipped the heal chain and render() for the whole load. */
+      let _hc=null;try{_hc=_stCell(c.st);}catch(e){console.warn('Heal/sweep write refused for row '+c.excelRow+':',e.message);}
+      if(_hc!==null)patchRange('AJ'+c.excelRow,[[_hc]]).catch(e=>console.warn('Heal/sweep write failed for row '+c.excelRow+':',e.message));
     }
   }
   if(healed)console.info('Auto-healed '+healed+' stuck awaiting candidate'+(healed===1?'':'s'));
@@ -22530,24 +22537,32 @@ async function backfillRefCodes(){
   if(!confirm('Generate refCodes for '+missing.length+' candidates? This writes to their AJ cells one at a time, so it may take ~'+missing.length+' seconds.'))return;
   const usedCodes=new Set();
   pipeline.forEach(c=>{if(c.st&&c.st.refCode)usedCodes.add(c.st.refCode);});
-  let done=0,failed=0;
+  let done=0,failed=0,skipped=0;
   const result=document.getElementById('refcode-scan-result');
-  for(const c of missing){
+  for(const c0 of missing){
+    /* ~1s per row, and backgroundRefresh replaces `pipeline` every 30s: the click-time card goes
+       stale within the loop and writing it put minutes-old state over the whole cell (a booking,
+       a withdrawal, a merged reply). Live card each row, and only over the cell it was read from. */
+    const c=pipeline.find(x=>x.excelRow===c0.excelRow);
+    if(!c||!c.st||c.st.__ajCorrupt||c.st.refCode||_wsOpenOn(c.excelRow)||!(await _ajUnchangedSinceLoad(c))){skipped++;continue;}
     let code=generateRefCode(),tries=0;
     while(usedCodes.has(code)&&tries<20){code=generateRefCode();tries++;}
     usedCodes.add(code);
-    c.st=c.st||{};c.st.refCode=code;
+    c.st.refCode=code;
     try{
-      await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+      const _cell=_stCell(c.st);
+      await patchRange('AJ'+c.excelRow,[[_cell]]);
+      if(Array.isArray(c.row))c.row[35]=_cell;
       done++;
     }catch(e){
+      delete c.st.refCode;
       console.warn('refCode backfill failed for row '+c.excelRow+':',e.message);
       failed++;
     }
-    if(result)result.innerHTML='⏳ Working… <b>'+done+' of '+missing.length+'</b> done'+(failed?' · '+failed+' failed':'');
+    if(result)result.innerHTML='⏳ Working… <b>'+done+' of '+missing.length+'</b> done'+(failed?' · '+failed+' failed':'')+(skipped?' · '+skipped+' skipped':'');
   }
-  toast('✓ Backfilled '+done+' refCodes'+(failed?' ('+failed+' failed)':''));
-  if(result)result.innerHTML='✓ <b>'+done+'</b> refCodes generated.'+(failed?' '+failed+' failed — check console.':'');
+  toast('✓ Backfilled '+done+' refCodes'+(failed?' ('+failed+' failed)':'')+(skipped?' · '+skipped+' skipped (changed or open — run again)':''));
+  if(result)result.innerHTML='✓ <b>'+done+'</b> refCodes generated.'+(failed?' '+failed+' failed — check console.':'')+(skipped?' '+skipped+' skipped (row changed since load or open in the workspace) — run again.':'');
 }
 
 /* ============================================================================
@@ -24724,8 +24739,13 @@ async function _recoverAutoReleased(){
   const affected=_findErroneouslyReleased();
   if(!affected.length){toast('No candidates to recover');return;}
   if(!confirm('Re-park '+affected.length+' candidate'+(affected.length===1?'':'s')+'?\n\nCert-clarification parks are reconstructed from the log; others get a generic reason. Review each afterward.'))return;
-  let done=0,failed=0,certRestored=0;
-  for(const c of affected){
+  let done=0,failed=0,certRestored=0,skipped=0;
+  for(const c0 of affected){
+    /* Same stale-card rule as every bulk pass: the live card per row, a clone mutated, and the
+       write only over the cell that card was read from (a 30s refresh swaps `pipeline` mid-loop). */
+    const lc=pipeline.find(x=>x.excelRow===c0.excelRow);
+    if(!lc||!lc.st||lc.st.__ajCorrupt||lc.st.manualAwaiting||_wsOpenOn(lc.excelRow)||!(await _ajUnchangedSinceLoad(lc))){skipped++;continue;}
+    const c={excelRow:lc.excelRow,st:JSON.parse(JSON.stringify(lc.st))};
     try{
       const inf=_inferOriginalPark(c);
       c.st.manualAwaiting=true;
@@ -24745,14 +24765,16 @@ async function _recoverAutoReleased(){
         c.st.awaitingReason=inf.reason||'Restored from erroneous auto-release \u2014 please review original context';
       }
       c.st.log=(c.st.log||[]).concat({t:stamp(),x:'\u2705 Restored to awaiting after erroneous auto-release'+(inf.certs?' (cert clarification reconstructed)':'')});
-      await patchRange('AJ'+c.excelRow,[[_stCell(c.st)]]);
+      const _cell=_stCell(c.st);
+      await patchRange('AJ'+c.excelRow,[[_cell]]);
+      lc.st=c.st;if(Array.isArray(lc.row))lc.row[35]=_cell;
       done++;
     }catch(e){
       failed++;
       console.warn('Recovery failed for row '+c.excelRow+':',e.message);
     }
   }
-  toast('\u2713 Restored '+done+(certRestored?(' ('+certRestored+' with cert context)'):'')+(failed?(' \u00b7 '+failed+' failed \u2014 check console'):''));
+  toast('\u2713 Restored '+done+(certRestored?(' ('+certRestored+' with cert context)'):'')+(failed?(' \u00b7 '+failed+' failed \u2014 check console'):'')+(skipped?(' \u00b7 '+skipped+' skipped (changed or open \u2014 run again)'):''));
   renderSettings();
   if(typeof render==='function')render();
 }
@@ -25396,13 +25418,14 @@ async function _bgFormBlocksConfirmed(c){
   const hit=reps.find(x=>x.id===ys.reportId)||(reps.length===1&&!ys.reportId?reps[0]:null);
   const lc=_liveCandAfterAwait(c.excelRow,c);
   if(hit&&hit.status&&lc&&lc.st.yardstik&&lc.st.yardstik.candidateId===ys.candidateId&&!_wsOpenOn(lc.excelRow)
-     &&(lc.st.yardstik.status!==hit.status||lc.st.yardstik.reportId!==hit.id)){
+     &&(lc.st.yardstik.status!==hit.status||lc.st.yardstik.reportId!==hit.id)
+     &&(await _ajUnchangedSinceLoad(lc))){ /* the card is as old as the load; write only over the cell it was read from */
     const y2=lc.st.yardstik,s2=String(hit.status);
     y2.reportId=hit.id;y2.status=s2;y2.lastUpdate=new Date().toISOString();
     if(['clear','proceed','pass'].includes(s2)){lc.st.tpCheck='clear';y2.decisionRequired=false;}
     else if(['consider','pre_adverse','ys_qa_review','final_adverse','fail'].includes(s2)&&!y2.decision){lc.st.tpCheck='flag';y2.decisionRequired=true;}
     lc.st.log=(lc.st.log||[]).concat({t:stamp(),x:'🤖🛡 Yardstik asked before the interview gate → '+s2+(blocks?' · form still not submitted':' · the background form is not what is missing')});
-    try{await patchRange('AJ'+lc.excelRow,[[_stCell(lc.st)]]);}catch(e2){console.warn('yardstik gate sync write failed row',lc.excelRow,e2.message);}
+    try{const _cell=_stCell(lc.st);await patchRange('AJ'+lc.excelRow,[[_cell]]);if(Array.isArray(lc.row))lc.row[35]=_cell;}catch(e2){console.warn('yardstik gate sync write failed row',lc.excelRow,e2.message);}
   }
   return blocks;
 }
