@@ -8886,6 +8886,21 @@ async function loadData(){
     if(!row||row[2]===''||row[2]==null){if(nextRow===null)nextRow=i+1;continue;}
     pipeline.push(cardOf(i,row));}
   if(nextRow===null)nextRow=vals.length+1;pipeline.reverse();
+  /* Mirror self-heal — the dual-write is fire-and-forget and parks itself for 5–30min on any
+     flaky reply, so individual stage writes can be silently dropped (six candidates had drifted
+     by 2026-10-16). Once per 12h per browser, re-mirror EVERY row's stage cell so the Supabase
+     mirror converges back to sheet truth on its own. Chunks of 44 because the worker slices a
+     call at 50 patches; same-shape rows collapse into one upsert worker-side, so each chunk
+     costs one Supabase call. */
+  try{
+    const _mrLast=+(localStorage.getItem('sbMirrorFullSync')||0);
+    if(pipeline.length&&Date.now()-_mrLast>12*3600000){
+      localStorage.setItem('sbMirrorFullSync',String(Date.now()));
+      const _gs=pipeline.map(c=>({addr:'G'+c.excelRow,values:[[c.stage]]}));
+      for(let _i=0;_i<_gs.length;_i+=44){const _chunk=_gs.slice(_i,_i+44);
+        setTimeout(()=>{try{_sbMirror(_chunk);}catch(e){}},(_i/44)*1500);}
+    }
+  }catch(e){}
   /* Auto-heal stuck awaiting candidates — runs once per page load. Fixes:
        (1) hasResume=Y but still parked with awaitingReason matching résumé/resume
        (2) awaitingItems contains a resume entry but hasResume=Y (drain it)
