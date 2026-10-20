@@ -25520,7 +25520,8 @@ function _seqAutomationPreview(){
       rows.push({n:c.name,what:'send "'+String(it.templateKey).replace(/_/g,' ')+'" and advance the sequence',cls:'warn'});budget--;
     }else if(it.type==='set-stage'){
       const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
-      if(flow.includes(it.stage)){rows.push({n:c.name,what:'move stage '+c.stage+' → '+it.stage,cls:'ok'});budget--;}
+      if(_seqStageBackward(c.stage,it.stage)){rows.push({n:c.name,what:'REFUSE — "'+it.stage+'" is behind their current stage '+c.stage+' (surfaced for you, never written)',cls:'bad'});}
+      else if(flow.includes(it.stage)){rows.push({n:c.name,what:'move stage '+c.stage+' → '+it.stage,cls:'ok'});budget--;}
     }else if(it.type==='integration'&&it.provider==='claude'&&/resume[-_]screen/.test(it.action||'')){
       if(c.st.aiScreen){rows.push({n:c.name,what:'skip the Claude screen (already on file) and advance the pointer',cls:'soft'});budget--;}
       else if(!c.st.hasResume){rows.push({n:c.name,what:'HOLD the Claude rating — waiting for their résumé (rates automatically when it arrives)',cls:'soft'});}
@@ -25800,6 +25801,11 @@ async function _seqAutomationTick(){
       }else if(it.type==='set-stage'){
         const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
         if(!(await _tickFresh(c)))continue; /* column G is written from this copy - never over a stage the worker just set */
+        /* STAGE IS TRUTH (rule 2): the robot never writes column G BACKWARD. _seqPointerLagsStage only
+           catches a lagging pointer when G's stage has its own step in this sequence; a stage the sequence
+           lacks (streamlined-v1 has no 'Onboarding booked', set by the Cal webhook / P-53 catch-up) left an
+           automate-marked earlier stage step free to demote a booked candidate. Surface it to the operator. */
+        if(_seqStageBackward(c.stage,it.stage)){await _stampFail('stage "'+it.stage+'" is behind their current stage "'+c.stage+'" — automation never moves a stage backward');continue;}
         if(flow.includes(it.stage)){
           _clearFail();
           await patchRange('G'+c.excelRow,[[it.stage]]);
@@ -26090,6 +26096,14 @@ function _seqPointerLagsStage(seq,c){
   const pId=c.st.sequenceStepId;
   return !!(stageStep&&pId&&pId!==stageStep.id&&_seqReachesDownstream(seq,pId,stageStep.id));
 }
+/* Would writing `to` into column G move the candidate BACKWARD on the board's stage order? Both stages
+   must be on the flow order to judge; anything else is not "backward" (the tick's flow.includes check
+   already refuses an off-flow target). Shared by the tick, its dry run, and the scheduled-bucket test. */
+function _seqStageBackward(from,to){
+  const flow=(SETTINGS.flow&&SETTINGS.flow.order&&SETTINGS.flow.order.length)?SETTINGS.flow.order:FLOW;
+  const fi=flow.indexOf(from),ti=flow.indexOf(to);
+  return fi>=0&&ti>=0&&ti<fi;
+}
 
 function _seqV3Unadopted(){
   return (typeof pipeline!=='undefined'?pipeline:[]).filter(c=>c&&!_isTerminalStage(c.stage)&&!(c.st&&c.st.sequenceId));
@@ -26267,7 +26281,7 @@ function _seqV3Action(c,info){
          step.email.templateKey and marks it automatable from step.automate alone, so the two
          are independent. */
       const _tickCan=i2=>i2&&((i2.type==='send-email'&&!!i2.templateKey)
-        ||(i2.type==='set-stage'&&_flowArr.includes(i2.stage))
+        ||(i2.type==='set-stage'&&_flowArr.includes(i2.stage)&&!_seqStageBackward(c.stage,i2.stage))
         ||(i2.type==='integration'&&i2.provider==='claude'&&/resume[-_]screen/.test(i2.action||'')&&!!(SETTINGS.config&&SETTINGS.config.ziToken)));
       /* The tick also provably skips: unadopted rows (no sequenceId) and steps whose last
          automated attempt FAILED (seqAutoFail stamp) — both must surface as operator
