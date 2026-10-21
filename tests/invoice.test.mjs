@@ -18,7 +18,7 @@ const src = html.slice(html.indexOf('*/', b) + 2, e);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cfgStore = {};
 const mk = new Function('cfg', 'lc', 'escapeHtml',
-  src + '\nreturn {DEFAULT_INVOICE_FROM,DEFAULT_INVOICE_SUBJECT,DEFAULT_INVOICE_TEMPLATE,invoiceCfg,isOnService,fmtMoney,invPrettyDate,fillInvoiceTokens,resolveDiscount,resolveDiscounts,hhaNameMatch,hhaParseDate,hhaParseHours,hhaParseMoney,parseHhaSheet,sumHhaHours};');
+  src + '\nreturn {DEFAULT_INVOICE_FROM,DEFAULT_INVOICE_SUBJECT,DEFAULT_INVOICE_TEMPLATE,invoiceCfg,isOnService,fmtMoney,invPrettyDate,fillInvoiceTokens,resolveDiscount,resolveDiscounts,invoicePaymentBlock,applyPaymentBlock,hhaNameMatch,hhaParseDate,hhaParseHours,hhaParseMoney,parseHhaSheet,sumHhaHours};');
 const I = mk(k => cfgStore[k], v => String(v || '').toLowerCase().trim(), esc);
 
 // ── status gate ──
@@ -189,6 +189,40 @@ ok(!/trackingPixelHtml\(_invRi/.test(html) && !/_trkPx/.test(src), 'invoices car
   ok(/if\(nsm\.indexOf\('invoice'\)>-1\)\{/.test(bb) && /data-action="open-invoice" data-ri="'\+ri\+'">🧾 Send Invoice<\/button>/.test(bb), 'selecting it DEFAULTS 🧾 Send Invoice as the primary row button');
   ok(bb.indexOf("nsm.indexOf('invoice')") < bb.indexOf("nsm.indexOf('call')"), 'invoice outranks the call/text/email fallbacks when selected');
   ok(/inv='';\s*\/\/ no duplicate small 🧾/.test(bb), 'no duplicate small 🧾 in the alts row when it is primary');
+}
+
+// ── 💰 how-to-pay block (B-1021-138): Zelle + QR + memo line + card ──
+{
+  const blk = I.invoicePaymentBlock({ invno: 'INV-1042', zelle: 'billing@solurahomecare.com', cardLink: '', cardOnFile: false, due: 'Nov 4, 2026' });
+  ok(/How to pay/.test(blk) && /billing@solurahomecare\.com/.test(blk), 'the block names Zelle to the billing mailbox');
+  ok(/apply\.solurahomecare\.com\/images\/zelle-qr\.png/.test(blk), 'the hosted Zelle QR rides along (data URIs get stripped by mail clients)');
+  ok(/Paying by Zelle\?/.test(blk) && /invoice <b>INV-1042<\/b> in the payment note/.test(blk), 'the STANDING line: put the invoice number in the Zelle note');
+  ok(/Prefer to pay by card\? Reply/.test(blk), 'no card link configured → invite a reply instead');
+
+  const withLink = I.invoicePaymentBlock({ invno: 'INV-1', cardLink: 'https://chase.example/paylink', cardOnFile: false });
+  ok(/href="https:\/\/chase\.example\/paylink"/.test(withLink) && />Pay by card<\/a>/.test(withLink), 'a configured Chase link renders as a Pay-by-card button');
+
+  const onFile = I.invoicePaymentBlock({ invno: 'INV-2', cardLink: 'https://chase.example/paylink', cardOnFile: true, due: 'Nov 4, 2026' });
+  ok(/Card on file:/.test(onFile) && /on <b>Nov 4, 2026<\/b>/.test(onFile) && /rather pay another way this time, just reply/.test(onFile), 'card-on-file = advance NOTICE naming the date and the way out');
+  ok(!/>Pay by card<\/a>/.test(onFile), 'card-on-file replaces the pay button — they are not asked to pay twice');
+
+  const esc9 = I.invoicePaymentBlock({ invno: '<x>', zelle: '<z>' });
+  ok(esc9.indexOf('<x>') === -1 && esc9.indexOf('<z>') === -1, 'field values are HTML-escaped');
+
+  ok(I.applyPaymentBlock('<p>a</p>{payment}<p>b</p>', '<BLK>') === '<p>a</p><BLK><p>b</p>', '{payment} in a custom template places the block');
+  ok(I.applyPaymentBlock('<p>no token</p>', '<BLK>') === '<p>no token</p>\n<BLK>', 'templates without the token get it APPENDED — every invoice carries it');
+}
+
+// ── wiring locks: build path, checkbox, persistence, settings ──
+{
+  ok(/html=applyPaymentBlock\(html,invoicePaymentBlock\(\{/.test(html) && /cardLink:String\(cfg\('cardPayLink'\)\|\|''\)\.trim\(\)/.test(html), 'invBuildEmail runs EVERY invoice through the payment block with the Settings card link');
+  ok(/id="inv-card-file"/.test(html), 'the 💳 card-on-file checkbox lives in the invoice modal');
+  ok(/cf9\.cardOnFile==='yes'/.test(html), 'opening an invoice restores the client\'s sticky card-on-file state');
+  ok(/t\.id==='inv-card-file'&&_invRi>=0/.test(html) && /facts0\.cardOnFile=t\.checked\?'yes':''/.test(html) && /leadMapSet\(lf0,_invRi,facts0\)/.test(html), 'toggling it persists per client identity (survives sheet re-sorts), saved immediately');
+  ok(/data-cfg="cardPayLink"/.test(html) && /Chase Business Online → Collect payments → Payment links/.test(html), 'Settings has the Chase link field and says exactly where the link comes from');
+  ok(/Chase has no API/.test(html), 'the settings copy is honest: no Chase API, the link is made once by hand');
+  ok(/card-on-file notice included/.test(html), 'the comms log says when an invoice carried the auto-charge notice');
+  ok(/The charge itself stays a human step in Chase\./.test(html), 'auto-charge is NOTICE only — money never moves without a human');
 }
 
 console.log('\nInvoicing: ' + PASS + ' passed, ' + FAIL + ' failed');

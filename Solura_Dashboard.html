@@ -1028,6 +1028,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <button data-action="inv-attach" style="padding:6px 12px;background:none;border:1.5px dashed var(--border);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">📎 Attach file(s)</button>
       </div>
       <div class="la-f" style="margin-bottom:12px"><label>Notes (optional — appears as a highlighted block on the invoice)</label><textarea id="inv-notes" rows="3" style="width:100%" placeholder="e.g. Includes the two extra weekend shifts we discussed."></textarea></div>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:12px;font-size:12px;cursor:pointer;line-height:1.5"><input type="checkbox" id="inv-card-file" style="margin-top:2px"><span>💳 <b>Card on file</b> — this client paid by card before. The invoice tells them, in advance, that we'll run that card on the due date unless they reply with a different preference. Sticks for this client.</span></label>
       <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end">
         <button data-action="inv-preview" style="padding:9px 14px;background:none;border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">👁 Preview</button>
         <button data-action="inv-send" style="padding:9px 18px;background:linear-gradient(135deg,#1f4d3a,#2c6b52);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📤 Send invoice</button>
@@ -1382,6 +1383,10 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <div class="la-f"><label>Next invoice number</label><input type="number" min="1" data-cfg="invoiceNextNo" data-cfgtype="int" placeholder="1001"></div>
         </div>
         <div class="la-f" style="margin-bottom:10px"><label>Email subject</label><input type="text" data-cfg="invoiceSubject"></div>
+        <h4 class="st-h2">💰 How-to-pay block (automatic on every invoice)</h4>
+        <p class="st-p">Every invoice — deposits included — automatically ends with a <b>How to pay</b> block: Zelle to the billing mailbox with its QR code, a standing reminder to put the <b>invoice number in the Zelle payment note</b>, and the card options below. Put <code style="font-size:11px">{payment}</code> in the template to position it yourself; otherwise it lands right after the invoice.</p>
+        <div class="la-f" style="margin-bottom:6px"><label>Card payment link (from Chase)</label><input type="url" data-cfg="cardPayLink" placeholder="https://… (paste your Chase payment link)"></div>
+        <p class="st-p" style="font-size:11.5px">Chase has no API for this, so make the link once in <b>Chase Business Online → Collect payments → Payment links</b> and paste it here — invoices then show a <b>Pay by card</b> button (Chase's card fee is 3.5% + 10¢; Zelle is free). Leave blank and invoices instead invite a reply for a card link. <b>Card on file:</b> when a client pays by card once, tick 💳 on their next invoice — it sticks for that client, and every invoice then says in advance that you'll run the card on the due date unless they reply. The charge itself stays a human step in Chase.</p>
         <label class="ee-lbl">Invoice template (HTML — edits save with the Save bar)</label>
         <textarea data-cfg="invoiceTemplate" rows="12" style="width:100%;font-family:monospace;font-size:11.5px"></textarea>
         <button data-action="st-restore-tpl" data-kind="inv" class="st-btn-ghost" style="padding:6px 12px;font-size:11.5px;margin-top:6px">↺ Restore built-in template</button>
@@ -1923,7 +1928,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1014-137';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1021-138';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -3114,6 +3119,44 @@ function fillInvoiceTokens(tpl,f){
     .replace(/\{discountrow\}/gi,discountRow)
     .replace(/\{notes\}/gi,notesBlock);
 }
+/* ── 💰 "How to pay" block: rides EVERY invoice (deposits included) ──
+ * Zelle to the billing mailbox with the QR, the standing "put the invoice
+ * number in the Zelle memo" line, and card options: a reusable Chase
+ * payment link from Settings, and — when this client's card is on file —
+ * the advance notice that we'll run that card on the due date. Chase has
+ * no public API, so the link is created once in Chase Business Online
+ * (Collect payments → Payment links) and pasted into Settings. */
+var ZELLE_QR_URL='https://apply.solurahomecare.com/images/zelle-qr.png';
+function invoicePaymentBlock(o){
+  o=o||{};
+  var zelle=String(o.zelle||'billing@solurahomecare.com').trim();
+  var invno=String(o.invno||'').trim();
+  var cardLink=String(o.cardLink||'').trim();
+  var due=String(o.due||'').trim();
+  var h='<div style="max-width:640px;margin:14px auto 0;font-family:Georgia,\'Times New Roman\',serif;color:#2a2a28;border:1px solid #ddd;border-radius:10px;background:#fffdf8;padding:20px 28px">'
+    +'<div style="font-size:15px;font-weight:700;color:#1f4d3a;margin-bottom:12px">How to pay</div>'
+    +'<table style="width:100%;border-collapse:collapse"><tr>'
+    +'<td style="vertical-align:top;padding-right:16px">'
+      +'<div style="font-size:13.5px;line-height:1.6"><b>Zelle</b> (no fees): send to <b>'+escapeHtml(zelle)+'</b> or scan the code.</div>'
+      +(invno?'<div style="font-size:13.5px;line-height:1.6;margin-top:8px;background:#f6f1e6;border:1px solid #e4ddcf;border-radius:8px;padding:9px 12px"><b>Paying by Zelle?</b> Please put invoice <b>'+escapeHtml(invno)+'</b> in the payment note, so we can match your payment right away.</div>':'')
+    +'</td>'
+    +'<td style="vertical-align:top;width:110px"><img src="'+ZELLE_QR_URL+'" width="104" height="104" alt="Zelle QR code for '+escapeHtml(zelle)+'" style="display:block;border:1px solid #e4ddcf;border-radius:8px"></td>'
+    +'</tr></table>';
+  if(o.cardOnFile){
+    h+='<div style="font-size:13.5px;line-height:1.6;margin-top:12px;border-top:1px solid #e4ddcf;padding-top:12px"><b>Card on file:</b> to save you a step, we will process this invoice on the card you have on file with our office'+(due?(' on <b>'+escapeHtml(due)+'</b>'):' on the due date')+'. If you would rather pay another way this time, just reply to this email'+(zelle?' or send the Zelle':'')+' before then.</div>';
+  }else if(cardLink){
+    h+='<div style="margin-top:12px;border-top:1px solid #e4ddcf;padding-top:12px"><a href="'+escapeHtml(cardLink)+'" style="display:inline-block;background:#1f4d3a;color:#ffffff;text-decoration:none;font-size:13.5px;font-weight:700;padding:10px 20px;border-radius:8px">Pay by card</a><span style="font-size:12.5px;color:#777;margin-left:10px">secure link through our bank</span></div>';
+  }else{
+    h+='<div style="font-size:13px;color:#777;margin-top:12px;border-top:1px solid #e4ddcf;padding-top:12px">Prefer to pay by card? Reply to this email and we will send you a secure card link.</div>';
+  }
+  h+='</div>';
+  return h;
+}
+// {payment} in a custom template places the block; templates without the
+// token get it appended after the invoice card, so EVERY invoice carries it.
+function applyPaymentBlock(html,block){
+  return /\{payment\}/i.test(html)?html.replace(/\{payment\}/gi,block):(html+'\n'+block);
+}
 /* ⏱ HHAeXchange hours import: no public self-service API exists (access is
  * ticket-gated through HHAX support), so hours arrive via their report
  * exports (Excel/CSV). These parsers are format-tolerant: header row found
@@ -4244,6 +4287,8 @@ function openInvoice(ri){
     if(pinRate)el('inv-rate').value=pinRate;
   }catch(_){}
   el('inv-notes').value='';
+  // 💳 Card-on-file sticks per CLIENT (identity-keyed, like the pinned rate)
+  try{var cf9=leadMapGet(leadFactsAll(),ri)||{};el('inv-card-file').checked=cf9.cardOnFile==='yes';}catch(_){}
   el('inv-out').textContent='';
   if(el('inv-hha-out'))el('inv-hha-out').textContent='';
   el('modal-invoice').classList.add('open');
@@ -4277,7 +4322,15 @@ function invBuildEmail(){
   var names=getNames(_invRi);
   var html=fillNames(fillInvoiceTokens(ic.template,f),names);
   var subj=fillNames(fillInvoiceTokens(ic.subject,f),names);
-  return {to:String(el('inv-to').value||'').trim(),from:ic.from,subject:subj,html:html,fields:f};
+  // 💰 Every invoice carries the "How to pay" block: Zelle + QR, the
+  // invoice-number-in-the-memo line, and card link / card-on-file notice.
+  var cardOnFile=!!(el('inv-card-file')&&el('inv-card-file').checked);
+  html=applyPaymentBlock(html,invoicePaymentBlock({
+    invno:f.invno,zelle:ic.from,
+    cardLink:String(cfg('cardPayLink')||'').trim(),
+    cardOnFile:cardOnFile,due:invPrettyDate(f.due)
+  }));
+  return {to:String(el('inv-to').value||'').trim(),from:ic.from,subject:subj,html:html,fields:f,cardOnFile:cardOnFile};
 }
 function invPreview(){
   if(_invRi<0)return;
@@ -4323,7 +4376,7 @@ async function invSend(){
     // Log it and advance the invoice counter (background — hash-skip safe)
     try{
       trk.record(logComms(commsEntryForLead(_invRi,{direction:'out',channel:'email',contact:em.to,
-        subject:em.subject,preview:'Invoice '+em.fields.invno+' — '+(fmtMoney(em.fields.amount)||em.fields.amount)+' due '+em.fields.due,
+        subject:em.subject,preview:'Invoice '+em.fields.invno+' — '+(fmtMoney(em.fields.amount)||em.fields.amount)+' due '+em.fields.due+(em.cardOnFile?' · 💳 card-on-file notice included':''),
         outcome:'invoice-sent',messageId:trk.id})));
     }catch(_){}
     try{
@@ -8158,6 +8211,17 @@ document.addEventListener('input',function(ev){
     // storage eviction, and follows you across devices (private OneDrive
     // file — never the public page source).
     try{enginesDoc.config=enginesDoc.config||{};enginesDoc.config.ghlApiKey=t.value.trim();stMarkDirty();}catch(_){}
+  }
+  // 💳 Card-on-file toggles persist per client the moment they're clicked
+  if(t&&t.id==='inv-card-file'&&_invRi>=0){
+    try{
+      var lf0=leadFactsAll();
+      var facts0=leadMapGet(lf0,_invRi)||{};
+      facts0.cardOnFile=t.checked?'yes':'';
+      leadMapSet(lf0,_invRi,facts0);
+      saveEnginesDoc().catch(function(){});
+      toast(t.checked?'💳 Card on file noted — every invoice to this client now carries the advance notice':'💳 Card-on-file removed for this client');
+    }catch(_){}
   }
   // Settings config fields → staged into enginesDoc.config, saved via Save bar
   if(t&&t.dataset&&t.dataset.cfg){
