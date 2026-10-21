@@ -7766,13 +7766,15 @@ async function saveAvailability(){
      is append-only: every entry past the 2-hour grace is pushed back into the pool on each
      pass and only ever leaves by being linked or manually assigned. Left alone it grows until
      Graph truncates the cell, the parse above fails, and the empty default is written back
-     over it. Trim the OLDEST unmatched entries (index 0 is oldest — `keep` preserves order)
-     until it fits; refuse rather than hand Graph more than it will store. */
+     over it. Trim the OLDEST unmatched entries until it fits; refuse rather than hand Graph more
+     than it will store. The worker files each new entry with unshift (pushUnmatchedBooking), so
+     index 0 is the NEWEST — slice(-n) kept the oldest n and dropped exactly the recent bookings
+     still waiting to be linked (the worker's own trim pops from the end for the same reason). */
   let json=JSON.stringify(AVAIL);
   if(json.length>32000&&Array.isArray(AVAIL.unmatched)){
     for(const n of [200,100,50,25,10]){
       if(json.length<=32000)break;
-      if(AVAIL.unmatched.length>n){AVAIL.unmatched=AVAIL.unmatched.slice(-n);json=JSON.stringify(AVAIL);}
+      if(AVAIL.unmatched.length>n){AVAIL.unmatched=AVAIL.unmatched.slice(0,n);json=JSON.stringify(AVAIL);}
     }
   }
   if(json.length>32000){
@@ -7781,6 +7783,37 @@ async function saveAvailability(){
   }
   try{await patchRange('AK1',[[json]]);return true;}
   catch(e){toast('Could not save availability');return false;}
+}
+/* Identity of an unmatched-pool entry. The pool is addressed by POSITION nowhere any more: the
+   calendar card lists a filtered subset (last 24h onward) whose positions are not the pool's,
+   every backgroundRefresh swaps AVAIL for a fresh read, and the worker unshifts new entries at
+   index 0 — an index taken at render time can name a different booking by the time it is used. */
+function _umKey(u){return u?(u.bookingId?'id:'+u.bookingId:'t:'+String(u.start||'')+'|'+String(u.email||'').toLowerCase()):'';}
+function _umFind(k){return k?((AVAIL&&AVAIL.unmatched)||[]).find(u=>_umKey(u)===k)||null:null;}
+/* Drop linked entries from the pool AS IT IS NOW, not as this load read it. Between
+   loadAvailability's read and the save, the linking code spent a sheet read and an AJ write per
+   booking, and the worker files unmatched bookings into AK1 with its own read-modify-write —
+   saving the load-time copy silently erased any booking it filed in between (nothing else ever
+   shows that booking again), and a backgroundRefresh landing mid-pass had already replaced AVAIL
+   with a newer object the pass's `keep` list predates. Re-read, remove exactly what was linked,
+   save that. An unreadable / empty / unparseable cell is left alone: the linked entries just
+   stay in the pool (the candidate now has an upcoming booking, so auto-link leaves them be). */
+async function _availDropUnmatched(done){
+  const gone=new Set((done||[]).map(_umKey).filter(Boolean));
+  if(!gone.size)return true;
+  let fresh=null;
+  try{
+    const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AK1')?$select=values");
+    if(!r.ok){console.warn('AK1 re-read failed:',r.status,'— linked bookings left in the unmatched pool');return false;}
+    const v=(await r.json()).values;const raw=(v&&v[0]&&v[0][0])||'';
+    if(!raw)return false;
+    fresh=Object.assign({pattern:{},slots:[],offs:[]},JSON.parse(raw));
+  }catch(e){console.warn('AK1 re-read failed:',e.message,'— linked bookings left in the unmatched pool');return false;}
+  const before=Array.isArray(fresh.unmatched)?fresh.unmatched:[];
+  fresh.unmatched=before.filter(u=>!gone.has(_umKey(u)));
+  AVAIL=fresh; /* newer than whatever this session held */
+  if(fresh.unmatched.length===before.length)return true; /* already gone — nothing to write */
+  return await saveAvailability();
 }
 
 /* Cal.com BACKFILL — the definitive net under the webhook. Pulls ALL upcoming bookings
@@ -7931,8 +7964,8 @@ async function _autoLinkUnmatchedBookings(){
   if(!AVAIL||!Array.isArray(AVAIL.unmatched)||!AVAIL.unmatched.length)return;
   if(typeof pipeline==='undefined'||!pipeline.length)return;
   const norm=s=>String(s||'').toLowerCase().replace(/[^a-z]/g,'');
-  let linked=0;const keep=[];
-  for(const u of AVAIL.unmatched){
+  let linked=0;const keep=[],done=[];
+  for(const u of AVAIL.unmatched.slice()){
     /* UPCOMING bookings only (same 2h-grace rule as the backfill): auto-linking a days-old
        no-show entry would stamp a fresh bookingReceivedAt, which the smart-awaiting override
        reads as a fresh booking — destroying parked state and advancing stages for a meeting
@@ -7962,12 +7995,11 @@ async function _autoLinkUnmatchedBookings(){
       cand.st.bookingKind=_uk; /* P-36 */
       cand.st.log=(cand.st.log||[]).concat({t:stamp(),x:'🔗 Booking auto-linked ('+(u.email||'?')+(u.eventType?' · '+u.eventType:'')+') — '+new Date(u.start).toLocaleString()});
       {const _cell=_stCell(cand.st);await patchRange('AJ'+cand.excelRow,[[_cell]]);if(Array.isArray(cand.row))cand.row[35]=_cell;} /* same - see _backfillCalBookings */
-      linked++;
+      linked++;done.push(u);
     }catch(e){console.warn('auto-link failed:',u.email,e.message);keep.push(u);}
   }
   if(linked){
-    AVAIL.unmatched=keep;
-    await saveAvailability();
+    await _availDropUnmatched(done); /* the pool as it is NOW minus what was linked — never this load's `keep` */
     toast('🔗 '+linked+' Cal.com booking'+(linked===1?'':'s')+' auto-linked to candidates');
     await _reconcileBookingStages().catch(e=>console.warn('post-link catch-up:',e.message));
     if(typeof render==='function')render();
@@ -19795,7 +19827,7 @@ function renderCalendar(){
     ${um.map((u,idx)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border-soft);font-size:12.5px;gap:8px;flex-wrap:wrap">
       <div style="flex:1;min-width:220px"><b>${esc(u.name||'(no name)')}</b> <span style="color:var(--soft)">${esc(u.email||'')}</span><div style="font-size:11px;color:var(--soft)">${esc(new Date(u.start).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))}</div></div>
       <div style="display:flex;gap:5px;flex-wrap:wrap">
-        <button class="cal-btn" onclick="linkBookingToExistingCandidate(${idx})" title="Link this booking to a candidate who's already in the pipeline (e.g. they booked with a different email)">\u2192 assign to existing</button>
+        <button class="cal-btn" onclick="linkBookingToExistingCandidate(decodeURIComponent('${encodeURIComponent(_umKey(u)).replace(/'/g,'%27')}'))" title="Link this booking to a candidate who's already in the pipeline (e.g. they booked with a different email)">\u2192 assign to existing</button>
         <button class="cal-btn" onclick="openAddFromBooking('${esc(u.name||'')}','${esc(u.email||'')}','${esc(u.start)}')">+ add candidate</button>
       </div></div>`).join('')}
   </div>`:'';
@@ -19821,10 +19853,12 @@ async function manualRefresh(){const btn=document.getElementById('hdr-refresh');
    worker stashes it in AVAIL.unmatched. The default UX is "+ add candidate" (creates a new record),
    but sometimes the person IS an existing candidate who just used a different email. This flow
    lets the user pick the right candidate and link the booking to them. */
-let _unmatchedBookingIdx=null;
-function linkBookingToExistingCandidate(idx){
-  _unmatchedBookingIdx=idx;
-  const u=(AVAIL.unmatched||[])[idx];
+/* Held by KEY (see _umKey): the card's button index counted the card's filtered list but was
+   looked up in the whole pool, so one stale entry ahead of it linked a DIFFERENT booking. */
+let _unmatchedBookingKey=null;
+function linkBookingToExistingCandidate(key){
+  _unmatchedBookingKey=key;
+  const u=_umFind(key);
   if(!u){toast('Booking not found');return;}
   /* Show a picker modal: search input + scrollable candidate list. Excludes candidates in Hired /
      Declined stages so the list is short and relevant. */
@@ -19836,10 +19870,10 @@ function linkBookingToExistingCandidate(idx){
 }
 function closeLinkBookingModal(){
   document.getElementById('link-booking-modal').classList.remove('open');
-  _unmatchedBookingIdx=null;
+  _unmatchedBookingKey=null;
 }
 function _renderLinkBookingList(searchTerm){
-  const u=(AVAIL.unmatched||[])[_unmatchedBookingIdx];
+  const u=_umFind(_unmatchedBookingKey);
   if(!u){closeLinkBookingModal();return;}
   const q=(searchTerm||'').toLowerCase().trim();
   const eligible=pipeline.filter(c=>c.stage!=='Hired'&&c.stage!=='Declined');
@@ -19871,7 +19905,7 @@ function _renderLinkBookingList(searchTerm){
   document.getElementById('link-booking-body').innerHTML=bookingLine+searchBar+`<div style="max-height:340px;overflow-y:auto;border:1.5px solid var(--border);border-radius:8px;background:#fff">${list}${truncated}</div>`;
 }
 async function commitLinkBooking(candidateExcelRow){
-  const u=(AVAIL.unmatched||[])[_unmatchedBookingIdx];
+  const u=_umFind(_unmatchedBookingKey);
   if(!u){toast('Booking not found');closeLinkBookingModal();return;}
   const cand=pipeline.find(c=>c.excelRow===candidateExcelRow);
   if(!cand){toast('Candidate not found');return;}
@@ -19880,6 +19914,7 @@ async function commitLinkBooking(candidateExcelRow){
     const proceed=confirm('This candidate already has a booking on '+new Date(cand.st.booking).toLocaleString()+'.\n\nOverwrite with the new booking on '+new Date(u.start).toLocaleString()+'?');
     if(!proceed)return;
   }
+  const _snapSt=JSON.stringify(cand.st||{});let _ajLanded=false;
   cand.st.booking=_bookingLocal(u.start);
   cand.st.bookingSource='manual-link';
   /* Preserve the original booking email as a hint for future reconciliation. */
@@ -19893,16 +19928,16 @@ async function commitLinkBooking(candidateExcelRow){
   /* Log the link for the activity trail. */
   cand.st.log=cand.st.log||[];
   cand.st.log.push({t:stamp(),x:'🔗 Booking linked from unmatched pool ('+u.email+') \u2014 '+new Date(u.start).toLocaleString()+(stageAdvancedTo?' \u2192 advanced to '+stageAdvancedTo:'')});
-  /* Remove this entry from AVAIL.unmatched so it disappears from the calendar. */
-  AVAIL.unmatched=(AVAIL.unmatched||[]).filter((_,i)=>i!==_unmatchedBookingIdx);
-  /* Persist: candidate state (AJ), stage column (G) if changed, and AVAIL (AK1). */
+  /* Persist: candidate state (AJ), stage column (G) if changed, and AVAIL (AK1). The pool entry
+     leaves only AFTER the candidate holds the booking — removing it up front meant a failed
+     write left the booking in neither place, and the next calendar save persisted the loss. */
   try{
     if(stageAdvancedTo){
       await patchRange('G'+cand.excelRow,[[stageAdvancedTo]]);
       cand.stage=stageAdvancedTo;cand.row[6]=stageAdvancedTo;  /* memory only once column G took it */
     }
-    await patchRange('AJ'+cand.excelRow,[[_stCell(cand.st)]]);
-    await saveAvailability();
+    {const _cell=_stCell(cand.st);await patchRange('AJ'+cand.excelRow,[[_cell]]);if(Array.isArray(cand.row))cand.row[35]=_cell;_ajLanded=true;}
+    await _availDropUnmatched([u]);
     toast('\u2713 Booking linked to '+cand.name+(stageAdvancedTo?' \u2014 advanced to '+stageAdvancedTo:''));
     closeLinkBookingModal();
     if(view==='calendar')renderCalendar();
@@ -19918,6 +19953,9 @@ async function commitLinkBooking(candidateExcelRow){
     }
     render();
   }catch(e){
+    /* Nothing reached AJ (or the pool save after it threw): memory must not keep a booking the
+       sheet does not have \u2014 the next save from anywhere would persist it half-done. */
+    if(!_ajLanded){try{cand.st=JSON.parse(_snapSt);}catch(e2){}}
     toast('\u2717 Could not link booking: '+e.message);
   }
 }
