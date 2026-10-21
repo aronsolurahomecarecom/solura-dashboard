@@ -8018,15 +8018,22 @@ async function loadSettings(){
              64 KB keepalive cap, or a file write that failed), and this line used to erase the
              only place still holding it. Keep it, load the FILE as always (nothing is restored
              behind the operator's back), and offer it after boot — see _offerNewerBrowserSettings. */
+          /* The undecided copy lives under its OWN key until the operator restores or discards it.
+             Kept only in 'solura_settings' it did not survive the session that offered it: every
+             save (_saveSettingsInternal, the pagehide flush, the heal chain's first autosave)
+             rewrites that key, so "Later" — or simply not answering the bar — erased it, and the
+             next load had nothing newer to offer. */
           let _keepCache=false;
           try{
             const _raw=localStorage.getItem('solura_settings');
             const _cc=_raw?JSON.parse(_raw):null;
             const _ts=o=>(o&&o._savedAt&&isFinite(Date.parse(o._savedAt)))?Date.parse(o._savedAt):0;
-            if(_cc&&_ts(_cc)>_ts(data.settings)&&_ts(data.settings)>0){
-              _keepCache=true;
-              window._newerBrowserSettings={copy:_cc,cacheAt:_cc._savedAt,fileAt:data.settings._savedAt};
+            let _pend=null;try{_pend=JSON.parse(localStorage.getItem('solura_settings_unsynced')||'null');}catch(e){}
+            if(_cc&&_ts(_cc)>_ts(data.settings)&&_ts(data.settings)>0&&(!_pend||_ts(_cc)>_ts(_pend))){
+              _pend=_cc;
+              try{localStorage.setItem('solura_settings_unsynced',_raw);}catch(e){_keepCache=true;}
             }
+            if(_pend&&typeof _pend==='object')window._newerBrowserSettings={copy:_pend,cacheAt:_pend._savedAt,fileAt:data.settings._savedAt};
           }catch(e){}
           if(!_keepCache)try{const _c=Object.assign({},SETTINGS);delete _c._undoHistory;localStorage.setItem('solura_settings',JSON.stringify(_c));}catch(e){}
         }else{
@@ -8129,6 +8136,7 @@ function _offerNewerBrowserSettings(){
 }
 function _discardNewerBrowserSettings(quiet){
   try{const _c=Object.assign({},SETTINGS);delete _c._undoHistory;localStorage.setItem('solura_settings',JSON.stringify(_c));}catch(e){}
+  try{localStorage.removeItem('solura_settings_unsynced');}catch(e){}
   window._newerBrowserSettings=null;
   const b=document.getElementById('newer-settings-bar');if(b)b.remove();
   if(!quiet)toast('Browser copy discarded — the settings file stands');
@@ -8150,6 +8158,7 @@ async function _reviewNewerBrowserSettings(){
   let st=null;try{st=await saveSettings();}finally{window._skipDiffOnce=false;}
   if(st&&st.workerFile){
     window._newerBrowserSettings=null;
+    try{localStorage.removeItem('solura_settings_unsynced');}catch(e){}
     const b=document.getElementById('newer-settings-bar');if(b)b.remove();
     toast('✓ Restored and saved to the settings file');
   }else{
