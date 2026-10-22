@@ -1021,8 +1021,8 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <button data-action="inv-add-disc" style="padding:6px 12px;background:none;border:1.5px dashed var(--border);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">＋ Add discount</button>
       </div>
       <div class="la-f inv-dep" style="margin-bottom:10px;display:none">
-        <label>What this deposit covers (lands on the deposit as its own line)</label>
-        <input type="text" id="inv-depfor" placeholder="Applied in full toward your first invoice">
+        <label>Deposit terms (lands on the deposit as its own line)</label>
+        <input type="text" id="inv-depfor" placeholder="Held on account as a security deposit">
       </div>
       <div class="la-grid g3" style="margin-bottom:10px">
         <div class="la-f"><label id="inv-amount-label">Amount due ($)</label><input type="number" min="0" step="0.01" id="inv-amount" placeholder="auto"></div>
@@ -1393,7 +1393,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div class="la-f" style="margin-bottom:10px"><label>Email subject</label><input type="text" data-cfg="invoiceSubject"></div>
         <h4 class="st-h2">💰 How-to-pay block (automatic on every invoice and deposit)</h4>
         <p class="st-p">Every invoice and deposit carries a <b>How to pay</b> section inside the card: Zelle to the billing mailbox with its QR code, plus the standing reminder to put the <b>invoice number in the Zelle payment note</b>. The built-in templates place it via the <code style="font-size:11px">{payment}</code> token — keep that token if you customize; a template without it gets the block as its own card below instead. <b>Card payments:</b> paste a link into the 💳 field on the invoice form (per send, by hand) and the section shows a Pay-by-card button. Proper card-processor integration comes when one is picked.</p>
-        <p class="st-p" style="font-size:11.5px"><b>🔐 Deposit mode:</b> the toggle at the top of the invoice form. It hides the service-only fields (period, hours, rate, discounts, HHAeXchange pull), numbers it <b>DEP-</b> on the same counter, and sends a deposit-shaped email instead — amount, how it applies (default: applied in full toward the first invoice), due date.</p>
+        <p class="st-p" style="font-size:11.5px"><b>🔐 Deposit mode:</b> the toggle at the top of the invoice form. It hides the service-only fields (period, hours, rate, discounts, HHAeXchange pull), numbers it <b>DEP-</b> on the same counter, and sends a security-deposit email instead — amount, deposit terms (default: held on account as a security deposit), due date.</p>
         <label class="ee-lbl">Invoice template (HTML — edits save with the Save bar)</label>
         <textarea data-cfg="invoiceTemplate" rows="12" style="width:100%;font-family:monospace;font-size:11.5px"></textarea>
         <button data-action="st-restore-tpl" data-kind="inv" class="st-btn-ghost" style="padding:6px 12px;font-size:11.5px;margin-top:6px">↺ Restore built-in template</button>
@@ -1935,7 +1935,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1022-140';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1022-141';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -3035,7 +3035,7 @@ var DEFAULT_INVOICE_TEMPLATE=[
 '</div>'].join('\n');
 /* 🔐 Deposit mode: same shell, deposit-shaped content — no service period,
  * hours, or rate; instead one "what it covers" line. Own subject too. */
-var DEFAULT_DEPOSIT_SUBJECT='Deposit {invno} — Solura Home Care';
+var DEFAULT_DEPOSIT_SUBJECT='Security deposit {invno} — Solura Home Care';
 var DEFAULT_DEPOSIT_TEMPLATE=[
 '<div style="max-width:640px;margin:0 auto;font-family:Georgia,\'Times New Roman\',serif;color:#2a2a28">',
 '  <div style="background:#1f4d3a;color:#fff;padding:26px 30px;border-radius:10px 10px 0 0">',
@@ -3043,13 +3043,13 @@ var DEFAULT_DEPOSIT_TEMPLATE=[
 '    <div style="font-size:12px;opacity:.85;margin-top:4px">Licensed Ohio Home Care · License 4574HHN · (216) 770-4886</div>',
 '  </div>',
 '  <div style="border:1px solid #ddd;border-top:none;padding:26px 30px;border-radius:0 0 10px 10px;background:#fffdf8">',
-'    <div style="font-size:17px;font-weight:700;margin-bottom:2px">Deposit {invno}</div>',
+'    <div style="font-size:17px;font-weight:700;margin-bottom:2px">Security deposit {invno}</div>',
 '    <div style="font-size:12.5px;color:#777;margin-bottom:18px">Issued {date}</div>',
 '    <p style="font-size:14px;line-height:1.55;margin:0 0 16px">Dear {dm},</p>',
-'    <p style="font-size:14px;line-height:1.55;margin:0 0 18px">Thank you for trusting Solura with {pt}’s care. This deposit reserves {pt}’s start with us.</p>',
+'    <p style="font-size:14px;line-height:1.55;margin:0 0 18px">Thank you for trusting Solura with {pt}’s care. This security deposit reserves {pt}’s start with us.</p>',
 '    <table style="width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:18px">',
-'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700;width:45%;font-size:15px">Deposit amount</td><td style="padding:9px 12px;border:1px solid #e4ddcf;font-weight:700;font-size:15px">{amount}</td></tr>',
-'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">How it applies</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{depositfor}</td></tr>',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700;width:45%;font-size:15px">Security deposit</td><td style="padding:9px 12px;border:1px solid #e4ddcf;font-weight:700;font-size:15px">{amount}</td></tr>',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Deposit terms</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{depositfor}</td></tr>',
 '      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Due date</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{due}</td></tr>',
 '    </table>',
 '    {notes}',
@@ -3152,7 +3152,7 @@ function fillInvoiceTokens(tpl,f){
     .replace(/\{subtotal\}/gi,isNaN(subN)?'':fmtMoney(subN))
     .replace(/\{discount\}/gi,dRes.total>0?fmtMoney(dRes.total):'')
     .replace(/\{discountrow\}/gi,discountRow)
-    .replace(/\{depositfor\}/gi,escapeHtml(String(f.depositfor||'').trim()||'Applied in full toward your first invoice'))
+    .replace(/\{depositfor\}/gi,escapeHtml(String(f.depositfor||'').trim()||'Held on account as a security deposit'))
     .replace(/\{notes\}/gi,notesBlock);
 }
 /* ── 💰 "How to pay": lives INSIDE the invoice card ──

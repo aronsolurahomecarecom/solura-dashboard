@@ -226,16 +226,18 @@ ok(!/trackingPixelHtml\(_invRi/.test(html) && !/_trkPx/.test(src), 'invoices car
   ok(/\.inv-dep'\)\.forEach\(function\(n\)\{n\.style\.display=dep\?'':'none';\}\)/.test(am), 'and shows the deposit-only "what it covers" field');
   ok(/\(dep\?'DEP-':'INV-'\)/.test(am) && /\/\^\(INV\|DEP\)-\\d\+\$\//.test(am), 'DEP- numbering on the same counter, only while the number is untouched');
   ok((html.match(/class="la-grid g2 inv-svc"/g) || []).length === 2 && /class="inv-svc" style="margin-bottom:10px">\s*<input type="file" id="inv-hha-file"/.test(html) && /class="la-f inv-svc"/.test(html), 'period, hours/rate, HHA pull and discounts are all marked service-only');
-  ok(/class="la-f inv-dep"/.test(html) && /id="inv-depfor"/.test(html) && /Applied in full toward your first invoice/.test(html), 'the deposit field exists with the sensible default');
+  ok(/class="la-f inv-dep"/.test(html) && /id="inv-depfor"/.test(html) && /Held on account as a security deposit/.test(html), 'the deposit-terms field exists with the security-deposit default');
+  ok(!/[Aa]pplied in full toward/.test(html), 'the applied-toward-first-invoice framing is gone everywhere');
   ok(/invApplyMode\('service'\); \/\/ every open starts as a service invoice/.test(html), 'reopening always starts in service mode');
 
   // The deposit template itself
-  ok(/Deposit \{invno\}/.test(I.DEFAULT_DEPOSIT_TEMPLATE) && /\{depositfor\}/.test(I.DEFAULT_DEPOSIT_TEMPLATE), 'deposit template: own heading + the how-it-applies row');
+  ok(/Security deposit \{invno\}/.test(I.DEFAULT_DEPOSIT_TEMPLATE) && /\{depositfor\}/.test(I.DEFAULT_DEPOSIT_TEMPLATE), 'deposit template: SECURITY-deposit heading + the deposit-terms row');
+  ok(/This security deposit reserves/.test(I.DEFAULT_DEPOSIT_TEMPLATE) && /Deposit terms/.test(I.DEFAULT_DEPOSIT_TEMPLATE) && /Security deposit \{invno\} — Solura Home Care/ .test(I.DEFAULT_DEPOSIT_SUBJECT), 'body, row label and subject all say security deposit');
   ok(!/Service period|Hours of care|Hourly rate|\{discountrow\}/.test(I.DEFAULT_DEPOSIT_TEMPLATE), 'deposit template has NO service rows');
   ok(I.invoiceCfg().depositSubject === I.DEFAULT_DEPOSIT_SUBJECT, 'deposit subject default');
   const dOut = I.fillInvoiceTokens(I.DEFAULT_DEPOSIT_TEMPLATE, { invno: 'DEP-1042', amount: '500', due: '2026-11-04', depositfor: '', date: '2026-10-21' });
   ok(dOut.indexOf('DEP-1042') > -1 && dOut.indexOf('$500.00') > -1 && dOut.indexOf('Nov 4, 2026') > -1, 'deposit fill: number, money and due date land');
-  ok(dOut.indexOf('Applied in full toward your first invoice') > -1, 'blank "covers" field falls back to the default line');
+  ok(dOut.indexOf('Held on account as a security deposit') > -1, 'blank terms field falls back to the security-deposit line');
   const dOut2 = I.fillInvoiceTokens(I.DEFAULT_DEPOSIT_TEMPLATE, { invno: 'DEP-1', amount: '500', depositfor: 'Holds the <Nov> start date' });
   ok(dOut2.indexOf('Holds the &lt;Nov&gt; start date') > -1, 'a typed "covers" line lands, HTML-escaped');
 
