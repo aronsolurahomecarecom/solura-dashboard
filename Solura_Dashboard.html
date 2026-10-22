@@ -994,32 +994,40 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
     <div class="mhead"><div class="mtitle" id="inv-title">🧾 Send invoice</div><button class="mclose" data-action="close-modal" data-mid="modal-invoice">✕</button></div>
     <div class="mbody">
       <div style="font-size:12px;color:var(--mid);margin-bottom:14px">Sends from <b id="inv-from-label"></b> using the template in ⚙ Settings → Invoicing. Fill the fields — everything else is automatic.</div>
-      <div class="la-grid g2" style="margin-bottom:10px">
-        <div class="la-f"><label>To (email)</label><input type="email" id="inv-to"></div>
-        <div class="la-f"><label>Invoice #</label><input type="text" id="inv-no"></div>
+      <div style="display:flex;gap:0;margin-bottom:14px;border:1.5px solid var(--border);border-radius:10px;overflow:hidden;width:fit-content">
+        <button data-action="inv-mode" data-mode="service" id="inv-mode-service" style="padding:8px 18px;border:none;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;background:#1f4d3a;color:#fff">🧾 Service invoice</button>
+        <button data-action="inv-mode" data-mode="deposit" id="inv-mode-deposit" style="padding:8px 18px;border:none;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;background:none;color:var(--mid)">🔐 Deposit</button>
       </div>
       <div class="la-grid g2" style="margin-bottom:10px">
+        <div class="la-f"><label>To (email)</label><input type="email" id="inv-to"></div>
+        <div class="la-f"><label id="inv-no-label">Invoice #</label><input type="text" id="inv-no"></div>
+      </div>
+      <div class="la-grid g2 inv-svc" style="margin-bottom:10px">
         <div class="la-f"><label>Service period — from</label><input type="date" id="inv-from-date"></div>
         <div class="la-f"><label>Service period — to</label><input type="date" id="inv-to-date"></div>
       </div>
-      <div class="la-grid g2" style="margin-bottom:10px">
+      <div class="la-grid g2 inv-svc" style="margin-bottom:10px">
         <div class="la-f"><label>Hours of care</label><input type="number" min="0" step="0.5" id="inv-hours"></div>
         <div class="la-f"><label>Hourly rate ($)</label><div style="display:flex;gap:6px"><input type="number" min="0" step="0.01" id="inv-rate" style="flex:1"><button data-action="inv-pin-rate" title="Save as this client's default rate — future invoices fill it automatically" style="padding:0 10px;background:none;border:1.5px solid var(--border);border-radius:8px;cursor:pointer;font-family:inherit">📌</button></div></div>
       </div>
-      <div style="margin-bottom:10px">
+      <div class="inv-svc" style="margin-bottom:10px">
         <input type="file" id="inv-hha-file" accept=".xlsx,.xls,.csv" style="display:none">
         <button data-action="inv-hha-pull" style="padding:6px 12px;background:none;border:1.5px dashed var(--border);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">⏱ Pull hours from an HHAeXchange export</button>
         <div id="inv-hha-out" style="font-size:11.5px;margin-top:5px;white-space:pre-wrap"></div>
       </div>
-      <div class="la-f" style="margin-bottom:10px">
+      <div class="la-f inv-svc" style="margin-bottom:10px">
         <label>Discounts (each takes flat $ or % — every one gets its own line on the invoice)</label>
         <div id="inv-discounts"></div>
         <button data-action="inv-add-disc" style="padding:6px 12px;background:none;border:1.5px dashed var(--border);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">＋ Add discount</button>
       </div>
+      <div class="la-f inv-dep" style="margin-bottom:10px;display:none">
+        <label>What this deposit covers (lands on the deposit as its own line)</label>
+        <input type="text" id="inv-depfor" placeholder="Applied in full toward your first invoice">
+      </div>
       <div class="la-grid g3" style="margin-bottom:10px">
-        <div class="la-f"><label>Amount due ($)</label><input type="number" min="0" step="0.01" id="inv-amount" placeholder="auto"></div>
+        <div class="la-f"><label id="inv-amount-label">Amount due ($)</label><input type="number" min="0" step="0.01" id="inv-amount" placeholder="auto"></div>
         <div class="la-f"><label>Due date</label><input type="date" id="inv-due"></div>
-        <div class="la-f"><label>&nbsp;</label><div style="font-size:11px;color:var(--soft);padding-top:8px">Amount = hours × rate − discounts. Type over it to override.</div></div>
+        <div class="la-f"><label>&nbsp;</label><div class="inv-svc" id="inv-amount-hint" style="font-size:11px;color:var(--soft);padding-top:8px">Amount = hours × rate − discounts. Type over it to override.</div></div>
       </div>
       <div class="la-f" style="margin-bottom:10px">
         <label>Attachments (optional — e.g. a PDF invoice or timesheet; ~2.5 MB total)</label>
@@ -1028,7 +1036,6 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <button data-action="inv-attach" style="padding:6px 12px;background:none;border:1.5px dashed var(--border);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">📎 Attach file(s)</button>
       </div>
       <div class="la-f" style="margin-bottom:12px"><label>Notes (optional — appears as a highlighted block on the invoice)</label><textarea id="inv-notes" rows="3" style="width:100%" placeholder="e.g. Includes the two extra weekend shifts we discussed."></textarea></div>
-      <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:12px;font-size:12px;cursor:pointer;line-height:1.5"><input type="checkbox" id="inv-card-file" style="margin-top:2px"><span>💳 <b>Card on file</b> — this client paid by card before. The invoice tells them, in advance, that we'll run that card on the due date unless they reply with a different preference. Sticks for this client.</span></label>
       <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end">
         <button data-action="inv-preview" style="padding:9px 14px;background:none;border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">👁 Preview</button>
         <button data-action="inv-send" style="padding:9px 18px;background:linear-gradient(135deg,#1f4d3a,#2c6b52);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📤 Send invoice</button>
@@ -1383,10 +1390,9 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <div class="la-f"><label>Next invoice number</label><input type="number" min="1" data-cfg="invoiceNextNo" data-cfgtype="int" placeholder="1001"></div>
         </div>
         <div class="la-f" style="margin-bottom:10px"><label>Email subject</label><input type="text" data-cfg="invoiceSubject"></div>
-        <h4 class="st-h2">💰 How-to-pay block (automatic on every invoice)</h4>
-        <p class="st-p">Every invoice — deposits included — automatically ends with a <b>How to pay</b> block: Zelle to the billing mailbox with its QR code, a standing reminder to put the <b>invoice number in the Zelle payment note</b>, and the card options below. Put <code style="font-size:11px">{payment}</code> in the template to position it yourself; otherwise it lands right after the invoice.</p>
-        <div class="la-f" style="margin-bottom:6px"><label>Card payment link (from Chase)</label><input type="url" data-cfg="cardPayLink" placeholder="https://… (paste your Chase payment link)"></div>
-        <p class="st-p" style="font-size:11.5px">Chase has no API for this, so make the link once in <b>Chase Business Online → Collect payments → Payment links</b> and paste it here — invoices then show a <b>Pay by card</b> button (Chase's card fee is 3.5% + 10¢; Zelle is free). Leave blank and invoices instead invite a reply for a card link. <b>Card on file:</b> when a client pays by card once, tick 💳 on their next invoice — it sticks for that client, and every invoice then says in advance that you'll run the card on the due date unless they reply. The charge itself stays a human step in Chase.</p>
+        <h4 class="st-h2">💰 How-to-pay block (automatic on every invoice and deposit)</h4>
+        <p class="st-p">Every invoice and deposit automatically ends with a <b>How to pay</b> block: Zelle to the billing mailbox with its QR code, plus the standing reminder to put the <b>invoice number in the Zelle payment note</b>. Put <code style="font-size:11px">{payment}</code> in the template to position it yourself; otherwise it lands right after the invoice. Card payments are deliberately unplumbed for now — when a proper card processor with a real API is picked, it slots in here.</p>
+        <p class="st-p" style="font-size:11.5px"><b>🔐 Deposit mode:</b> the toggle at the top of the invoice form. It hides the service-only fields (period, hours, rate, discounts, HHAeXchange pull), numbers it <b>DEP-</b> on the same counter, and sends a deposit-shaped email instead — amount, how it applies (default: applied in full toward the first invoice), due date.</p>
         <label class="ee-lbl">Invoice template (HTML — edits save with the Save bar)</label>
         <textarea data-cfg="invoiceTemplate" rows="12" style="width:100%;font-family:monospace;font-size:11.5px"></textarea>
         <button data-action="st-restore-tpl" data-kind="inv" class="st-btn-ghost" style="padding:6px 12px;font-size:11.5px;margin-top:6px">↺ Restore built-in template</button>
@@ -1928,7 +1934,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1021-138';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1021-139';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -3025,11 +3031,37 @@ var DEFAULT_INVOICE_TEMPLATE=[
 '    <p style="font-size:13.5px;margin:14px 0 0">With gratitude,<br><b>Solura Home Care — Billing</b></p>',
 '  </div>',
 '</div>'].join('\n');
+/* 🔐 Deposit mode: same shell, deposit-shaped content — no service period,
+ * hours, or rate; instead one "what it covers" line. Own subject too. */
+var DEFAULT_DEPOSIT_SUBJECT='Deposit {invno} — Solura Home Care';
+var DEFAULT_DEPOSIT_TEMPLATE=[
+'<div style="max-width:640px;margin:0 auto;font-family:Georgia,\'Times New Roman\',serif;color:#2a2a28">',
+'  <div style="background:#1f4d3a;color:#fff;padding:26px 30px;border-radius:10px 10px 0 0">',
+'    <div style="font-size:21px;font-weight:700;letter-spacing:.3px">Solura Home Care</div>',
+'    <div style="font-size:12px;opacity:.85;margin-top:4px">Licensed Ohio Home Care · License 4574HHN · (216) 770-4886</div>',
+'  </div>',
+'  <div style="border:1px solid #ddd;border-top:none;padding:26px 30px;border-radius:0 0 10px 10px;background:#fffdf8">',
+'    <div style="font-size:17px;font-weight:700;margin-bottom:2px">Deposit {invno}</div>',
+'    <div style="font-size:12.5px;color:#777;margin-bottom:18px">Issued {date}</div>',
+'    <p style="font-size:14px;line-height:1.55;margin:0 0 16px">Dear {dm},</p>',
+'    <p style="font-size:14px;line-height:1.55;margin:0 0 18px">Thank you for trusting Solura with {pt}’s care. This deposit reserves {pt}’s start with us.</p>',
+'    <table style="width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:18px">',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700;width:45%;font-size:15px">Deposit amount</td><td style="padding:9px 12px;border:1px solid #e4ddcf;font-weight:700;font-size:15px">{amount}</td></tr>',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">How it applies</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{depositfor}</td></tr>',
+'      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Due date</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{due}</td></tr>',
+'    </table>',
+'    {notes}',
+'    <p style="font-size:13.5px;line-height:1.55;margin:18px 0 0">Questions? Just reply to this email or call (216) 770-4886.</p>',
+'    <p style="font-size:13.5px;margin:14px 0 0">With gratitude,<br><b>Solura Home Care — Billing</b></p>',
+'  </div>',
+'</div>'].join('\n');
 function invoiceCfg(){
   return {
     from:String(cfg('billingFrom')||'').trim()||DEFAULT_INVOICE_FROM,
     subject:String(cfg('invoiceSubject')||'').trim()||DEFAULT_INVOICE_SUBJECT,
-    template:String(cfg('invoiceTemplate')||'').trim()||DEFAULT_INVOICE_TEMPLATE
+    template:String(cfg('invoiceTemplate')||'').trim()||DEFAULT_INVOICE_TEMPLATE,
+    depositSubject:String(cfg('depositSubject')||'').trim()||DEFAULT_DEPOSIT_SUBJECT,
+    depositTemplate:String(cfg('depositTemplate')||'').trim()||DEFAULT_DEPOSIT_TEMPLATE
   };
 }
 function isOnService(st){var s=lc(st);return s.indexOf('on service')>-1||s.indexOf('service')===0;}
@@ -3117,23 +3149,20 @@ function fillInvoiceTokens(tpl,f){
     .replace(/\{subtotal\}/gi,isNaN(subN)?'':fmtMoney(subN))
     .replace(/\{discount\}/gi,dRes.total>0?fmtMoney(dRes.total):'')
     .replace(/\{discountrow\}/gi,discountRow)
+    .replace(/\{depositfor\}/gi,escapeHtml(String(f.depositfor||'').trim()||'Applied in full toward your first invoice'))
     .replace(/\{notes\}/gi,notesBlock);
 }
-/* ── 💰 "How to pay" block: rides EVERY invoice (deposits included) ──
- * Zelle to the billing mailbox with the QR, the standing "put the invoice
- * number in the Zelle memo" line, and card options: a reusable Chase
- * payment link from Settings, and — when this client's card is on file —
- * the advance notice that we'll run that card on the due date. Chase has
- * no public API, so the link is created once in Chase Business Online
- * (Collect payments → Payment links) and pasted into Settings. */
+/* ── 💰 "How to pay" block: rides EVERY invoice and deposit ──
+ * Zelle to the billing mailbox with the QR, plus the standing "put the
+ * invoice number in the Zelle payment note" line. Card handling is gone
+ * on purpose (B-1021-139): a proper card processor with a real API comes
+ * later — until then card payers simply reply and it's handled by hand. */
 var ZELLE_QR_URL='https://apply.solurahomecare.com/images/zelle-qr.png';
 function invoicePaymentBlock(o){
   o=o||{};
   var zelle=String(o.zelle||'billing@solurahomecare.com').trim();
   var invno=String(o.invno||'').trim();
-  var cardLink=String(o.cardLink||'').trim();
-  var due=String(o.due||'').trim();
-  var h='<div style="max-width:640px;margin:14px auto 0;font-family:Georgia,\'Times New Roman\',serif;color:#2a2a28;border:1px solid #ddd;border-radius:10px;background:#fffdf8;padding:20px 28px">'
+  return '<div style="max-width:640px;margin:14px auto 0;font-family:Georgia,\'Times New Roman\',serif;color:#2a2a28;border:1px solid #ddd;border-radius:10px;background:#fffdf8;padding:20px 28px">'
     +'<div style="font-size:15px;font-weight:700;color:#1f4d3a;margin-bottom:12px">How to pay</div>'
     +'<table style="width:100%;border-collapse:collapse"><tr>'
     +'<td style="vertical-align:top;padding-right:16px">'
@@ -3141,16 +3170,9 @@ function invoicePaymentBlock(o){
       +(invno?'<div style="font-size:13.5px;line-height:1.6;margin-top:8px;background:#f6f1e6;border:1px solid #e4ddcf;border-radius:8px;padding:9px 12px"><b>Paying by Zelle?</b> Please put invoice <b>'+escapeHtml(invno)+'</b> in the payment note, so we can match your payment right away.</div>':'')
     +'</td>'
     +'<td style="vertical-align:top;width:110px"><img src="'+ZELLE_QR_URL+'" width="104" height="104" alt="Zelle QR code for '+escapeHtml(zelle)+'" style="display:block;border:1px solid #e4ddcf;border-radius:8px"></td>'
-    +'</tr></table>';
-  if(o.cardOnFile){
-    h+='<div style="font-size:13.5px;line-height:1.6;margin-top:12px;border-top:1px solid #e4ddcf;padding-top:12px"><b>Card on file:</b> to save you a step, we will process this invoice on the card you have on file with our office'+(due?(' on <b>'+escapeHtml(due)+'</b>'):' on the due date')+'. If you would rather pay another way this time, just reply to this email'+(zelle?' or send the Zelle':'')+' before then.</div>';
-  }else if(cardLink){
-    h+='<div style="margin-top:12px;border-top:1px solid #e4ddcf;padding-top:12px"><a href="'+escapeHtml(cardLink)+'" style="display:inline-block;background:#1f4d3a;color:#ffffff;text-decoration:none;font-size:13.5px;font-weight:700;padding:10px 20px;border-radius:8px">Pay by card</a><span style="font-size:12.5px;color:#777;margin-left:10px">secure link through our bank</span></div>';
-  }else{
-    h+='<div style="font-size:13px;color:#777;margin-top:12px;border-top:1px solid #e4ddcf;padding-top:12px">Prefer to pay by card? Reply to this email and we will send you a secure card link.</div>';
-  }
-  h+='</div>';
-  return h;
+    +'</tr></table>'
+    +'<div style="font-size:13px;color:#777;margin-top:12px;border-top:1px solid #e4ddcf;padding-top:12px">Prefer to pay another way? Just reply to this email and we will arrange it.</div>'
+    +'</div>';
 }
 // {payment} in a custom template places the block; templates without the
 // token get it appended after the invoice card, so EVERY invoice carries it.
@@ -4264,6 +4286,23 @@ function invRecalcAmount(){
   var sub=ih*ir;
   ia.value=String(Math.round(Math.max(0,sub-resolveDiscounts(_invDiscounts,sub).total)*100)/100);
 }
+var _invMode='service';
+// 🔐⇄🧾 The toggle: deposit mode hides service-only fields (period, hours,
+// rate, HHA pull, discounts) and shows the one deposit field instead.
+function invApplyMode(mode){
+  _invMode=mode==='deposit'?'deposit':'service';
+  var dep=_invMode==='deposit';
+  document.querySelectorAll('#modal-invoice .inv-svc').forEach(function(n){n.style.display=dep?'none':'';});
+  document.querySelectorAll('#modal-invoice .inv-dep').forEach(function(n){n.style.display=dep?'':'none';});
+  var sb=el('inv-mode-service'),db=el('inv-mode-deposit');
+  if(sb){sb.style.background=dep?'none':'#1f4d3a';sb.style.color=dep?'var(--mid)':'#fff';}
+  if(db){db.style.background=dep?'#1f4d3a':'none';db.style.color=dep?'#fff':'var(--mid)';}
+  var al=el('inv-amount-label');if(al)al.textContent=dep?'Deposit amount ($)':'Amount due ($)';
+  var nl=el('inv-no-label');if(nl)nl.textContent=dep?'Deposit #':'Invoice #';
+  // Same counter, different prefix — only swapped while the number is untouched
+  var no=el('inv-no');
+  if(no&&/^(INV|DEP)-\d+$/.test(no.value))no.value=(dep?'DEP-':'INV-')+no.value.replace(/^(INV|DEP)-/,'');
+}
 function openInvoice(ri){
   _invRi=ri;_invAmountTouched=false;
   _invDiscounts=[];_invAtts=[];
@@ -4287,20 +4326,24 @@ function openInvoice(ri){
     if(pinRate)el('inv-rate').value=pinRate;
   }catch(_){}
   el('inv-notes').value='';
-  // 💳 Card-on-file sticks per CLIENT (identity-keyed, like the pinned rate)
-  try{var cf9=leadMapGet(leadFactsAll(),ri)||{};el('inv-card-file').checked=cf9.cardOnFile==='yes';}catch(_){}
+  var df9=el('inv-depfor');if(df9)df9.value='';
+  invApplyMode('service'); // every open starts as a service invoice
   el('inv-out').textContent='';
   if(el('inv-hha-out'))el('inv-hha-out').textContent='';
   el('modal-invoice').classList.add('open');
 }
 function invFields(){
+  var dep=_invMode==='deposit';
   var f={
     invno:String(el('inv-no').value||'').trim(),
-    from:String(el('inv-from-date').value||'').trim(),
-    to:String(el('inv-to-date').value||'').trim(),
-    hours:String(el('inv-hours').value||'').trim(),
-    rate:String(el('inv-rate').value||'').trim(),
-    discounts:_invDiscounts.map(function(d){return {label:d.label,value:d.value};}),
+    mode:_invMode,
+    // Deposit fields: service period, hours, rate and discounts don't apply
+    from:dep?'':String(el('inv-from-date').value||'').trim(),
+    to:dep?'':String(el('inv-to-date').value||'').trim(),
+    hours:dep?'':String(el('inv-hours').value||'').trim(),
+    rate:dep?'':String(el('inv-rate').value||'').trim(),
+    discounts:dep?[]:_invDiscounts.map(function(d){return {label:d.label,value:d.value};}),
+    depositfor:dep?String((el('inv-depfor')||{}).value||'').trim():'',
     amount:String(el('inv-amount').value||'').trim(),
     due:String(el('inv-due').value||'').trim(),
     notes:String(el('inv-notes').value||''),
@@ -4319,18 +4362,14 @@ function invFields(){
 function invBuildEmail(){
   var ic=invoiceCfg();
   var f=invFields();
+  var dep=f.mode==='deposit';
   var names=getNames(_invRi);
-  var html=fillNames(fillInvoiceTokens(ic.template,f),names);
-  var subj=fillNames(fillInvoiceTokens(ic.subject,f),names);
-  // 💰 Every invoice carries the "How to pay" block: Zelle + QR, the
-  // invoice-number-in-the-memo line, and card link / card-on-file notice.
-  var cardOnFile=!!(el('inv-card-file')&&el('inv-card-file').checked);
-  html=applyPaymentBlock(html,invoicePaymentBlock({
-    invno:f.invno,zelle:ic.from,
-    cardLink:String(cfg('cardPayLink')||'').trim(),
-    cardOnFile:cardOnFile,due:invPrettyDate(f.due)
-  }));
-  return {to:String(el('inv-to').value||'').trim(),from:ic.from,subject:subj,html:html,fields:f,cardOnFile:cardOnFile};
+  var html=fillNames(fillInvoiceTokens(dep?ic.depositTemplate:ic.template,f),names);
+  var subj=fillNames(fillInvoiceTokens(dep?ic.depositSubject:ic.subject,f),names);
+  // 💰 Every invoice AND deposit carries the "How to pay" block:
+  // Zelle + QR + the invoice-number-in-the-payment-note line.
+  html=applyPaymentBlock(html,invoicePaymentBlock({invno:f.invno,zelle:ic.from}));
+  return {to:String(el('inv-to').value||'').trim(),from:ic.from,subject:subj,html:html,fields:f};
 }
 function invPreview(){
   if(_invRi<0)return;
@@ -4376,7 +4415,7 @@ async function invSend(){
     // Log it and advance the invoice counter (background — hash-skip safe)
     try{
       trk.record(logComms(commsEntryForLead(_invRi,{direction:'out',channel:'email',contact:em.to,
-        subject:em.subject,preview:'Invoice '+em.fields.invno+' — '+(fmtMoney(em.fields.amount)||em.fields.amount)+' due '+em.fields.due+(em.cardOnFile?' · 💳 card-on-file notice included':''),
+        subject:em.subject,preview:(em.fields.mode==='deposit'?'Deposit ':'Invoice ')+em.fields.invno+' — '+(fmtMoney(em.fields.amount)||em.fields.amount)+' due '+em.fields.due,
         outcome:'invoice-sent',messageId:trk.id})));
     }catch(_){}
     try{
@@ -4386,7 +4425,7 @@ async function invSend(){
     }catch(_){}
     traceOp({kind:'invoice-sent',to:em.to,from:em.from,no:em.fields.invno,amount:em.fields.amount});
     el('modal-invoice').classList.remove('open');
-    toast('🧾 Invoice '+em.fields.invno+' sent from '+em.from);
+    toast((em.fields.mode==='deposit'?'🔐 Deposit ':'🧾 Invoice ')+em.fields.invno+' sent from '+em.from);
     _invRi=-1;_invAtts=[];_invDiscounts=[];
   }catch(e){
     out.style.color='var(--red)';
@@ -8211,17 +8250,6 @@ document.addEventListener('input',function(ev){
     // storage eviction, and follows you across devices (private OneDrive
     // file — never the public page source).
     try{enginesDoc.config=enginesDoc.config||{};enginesDoc.config.ghlApiKey=t.value.trim();stMarkDirty();}catch(_){}
-  }
-  // 💳 Card-on-file toggles persist per client the moment they're clicked
-  if(t&&t.id==='inv-card-file'&&_invRi>=0){
-    try{
-      var lf0=leadFactsAll();
-      var facts0=leadMapGet(lf0,_invRi)||{};
-      facts0.cardOnFile=t.checked?'yes':'';
-      leadMapSet(lf0,_invRi,facts0);
-      saveEnginesDoc().catch(function(){});
-      toast(t.checked?'💳 Card on file noted — every invoice to this client now carries the advance notice':'💳 Card-on-file removed for this client');
-    }catch(_){}
   }
   // Settings config fields → staged into enginesDoc.config, saved via Save bar
   if(t&&t.dataset&&t.dataset.cfg){
@@ -15538,6 +15566,7 @@ function onClick(ev){
       break;
     case 'intake-test': intakeTestConnection(); break;
     case 'formdrop-refresh': loadFormDrop(); break;
+    case 'inv-mode': invApplyMode(t.dataset.mode); break;
     case 'open-settings': openSettings(); break;
     case 'es-new-engine': openPresetPicker(); break;
     case 'ee-preset': pickPreset(t.dataset.preset); break;

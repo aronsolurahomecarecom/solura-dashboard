@@ -18,7 +18,7 @@ const src = html.slice(html.indexOf('*/', b) + 2, e);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cfgStore = {};
 const mk = new Function('cfg', 'lc', 'escapeHtml',
-  src + '\nreturn {DEFAULT_INVOICE_FROM,DEFAULT_INVOICE_SUBJECT,DEFAULT_INVOICE_TEMPLATE,invoiceCfg,isOnService,fmtMoney,invPrettyDate,fillInvoiceTokens,resolveDiscount,resolveDiscounts,invoicePaymentBlock,applyPaymentBlock,hhaNameMatch,hhaParseDate,hhaParseHours,hhaParseMoney,parseHhaSheet,sumHhaHours};');
+  src + '\nreturn {DEFAULT_INVOICE_FROM,DEFAULT_INVOICE_SUBJECT,DEFAULT_INVOICE_TEMPLATE,DEFAULT_DEPOSIT_SUBJECT,DEFAULT_DEPOSIT_TEMPLATE,invoiceCfg,isOnService,fmtMoney,invPrettyDate,fillInvoiceTokens,resolveDiscount,resolveDiscounts,invoicePaymentBlock,applyPaymentBlock,hhaNameMatch,hhaParseDate,hhaParseHours,hhaParseMoney,parseHhaSheet,sumHhaHours};');
 const I = mk(k => cfgStore[k], v => String(v || '').toLowerCase().trim(), esc);
 
 // ── status gate ──
@@ -191,38 +191,49 @@ ok(!/trackingPixelHtml\(_invRi/.test(html) && !/_trkPx/.test(src), 'invoices car
   ok(/inv='';\s*\/\/ no duplicate small 🧾/.test(bb), 'no duplicate small 🧾 in the alts row when it is primary');
 }
 
-// ── 💰 how-to-pay block (B-1021-138): Zelle + QR + memo line + card ──
+// ── 💰 how-to-pay block (B-1021-139): Zelle + QR + memo line, no card automation ──
 {
-  const blk = I.invoicePaymentBlock({ invno: 'INV-1042', zelle: 'billing@solurahomecare.com', cardLink: '', cardOnFile: false, due: 'Nov 4, 2026' });
+  const blk = I.invoicePaymentBlock({ invno: 'INV-1042', zelle: 'billing@solurahomecare.com' });
   ok(/How to pay/.test(blk) && /billing@solurahomecare\.com/.test(blk), 'the block names Zelle to the billing mailbox');
   ok(/apply\.solurahomecare\.com\/images\/zelle-qr\.png/.test(blk), 'the hosted Zelle QR rides along (data URIs get stripped by mail clients)');
   ok(/Paying by Zelle\?/.test(blk) && /invoice <b>INV-1042<\/b> in the payment note/.test(blk), 'the STANDING line: put the invoice number in the Zelle note');
-  ok(/Prefer to pay by card\? Reply/.test(blk), 'no card link configured → invite a reply instead');
-
-  const withLink = I.invoicePaymentBlock({ invno: 'INV-1', cardLink: 'https://chase.example/paylink', cardOnFile: false });
-  ok(/href="https:\/\/chase\.example\/paylink"/.test(withLink) && />Pay by card<\/a>/.test(withLink), 'a configured Chase link renders as a Pay-by-card button');
-
-  const onFile = I.invoicePaymentBlock({ invno: 'INV-2', cardLink: 'https://chase.example/paylink', cardOnFile: true, due: 'Nov 4, 2026' });
-  ok(/Card on file:/.test(onFile) && /on <b>Nov 4, 2026<\/b>/.test(onFile) && /rather pay another way this time, just reply/.test(onFile), 'card-on-file = advance NOTICE naming the date and the way out');
-  ok(!/>Pay by card<\/a>/.test(onFile), 'card-on-file replaces the pay button — they are not asked to pay twice');
+  ok(/Prefer to pay another way\? Just reply/.test(blk), 'other payment = a reply, handled by a human');
+  ok(!/Pay by card/.test(blk) && !/[Cc]ard on file/.test(blk), 'NO card buttons or card-on-file notices — automation removed until a real processor is picked');
 
   const esc9 = I.invoicePaymentBlock({ invno: '<x>', zelle: '<z>' });
   ok(esc9.indexOf('<x>') === -1 && esc9.indexOf('<z>') === -1, 'field values are HTML-escaped');
 
   ok(I.applyPaymentBlock('<p>a</p>{payment}<p>b</p>', '<BLK>') === '<p>a</p><BLK><p>b</p>', '{payment} in a custom template places the block');
   ok(I.applyPaymentBlock('<p>no token</p>', '<BLK>') === '<p>no token</p>\n<BLK>', 'templates without the token get it APPENDED — every invoice carries it');
+  ok(!/cardPayLink|inv-card-file|cardOnFile/.test(html), 'every trace of the card-on-file/Chase-link automation is gone');
 }
 
-// ── wiring locks: build path, checkbox, persistence, settings ──
+// ── 🔐 deposit mode ──
 {
-  ok(/html=applyPaymentBlock\(html,invoicePaymentBlock\(\{/.test(html) && /cardLink:String\(cfg\('cardPayLink'\)\|\|''\)\.trim\(\)/.test(html), 'invBuildEmail runs EVERY invoice through the payment block with the Settings card link');
-  ok(/id="inv-card-file"/.test(html), 'the 💳 card-on-file checkbox lives in the invoice modal');
-  ok(/cf9\.cardOnFile==='yes'/.test(html), 'opening an invoice restores the client\'s sticky card-on-file state');
-  ok(/t\.id==='inv-card-file'&&_invRi>=0/.test(html) && /facts0\.cardOnFile=t\.checked\?'yes':''/.test(html) && /leadMapSet\(lf0,_invRi,facts0\)/.test(html), 'toggling it persists per client identity (survives sheet re-sorts), saved immediately');
-  ok(/data-cfg="cardPayLink"/.test(html) && /Chase Business Online → Collect payments → Payment links/.test(html), 'Settings has the Chase link field and says exactly where the link comes from');
-  ok(/Chase has no API/.test(html), 'the settings copy is honest: no Chase API, the link is made once by hand');
-  ok(/card-on-file notice included/.test(html), 'the comms log says when an invoice carried the auto-charge notice');
-  ok(/The charge itself stays a human step in Chase\./.test(html), 'auto-charge is NOTICE only — money never moves without a human');
+  ok(/data-action="inv-mode" data-mode="deposit"/.test(html) && /data-action="inv-mode" data-mode="service"/.test(html), 'the service/deposit toggle sits at the top of the invoice form');
+  ok(/case 'inv-mode': invApplyMode\(t\.dataset\.mode\); break;/.test(html), 'the toggle is wired');
+  const am = html.slice(html.indexOf('function invApplyMode'), html.indexOf('function openInvoice'));
+  ok(/\.inv-svc'\)\.forEach\(function\(n\)\{n\.style\.display=dep\?'none':'';\}\)/.test(am), 'deposit mode hides the service-only fields (period, hours, rate, discounts, HHA pull)');
+  ok(/\.inv-dep'\)\.forEach\(function\(n\)\{n\.style\.display=dep\?'':'none';\}\)/.test(am), 'and shows the deposit-only "what it covers" field');
+  ok(/\(dep\?'DEP-':'INV-'\)/.test(am) && /\/\^\(INV\|DEP\)-\\d\+\$\//.test(am), 'DEP- numbering on the same counter, only while the number is untouched');
+  ok((html.match(/class="la-grid g2 inv-svc"/g) || []).length === 2 && /class="inv-svc" style="margin-bottom:10px">\s*<input type="file" id="inv-hha-file"/.test(html) && /class="la-f inv-svc"/.test(html), 'period, hours/rate, HHA pull and discounts are all marked service-only');
+  ok(/class="la-f inv-dep"/.test(html) && /id="inv-depfor"/.test(html) && /Applied in full toward your first invoice/.test(html), 'the deposit field exists with the sensible default');
+  ok(/invApplyMode\('service'\); \/\/ every open starts as a service invoice/.test(html), 'reopening always starts in service mode');
+
+  // The deposit template itself
+  ok(/Deposit \{invno\}/.test(I.DEFAULT_DEPOSIT_TEMPLATE) && /\{depositfor\}/.test(I.DEFAULT_DEPOSIT_TEMPLATE), 'deposit template: own heading + the how-it-applies row');
+  ok(!/Service period|Hours of care|Hourly rate|\{discountrow\}/.test(I.DEFAULT_DEPOSIT_TEMPLATE), 'deposit template has NO service rows');
+  ok(I.invoiceCfg().depositSubject === I.DEFAULT_DEPOSIT_SUBJECT, 'deposit subject default');
+  const dOut = I.fillInvoiceTokens(I.DEFAULT_DEPOSIT_TEMPLATE, { invno: 'DEP-1042', amount: '500', due: '2026-11-04', depositfor: '', date: '2026-10-21' });
+  ok(dOut.indexOf('DEP-1042') > -1 && dOut.indexOf('$500.00') > -1 && dOut.indexOf('Nov 4, 2026') > -1, 'deposit fill: number, money and due date land');
+  ok(dOut.indexOf('Applied in full toward your first invoice') > -1, 'blank "covers" field falls back to the default line');
+  const dOut2 = I.fillInvoiceTokens(I.DEFAULT_DEPOSIT_TEMPLATE, { invno: 'DEP-1', amount: '500', depositfor: 'Holds the <Nov> start date' });
+  ok(dOut2.indexOf('Holds the &lt;Nov&gt; start date') > -1, 'a typed "covers" line lands, HTML-escaped');
+
+  // Build path + comms
+  ok(/fillInvoiceTokens\(dep\?ic\.depositTemplate:ic\.template,f\)/.test(html) && /dep\?ic\.depositSubject:ic\.subject/.test(html), 'deposit mode sends the deposit template and subject');
+  ok(/from:dep\?'':/.test(html) && /discounts:dep\?\[\]:/.test(html), 'deposit sends strip the service-only values even if fields held leftovers');
+  ok(/em\.fields\.mode==='deposit'\?'Deposit ':'Invoice '/.test(html), 'the comms log says Deposit vs Invoice');
 }
 
 console.log('\nInvoicing: ' + PASS + ' passed, ' + FAIL + ' failed');
