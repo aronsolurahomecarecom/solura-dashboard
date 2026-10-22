@@ -191,21 +191,30 @@ ok(!/trackingPixelHtml\(_invRi/.test(html) && !/_trkPx/.test(src), 'invoices car
   ok(/inv='';\s*\/\/ no duplicate small 🧾/.test(bb), 'no duplicate small 🧾 in the alts row when it is primary');
 }
 
-// ── 💰 how-to-pay block (B-1021-139): Zelle + QR + memo line, no card automation ──
+// ── 💰 how-to-pay (B-1022-140): INSIDE the card, manual card link per send ──
 {
   const blk = I.invoicePaymentBlock({ invno: 'INV-1042', zelle: 'billing@solurahomecare.com' });
   ok(/How to pay/.test(blk) && /billing@solurahomecare\.com/.test(blk), 'the block names Zelle to the billing mailbox');
   ok(/apply\.solurahomecare\.com\/images\/zelle-qr\.png/.test(blk), 'the hosted Zelle QR rides along (data URIs get stripped by mail clients)');
   ok(/Paying by Zelle\?/.test(blk) && /invoice <b>INV-1042<\/b> in the payment note/.test(blk), 'the STANDING line: put the invoice number in the Zelle note');
-  ok(/Prefer to pay another way\? Just reply/.test(blk), 'other payment = a reply, handled by a human');
-  ok(!/Pay by card/.test(blk) && !/[Cc]ard on file/.test(blk), 'NO card buttons or card-on-file notices — automation removed until a real processor is picked');
+  ok(blk.indexOf('max-width:640px') === -1 && /^<div style="margin-top:18px;border-top:1px solid #e4ddcf/.test(blk), 'the block is an INNER section — it fits inside the invoice card, not a detached box');
+  ok(/Prefer to pay another way\? Just reply/.test(blk) && !/Pay by card/.test(blk), 'no link pasted = Zelle only, other ways by reply');
 
-  const esc9 = I.invoicePaymentBlock({ invno: '<x>', zelle: '<z>' });
-  ok(esc9.indexOf('<x>') === -1 && esc9.indexOf('<z>') === -1, 'field values are HTML-escaped');
+  const withLink = I.invoicePaymentBlock({ invno: 'INV-1', cardLink: 'https://pay.example/abc' });
+  ok(/href="https:\/\/pay\.example\/abc"/.test(withLink) && />Pay by card<\/a>/.test(withLink), 'a pasted link renders the Pay-by-card button');
+  ok(!/Prefer to pay another way/.test(withLink), 'the button replaces the reply line, not stacks on it');
 
-  ok(I.applyPaymentBlock('<p>a</p>{payment}<p>b</p>', '<BLK>') === '<p>a</p><BLK><p>b</p>', '{payment} in a custom template places the block');
-  ok(I.applyPaymentBlock('<p>no token</p>', '<BLK>') === '<p>no token</p>\n<BLK>', 'templates without the token get it APPENDED — every invoice carries it');
-  ok(!/cardPayLink|inv-card-file|cardOnFile/.test(html), 'every trace of the card-on-file/Chase-link automation is gone');
+  const esc9 = I.invoicePaymentBlock({ invno: '<x>', zelle: '<z>', cardLink: '"><script>' });
+  ok(esc9.indexOf('<x>') === -1 && esc9.indexOf('<z>') === -1 && esc9.indexOf('"><script>') === -1, 'field values AND the link are HTML-escaped');
+
+  ok(/\{payment\}/.test(I.DEFAULT_INVOICE_TEMPLATE) && /\{payment\}/.test(I.DEFAULT_DEPOSIT_TEMPLATE), 'BOTH built-in templates carry the {payment} slot inside the card');
+  ok(I.DEFAULT_INVOICE_TEMPLATE.indexOf('{payment}') > I.DEFAULT_INVOICE_TEMPLATE.indexOf('{notes}'), 'it sits after the notes, before the sign-off');
+  ok(I.applyPaymentBlock('<p>a</p>{payment}<p>b</p>', '<BLK>') === '<p>a</p><BLK><p>b</p>', '{payment} places the block inline');
+  const appended = I.applyPaymentBlock('<p>no token</p>', '<BLK>');
+  ok(/^<p>no token<\/p>\n<div style="max-width:640px/.test(appended) && appended.indexOf('<BLK>') > -1, 'a custom template without the token still gets the block, wrapped as its own matching card');
+  ok(!/cardPayLink|inv-card-file|cardOnFile/.test(html), 'no trace of the removed card-on-file/Chase-settings automation');
+  ok(/id="inv-cardlink"/.test(html) && /cl9\.value=''; \/\/ card link is per-send, by hand/.test(html), 'the 💳 link field lives on the invoice form and clears on every open — manual, per send');
+  ok(/cardLink:String\(\(el\('inv-cardlink'\)\|\|\{\}\)\.value\|\|''\)\.trim\(\)/.test(html), 'the pasted link feeds the block at build time');
 }
 
 // ── 🔐 deposit mode ──

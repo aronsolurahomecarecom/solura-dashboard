@@ -1036,6 +1036,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <button data-action="inv-attach" style="padding:6px 12px;background:none;border:1.5px dashed var(--border);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">📎 Attach file(s)</button>
       </div>
       <div class="la-f" style="margin-bottom:12px"><label>Notes (optional — appears as a highlighted block on the invoice)</label><textarea id="inv-notes" rows="3" style="width:100%" placeholder="e.g. Includes the two extra weekend shifts we discussed."></textarea></div>
+      <div class="la-f" style="margin-bottom:12px"><label>💳 Card payment link (optional — paste one and the How-to-pay box shows a Pay by card button)</label><input type="url" id="inv-cardlink" placeholder="https://… (blank = Zelle only)"></div>
       <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end">
         <button data-action="inv-preview" style="padding:9px 14px;background:none;border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">👁 Preview</button>
         <button data-action="inv-send" style="padding:9px 18px;background:linear-gradient(135deg,#1f4d3a,#2c6b52);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📤 Send invoice</button>
@@ -1391,7 +1392,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         </div>
         <div class="la-f" style="margin-bottom:10px"><label>Email subject</label><input type="text" data-cfg="invoiceSubject"></div>
         <h4 class="st-h2">💰 How-to-pay block (automatic on every invoice and deposit)</h4>
-        <p class="st-p">Every invoice and deposit automatically ends with a <b>How to pay</b> block: Zelle to the billing mailbox with its QR code, plus the standing reminder to put the <b>invoice number in the Zelle payment note</b>. Put <code style="font-size:11px">{payment}</code> in the template to position it yourself; otherwise it lands right after the invoice. Card payments are deliberately unplumbed for now — when a proper card processor with a real API is picked, it slots in here.</p>
+        <p class="st-p">Every invoice and deposit carries a <b>How to pay</b> section inside the card: Zelle to the billing mailbox with its QR code, plus the standing reminder to put the <b>invoice number in the Zelle payment note</b>. The built-in templates place it via the <code style="font-size:11px">{payment}</code> token — keep that token if you customize; a template without it gets the block as its own card below instead. <b>Card payments:</b> paste a link into the 💳 field on the invoice form (per send, by hand) and the section shows a Pay-by-card button. Proper card-processor integration comes when one is picked.</p>
         <p class="st-p" style="font-size:11.5px"><b>🔐 Deposit mode:</b> the toggle at the top of the invoice form. It hides the service-only fields (period, hours, rate, discounts, HHAeXchange pull), numbers it <b>DEP-</b> on the same counter, and sends a deposit-shaped email instead — amount, how it applies (default: applied in full toward the first invoice), due date.</p>
         <label class="ee-lbl">Invoice template (HTML — edits save with the Save bar)</label>
         <textarea data-cfg="invoiceTemplate" rows="12" style="width:100%;font-family:monospace;font-size:11.5px"></textarea>
@@ -1934,7 +1935,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1021-139';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1022-140';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -3027,6 +3028,7 @@ var DEFAULT_INVOICE_TEMPLATE=[
 '      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Due date</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{due}</td></tr>',
 '    </table>',
 '    {notes}',
+'    {payment}',
 '    <p style="font-size:13.5px;line-height:1.55;margin:18px 0 0">Questions about this invoice? Just reply to this email or call (216) 770-4886.</p>',
 '    <p style="font-size:13.5px;margin:14px 0 0">With gratitude,<br><b>Solura Home Care — Billing</b></p>',
 '  </div>',
@@ -3051,6 +3053,7 @@ var DEFAULT_DEPOSIT_TEMPLATE=[
 '      <tr><td style="padding:9px 12px;border:1px solid #e4ddcf;background:#f6f1e6;font-weight:700">Due date</td><td style="padding:9px 12px;border:1px solid #e4ddcf">{due}</td></tr>',
 '    </table>',
 '    {notes}',
+'    {payment}',
 '    <p style="font-size:13.5px;line-height:1.55;margin:18px 0 0">Questions? Just reply to this email or call (216) 770-4886.</p>',
 '    <p style="font-size:13.5px;margin:14px 0 0">With gratitude,<br><b>Solura Home Care — Billing</b></p>',
 '  </div>',
@@ -3152,17 +3155,21 @@ function fillInvoiceTokens(tpl,f){
     .replace(/\{depositfor\}/gi,escapeHtml(String(f.depositfor||'').trim()||'Applied in full toward your first invoice'))
     .replace(/\{notes\}/gi,notesBlock);
 }
-/* ── 💰 "How to pay" block: rides EVERY invoice and deposit ──
- * Zelle to the billing mailbox with the QR, plus the standing "put the
- * invoice number in the Zelle payment note" line. Card handling is gone
- * on purpose (B-1021-139): a proper card processor with a real API comes
- * later — until then card payers simply reply and it's handled by hand. */
+/* ── 💰 "How to pay": lives INSIDE the invoice card ──
+ * Zelle to the billing mailbox with the QR, the standing "put the invoice
+ * number in the Zelle payment note" line, and — only when a card link was
+ * pasted on the form for THIS send — a Pay-by-card button. No automation:
+ * the link comes from wherever Meir made it, by hand, until a proper card
+ * processor with a real API is picked. Both built-in templates carry the
+ * {payment} slot; a custom template without it gets the block as its own
+ * matching card right below the invoice instead. */
 var ZELLE_QR_URL='https://apply.solurahomecare.com/images/zelle-qr.png';
 function invoicePaymentBlock(o){
   o=o||{};
   var zelle=String(o.zelle||'billing@solurahomecare.com').trim();
   var invno=String(o.invno||'').trim();
-  return '<div style="max-width:640px;margin:14px auto 0;font-family:Georgia,\'Times New Roman\',serif;color:#2a2a28;border:1px solid #ddd;border-radius:10px;background:#fffdf8;padding:20px 28px">'
+  var cardLink=String(o.cardLink||'').trim();
+  return '<div style="margin-top:18px;border-top:1px solid #e4ddcf;padding-top:16px">'
     +'<div style="font-size:15px;font-weight:700;color:#1f4d3a;margin-bottom:12px">How to pay</div>'
     +'<table style="width:100%;border-collapse:collapse"><tr>'
     +'<td style="vertical-align:top;padding-right:16px">'
@@ -3171,13 +3178,17 @@ function invoicePaymentBlock(o){
     +'</td>'
     +'<td style="vertical-align:top;width:110px"><img src="'+ZELLE_QR_URL+'" width="104" height="104" alt="Zelle QR code for '+escapeHtml(zelle)+'" style="display:block;border:1px solid #e4ddcf;border-radius:8px"></td>'
     +'</tr></table>'
-    +'<div style="font-size:13px;color:#777;margin-top:12px;border-top:1px solid #e4ddcf;padding-top:12px">Prefer to pay another way? Just reply to this email and we will arrange it.</div>'
+    +(cardLink
+      ?'<div style="margin-top:12px"><a href="'+escapeHtml(cardLink)+'" style="display:inline-block;background:#1f4d3a;color:#ffffff;text-decoration:none;font-size:13.5px;font-weight:700;padding:10px 20px;border-radius:8px">Pay by card</a><span style="font-size:12.5px;color:#777;margin-left:10px">secure card link</span></div>'
+      :'<div style="font-size:13px;color:#777;margin-top:12px">Prefer to pay another way? Just reply to this email and we will arrange it.</div>')
     +'</div>';
 }
-// {payment} in a custom template places the block; templates without the
-// token get it appended after the invoice card, so EVERY invoice carries it.
+// {payment} in a template places the block INSIDE the invoice card (both
+// built-ins carry it); a custom template without the token still gets the
+// block — wrapped as its own matching card right below the invoice.
 function applyPaymentBlock(html,block){
-  return /\{payment\}/i.test(html)?html.replace(/\{payment\}/gi,block):(html+'\n'+block);
+  if(/\{payment\}/i.test(html))return html.replace(/\{payment\}/gi,block);
+  return html+'\n<div style="max-width:640px;margin:14px auto 0;font-family:Georgia,\'Times New Roman\',serif;color:#2a2a28;border:1px solid #ddd;border-radius:10px;background:#fffdf8;padding:2px 28px 20px">'+block+'</div>';
 }
 /* ⏱ HHAeXchange hours import: no public self-service API exists (access is
  * ticket-gated through HHAX support), so hours arrive via their report
@@ -4327,6 +4338,7 @@ function openInvoice(ri){
   }catch(_){}
   el('inv-notes').value='';
   var df9=el('inv-depfor');if(df9)df9.value='';
+  var cl9=el('inv-cardlink');if(cl9)cl9.value=''; // card link is per-send, by hand
   invApplyMode('service'); // every open starts as a service invoice
   el('inv-out').textContent='';
   if(el('inv-hha-out'))el('inv-hha-out').textContent='';
@@ -4366,9 +4378,11 @@ function invBuildEmail(){
   var names=getNames(_invRi);
   var html=fillNames(fillInvoiceTokens(dep?ic.depositTemplate:ic.template,f),names);
   var subj=fillNames(fillInvoiceTokens(dep?ic.depositSubject:ic.subject,f),names);
-  // 💰 Every invoice AND deposit carries the "How to pay" block:
-  // Zelle + QR + the invoice-number-in-the-payment-note line.
-  html=applyPaymentBlock(html,invoicePaymentBlock({invno:f.invno,zelle:ic.from}));
+  // 💰 Every invoice AND deposit carries the "How to pay" block: Zelle + QR
+  // + the invoice-number-in-the-payment-note line, and a Pay-by-card button
+  // only when a link was pasted on the form for this send.
+  html=applyPaymentBlock(html,invoicePaymentBlock({invno:f.invno,zelle:ic.from,
+    cardLink:String((el('inv-cardlink')||{}).value||'').trim()}));
   return {to:String(el('inv-to').value||'').trim(),from:ic.from,subject:subj,html:html,fields:f};
 }
 function invPreview(){
