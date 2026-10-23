@@ -671,6 +671,18 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
 </div>
 
 <!-- SMS Modal -->
+<div class="modal" id="modal-nlcompose">
+  <div class="mbox" style="max-width:1100px;width:min(96vw,1100px)">
+    <div class="mhead"><div class="mtitle">✍ Newsletter composer — solurahomecare.com</div><button class="mclose" data-action="close-modal" data-mid="modal-nlcompose">✕</button></div>
+    <div class="mbody" style="padding:0">
+      <!-- src is set on first open, so the site never loads until needed.
+           The composer only allows this origin to frame it; sign in once
+           inside with the WEBSITE admin login (stays in this browser). -->
+      <iframe id="nlcompose-frame" title="Newsletter composer" style="width:100%;height:80vh;border:0;display:block;border-radius:0 0 14px 14px"></iframe>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="modal-sms">
   <div class="mbox" style="max-width:500px">
     <div class="mhead"><div class="mtitle">Send SMS</div><button class="mclose" data-action="close-modal" data-mid="modal-sms">✕</button></div>
@@ -1656,7 +1668,17 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       </section>
 
       <section class="st-sec" id="st-sec-newsletter" hidden>
-        <h3 class="st-h">📰 Newsletter (Resend Broadcasts)</h3>
+        <h3 class="st-h">📰 Newsletter</h3>
+        <h4 class="st-h2">✍ Composer &amp; personal links (solurahomecare.com)</h4>
+        <p class="st-p">Write the week's letter in the website composer; it publishes instantly at <code style="font-size:11px">solurahomecare.com/newsletter/…</code>. Pressing <b>Publish</b> there (or <b>Use for a send</b> on an older edition) hands the edition to this dashboard. Sending makes <b>one personal link per lead</b> and emails it through Resend; the website then reports who opened and who actually <b>read</b> (8 seconds on the page, or scrolled 40%). <b>Read is the real signal</b> — email security scanners sometimes visit links and show as opens, but they never read. The website never learns who a code belongs to; only this dashboard knows.</p>
+        <div class="st-field" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button data-action="nlhub-compose" class="st-btn-sky">✍ Open composer</button>
+          <span style="font-size:11.5px;color:var(--soft)">Sign in once inside the frame with the website admin login — it stays in this browser.</span>
+        </div>
+        <div id="nlhub-edition" style="margin-bottom:10px"></div>
+        <div id="nlhub-send-out" style="font-size:12px;color:var(--mid);white-space:pre-line;margin-bottom:10px"></div>
+        <div id="nlhub-sends" style="margin-bottom:18px"></div>
+        <h4 class="st-h2">Delivery (Resend)</h4>
         <p class="st-p">Only the newsletter sends through Resend from <code style="font-size:11px">hello.solurahomecare.com</code> — every sequence and one-to-one email stays on Outlook exactly as today. Resend hosts the entire unsubscribe flow (headers, page, suppression); opt-outs sync back into column AD and those leads exit ALL automated outreach. Calls relay through your tracking worker (v6.2+), so the Resend API key lives only as a Cloudflare secret named <code style="font-size:11px">RESEND_API_KEY</code> — add it in the worker's Settings → Variables. Never paste it here.</p>
         <div class="st-field">
           <label class="ee-lbl">Segment ID <span style="font-weight:400;color:var(--soft)">(Resend now has ONE audience per account; broadcasts target a Segment — Test connection finds yours, or creates one)</span></label>
@@ -1935,7 +1957,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1022-141';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1023-142';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -7572,6 +7594,7 @@ function renderConfigInputs(){
   if(gk){try{gk.value=GHL_KEY();}catch(_){}}
   try{renderEmailPresetSettings();}catch(_){}
   try{renderIntakeLinks();}catch(_){}
+  try{renderNlHub();}catch(_){} // 📰 composer edition + send history
   try{loadFormDrop();}catch(_){} // 📉 the funnel loads itself with Settings
   try{renderSchedMail();}catch(_){}
   try{renderSchedSms();}catch(_){}
@@ -8957,6 +8980,7 @@ function startInboundPolling(){
     pollNdrMail().catch(function(){});
     schedCheckPastDue().catch(function(){}); // ⏰ confirm Exchange sent what was due
     schedSmsCheckPastDue().catch(function(){}); // 📱 confirm GHL sent what was due
+    try{nlHubAutoPoll();}catch(_){} // 📰 newsletter read-status, at most every 20 min
   },INBOUND_POLL_MS);
 }
 function stopInboundPolling(){
@@ -11028,6 +11052,200 @@ async function resendSendBroadcast(subject,html){
   return bid;
 }
 /* ─── 📰 NEWSLETTER (Resend Broadcasts) — END ─────────────────────────── */
+
+/* ⚡NLHUB — BEGIN (sliced by tests/nlhub.test.mjs) */
+/* ── ✍ Website composer + personal links (spec 2026-10-23) ──────────────
+ * The letter is WRITTEN on solurahomecare.com (composer in an iframe) and
+ * published there. The dashboard's job: take the edition handoff, mint one
+ * personal code per lead per send, email the personal link through Resend
+ * (NO pixel, NO click-tracking rewrites — the link must reach the website
+ * untouched), then ask the website which codes were opened and READ.
+ * The website never learns who a code belongs to; the mapping lives here. */
+var NL_SITE_ORIGIN='https://www.solurahomecare.com';
+var NL_STATUS_URL='https://btmyolfxgnofrowofdnm.supabase.co/rest/v1/rpc/newsletter_status';
+var NL_STATUS_KEY='sb_publishable_4GeZgLTF74huESNqW0nq0w_-HTUlHhI'; // publishable by design — knowing a code is the only way to see its status
+var NL_HUB_KEEP=30; // sends kept in history (oldest drop off)
+// 12 chars, a-z and 0-9, crypto-random — a NEW one every send, even resends
+function nlNewCode(){
+  var abc='abcdefghijklmnopqrstuvwxyz0123456789';
+  var b=crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(b,function(x){return abc[x%36];}).join('');
+}
+function nlPersonalLink(editionUrl,code){
+  return String(editionUrl||'')+(String(editionUrl||'').indexOf('?')>-1?'&':'?')+'r='+code;
+}
+// The email: short intro, cover picture, ONE button to the personal link.
+// Outbound copy: warm, letter-like, and no em dashes (brand rule).
+function nlHubEmailHtml(ed,first,link){
+  ed=ed||{};
+  var greet=first?('Dear '+escapeHtml(first)+','):'Hello,';
+  var intro=String(ed.description||'').trim()||"This week's letter from Solura Home Care is ready for you.";
+  return '<div style="background:#F5F1E8;padding:28px 12px;font-family:Georgia,\'Times New Roman\',serif">'
+    +'<div style="max-width:600px;margin:0 auto;background:#FAF8F4;border-radius:14px;padding:30px 34px;color:#3d4348">'
+    +'<p style="font-size:16px;line-height:1.6;margin:0 0 14px">'+greet+'</p>'
+    +'<h1 style="font-size:22px;line-height:1.3;color:#1f3d57;font-weight:normal;margin:0 0 12px">'+escapeHtml(String(ed.title||"This week's letter"))+'</h1>'
+    +'<p style="font-size:15px;line-height:1.65;margin:0 0 18px">'+escapeHtml(intro)+'</p>'
+    +(ed.cover_image_url?'<img src="'+escapeHtml(String(ed.cover_image_url))+'" alt="" style="width:100%;border-radius:10px;display:block;margin:0 0 18px">':'')
+    +'<a href="'+escapeHtml(link)+'" style="display:inline-block;background:#1f3d57;color:#faf8f4;text-decoration:none;font-size:16px;font-weight:bold;padding:13px 26px;border-radius:10px;border-bottom:3px solid #C59B4E">Read this week\'s letter</a>'
+    +'<p style="font-size:12.5px;line-height:1.6;color:#8a8f94;margin:22px 0 0">This link is personal to you. Please don\'t forward it.</p>'
+    +'<p style="font-size:12.5px;line-height:1.6;color:#8a8f94;margin:8px 0 0">Would you rather not get these letters? Just reply with the word stop and we will take care of it right away.</p>'
+    +'<p style="font-size:12px;line-height:1.6;color:#8a8f94;margin:14px 0 0">Solura Home Care · (216) 770-4886 · License 4574HHN<br>815 Superior Ave E Ste 1618, Cleveland OH 44114</p>'
+    +'</div></div>';
+}
+function nlSendsAll(){
+  enginesDoc.nlSends=enginesDoc.nlSends||[];
+  return enginesDoc.nlSends;
+}
+// Pure: one send's funnel. "Read" is the real signal; scanners that
+// prefetch links show as opens but never stay long enough to read.
+function nlHubStatsSummary(send){
+  var rec=(send&&send.recipients)||[],stats=(send&&send.stats)||{};
+  var opened=0,read=0,secs=0;
+  rec.forEach(function(rp){
+    var st=stats[rp.code];if(!st)return;
+    opened++;
+    if(st.read_at){read++;secs+=(parseFloat(st.seconds)||0);}
+  });
+  return {sent:rec.length,opened:opened,read:read,avgSeconds:read?Math.round(secs/read):0};
+}
+/* ⚡NLHUB — END */
+// Handoff from the composer: ONLY messages from the website origin count.
+window.addEventListener('message',function(e){
+  if(e.origin!==NL_SITE_ORIGIN)return; // always check — anything else is noise
+  var m=e.data||{};
+  if(m.type!=='solura:newsletter-published'&&m.type!=='solura:newsletter-selected')return;
+  var ed=m.edition||{};
+  if(!ed.url||!ed.slug)return;
+  enginesDoc.config=enginesDoc.config||{};
+  enginesDoc.config.nlEdition={slug:String(ed.slug).slice(0,120),url:String(ed.url).slice(0,300),
+    title:String(ed.title||'').slice(0,200),description:String(ed.description||'').slice(0,600),
+    cover_image_url:String(ed.cover_image_url||'').slice(0,300),
+    published_at:String(ed.published_at||'').slice(0,40),pickedAt:Date.now()};
+  saveEnginesDoc().catch(function(){});
+  try{renderNlHub();}catch(_){}
+  toast(m.type==='solura:newsletter-published'
+    ?('📰 Published — "'+(ed.title||ed.slug)+'" is ready to send')
+    :('📰 Selected for a send — "'+(ed.title||ed.slug)+'"'));
+});
+function openNlCompose(){
+  var fr=el('nlcompose-frame');
+  if(fr&&!fr.src)fr.src=NL_SITE_ORIGIN+'/compose'; // loads only on first open
+  el('modal-nlcompose').classList.add('open');
+}
+var _nlHubSending=false;
+async function nlHubSend(){
+  if(_nlHubSending)return;
+  var out=el('nlhub-send-out');
+  function say(t2){if(out)out.textContent=t2;}
+  var ed=(enginesDoc.config||{}).nlEdition;
+  if(!ed||!ed.url){say('✗ No edition picked yet. Publish in the composer, or press Use for a send on an older edition there.');return;}
+  var rc=resendCfg();
+  if(!rc||!rc.from){say('✗ Resend is not set up. Fill in the Delivery section below (worker + From) first.');return;}
+  var cand=resendCandidates().list;
+  if(!cand.length){say('✗ Nobody on the newsletter audience right now. Check Who gets the newsletter below.');return;}
+  if(!confirm('Send "'+(ed.title||ed.slug)+'" to '+cand.length+' '+(cand.length===1?'person':'people')+', each with their own personal link?'))return;
+  _nlHubSending=true;
+  var send={slug:ed.slug,title:ed.title||ed.slug,url:ed.url,sentAt:Date.now(),recipients:[],stats:{},lastPoll:0};
+  var sent=0,fail=0,firstErr='';
+  try{
+    for(var i=0;i<cand.length;i++){
+      var cd=cand[i];
+      // One code per lead per send — a NEW code even on a resend. No open
+      // pixel gets attached: the website measures reading, not the email.
+      var code=nlNewCode();
+      var link=nlPersonalLink(ed.url,code);
+      try{
+        var res=await resendFetch('sendEmail',{from:rc.from,replyTo:rc.replyTo,to:cd.email,
+          subject:String(ed.title||"This week's letter from Solura"),html:nlHubEmailHtml(ed,cd.firstName,link)});
+        send.recipients.push({k:leadKey(cd.ri),name:String((rows[cd.ri]||[])[C.NM]||(rows[cd.ri]||[])[C.DM]||cd.email).trim(),
+          email:cd.email,code:code,msgId:String((res&&res.id)||'')});
+        sent++;
+        try{logComms(commsEntryForLead(cd.ri,{direction:'out',channel:'email',contact:cd.email,
+          subject:String(ed.title||'Newsletter'),preview:'Personal newsletter link · '+ed.slug,
+          outcome:'newsletter-sent',messageId:'nlhub-'+code}));}catch(_){}
+      }catch(eS){fail++;if(!firstErr)firstErr=String(eS&&eS.message||'send failed');}
+      if(i%5===4)say('Sending… '+(i+1)+' of '+cand.length+' ('+sent+' out'+(fail?(', '+fail+' failed'):'')+')');
+    }
+  }finally{_nlHubSending=false;}
+  if(sent){
+    var L=nlSendsAll();
+    L.unshift(send);
+    if(L.length>NL_HUB_KEEP)L.length=NL_HUB_KEEP;
+    saveEnginesDoc().catch(function(e){showErr('Send log failed to sync: '+e.message);});
+  }
+  say('✓ '+sent+' sent'+(fail?(' · ✗ '+fail+' failed ('+firstErr+')'):'')+' — first read numbers usually land within the hour.');
+  toast('📰 "'+(ed.title||ed.slug)+'" sent to '+sent+' people, each with a personal link');
+  try{renderNlHub();}catch(_){}
+}
+// Ask the website which codes were opened/read (chunks of 2000 per spec)
+async function nlHubPoll(idx){
+  var send=nlSendsAll()[idx];
+  if(!send||!(send.recipients||[]).length)return;
+  var codes=send.recipients.map(function(r){return r.code;});
+  for(var i=0;i<codes.length;i+=2000){
+    var r=await fetch(NL_STATUS_URL,{method:'POST',
+      headers:{apikey:NL_STATUS_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({p_codes:codes.slice(i,i+2000)})});
+    if(!r.ok)throw new Error('status endpoint answered '+r.status);
+    var rows9=await r.json();
+    (rows9||[]).forEach(function(row){if(row&&row.code)send.stats[row.code]=row;});
+  }
+  send.lastPoll=Date.now();
+  saveEnginesDoc().catch(function(){});
+  try{renderNlHub();}catch(_){}
+}
+// Latest send refreshes itself on the standing poll, at most every 20 min
+function nlHubAutoPoll(){
+  var L=nlSendsAll();
+  if(!L.length)return;
+  if(Date.now()-(L[0].lastPoll||0)<20*60*1000)return;
+  nlHubPoll(0).catch(function(){});
+}
+function nlHubFmtSecs(s){
+  s=Math.round(parseFloat(s)||0);
+  return s<60?(s+'s'):(Math.floor(s/60)+'m '+(s%60)+'s');
+}
+function renderNlHub(){
+  var edHost=el('nlhub-edition'),sHost=el('nlhub-sends');
+  if(!edHost||!sHost)return;
+  var ed=(enginesDoc.config||{}).nlEdition;
+  if(!ed||!ed.url){
+    edHost.innerHTML='<div style="color:var(--soft);font-size:12px;border:1.5px dashed var(--border);border-radius:10px;padding:12px 14px">No edition yet. Open the composer, write the letter, press Publish — it lands here by itself.</div>';
+  }else{
+    var when=ed.published_at?new Date(ed.published_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
+    edHost.innerHTML='<div style="border:1.5px solid var(--gold);border-radius:12px;padding:12px 14px;background:var(--gold-pale);display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
+      +(ed.cover_image_url?'<img src="'+escapeHtml(ed.cover_image_url)+'" alt="" style="width:72px;height:48px;object-fit:cover;border-radius:8px;flex:none">':'')
+      +'<div style="flex:1;min-width:200px"><div style="font-weight:800;font-size:13px">'+escapeHtml(ed.title||ed.slug)+'</div>'
+      +'<div style="font-size:11px;color:var(--mid)">'+(when?('Published '+when+' · '):'')+'<a href="'+escapeHtml(ed.url)+'" target="_blank" rel="noopener">view on the site ↗</a></div></div>'
+      +'<button class="ee-mini" style="background:var(--gold-pale);border-color:var(--gold);color:#8B6500;font-weight:700" data-action="nlhub-send">📨 Send with personal links</button>'
+      +'</div>';
+  }
+  var L=nlSendsAll();
+  if(!L.length){sHost.innerHTML='';return;}
+  sHost.innerHTML='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:#8B6500;margin:12px 0 6px">Sends</div>'
+    +L.map(function(send,idx){
+      var sm=nlHubStatsSummary(send);
+      var when=new Date(send.sentAt).toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      return '<details style="border:1.5px solid var(--border);border-radius:10px;padding:0;margin-bottom:8px;overflow:hidden">'
+        +'<summary style="cursor:pointer;list-style:none;padding:10px 12px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:12px">'
+        +'<b>'+escapeHtml(send.title||send.slug)+'</b><span style="color:var(--soft)">'+when+'</span>'
+        +'<span>'+sm.sent+' sent</span><span style="color:var(--mid)">'+sm.opened+' opened</span>'
+        +'<span style="color:var(--grn);font-weight:700">'+sm.read+' read</span>'
+        +(sm.read?'<span style="color:var(--soft)">'+nlHubFmtSecs(sm.avgSeconds)+' avg</span>':'')
+        +'<button class="ee-mini" style="margin-left:auto" data-action="nlhub-poll" data-idx="'+idx+'">↻ Refresh</button>'
+        +'</summary>'
+        +'<div style="padding:4px 12px 10px;font-size:12px">'
+        +(send.recipients||[]).map(function(rp){
+          var st=(send.stats||{})[rp.code];
+          var badge=!st?'<span style="color:var(--soft)">not opened</span>'
+            :st.read_at?('<span style="color:var(--grn);font-weight:700">✓ read</span> <span style="color:var(--soft)">'+nlHubFmtSecs(st.seconds)+' · '+Math.round(st.max_scroll||0)+'% · '+escapeHtml(String(st.device||''))+'</span>')
+            :'<span style="color:#B8860B">opened, not read</span>';
+          return '<div style="border-top:1px solid var(--border);padding:5px 0;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap"><span style="min-width:160px;font-weight:600">'+escapeHtml(rp.name||rp.email)+'</span>'+badge+'</div>';
+        }).join('')
+        +'</div></details>';
+    }).join('');
+}
+
 
 /* ─── ✨ Claude email writer ────────────────────────────────────────────
  * Assembles everything the dashboard knows about a lead — identity fields,
@@ -15581,6 +15799,13 @@ function onClick(ev){
     case 'intake-test': intakeTestConnection(); break;
     case 'formdrop-refresh': loadFormDrop(); break;
     case 'inv-mode': invApplyMode(t.dataset.mode); break;
+    case 'nlhub-compose': openNlCompose(); break;
+    case 'nlhub-send': nlHubSend(); break;
+    case 'nlhub-poll':
+      (function(){var i9=parseInt(t.dataset.idx,10)||0;t.textContent='…';
+        nlHubPoll(i9).catch(function(e){toast('⚠ Could not reach the read-status service: '+e.message);})
+          .finally(function(){t.textContent='↻ Refresh';});})();
+      break;
     case 'open-settings': openSettings(); break;
     case 'es-new-engine': openPresetPicker(); break;
     case 'ee-preset': pickPreset(t.dataset.preset); break;

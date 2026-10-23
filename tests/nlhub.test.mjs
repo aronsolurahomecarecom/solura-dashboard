@@ -1,0 +1,106 @@
+// 📰✍ Newsletter hub (B-1023-142): the letter is written in the WEBSITE
+// composer (iframed); the dashboard mints one personal code per lead per
+// send, emails the link through Resend untouched (no pixel, no click
+// rewriting), and reads back who opened and who actually READ.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const html = readFileSync(join(here, '..', 'Solura_Dashboard.html'), 'utf8');
+
+let PASS = 0, FAIL = 0;
+const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: ' + n); } };
+
+const b = html.indexOf('/* ⚡NLHUB — BEGIN');
+const e = html.indexOf('/* ⚡NLHUB — END */');
+if (b < 0 || e < 0) throw new Error('NLHUB markers missing');
+const src = html.slice(html.indexOf('*/', b) + 2, e);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const enginesDoc = {};
+const mk = new Function('escapeHtml', 'enginesDoc', 'crypto',
+  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary};');
+const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto);
+
+// ── codes: the spec's exact contract ──
+{
+  const seen = {};
+  let good = true, unique = true;
+  for (let i = 0; i < 200; i++) {
+    const c = N.nlNewCode();
+    if (!/^[a-z0-9]{12}$/.test(c)) good = false;
+    if (seen[c]) unique = false;
+    seen[c] = 1;
+  }
+  ok(good, 'codes are exactly 12 chars, a-z and 0-9 only (10-24 allowed; 12 chosen)');
+  ok(unique, '200 codes, zero collisions — a NEW code every send');
+  ok(N.nlPersonalLink('https://www.solurahomecare.com/newsletter/week-42', 'abc123def456') === 'https://www.solurahomecare.com/newsletter/week-42?r=abc123def456', 'personal link = edition url + ?r=code');
+  ok(N.nlPersonalLink('https://x.com/n/w?v=2', 'abc123def456') === 'https://x.com/n/w?v=2&r=abc123def456', 'an edition url that already has a query gets &r=');
+}
+
+// ── the email ──
+{
+  const ed = { title: 'Week 42: Warm soup & old photos', description: 'A short one about small comforts.', cover_image_url: 'https://www.solurahomecare.com/img/w42.jpg' };
+  const link = 'https://www.solurahomecare.com/newsletter/week-42?r=abc123def456';
+  const em = N.nlHubEmailHtml(ed, 'Susan', link);
+  ok(em.indexOf('Dear Susan,') > -1, 'greets by first name');
+  ok(N.nlHubEmailHtml(ed, '', link).indexOf('Hello,') > -1, 'no name = a plain hello, never a blank greeting');
+  ok(em.indexOf('Week 42: Warm soup &amp; old photos') > -1 && em.indexOf('A short one about small comforts.') > -1, 'title + description land, escaped');
+  ok(em.indexOf('src="https://www.solurahomecare.com/img/w42.jpg"') > -1, 'cover picture rides along');
+  ok(N.nlHubEmailHtml({ title: 't' }, '', link).indexOf('<img') === -1, 'no cover = no broken image tag');
+  ok(em.indexOf('href="' + link + '"') > -1, 'the button carries the personal link EXACTLY (untouched, unrewritten)');
+  ok(em.indexOf("Read this week's letter") > -1, 'the one button says what the spec says');
+  ok(em.indexOf("This link is personal to you. Please don't forward it.") > -1, 'the personal-link footer line');
+  ok(/reply with the word stop/.test(em), 'the way out is one reply (the dashboard already flags opt-out language)');
+  ok(em.indexOf('815 Superior Ave E Ste 1618') > -1 && em.indexOf('License 4574HHN') > -1, 'the brand contact block closes it');
+  ok(em.indexOf('—') === -1, 'no em dashes anywhere in outbound copy (brand rule)');
+  const hostile = N.nlHubEmailHtml({ title: '<script>x</script>', description: '<b>y</b>' }, '<i>z</i>', link);
+  ok(hostile.indexOf('<script>x</script>') === -1 && hostile.indexOf('<b>y</b>') === -1 && hostile.indexOf('<i>z</i>') === -1, 'edition fields and names are escaped');
+}
+
+// ── the funnel math: read is the real signal ──
+{
+  const send = { recipients: [{ code: 'a' }, { code: 'b' }, { code: 'c' }, { code: 'd' }], stats: {
+    a: { read_at: '2026-10-23T10:00:00Z', seconds: 95, max_scroll: 80 },
+    b: { read_at: null, seconds: 1, max_scroll: 0 },      // scanner: opened, never read
+    c: { read_at: '2026-10-23T11:00:00Z', seconds: 25, max_scroll: 100 }
+  } };
+  const sm = N.nlHubStatsSummary(send);
+  ok(sm.sent === 4 && sm.opened === 3 && sm.read === 2, '4 sent, 3 opened, 2 READ — the scanner open does not count as read');
+  ok(sm.avgSeconds === 60, 'average time counts readers only');
+  ok(N.nlHubStatsSummary({}).sent === 0, 'an empty send stays calm');
+  ok(N.nlSendsAll() === enginesDoc.nlSends && Array.isArray(enginesDoc.nlSends), 'send history lives in the synced engines doc');
+  ok(N.NL_HUB_KEEP === 30, 'history is capped');
+}
+
+// ── constants: the exact endpoints from the spec ──
+{
+  ok(N.NL_SITE_ORIGIN === 'https://www.solurahomecare.com', 'composer origin pinned');
+  ok(N.NL_STATUS_URL === 'https://btmyolfxgnofrowofdnm.supabase.co/rest/v1/rpc/newsletter_status', 'status endpoint pinned');
+  ok(/^sb_publishable_/.test(N.NL_STATUS_KEY), 'the key is the publishable one (safe in the browser by design)');
+}
+
+// ── wiring locks ──
+{
+  ok(/if\(e\.origin!==NL_SITE_ORIGIN\)return; \/\/ always check/.test(html), "the message listener trusts ONLY the website's origin");
+  ok(/m\.type!=='solura:newsletter-published'&&m\.type!=='solura:newsletter-selected'/.test(html), 'both handoffs handled: fresh publish and use-for-a-send');
+  ok(/enginesDoc\.config\.nlEdition=\{slug:/.test(html), 'the edition is stored in the synced config');
+  ok(/id="nlcompose-frame"/.test(html) && /if\(fr&&!fr\.src\)fr\.src=NL_SITE_ORIGIN\+'\/compose'/.test(html), 'the composer iframe exists and loads only on first open');
+  ok(/data-action="nlhub-compose"/.test(html) && /data-action="nlhub-send"/.test(html) && /data-action="nlhub-poll"/.test(html), 'open / send / refresh are wired');
+  const sendFn = html.slice(html.indexOf('async function nlHubSend'), html.indexOf('async function nlHubPoll'));
+  ok(/resendCandidates\(\)\.list/.test(sendFn), 'the audience is the SAME one the newsletter rules below define');
+  ok(/var code=nlNewCode\(\);/.test(sendFn) && /nlPersonalLink\(ed\.url,code\)/.test(sendFn), 'one fresh code per recipient per send');
+  ok(/resendFetch\('sendEmail'/.test(sendFn) && !/trackSystemEmail/.test(sendFn), 'sends ride Resend with NO dashboard pixel — the website measures reading');
+  ok(/k:leadKey\(cd\.ri\)/.test(sendFn) && /msgId:String\(\(res&&res\.id\)\|\|''\)/.test(sendFn), 'stored per recipient: lead identity, code, Resend message id');
+  ok(/outcome:'newsletter-sent'/.test(sendFn), 'each send lands in the lead comms log');
+  ok(/if\(!confirm\('Send "/.test(sendFn), 'a mass send asks once, with the real count');
+  const pollFn = html.slice(html.indexOf('async function nlHubPoll'), html.indexOf('function nlHubAutoPoll'));
+  ok(/i\+=2000/.test(pollFn) && /p_codes:codes\.slice\(i,i\+2000\)/.test(pollFn), 'status calls chunk at 2,000 codes per the spec');
+  ok(/headers:\{apikey:NL_STATUS_KEY/.test(pollFn), 'the publishable key rides as the apikey header');
+  ok(/Date\.now\(\)-\(L\[0\]\.lastPoll\|\|0\)<20\*60\*1000/.test(html) && /nlHubAutoPoll\(\);\}catch\(_\)\{\} \/\/ 📰/.test(html), 'the latest send self-refreshes on the standing poll, at most every 20 minutes');
+  ok(/Read is the real signal<\/b>/.test(html), 'the settings copy teaches the scanner caveat');
+  ok(/opened, not read/.test(html) && /✓ read/.test(html), 'per-lead rows distinguish opened from actually read');
+}
+
+console.log('\nNewsletter hub: ' + PASS + ' passed, ' + FAIL + ' failed');
+process.exit(FAIL ? 1 : 0);
