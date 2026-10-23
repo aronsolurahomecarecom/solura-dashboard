@@ -938,7 +938,10 @@ const PRIVACY_LINK_HTML=' <a href="https://www.solurahomecare.com/privacy" targe
 function _fcQuestionHtml(q){
   const req=q.required?' <span class="req">*</span>':'';
   const hint=q.hint?' <span class="hint" style="display:inline">'+escF(q.hint)+'</span>':'';
-  const privacy=SMS_CONSENT_QIDS.includes(q.id)?PRIVACY_LINK_HTML:'';
+  // Portal-created questions get a random id, so the consent question is also recognized by its
+  // carrier-required "Reply STOP" wording.
+  const isSmsConsent=SMS_CONSENT_QIDS.includes(q.id)||(q.type==='yesno'&&/reply\s+stop/i.test(q.label||''));
+  const privacy=isSmsConsent?PRIVACY_LINK_HTML:'';
   const label='<label>'+escF(q.label)+req+hint+privacy+'</label>';
   if(q.id==='employers'){
     return '<div id="employers-list" style="margin-top:14px"></div>'+
