@@ -1640,7 +1640,7 @@ input[type="text"]:focus:not(#search),input[type="search"]:focus:not(#search){ba
   </div>
   <div class="hdr-search" id="hdr-search-wrap" style="display:none">
     <span class="hdr-search-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><line x1="11" y1="11" x2="14" y2="14"/></svg></span>
-    <input type="text" id="search" placeholder="Search candidates…" autocomplete="off" oninput="render()">
+    <input type="text" id="search" placeholder="Search name, phone, email, anything…" autocomplete="off" oninput="render()">
   </div>
   <div class="hdr-r">
     <div class="tabs-bar" id="tabsbar">
@@ -10588,11 +10588,36 @@ function _actionC(c){
 }
 
 /* ===================== filter ===================== */
+/* ── Smart search helpers (2026-10-26) ── */
+/* Strip accents so "josé" and "jose" find each other in either direction. */
+function _deburr(s){try{return String(s).normalize('NFD').replace(/[̀-ͯ]/g,'');}catch(e){return String(s);}}
+/* Is the edit distance between two lowercase strings <= 1 (one typo: substitution,
+   insertion or deletion)? Early-exit scan — no matrix, cheap enough per keystroke. */
+function _ed1(a,b){
+  if(a===b)return true;
+  const la=a.length,lb=b.length;
+  if(Math.abs(la-lb)>1)return false;
+  let i=0,j=0,edits=0;
+  while(i<la&&j<lb){
+    if(a[i]===b[j]){i++;j++;continue;}
+    if(++edits>1)return false;
+    if(la===lb){i++;j++;}else if(la>lb){i++;}else{j++;}
+  }
+  return edits+(la-i)+(lb-j)<=1;
+}
 function matchFilters(c){
-  const t=(document.getElementById('search').value||'').toLowerCase();
+  const t=_deburr(document.getElementById('search').value||'').toLowerCase().trim();
   if(t){
-    /* Search covers the FULL application: raw form answers, screening, facts, custom answers —
-       plus friendly words for coded values so "car" finds transport:'car', etc. */
+    /* SMART SEARCH: tokenized, phone-aware, typo-tolerant (2026-10-26, Meir's ask:
+       "search with phone numbers and all other info … shouldn't have to be exact").
+       - every whitespace token must match somewhere, in any order — "smith jane" works
+       - a numeric-ish token matches a digits-only haystack of phone / zip / license,
+         so "(216) 868" finds 216-868-7969 however either side was formatted
+       - a text token matches as a substring, or (4+ chars) within ONE typo of any
+         haystack word or word-prefix, so "jesica" still finds Jessica
+       Search covers the FULL candidate: name, phone(s), email, refCode, source, notes,
+       address, license, pills/certs/stage, raw form answers, screening, facts — plus
+       friendly words for coded values so "car" finds transport:'car'. */
     const s0=c.st||{};
     const trWords={car:'own car',transit:'public transit bus',rides:'rides',none:'no transport no car'}[(s0.formAnswers||{}).transport]||'';
     /* VALUES only, memoized per candidate — raw JSON.stringify matched key names and coded
@@ -10600,15 +10625,38 @@ function matchFilters(c){
        keystroke. Cache invalidates with the standard memo generation. */
     window._hayMemo=window._hayMemo||new WeakMap();
     let _hayE=window._hayMemo.get(c);
-    let hay=(_hayE&&_hayE.g===_memGen)?_hayE.hay:null;
-    if(hay==null){
+    if(!(_hayE&&_hayE.g===_memGen&&_hayE.dig!=null)){
       const vals=o=>{const out=[];(function walk(x){if(x==null)return;if(Array.isArray(x))x.forEach(walk);else if(typeof x==='object')Object.keys(x).forEach(k=>walk(x[k]));else{const sv=String(x);if(sv.length>1)out.push(sv);}})(o);return out.join(' ');};
-      hay=(c.name+' '+c.email+' '+(s0.pills||[]).join(' ')+' '+(s0.certs||[]).join(' ')+' '+c.stage
+      const hay=_deburr(c.name+' '+c.email+' '+(c.phone||'')+' '+(s0.callPhone||'')+' '+(s0.refCode||'')
+        +' '+(c.source||'')+' '+(c.notes||'')+' '+(s0.zip||'')+' '+(s0.address||'')+' '+(s0.addressLine||'')
+        +' '+(s0.city||'')+' '+(s0.state||'')+' '+(s0.licenseNum||'')+' '+(s0.license||'')
+        +' '+(s0.pills||[]).join(' ')+' '+(s0.certs||[]).join(' ')+' '+c.stage
         +' '+trWords+(_liveIn(s0.liveIn)?' live-in':'')
         +' '+vals(s0.formAnswers)+' '+vals(s0.screening)+' '+vals(s0.facts)).toLowerCase();
-      window._hayMemo.set(c,{g:_memGen,hay});
+      /* digits-only lanes, one per field, so a number can't match across two fields */
+      const dig=[c.phone,s0.callPhone,s0.zip,s0.licenseNum,s0.refCode].map(x=>String(x||'').replace(/\D/g,'')).join(' ');
+      const wds=hay.split(/[^a-z0-9@'._-]+/).filter(w=>w.length>=3);
+      _hayE={g:_memGen,hay,dig,wds};
+      window._hayMemo.set(c,_hayE);
     }
-    if(hay.indexOf(t)<0)return false;
+    const hay=_hayE.hay,dig=_hayE.dig,wds=_hayE.wds;
+    const toks=t.split(/\s+/).filter(Boolean);
+    for(const tk of toks){
+      const digits=tk.replace(/\D/g,'');
+      /* numeric-ish token (only digits + phone punctuation) → match the digit lanes */
+      if(digits.length>=3&&tk.replace(/[\s().+\-\/#]/g,'')===digits){
+        if(dig.indexOf(digits)<0)return false;
+        continue;
+      }
+      if(hay.indexOf(tk)>=0)continue;
+      let ok=false;
+      if(tk.length>=4){
+        for(const w of wds){
+          if(_ed1(tk,w)||(w.length>tk.length&&_ed1(tk,w.slice(0,tk.length)))){ok=true;break;}
+        }
+      }
+      if(!ok)return false;
+    }
   }
   const s=c.st||{},sc=s.screening||{},g=s.gates||{};
 
