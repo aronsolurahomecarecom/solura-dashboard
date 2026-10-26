@@ -7396,16 +7396,22 @@ async function onSignedIn(){setConn(true);
 let _saveInFlight=0;
 function pulseOn(){_saveInFlight++;document.getElementById('save-pulse').classList.add('on');}
 function pulseOff(){_saveInFlight=Math.max(0,_saveInFlight-1);if(_saveInFlight===0)document.getElementById('save-pulse').classList.remove('on');}
-/* ── Supabase dual-write mirror (Phase 1) ──
-   Every successful sheet write the PORTAL makes is shadowed to Supabase through the
-   worker's token-gated /sb/mirror (the service key never touches the browser). Pure
-   fire-and-forget: the sheet remains truth, a mirror failure changes nothing here.
-   Inert until the worker has its SUPABASE_* env vars. */
+/* ── Supabase dual-write mirror (Phase 1) + read flip (Phase 2, 2026-10-26) ──
+   Every successful sheet write the PORTAL makes is shadowed to Supabase. The target moved
+   from the paste-locked Cloudflare worker's /sb/mirror to the `legacy-bridge` Edge Function
+   (same token gate, same patch shapes, deployable without a paste; the service key still
+   never touches the browser — the function holds it). Pure fire-and-forget: the sheet
+   remains write-truth, a mirror failure changes nothing here. The worker's own
+   webhook-side mirroring is unchanged and still lands in the same table. */
+const SB_BRIDGE_URL='https://btmyolfxgnofrowofdnm.supabase.co/functions/v1/legacy-bridge';
+const SB_PUBLIC_KEY='sb_publishable_4GeZgLTF74huESNqW0nq0w_-HTUlHhI'; /* publishable — public by design, gateway pass only */
+function _sbTok(){return (SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||localStorage.getItem('solura_internal_token')||localStorage.getItem('solura_zi_token')||'';}
+function _sbHeaders(tok){return {'Content-Type':'application/json','apikey':SB_PUBLIC_KEY,'Authorization':'Bearer '+SB_PUBLIC_KEY,'X-Solura-Token':tok};}
 let _sbMirrorHoldUntil=0;
 function _sbMirror(patches){
   try{
     if(Date.now()<_sbMirrorHoldUntil)return;
-    const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||'';
+    const tok=_sbTok();
     if(!tok||!patches||!patches.length)return;
     /* Shapes the portal really writes. saveW — the main workspace save — writes G:L and AI:AJ
        (never bare G / AI / AJ), and identity edits write single C/D/E/F cells; the first filter
@@ -7417,7 +7423,7 @@ function _sbMirror(patches){
       if(!p)return;const a=String(p.addr||'');let m;
       if((m=/^AI(\d+):AJ\1$/.exec(a))){const v=(p.values&&p.values[0])||[];
         send.push({addr:'AI'+m[1],values:[[v[0]]]},{addr:'AJ'+m[1],values:[[v[1]]]});return;}
-      if(/^(AJ\d+|G\d+|AI\d+|[C-F]\d+|C\d+:L\d+|G\d+:L\d+|N\d+:Y\d+)$/.test(a))send.push({addr:a,values:p.values});
+      if(/^(AJ\d+|G\d+|AI\d+|AH\d+|[C-F]\d+|C\d+:L\d+|G\d+:L\d+|N\d+:Y\d+|[N-Y]\d+)$/.test(a))send.push({addr:a,values:p.values});
     });
     if(!send.length)return;
     /* A worker that predates /sb/mirror has no such route: the POST falls through to its Cal.com
@@ -7425,7 +7431,7 @@ function _sbMirror(patches){
        20-line AM1 log. So read the reply: anything but the route's own {ok:…} JSON, or
        {inactive:true} (no SUPABASE_* vars yet), parks the mirror for 30 minutes instead of
        knocking on every single sheet write. */
-    fetch(ZI_WORKER_URL+'/sb/mirror',{method:'POST',headers:{'Content-Type':'application/json','X-Solura-Token':tok},body:JSON.stringify({patches:send})})
+    fetch(SB_BRIDGE_URL,{method:'POST',headers:_sbHeaders(tok),body:JSON.stringify({op:'mirror',patches:send})})
       .then(r=>r.text()).then(t=>{let j=null;try{j=JSON.parse(t);}catch(e){}
         if(!j||typeof j.ok!=='boolean'||j.inactive)_sbMirrorHoldUntil=Date.now()+30*60000;})
       .catch(()=>{_sbMirrorHoldUntil=Date.now()+5*60000;});
@@ -8951,7 +8957,50 @@ function cardOf(i,row){
     longest:facts.longest||st.longest||'',
     st:st,answers:pAns(row)};
 }
+/* ── Phase 2 READ FLIP (2026-10-26) ── the pipeline loads from Supabase (via the
+   legacy-bridge Edge Function) and falls back to the Graph usedRange read whenever the
+   bridge is unreachable, the token is missing, or the mirror is parked (a parked mirror
+   means recent writes may not have landed in Supabase — the sheet is the safer read).
+   The sheet remains WRITE-truth: every write still goes to Excel first, and the mirror
+   shadows it to Supabase within the same request. */
+function _rowFromBridge(b){
+  const row=new Array(36).fill('');
+  row[2]=b.name==null?'':String(b.name);row[3]=b.phone==null?'':String(b.phone);
+  row[4]=b.email==null?'':String(b.email);row[5]=b.source==null?'':String(b.source);
+  row[6]=b.stage==null?'':String(b.stage);
+  const g=b.gates||{};row[7]=g.wa==null?'':String(g.wa);row[8]=g.cr==null?'':String(g.cr);
+  row[9]=g.bg==null?'':String(g.bg);row[10]=g.tr==null?'':String(g.tr);row[11]=g.av==null?'':String(g.av);
+  row[33]=b.notes==null?'':String(b.notes);
+  row[34]=b.answers?JSON.stringify(b.answers):'';
+  row[35]=b.state?JSON.stringify(b.state):'';
+  return row;
+}
+async function _sbPipelineRows(){
+  try{
+    if(Date.now()<_sbMirrorHoldUntil)return null; /* mirror parked → Supabase may be behind the sheet */
+    const tok=_sbTok();if(!tok)return null;
+    const r=await fetch(SB_BRIDGE_URL+'?op=pipeline',{headers:_sbHeaders(tok)});
+    if(!r.ok)return null;
+    const j=await r.json().catch(()=>null);
+    if(!j||j.ok!==true||!Array.isArray(j.rows)||!j.rows.length)return null;
+    return j.rows;
+  }catch(e){return null;}
+}
 async function loadData(){
+  const bridgeRows=await _sbPipelineRows();
+  if(bridgeRows){
+    pipeline=[];nextRow=null;let _maxRow=2;
+    bridgeRows.forEach(b=>{
+      if(!b||!b.excel_row||b.excel_row<3)return; /* rows 1-2 are headers on the sheet */
+      if(b.excel_row>_maxRow)_maxRow=b.excel_row;
+      const row=_rowFromBridge(b);
+      if(row[2]===''||row[2]==null)return;
+      pipeline.push(cardOf(b.excel_row-1,row));
+    });
+    nextRow=_maxRow+1;
+    pipeline.sort((a,b)=>b.excelRow-a.excelRow); /* same newest-first order the sheet path produces */
+    window._pipelineSource='supabase';
+  }else{
   const sid=await getWorkbookSession();const h=sid?{'workbook-session-id':sid}:{};
   const r=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+'/workbook/worksheets/'+SHEET+'/usedRange?$select=values',{headers:h});
   if(!r.ok){toast('Load failed: '+r.status);return;}
@@ -8960,6 +9009,8 @@ async function loadData(){
     if(!row||row[2]===''||row[2]==null){if(nextRow===null)nextRow=i+1;continue;}
     pipeline.push(cardOf(i,row));}
   if(nextRow===null)nextRow=vals.length+1;pipeline.reverse();
+  window._pipelineSource='graph';
+  }
   /* Mirror self-heal — the dual-write is fire-and-forget and parks itself for 5–30min on any
      flaky reply, so individual stage writes can be silently dropped (six candidates had drifted
      by 2026-10-16). Once per 12h per browser, re-mirror EVERY row's stage cell so the Supabase
@@ -8968,7 +9019,9 @@ async function loadData(){
      costs one Supabase call. */
   try{
     const _mrLast=+(localStorage.getItem('sbMirrorFullSync')||0);
-    if(pipeline.length&&Date.now()-_mrLast>12*3600000){
+    /* Only meaningful on a GRAPH load: re-mirroring values that were just READ from the
+       mirror can't heal anything (read flip 2026-10-26). */
+    if(window._pipelineSource==='graph'&&pipeline.length&&Date.now()-_mrLast>12*3600000){
       localStorage.setItem('sbMirrorFullSync',String(Date.now()));
       const _gs=pipeline.map(c=>({addr:'G'+c.excelRow,values:[[c.stage]]}));
       for(let _i=0;_i<_gs.length;_i+=44){const _chunk=_gs.slice(_i,_i+44);
@@ -18807,6 +18860,22 @@ async function _mailScanPages(url,sinceIso,stampOf,maxPages){
   return {resp:firstResp,ok:!!(firstResp&&firstResp.ok),items:items,pages:pages,complete:!next};
 }
 
+/* Read flip (2026-10-26): when the pipeline loads from Supabase, c.row[35] is jsonb
+   re-serialized by Postgres — byte-different from the sheet cell, same content. These
+   guards exist to detect CONTENT changes underneath this session, so when both sides
+   parse, compare canonically (sorted keys); raw string equality stays the fast path and
+   the corrupt-cell behavior (unparseable ⇒ not equal ⇒ write refused) is unchanged. */
+function _canonJson(x){
+  if(Array.isArray(x))return '['+x.map(_canonJson).join(',')+']';
+  if(x&&typeof x==='object')return '{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+_canonJson(x[k])).join(',')+'}';
+  return JSON.stringify(x);
+}
+function _ajEquiv(a,b){
+  const A=String(a==null?'':a),B=String(b==null?'':b);
+  if(A===B)return true;
+  if(!A||!B)return false;
+  try{return _canonJson(JSON.parse(A))===_canonJson(JSON.parse(B));}catch(e){return false;}
+}
 /* Is the AJ cell on the sheet still exactly what this session loaded for the candidate?
    false = it changed underneath us (or could not be read) — the caller must not write its
    load-time copy over it. Compares against c.row[35], the raw cell loadData parsed. */
@@ -18818,7 +18887,7 @@ async function _ajUnchangedSinceLoad(c){
     if(!r.ok)return false;
     const vals=(await r.json()).values||[[]];
     const raw=vals[0]&&vals[0][0];
-    return String(raw==null?'':raw)===String(c.row[35]==null?'':c.row[35]);
+    return _ajEquiv(raw,c.row[35]);
   }catch(e){
     console.warn('AJ unchanged-check row',c&&c.excelRow,'failed:',e&&e.message);
     return false;
@@ -18836,7 +18905,7 @@ async function _stageAndAjUnchangedSinceLoad(c){
     if(!r.ok)return false;
     const row=((await r.json()).values||[[]])[0]||[];
     const S=v=>String(v==null?'':v);
-    return row.length===30&&S(row[0])===S(c.row[6])&&S(row[29])===S(c.row[35]);
+    return row.length===30&&S(row[0])===S(c.row[6])&&_ajEquiv(row[29],c.row[35]);
   }catch(e){
     console.warn('G/AJ unchanged-check row',c&&c.excelRow,'failed:',e&&e.message);
     return false;
@@ -25689,6 +25758,14 @@ function _robotCardHtml(){
 }
 async function _seqAutomationTick(){
   if(!(SETTINGS.config&&SETTINGS.config.seqAutomation))return;
+  /* OPERATOR GATE (2026-10-26, multi-user): the tick sends mail through /me — the signed-in
+     account. With a second operator signed in, her tab winning a tick would send sequence
+     emails FROM HER MAILBOX and surprise-double the robot. Only accounts listed in
+     config.automationOperators (default: the super-admins) run automation; every other
+     session is a viewer as far as the robot is concerned. */
+  {const _op=(userEmail||'').toLowerCase();
+   const _ops=((SETTINGS.config&&SETTINGS.config.automationOperators)||SUPER_ADMINS).map(x=>String(x).toLowerCase());
+   if(_ops.indexOf(_op)<0)return;}
   if(!_robotMayRun())return; /* P-39 — standby copy, or another tab of this browser holds the lease */
   if(window._reconnecting)return; /* P-41 — no sign-in right now: every send would fail and be stamped as a robot failure */
   if(!window.SeqEngineV2||!(SETTINGS.sequences||[]).length)return;
