@@ -8039,7 +8039,30 @@ async function loadSettings(){
        exactly once per session (7205), and SETTINGS is rebuilt from defaults on the next load.
        The two keys are interchangeable by construction — 7615 already reads either into
        config.ziToken and 7932 writes config.ziToken back out. */
-    const tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||localStorage.getItem('solura_internal_token')||localStorage.getItem('solura_zi_token')||'';
+    let tok=(SETTINGS&&SETTINGS.config&&SETTINGS.config.ziToken)||localStorage.getItem('solura_internal_token')||localStorage.getItem('solura_zi_token')||'';
+    /* FIRST-RUN BOOTSTRAP (2026-10-26). A fresh browser has no token in localStorage and
+       SETTINGS is still defaults, so the primary tier was unreachable for any SECOND operator:
+       they booted on the July-frozen AL1 mirror (zero sequences) or raw defaults, and the
+       admin-gated Settings tab meant they could never enter the token themselves (Meir's
+       employee, "so messed up"). The AL1 mirror is readable by any account with workbook
+       access and still parses (verified live 2026-10-26: 30,563 chars, config.ziToken
+       present) — so pull JUST the token from it, stash it where every later load looks, and
+       the primary file becomes reachable from the very first sign-in. The stale mirror is
+       used for its token only; settings still load from the primary file below. */
+    if(!tok){
+      try{
+        const r0=await gfetch(GR+'/drives/'+driveId+'/items/'+itemId+"/workbook/worksheets/"+SHEET+"/range(address='AL1')?$select=values");
+        if(r0.ok){
+          const v0=((await r0.json()).values||[[]]);const raw0=(v0[0]&&v0[0][0])||'';
+          if(raw0){try{const s0=JSON.parse(raw0);tok=(s0&&s0.config&&s0.config.ziToken)||'';}catch(e){}}
+        }
+        if(tok){
+          try{localStorage.setItem('solura_zi_token',tok);}catch(e){}
+          try{localStorage.setItem('solura_internal_token',tok);}catch(e){}
+          load.errors.push('token bootstrapped from AL1 (first run in this browser)');
+        }
+      }catch(e){}
+    }
     if(tok){
       const r=await fetch(ZI_WORKER_URL+'/settings',{headers:{'X-Solura-Token':tok}});
       if(r.ok){
