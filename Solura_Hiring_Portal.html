@@ -10592,7 +10592,8 @@ function _actionC(c){
 /* Strip accents so "josé" and "jose" find each other in either direction. */
 function _deburr(s){try{return String(s).normalize('NFD').replace(/[̀-ͯ]/g,'');}catch(e){return String(s);}}
 /* Is the edit distance between two lowercase strings <= 1 (one typo: substitution,
-   insertion or deletion)? Early-exit scan — no matrix, cheap enough per keystroke. */
+   insertion, deletion — or an adjacent SWAP, "christain"→"christian")? Early-exit
+   scan — no matrix, cheap enough per keystroke. */
 function _ed1(a,b){
   if(a===b)return true;
   const la=a.length,lb=b.length;
@@ -10601,7 +10602,10 @@ function _ed1(a,b){
   while(i<la&&j<lb){
     if(a[i]===b[j]){i++;j++;continue;}
     if(++edits>1)return false;
-    if(la===lb){i++;j++;}else if(la>lb){i++;}else{j++;}
+    if(la===lb){
+      if(a[i]===b[j+1]&&a[i+1]===b[j]){i+=2;j+=2;} /* transposition = one typo */
+      else{i++;j++;}
+    }else if(la>lb){i++;}else{j++;}
   }
   return edits+(la-i)+(lb-j)<=1;
 }
@@ -10640,14 +10644,24 @@ function matchFilters(c){
       window._hayMemo.set(c,_hayE);
     }
     const hay=_hayE.hay,dig=_hayE.dig,wds=_hayE.wds;
-    const toks=t.split(/\s+/).filter(Boolean);
-    for(const tk of toks){
-      const digits=tk.replace(/\D/g,'');
-      /* numeric-ish token (only digits + phone punctuation) → match the digit lanes */
-      if(digits.length>=3&&tk.replace(/[\s().+\-\/#]/g,'')===digits){
-        if(dig.indexOf(digits)<0)return false;
+    const _isNum=x=>{const d=x.replace(/\D/g,'');return d.length>=1&&x.replace(/[\s().+\-\/#]/g,'')===d?d:null;};
+    /* ADJACENT digit groups are one number the user spaced out — "216 408 1234" is a
+       single phone fragment, not three independent needles. Merge before matching. */
+    const toks=[];
+    t.split(/\s+/).filter(Boolean).forEach(x=>{
+      const d=_isNum(x);
+      const last=toks[toks.length-1];
+      if(d!=null&&last&&last.d!=null)last.d+=d;
+      else toks.push(d!=null?{d}:{x});
+    });
+    for(const tok of toks){
+      /* numeric token (digits + phone punctuation only) → match the digit lanes */
+      if(tok.d!=null){
+        if(tok.d.length<3){if(hay.indexOf(tok.d)<0)return false;continue;} /* "22" in jane22 */
+        if(dig.indexOf(tok.d)<0)return false;
         continue;
       }
+      const tk=tok.x;
       if(hay.indexOf(tk)>=0)continue;
       let ok=false;
       if(tk.length>=4){
