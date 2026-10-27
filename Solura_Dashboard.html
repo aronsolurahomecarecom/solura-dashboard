@@ -1487,7 +1487,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <input type="number" min="0.2" step="0.1" class="ee-inp" style="max-width:140px" data-cfg="emailFallbackMinMB" data-cfgtype="float">
         </div>
         <h4 class="st-h2">Email design shell</h4>
-        <p class="st-p">Paste your branded HTML wrapper here. <code style="font-size:11px">{content}</code> (or <code style="font-size:11px">{{body}}</code>) marks where the message goes — everything you type, Claude drafts, and the weekly nurture email all flow into it automatically at send. <code style="font-size:11px">{dm}</code> and <code style="font-size:11px">{pt}</code> also fill per lead. Leave empty for plain emails.</p>
+        <p class="st-p">Paste your branded HTML wrapper here. <code style="font-size:11px">{content}</code> (or <code style="font-size:11px">{{body}}</code>) marks where the message goes — everything you type, Claude drafts, and the weekly nurture email all flow into it automatically at send. <code style="font-size:11px">{dm}</code>, <code style="font-size:11px">{pt}</code> and <code style="font-size:11px">{link}</code> (the lead's personal link to the current newsletter edition) also fill per lead. Leave empty for plain emails.</p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
           <div>
             <textarea class="ee-inp" rows="16" style="font-family:'SF Mono',Monaco,monospace;font-size:11px;line-height:1.45" data-cfg="emailShellHtml" data-cfgtype="str" placeholder='<div style="background:#F5F1E8;padding:30px">&#10;  <div style="max-width:600px;margin:0 auto;background:#fff;padding:30px;border-radius:8px">&#10;    {content}&#10;    <hr>&#10;    <p style="color:#8B6500">Solura Home Care · (216) 770-4886</p>&#10;  </div>&#10;</div>'></textarea>
@@ -1957,7 +1957,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1025-143';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1027-144';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -2942,7 +2942,7 @@ function getNames(ri){
     }
   }
   return {dm:dmFirst,pt:ptFirst,hasDM:!!dmFirst,apfm:isAPFM(ri),
-    rel:String(r[C.REL]||'').trim().toLowerCase()};
+    rel:String(r[C.REL]||'').trim().toLowerCase(),ri:ri};
 }
 /* ⚡FILLNAMES — BEGIN (sliced by tests/engine-gaps.test.mjs) */
 // The flip of {rel}: what the PATIENT is to the lead. The sheet doesn't
@@ -2979,6 +2979,15 @@ function fillNames(s,names){
     .replace(/\{\s*(?:patient|client)\s*\}/gi,'{pt}')
     .replace(/\{\{\s*(?:rel|relationship)\s*\}\}/gi,'{rel}')
     .replace(/\{\s*relationship\s*\}/gi,'{rel}');
+  // {link} → this lead's PERSONAL link to the current newsletter edition,
+  // same family as {dm}/{pt}. The typeof guard keeps this slice-safe: in
+  // test slices (or with no edition picked) it falls back to the public
+  // letters page, so a broken link never ships.
+  if(/\{\{?\s*link\s*\}\}?/i.test(s)){
+    var lk='https://www.solurahomecare.com/newsletter';
+    try{if(typeof nlLinkForLead==='function')lk=nlLinkForLead(names.ri)||lk;}catch(_){}
+    s=s.replace(/\{\{\s*link\s*\}\}/gi,lk).replace(/\{\s*link\s*\}/gi,lk);
+  }
   s=s.replace(/\{dm\}/g,dm);
   // {ptrel} → the flip: what the patient is to the lead ("your parent",
   // "your spouse"). Ambiguous inverses fall back to "loved one".
@@ -11095,6 +11104,25 @@ function nlHubEmailHtml(ed,first,link){
 function nlSendsAll(){
   enginesDoc.nlSends=enginesDoc.nlSends||[];
   return enginesDoc.nlSends;
+}
+// {link} in ANY email body: this lead's personal link to the CURRENT
+// edition. A fresh code per fill, recorded against the lead (last 5 per
+// lead) so reads can be matched later. No edition picked yet, or no lead
+// in context → the public letters page, never a broken token.
+function nlLinkForLead(ri){
+  var ed=(enginesDoc.config||{}).nlEdition;
+  if(!ed||!ed.url)return 'https://www.solurahomecare.com/newsletter';
+  if(ri==null||ri<0)return ed.url; // no lead context: the edition, uncoded
+  var code=nlNewCode();
+  try{
+    enginesDoc.nlAdhoc=enginesDoc.nlAdhoc||{};
+    var k=leadKey(ri);
+    var L=enginesDoc.nlAdhoc[k]=enginesDoc.nlAdhoc[k]||[];
+    L.unshift({code:code,slug:ed.slug,at:Date.now()});
+    if(L.length>5)L.length=5;
+    saveEnginesDoc().catch(function(){});
+  }catch(_){}
+  return nlPersonalLink(ed.url,code);
 }
 // Pure: one send's funnel. "Read" is the real signal; scanners that
 // prefetch links show as opens but never stay long enough to read.

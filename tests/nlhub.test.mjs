@@ -18,9 +18,9 @@ if (b < 0 || e < 0) throw new Error('NLHUB markers missing');
 const src = html.slice(html.indexOf('*/', b) + 2, e);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const enginesDoc = {};
-const mk = new Function('escapeHtml', 'enginesDoc', 'crypto',
-  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary};');
-const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto);
+const mk = new Function('escapeHtml', 'enginesDoc', 'crypto', 'leadKey', 'saveEnginesDoc',
+  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary,nlLinkForLead};');
+const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => 'lead-' + ri, async () => {});
 
 // ── codes: the spec's exact contract ──
 {
@@ -71,6 +71,34 @@ const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto);
   ok(N.nlHubStatsSummary({}).sent === 0, 'an empty send stays calm');
   ok(N.nlSendsAll() === enginesDoc.nlSends && Array.isArray(enginesDoc.nlSends), 'send history lives in the synced engines doc');
   ok(N.NL_HUB_KEEP === 30, 'history is capped');
+}
+
+// ── {link}: the per-lead fill-in, same family as {dm}/{pt} ──
+{
+  delete enginesDoc.config;
+  ok(N.nlLinkForLead(5) === 'https://www.solurahomecare.com/newsletter', 'no edition picked = the public letters page, never a broken token');
+  enginesDoc.config = { nlEdition: { slug: 'week-42', url: 'https://www.solurahomecare.com/newsletter/week-42', title: 'W42' } };
+  ok(N.nlLinkForLead(null) === 'https://www.solurahomecare.com/newsletter/week-42', 'no lead in context = the edition itself, uncoded');
+  const l1 = N.nlLinkForLead(5), l2 = N.nlLinkForLead(5);
+  ok(/^https:\/\/www\.solurahomecare\.com\/newsletter\/week-42\?r=[a-z0-9]{12}$/.test(l1), 'with a lead: the edition url + a fresh personal code');
+  ok(l1 !== l2, 'every fill mints a NEW code');
+  const rec = enginesDoc.nlAdhoc['lead-5'];
+  ok(Array.isArray(rec) && rec.length === 2 && rec[0].slug === 'week-42' && /^[a-z0-9]{12}$/.test(rec[0].code), 'each minted code is recorded against the lead identity');
+  for (let i = 0; i < 9; i++) N.nlLinkForLead(5);
+  ok(enginesDoc.nlAdhoc['lead-5'].length === 5, 'kept codes cap at the last 5 per lead');
+
+  // The fill itself rides fillNames, next to {dm}/{pt}
+  const fb = html.indexOf('/* ⚡FILLNAMES — BEGIN');
+  const fe = html.indexOf('/* ⚡FILLNAMES — END */');
+  const fsrc = html.slice(html.indexOf('*/', fb) + 2, fe);
+  const fmk = new Function('nlLinkForLead', fsrc + '\nreturn {fillNames};');
+  const F1 = fmk((ri) => 'https://www.solurahomecare.com/newsletter/week-42?r=code4lead' + ri).fillNames;
+  const out1 = F1('Hi {dm}, this week\'s letter: {link} and again {{link}}.', { dm: 'Sue', pt: 'Mom', ri: 7 });
+  ok(out1.indexOf('https://www.solurahomecare.com/newsletter/week-42?r=code4lead7') > -1 && out1.indexOf('{link}') === -1 && out1.indexOf('{{link}}') === -1, '{link} and {{link}} both fill with the personal link, ri passed through');
+  const F0 = fmk(undefined).fillNames; // slice without the dashboard around it
+  ok(F0('Read it here: {link}', { dm: 'Sue', ri: 7 }).indexOf('https://www.solurahomecare.com/newsletter') > -1, 'without the resolver the fallback page fills in — a token never ships raw');
+  ok(/rel:String\(r\[C\.REL\]\|\|''\)\.trim\(\)\.toLowerCase\(\),ri:ri\}/.test(html), 'getNames carries ri so every email path has the lead in hand');
+  ok(/\{link\}<\/code> \(the lead's personal link to the current newsletter edition\)/.test(html), 'the settings copy teaches the new token');
 }
 
 // ── constants: the exact endpoints from the spec ──
