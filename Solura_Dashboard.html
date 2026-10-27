@@ -1965,7 +1965,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1027-147';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1027-148';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -9770,7 +9770,7 @@ function applyWeeklyDraft(ri,opts){
   if(siteLnk){
     var beHost2=el('email-body');
     if(beHost2&&beHost2.innerHTML.indexOf('data-nllink')===-1){
-      beHost2.innerHTML+='<p style="margin-top:16px"><a data-nllink="1" href="'+escapeHtml(siteLnk)+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">\ud83d\udcf0 Read this week\'s letter</a></p>';
+      beHost2.innerHTML+=nlReadButtonHtml(siteLnk,true);
     }
   }
   if(w.pdf&&(w.pdf.b64||w.pdf.webUrl)){
@@ -10947,7 +10947,7 @@ function nlWarmupEmailFor(ri,forced){
       if(ri>=0&&typeof weeklyLinkHrefFor==='function'){
         var setL=null;try{setL=getWeeklyDraftFor(ri);}catch(_){}
         var lkW=weeklyLinkHrefFor(ri,setL,w);
-        if(lkW)html+='<p style="margin-top:16px"><a href="'+escapeHtml(lkW)+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">📰 Read this week\'s letter</a></p>';
+        if(lkW&&typeof nlReadButtonHtml==='function')html+=nlReadButtonHtml(lkW);
       }
     }catch(_){}
     html=buildNewsletterHtml(html,{noUnsub:true});
@@ -11189,6 +11189,16 @@ function nlCustomLinkForLead(ri,url){
 // even older pdfAsLink checkbox) are the fallbacks for existing drafts.
 function wkVariantLinkMode(set,v){
   return String((v&&v.linkMode)||(set&&set.linkMode)||((set&&set.pdfAsLink)?'pdf':'none'));
+}
+// The Read-the-letter block: a quiet, letter-like card in the brand's
+// linen-and-gold, not a bare button bolted to the bottom. Outbound copy,
+// so warm and unhurried, and no em dashes.
+function nlReadButtonHtml(href,marked){
+  return '<div'+(marked?' data-nllink="1"':'')+' style="margin-top:26px;padding:20px 22px;background:#f7f3ea;border:1px solid #e4ddcf;border-radius:12px;text-align:center;font-family:Georgia,\'Times New Roman\',serif">'
+    +'<div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#8B6500;font-weight:bold;margin-bottom:6px">This week\'s letter</div>'
+    +'<div style="font-size:14.5px;line-height:1.6;color:#3d4348;margin-bottom:14px">A few quiet minutes of reading, written for families like yours.</div>'
+    +'<a href="'+escapeHtml(String(href||''))+'" style="display:inline-block;background:#1f3d57;color:#faf8f4;text-decoration:none;font-size:16px;font-weight:bold;padding:12px 28px;border-radius:10px;border-bottom:3px solid #C59B4E">Read this week\'s letter</a>'
+    +'</div>';
 }
 function weeklyLinkHrefFor(ri,set,v){
   var mode=wkVariantLinkMode(set,v);

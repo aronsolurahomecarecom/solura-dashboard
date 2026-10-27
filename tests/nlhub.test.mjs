@@ -19,7 +19,7 @@ const src = html.slice(html.indexOf('*/', b) + 2, e);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const enginesDoc = {};
 const mk = new Function('escapeHtml', 'enginesDoc', 'crypto', 'leadKey', 'saveEnginesDoc',
-  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary,nlLinkForLead,nlTrackableUrl,nlCustomLinkForLead,wkVariantLinkMode,weeklyLinkHrefFor};');
+  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary,nlLinkForLead,nlTrackableUrl,nlCustomLinkForLead,wkVariantLinkMode,weeklyLinkHrefFor,nlReadButtonHtml};');
 const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => 'lead-' + ri, async () => {});
 
 // ── codes: the spec's exact contract ──
@@ -134,8 +134,17 @@ const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => '
   ok(/lm2\.value=wkVariantLinkMode\(set,v\);/.test(html), 'switching A/B/C tabs shows that variant\'s own choice');
   ok(/wkVariantLinkMode\(st6,vv6\)==='pdf'&&vv6\.pdf/.test(html), 'the save-time OneDrive upload keys off the per-variant mode');
   ok(/wkVariantLinkMode\(set,w\)==='pdf'&&w\.pdf\.webUrl/.test(html), 'so does the SharePoint button branch');
-  ok(/siteLnk=weeklyLinkHrefFor\(ri,set,w\);/.test(html) && /data-nllink="1" href="'\+escapeHtml\(siteLnk\)/.test(html), 'the composer apply adds the per-lead button for site/custom variants');
-  ok(/typeof weeklyLinkHrefFor==='function'/.test(html) && /lkW=weeklyLinkHrefFor\(ri,setL,w\);/.test(html), 'the automated warm-up / A-B sends pass the VARIANT too (slice-safe)');
+  ok(/siteLnk=weeklyLinkHrefFor\(ri,set,w\);/.test(html) && /nlReadButtonHtml\(siteLnk,true\)/.test(html), 'the composer apply adds the per-lead card for site/custom variants');
+  ok(/typeof weeklyLinkHrefFor==='function'/.test(html) && /lkW=weeklyLinkHrefFor\(ri,setL,w\);/.test(html) && /nlReadButtonHtml\(lkW\)/.test(html), 'the automated warm-up / A-B sends pass the VARIANT and use the same card (slice-safe)');
+
+  // The card itself: letter-like, branded, escaped, no em dashes
+  const card = N.nlReadButtonHtml('https://www.solurahomecare.com/newsletter/week-42?r=abc123def456', true);
+  ok(/^<div data-nllink="1"/.test(card), 'the composer card carries the dedupe mark');
+  ok(!/data-nllink/.test(N.nlReadButtonHtml('https://x.com')), 'the automated card does not');
+  ok(/This week's letter<\/div>/.test(card) && /A few quiet minutes of reading, written for families like yours\./.test(card), 'an eyebrow and a warm line, not a bare button');
+  ok(/background:#1f3d57/.test(card) && /border-bottom:3px solid #C59B4E/.test(card) && /background:#f7f3ea/.test(card), 'brand navy button, gold underline, linen card');
+  ok(card.indexOf('?r=abc123def456') > -1 && card.indexOf('—') === -1, 'the personal link lands; no em dashes in outbound copy');
+  ok(N.nlReadButtonHtml('"><script>').indexOf('"><script>') === -1, 'the href is escaped');
   ok(/<a data-trkdoc="1" href="'\+escapeHtml\(w\.pdf\.webUrl\)/.test(html), 'the manual-upload SharePoint/OneDrive button works exactly as it always did');
   ok(!/nlRetireLegacyLinks/.test(html), 'the blanket legacy-link rewrite stays gone — link choice is explicit');
   ok(/wkLinkModeHint/.test(html) && /No edition picked yet/.test(html), 'the editor hint warns when site mode has no edition to point at');
