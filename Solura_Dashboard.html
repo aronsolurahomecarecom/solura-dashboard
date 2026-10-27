@@ -1957,7 +1957,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1027-144';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1027-145';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -9718,7 +9718,7 @@ function applyWeeklyDraft(ri,opts){
   var bodyEl=el('email-body');
   emailClearRawHtml({keepBody:true}); // weekly draft replaces any pasted raw HTML
   if(bodyEl&&w.body){
-    var filled=fillNames(w.body,names);
+    var filled=nlRetireLegacyLinks(fillNames(w.body,names),ri); // SharePoint → the lead's personal website link
     if(looksLikeHtml(filled)){
       // HTML newsletter → straight in, rendered — and the design shell is
       // SUPPRESSED at send: a newsletter is already a complete design.
@@ -9733,12 +9733,18 @@ function applyWeeklyDraft(ri,opts){
   }
   if(w.pdf&&(w.pdf.b64||w.pdf.webUrl)){
     if(set.pdfAsLink&&w.pdf.webUrl){
-      // Tracked-link delivery: a gold button in the body instead of an
-      // attachment. The href is rewritten through /doc at send time, so
-      // every click lands as a doc-open you can see.
+      // Link delivery: a gold button in the body instead of an attachment.
+      // With an edition picked, the button points at the lead's PERSONAL
+      // website link (direct, untracked by us \u2014 the website measures
+      // reading). Without one, the old OneDrive share link still works and
+      // rides /doc tracking at send time.
       var beHost=el('email-body');
-      if(beHost&&beHost.innerHTML.indexOf('data-trkdoc')===-1){
-        beHost.innerHTML+='<p style="margin-top:16px"><a data-trkdoc="1" href="'+escapeHtml(w.pdf.webUrl)+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">\ud83d\udcc4 '+escapeHtml(w.pdf.name.replace(/\.pdf$/i,''))+'</a></p>';
+      var ed8=null;try{ed8=(enginesDoc.config||{}).nlEdition;}catch(_){}
+      var onSite=!!(ed8&&ed8.url);
+      if(beHost&&beHost.innerHTML.indexOf(onSite?'data-nllink':'data-trkdoc')===-1){
+        beHost.innerHTML+=onSite
+          ?('<p style="margin-top:16px"><a data-nllink="1" href="'+escapeHtml(nlLinkForLead(ri))+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">\ud83d\udcf0 Read this week\'s letter</a></p>')
+          :('<p style="margin-top:16px"><a data-trkdoc="1" href="'+escapeHtml(w.pdf.webUrl)+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">\ud83d\udcc4 '+escapeHtml(w.pdf.name.replace(/\.pdf$/i,''))+'</a></p>');
       }
     }else if(w.pdf.b64){
       var already=emailAttachments.some(function(a){return a._weekly;});
@@ -10889,6 +10895,8 @@ function nlWarmupEmailFor(ri,forced){
   var names=(ri>=0)?getNames(ri):{dm:'',pt:''}; // blanks → "there"/"your loved one" fallbacks
   var subj=fillNames(String(w.subject||''),names);
   var body=fillNames(String(w.body||''),names);
+  // SharePoint → personal website link (typeof keeps the test slice safe)
+  try{if(typeof nlRetireLegacyLinks==='function')body=nlRetireLegacyLinks(body,ri);}catch(_){}
   var html;
   if(looksLikeHtml(body)){
     html=sanitizeDraftHtml(body);
@@ -11104,6 +11112,20 @@ function nlHubEmailHtml(ed,first,link){
 function nlSendsAll(){
   enginesDoc.nlSends=enginesDoc.nlSends||[];
   return enginesDoc.nlSends;
+}
+// 🔚 SharePoint retirement: old weekly drafts still carry OneDrive /
+// SharePoint newsletter links in their SAVED CONTENT. Once an edition is
+// picked, every weekly send rewrites those to the lead's personal website
+// link — ONE code per email, reused across every occurrence. No edition
+// picked = untouched (the old link keeps working until the new system is on).
+function nlRetireLegacyLinks(s,ri){
+  s=String(s||'');
+  var ed=(enginesDoc.config||{}).nlEdition;
+  if(!ed||!ed.url)return s;
+  var RX=/https?:\/\/[^\s"'<>]*(?:sharepoint\.com|1drv\.ms)[^\s"'<>]*/gi;
+  if(!RX.test(s))return s;
+  var link=nlLinkForLead(ri);
+  return s.replace(RX,link);
 }
 // {link} in ANY email body: this lead's personal link to the CURRENT
 // edition. A fresh code per fill, recorded against the lead (last 5 per
