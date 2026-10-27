@@ -19,7 +19,7 @@ const src = html.slice(html.indexOf('*/', b) + 2, e);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const enginesDoc = {};
 const mk = new Function('escapeHtml', 'enginesDoc', 'crypto', 'leadKey', 'saveEnginesDoc',
-  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary,nlLinkForLead,nlRetireLegacyLinks};');
+  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary,nlLinkForLead,nlTrackableUrl,nlCustomLinkForLead,weeklyLinkHrefFor};');
 const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => 'lead-' + ri, async () => {});
 
 // ── codes: the spec's exact contract ──
@@ -101,24 +101,34 @@ const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => '
   ok(/\{link\}<\/code> \(the lead's personal link to the current newsletter edition\)/.test(html), 'the settings copy teaches the new token');
 }
 
-// ── 🔚 SharePoint retirement: legacy links in SAVED drafts get rewritten ──
+// ── 🔗 weekly link modes: pdf keeps SharePoint; site/custom go personal ──
 {
   enginesDoc.config = { nlEdition: { slug: 'week-42', url: 'https://www.solurahomecare.com/newsletter/week-42', title: 'W42' } };
-  const legacy = '<p>Read it: <a href="https://solura-my.sharepoint.com/:b:/g/personal/x/EeAbc?e=12">here</a> or https://1drv.ms/b/s!Abc123 — and our site <a href="https://www.solurahomecare.com/about">about</a></p>';
-  const out = N.nlRetireLegacyLinks(legacy, 9);
-  ok(out.indexOf('sharepoint.com') === -1 && out.indexOf('1drv.ms') === -1, 'SharePoint and OneDrive short links are gone');
-  const links = out.match(/https:\/\/www\.solurahomecare\.com\/newsletter\/week-42\?r=[a-z0-9]{12}/g) || [];
-  ok(links.length === 2 && links[0] === links[1], 'both legacy links became the personal link, ONE code reused per email');
-  ok(out.indexOf('https://www.solurahomecare.com/about') > -1, 'ordinary links are left alone');
-  delete enginesDoc.config;
-  ok(N.nlRetireLegacyLinks(legacy, 9) === legacy, 'no edition picked = untouched, the old link keeps working');
-  enginesDoc.config = { nlEdition: { slug: 'week-42', url: 'https://www.solurahomecare.com/newsletter/week-42' } };
+  ok(N.nlTrackableUrl('https://www.solurahomecare.com/newsletter/week-42') && N.nlTrackableUrl('https://solurahomecare.com/x'), 'our website is where read data exists');
+  ok(!N.nlTrackableUrl('https://solura-my.sharepoint.com/x') && !N.nlTrackableUrl('https://example.com/a'), 'SharePoint and foreign hosts are not trackable');
 
-  // Wired into BOTH weekly paths + the PDF-as-link button
-  ok(/var filled=nlRetireLegacyLinks\(fillNames\(w\.body,names\),ri\);/.test(html), 'the composer weekly apply rewrites legacy links');
-  ok(/typeof nlRetireLegacyLinks==='function'\)body=nlRetireLegacyLinks\(body,ri\);/.test(html), 'the warm-up / A-B automated sends rewrite them too');
-  ok(/data-nllink="1" href="'\+escapeHtml\(nlLinkForLead\(ri\)\)/.test(html) && /Read this week\\'s letter<\/a>/.test(html), 'with an edition picked, the weekly PDF button points at the personal WEBSITE link instead of OneDrive');
-  ok(/:\('<p style="margin-top:16px"><a data-trkdoc="1" href="'\+escapeHtml\(w\.pdf\.webUrl\)/.test(html), 'without one, the OneDrive share button still works as before');
+  const c1 = N.nlCustomLinkForLead(9, 'https://www.solurahomecare.com/newsletter/special-edition');
+  ok(/^https:\/\/www\.solurahomecare\.com\/newsletter\/special-edition\?r=[a-z0-9]{12}$/.test(c1), 'a pasted WEBSITE link gets a personal code per lead');
+  ok((enginesDoc.nlAdhoc['lead-9'] || [])[0].slug === 'special-edition', 'and the code is recorded with the page it points at');
+  ok(N.nlCustomLinkForLead(9, 'https://example.com/anywhere') === 'https://example.com/anywhere', 'a pasted link elsewhere is used exactly as pasted — no fake tracking');
+  ok(N.nlCustomLinkForLead(9, '') === '', 'no url = no button');
+
+  ok(/^https:\/\/www\.solurahomecare\.com\/newsletter\/week-42\?r=[a-z0-9]{12}$/.test(N.weeklyLinkHrefFor(9, { linkMode: 'site' })), "mode 'site' = this week's edition, personal per lead");
+  delete enginesDoc.config;
+  ok(N.weeklyLinkHrefFor(9, { linkMode: 'site' }) === '', "mode 'site' with no edition picked = NO button, never a dead link");
+  enginesDoc.config = { nlEdition: { slug: 'week-42', url: 'https://www.solurahomecare.com/newsletter/week-42' } };
+  ok(N.weeklyLinkHrefFor(9, { linkMode: 'custom', customUrl: 'https://example.com/z' }) === 'https://example.com/z', "mode 'custom' uses the pasted link");
+  ok(N.weeklyLinkHrefFor(9, { linkMode: 'pdf' }) === '' && N.weeklyLinkHrefFor(9, {}) === '', "modes 'pdf' and 'none' leave the button to the pdf block — SharePoint path untouched");
+
+  // Wiring: editor control, both send paths, and the untouched pdf branch
+  ok(/id="wk-set-linkmode"/.test(html) && /id="wk-set-customurl"/.test(html), 'the editor has the link-mode selector + the paste-a-link field');
+  ok(/set\.linkMode=lm\.value\|\|'none';/.test(html) && /set\.pdfAsLink=\(set\.linkMode==='pdf'\)/.test(html), 'the mode saves per set; pdf mode keeps the OneDrive upload-at-save machinery');
+  ok(/lm2\.value=set\.linkMode\|\|\(set\.pdfAsLink\?'pdf':'none'\);/.test(html), "old sets with the checkbox map to mode 'pdf' automatically");
+  ok(/siteLnk=weeklyLinkHrefFor\(ri,set\);/.test(html) && /data-nllink="1" href="'\+escapeHtml\(siteLnk\)/.test(html), 'the composer apply adds the per-lead button for site/custom modes');
+  ok(/typeof weeklyLinkHrefFor==='function'/.test(html) && /lkW=weeklyLinkHrefFor\(ri,setL\);/.test(html), 'the automated warm-up / A-B sends add the same button (slice-safe)');
+  ok(/<a data-trkdoc="1" href="'\+escapeHtml\(w\.pdf\.webUrl\)/.test(html), 'the manual-upload SharePoint/OneDrive button works exactly as it always did');
+  ok(!/nlRetireLegacyLinks/.test(html), 'the blanket legacy-link rewrite is gone — link choice is explicit now');
+  ok(/wkLinkModeHint/.test(html) && /No edition picked yet/.test(html), 'the editor hint warns when site mode has no edition to point at');
 }
 
 // ── constants: the exact endpoints from the spec ──

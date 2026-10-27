@@ -1229,7 +1229,15 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <input type="number" id="wk-set-refresh" min="1" max="90" class="ee-inp"></div>
       </div>
       <div style="margin-bottom:10px">
-        <label class="st-check" style="font-size:12px"><input type="checkbox" id="wk-set-pdflink"> Deliver the PDF as a <strong>tracked link</strong> instead of an attachment — you'll see who opens it (attached PDFs can't be tracked)</label>
+        <label class="ee-lbl">The "Read this week's letter" button points at…</label>
+        <select id="wk-set-linkmode" class="ee-inp">
+          <option value="none">Nothing — body only (a PDF, if attached, rides as an attachment)</option>
+          <option value="pdf">📄 The uploaded PDF, as a OneDrive/SharePoint tracked link</option>
+          <option value="site">🌐 This week's WEBSITE edition — a personal tracked link per lead</option>
+          <option value="custom">🔗 A link I paste below</option>
+        </select>
+        <input type="url" id="wk-set-customurl" class="ee-inp" placeholder="https://www.solurahomecare.com/newsletter/…" style="display:none;margin-top:6px">
+        <div id="wk-linkmode-hint" style="font-size:11px;color:var(--soft);margin-top:4px;line-height:1.5"></div>
       </div>
       <div style="margin-bottom:12px">
         <label class="ee-lbl">SMS template for this sequence's nurture texts ({dm}/{pt}/{rel} fill)</label>
@@ -1957,7 +1965,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1027-145';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1027-146';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -8297,6 +8305,7 @@ document.addEventListener('input',function(ev){
     // file — never the public page source).
     try{enginesDoc.config=enginesDoc.config||{};enginesDoc.config.ghlApiKey=t.value.trim();stMarkDirty();}catch(_){}
   }
+  if(t&&t.id==='wk-set-linkmode'){try{wkLinkModeHint();}catch(_){}}
   // Settings config fields → staged into enginesDoc.config, saved via Save bar
   if(t&&t.dataset&&t.dataset.cfg){
     var ty=t.dataset.cfgtype;
@@ -9584,7 +9593,12 @@ function wkStash(){
   var se=el('wk-set-engine');if(se)set.engineId=se.value||'';
   var sr=el('wk-set-refresh');if(sr)set.refreshDays=Math.max(1,parseInt(sr.value,10)||8);
   var ss=el('wk-set-sms');if(ss)set.smsText=ss.value||'';
-  var pl=el('wk-set-pdflink');if(pl)set.pdfAsLink=!!pl.checked;
+  var lm=el('wk-set-linkmode');
+  if(lm){
+    set.linkMode=lm.value||'none';
+    set.pdfAsLink=(set.linkMode==='pdf'); // the save-time OneDrive upload keys off this, as before
+  }
+  var cu=el('wk-set-customurl');if(cu)set.customUrl=String(cu.value||'').trim();
   if(set.engineId){var e5=(enginesDoc.engines||[]).find(function(x){return x.id===set.engineId;});set.name=e5?e5.name:set.engineId;}
   else set.name='Default (all sequences)';
   var vs=weeklyVariants();
@@ -9594,6 +9608,21 @@ function wkStash(){
   var nb=(el('weekly-body')||{}).value||'';
   if(ns!==(v.subject||'')||nb!==(v.body||'')){v.updatedAt=Date.now();}
   v.subject=ns;v.body=nb;
+}
+// The link-mode line under the selector says what each choice really does
+function wkLinkModeHint(){
+  var lm=el('wk-set-linkmode'),hint=el('wk-linkmode-hint'),cu=el('wk-set-customurl');
+  if(!lm||!hint)return;
+  var m=lm.value;
+  if(cu)cu.style.display=(m==='custom')?'':'none';
+  if(m==='pdf')hint.textContent='The uploaded PDF goes out as a OneDrive/SharePoint link, click-tracked through the worker — the classic manual-upload path.';
+  else if(m==='site'){
+    var ed=null;try{ed=(enginesDoc.config||{}).nlEdition;}catch(_){}
+    hint.textContent=ed&&ed.url?('Current edition: "'+(ed.title||ed.slug)+'" — every lead gets their own tracked link to it (opens + real reads).')
+      :'⚠ No edition picked yet — publish in the composer (Settings → Newsletter) first, or the button is left out.';
+  }
+  else if(m==='custom')hint.textContent='On solurahomecare.com: every lead gets their own tracked link (opens + real reads). Anywhere else: the link is used exactly as pasted — no read data exists there.';
+  else hint.textContent='';
 }
 function openWeekly(){
   draftSets(); // ensure migrated
@@ -9625,7 +9654,13 @@ function renderWeeklyEditor(){
   }
   var sr=el('wk-set-refresh');if(sr)sr.value=set.refreshDays||8;
   var ss=el('wk-set-sms');if(ss)ss.value=set.smsText||'';
-  var pl2=el('wk-set-pdflink');if(pl2)pl2.checked=!!set.pdfAsLink;
+  var lm2=el('wk-set-linkmode');
+  if(lm2){
+    // Old sets only knew the pdfAsLink checkbox — that maps to 'pdf'
+    lm2.value=set.linkMode||(set.pdfAsLink?'pdf':'none');
+    var cu2=el('wk-set-customurl');if(cu2)cu2.value=set.customUrl||'';
+    wkLinkModeHint();
+  }
   var vs=weeklyVariants();
   if(_wkIdx>=vs.length)_wkIdx=Math.max(0,vs.length-1);
   var v=vs[_wkIdx]||{};
@@ -9718,7 +9753,7 @@ function applyWeeklyDraft(ri,opts){
   var bodyEl=el('email-body');
   emailClearRawHtml({keepBody:true}); // weekly draft replaces any pasted raw HTML
   if(bodyEl&&w.body){
-    var filled=nlRetireLegacyLinks(fillNames(w.body,names),ri); // SharePoint → the lead's personal website link
+    var filled=fillNames(w.body,names);
     if(looksLikeHtml(filled)){
       // HTML newsletter → straight in, rendered — and the design shell is
       // SUPPRESSED at send: a newsletter is already a complete design.
@@ -9731,20 +9766,24 @@ function applyWeeklyDraft(ri,opts){
       bodyEl.innerHTML=emailPlainToHtml(filled);
     }
   }
+  // \ud83d\udd17 The set's Read-the-letter button: website edition or pasted link,
+  // personal per lead where trackable. The PDF modes stay below, untouched.
+  var siteLnk='';try{siteLnk=weeklyLinkHrefFor(ri,set);}catch(_){}
+  if(siteLnk){
+    var beHost2=el('email-body');
+    if(beHost2&&beHost2.innerHTML.indexOf('data-nllink')===-1){
+      beHost2.innerHTML+='<p style="margin-top:16px"><a data-nllink="1" href="'+escapeHtml(siteLnk)+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">\ud83d\udcf0 Read this week\'s letter</a></p>';
+    }
+  }
   if(w.pdf&&(w.pdf.b64||w.pdf.webUrl)){
     if(set.pdfAsLink&&w.pdf.webUrl){
-      // Link delivery: a gold button in the body instead of an attachment.
-      // With an edition picked, the button points at the lead's PERSONAL
-      // website link (direct, untracked by us \u2014 the website measures
-      // reading). Without one, the old OneDrive share link still works and
-      // rides /doc tracking at send time.
+      // Tracked-link delivery: a gold button in the body instead of an
+      // attachment. The href is rewritten through /doc at send time, so
+      // every click lands as a doc-open you can see. This is the manual
+      // SharePoint/OneDrive path \u2014 kept exactly as it always was.
       var beHost=el('email-body');
-      var ed8=null;try{ed8=(enginesDoc.config||{}).nlEdition;}catch(_){}
-      var onSite=!!(ed8&&ed8.url);
-      if(beHost&&beHost.innerHTML.indexOf(onSite?'data-nllink':'data-trkdoc')===-1){
-        beHost.innerHTML+=onSite
-          ?('<p style="margin-top:16px"><a data-nllink="1" href="'+escapeHtml(nlLinkForLead(ri))+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">\ud83d\udcf0 Read this week\'s letter</a></p>')
-          :('<p style="margin-top:16px"><a data-trkdoc="1" href="'+escapeHtml(w.pdf.webUrl)+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">\ud83d\udcc4 '+escapeHtml(w.pdf.name.replace(/\.pdf$/i,''))+'</a></p>');
+      if(beHost&&beHost.innerHTML.indexOf('data-trkdoc')===-1){
+        beHost.innerHTML+='<p style="margin-top:16px"><a data-trkdoc="1" href="'+escapeHtml(w.pdf.webUrl)+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">\ud83d\udcc4 '+escapeHtml(w.pdf.name.replace(/\.pdf$/i,''))+'</a></p>';
       }
     }else if(w.pdf.b64){
       var already=emailAttachments.some(function(a){return a._weekly;});
@@ -10895,8 +10934,6 @@ function nlWarmupEmailFor(ri,forced){
   var names=(ri>=0)?getNames(ri):{dm:'',pt:''}; // blanks → "there"/"your loved one" fallbacks
   var subj=fillNames(String(w.subject||''),names);
   var body=fillNames(String(w.body||''),names);
-  // SharePoint → personal website link (typeof keeps the test slice safe)
-  try{if(typeof nlRetireLegacyLinks==='function')body=nlRetireLegacyLinks(body,ri);}catch(_){}
   var html;
   if(looksLikeHtml(body)){
     html=sanitizeDraftHtml(body);
@@ -10904,7 +10941,19 @@ function nlWarmupEmailFor(ri,forced){
     var sig=String(cfg('emailSignature')||'').trim();
     html=emailPlainToHtml(body+(sig?('\n\n'+sig):''));
   }
-  if(!isFullDesignHtml(html))html=buildNewsletterHtml(html,{noUnsub:true});
+  // 🔗 The set's Read-the-letter button (website edition / pasted link),
+  // personal per lead — same as the composer apply. typeof keeps the test
+  // slice safe; full-design HTML carries its own links, so it's left alone.
+  if(!isFullDesignHtml(html)){
+    try{
+      if(ri>=0&&typeof weeklyLinkHrefFor==='function'){
+        var setL=null;try{setL=getWeeklyDraftFor(ri);}catch(_){}
+        var lkW=weeklyLinkHrefFor(ri,setL);
+        if(lkW)html+='<p style="margin-top:16px"><a href="'+escapeHtml(lkW)+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">📰 Read this week\'s letter</a></p>';
+      }
+    }catch(_){}
+    html=buildNewsletterHtml(html,{noUnsub:true});
+  }
   return {subj:subj,html:html,label:String(w.label||'A')};
 }
 async function nlWarmupSendBatch(progress){
@@ -11113,19 +11162,39 @@ function nlSendsAll(){
   enginesDoc.nlSends=enginesDoc.nlSends||[];
   return enginesDoc.nlSends;
 }
-// 🔚 SharePoint retirement: old weekly drafts still carry OneDrive /
-// SharePoint newsletter links in their SAVED CONTENT. Once an edition is
-// picked, every weekly send rewrites those to the lead's personal website
-// link — ONE code per email, reused across every occurrence. No edition
-// picked = untouched (the old link keeps working until the new system is on).
-function nlRetireLegacyLinks(s,ri){
-  s=String(s||'');
-  var ed=(enginesDoc.config||{}).nlEdition;
-  if(!ed||!ed.url)return s;
-  var RX=/https?:\/\/[^\s"'<>]*(?:sharepoint\.com|1drv\.ms)[^\s"'<>]*/gi;
-  if(!RX.test(s))return s;
-  var link=nlLinkForLead(ri);
-  return s.replace(RX,link);
+// 🔗 The weekly "Read this week's letter" button, per the SET's link mode.
+// 'pdf' keeps the classic OneDrive/SharePoint path (handled by the pdf
+// block, untouched); 'site' is this week's website edition with a personal
+// tracked link per lead; 'custom' is any pasted url — personal + tracked
+// when it lives on our website (that's where the read data exists), used
+// exactly as pasted anywhere else.
+function nlTrackableUrl(u){
+  return /^https:\/\/(www\.)?solurahomecare\.com\//i.test(String(u||'').trim());
+}
+function nlCustomLinkForLead(ri,url){
+  url=String(url||'').trim();
+  if(!url)return '';
+  if(!nlTrackableUrl(url))return url; // elsewhere: as pasted — no read data there
+  if(ri==null||ri<0)return url;
+  var code=nlNewCode();
+  try{
+    enginesDoc.nlAdhoc=enginesDoc.nlAdhoc||{};
+    var k=leadKey(ri);
+    var L=enginesDoc.nlAdhoc[k]=enginesDoc.nlAdhoc[k]||[];
+    L.unshift({code:code,slug:url.split('?')[0].split('/').filter(Boolean).pop()||'',at:Date.now()});
+    if(L.length>5)L.length=5;
+    saveEnginesDoc().catch(function(){});
+  }catch(_){}
+  return nlPersonalLink(url,code);
+}
+function weeklyLinkHrefFor(ri,set){
+  var mode=String((set&&set.linkMode)||'');
+  if(mode==='site'){
+    var ed=(enginesDoc.config||{}).nlEdition;
+    return (ed&&ed.url)?nlLinkForLead(ri):''; // no edition picked = no button, never a dead link
+  }
+  if(mode==='custom')return nlCustomLinkForLead(ri,set&&set.customUrl);
+  return ''; // 'pdf' and 'none' are the pdf block's business
 }
 // {link} in ANY email body: this lead's personal link to the CURRENT
 // edition. A fresh code per fill, recorded against the lead (last 5 per
