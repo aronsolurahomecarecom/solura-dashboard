@@ -19,7 +19,7 @@ const src = html.slice(html.indexOf('*/', b) + 2, e);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const enginesDoc = {};
 const mk = new Function('escapeHtml', 'enginesDoc', 'crypto', 'leadKey', 'saveEnginesDoc',
-  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary,nlLinkForLead,nlTrackableUrl,nlCustomLinkForLead,weeklyLinkHrefFor};');
+  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary,nlLinkForLead,nlTrackableUrl,nlCustomLinkForLead,wkVariantLinkMode,weeklyLinkHrefFor};');
 const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => 'lead-' + ri, async () => {});
 
 // ── codes: the spec's exact contract ──
@@ -113,21 +113,31 @@ const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => '
   ok(N.nlCustomLinkForLead(9, 'https://example.com/anywhere') === 'https://example.com/anywhere', 'a pasted link elsewhere is used exactly as pasted — no fake tracking');
   ok(N.nlCustomLinkForLead(9, '') === '', 'no url = no button');
 
-  ok(/^https:\/\/www\.solurahomecare\.com\/newsletter\/week-42\?r=[a-z0-9]{12}$/.test(N.weeklyLinkHrefFor(9, { linkMode: 'site' })), "mode 'site' = this week's edition, personal per lead");
+  // Per-VARIANT choice, with set-level and legacy-checkbox fallbacks
+  ok(N.wkVariantLinkMode({ linkMode: 'site' }, { linkMode: 'custom' }) === 'custom', "the variant's own choice wins");
+  ok(N.wkVariantLinkMode({ linkMode: 'site' }, {}) === 'site', 'a variant without one inherits the set');
+  ok(N.wkVariantLinkMode({ pdfAsLink: true }, {}) === 'pdf' && N.wkVariantLinkMode({}, {}) === 'none', 'the old checkbox maps to pdf; nothing set = none');
+
+  ok(/^https:\/\/www\.solurahomecare\.com\/newsletter\/week-42\?r=[a-z0-9]{12}$/.test(N.weeklyLinkHrefFor(9, {}, { linkMode: 'site' })), "mode 'site' = this week's edition, personal per lead");
   delete enginesDoc.config;
-  ok(N.weeklyLinkHrefFor(9, { linkMode: 'site' }) === '', "mode 'site' with no edition picked = NO button, never a dead link");
+  ok(N.weeklyLinkHrefFor(9, {}, { linkMode: 'site' }) === '', "mode 'site' with no edition picked = NO button, never a dead link");
   enginesDoc.config = { nlEdition: { slug: 'week-42', url: 'https://www.solurahomecare.com/newsletter/week-42' } };
-  ok(N.weeklyLinkHrefFor(9, { linkMode: 'custom', customUrl: 'https://example.com/z' }) === 'https://example.com/z', "mode 'custom' uses the pasted link");
-  ok(N.weeklyLinkHrefFor(9, { linkMode: 'pdf' }) === '' && N.weeklyLinkHrefFor(9, {}) === '', "modes 'pdf' and 'none' leave the button to the pdf block — SharePoint path untouched");
+  ok(N.weeklyLinkHrefFor(9, {}, { linkMode: 'custom', customUrl: 'https://example.com/z' }) === 'https://example.com/z', "mode 'custom' uses the variant's pasted link");
+  ok(N.weeklyLinkHrefFor(9, { customUrl: 'https://example.com/set' }, { linkMode: 'custom' }) === 'https://example.com/set', 'a variant without its own url falls back to the set url');
+  ok(/^https:\/\/www\.solurahomecare\.com\/newsletter\/week-42\?r=/.test(N.weeklyLinkHrefFor(9, { linkMode: 'site' }, { linkMode: 'custom', customUrl: 'https://www.solurahomecare.com/newsletter/week-42' })), 'A and B can point at DIFFERENT places in the same set');
+  ok(N.weeklyLinkHrefFor(9, {}, { linkMode: 'pdf' }) === '' && N.weeklyLinkHrefFor(9, {}, {}) === '', "modes 'pdf' and 'none' leave the button to the pdf block — SharePoint path untouched");
 
   // Wiring: editor control, both send paths, and the untouched pdf branch
   ok(/id="wk-set-linkmode"/.test(html) && /id="wk-set-customurl"/.test(html), 'the editor has the link-mode selector + the paste-a-link field');
-  ok(/set\.linkMode=lm\.value\|\|'none';/.test(html) && /set\.pdfAsLink=\(set\.linkMode==='pdf'\)/.test(html), 'the mode saves per set; pdf mode keeps the OneDrive upload-at-save machinery');
-  ok(/lm2\.value=set\.linkMode\|\|\(set\.pdfAsLink\?'pdf':'none'\);/.test(html), "old sets with the checkbox map to mode 'pdf' automatically");
-  ok(/siteLnk=weeklyLinkHrefFor\(ri,set\);/.test(html) && /data-nllink="1" href="'\+escapeHtml\(siteLnk\)/.test(html), 'the composer apply adds the per-lead button for site/custom modes');
-  ok(/typeof weeklyLinkHrefFor==='function'/.test(html) && /lkW=weeklyLinkHrefFor\(ri,setL\);/.test(html), 'the automated warm-up / A-B sends add the same button (slice-safe)');
+  ok(/THIS variant's "Read this week's letter" button/.test(html), 'the control sits with the A/B/C variant, not the set');
+  ok(/if\(lm\)v\.linkMode=lm\.value\|\|'none';/.test(html) && /if\(cu\)v\.customUrl=String\(cu\.value\|\|''\)\.trim\(\);/.test(html), 'the choice saves onto the VARIANT');
+  ok(/lm2\.value=wkVariantLinkMode\(set,v\);/.test(html), 'switching A/B/C tabs shows that variant\'s own choice');
+  ok(/wkVariantLinkMode\(st6,vv6\)==='pdf'&&vv6\.pdf/.test(html), 'the save-time OneDrive upload keys off the per-variant mode');
+  ok(/wkVariantLinkMode\(set,w\)==='pdf'&&w\.pdf\.webUrl/.test(html), 'so does the SharePoint button branch');
+  ok(/siteLnk=weeklyLinkHrefFor\(ri,set,w\);/.test(html) && /data-nllink="1" href="'\+escapeHtml\(siteLnk\)/.test(html), 'the composer apply adds the per-lead button for site/custom variants');
+  ok(/typeof weeklyLinkHrefFor==='function'/.test(html) && /lkW=weeklyLinkHrefFor\(ri,setL,w\);/.test(html), 'the automated warm-up / A-B sends pass the VARIANT too (slice-safe)');
   ok(/<a data-trkdoc="1" href="'\+escapeHtml\(w\.pdf\.webUrl\)/.test(html), 'the manual-upload SharePoint/OneDrive button works exactly as it always did');
-  ok(!/nlRetireLegacyLinks/.test(html), 'the blanket legacy-link rewrite is gone — link choice is explicit now');
+  ok(!/nlRetireLegacyLinks/.test(html), 'the blanket legacy-link rewrite stays gone — link choice is explicit');
   ok(/wkLinkModeHint/.test(html) && /No edition picked yet/.test(html), 'the editor hint warns when site mode has no edition to point at');
 }
 

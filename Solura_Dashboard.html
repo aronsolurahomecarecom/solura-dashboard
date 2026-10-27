@@ -1228,8 +1228,13 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div><label class="ee-lbl">Refresh every (days)</label>
           <input type="number" id="wk-set-refresh" min="1" max="90" class="ee-inp"></div>
       </div>
-      <div style="margin-bottom:10px">
-        <label class="ee-lbl">The "Read this week's letter" button points at…</label>
+      <div style="margin-bottom:12px">
+        <label class="ee-lbl">SMS template for this sequence's nurture texts ({dm}/{pt}/{rel} fill)</label>
+        <textarea id="wk-set-sms" rows="2" class="ee-inp" placeholder="Hi {dm}, Meir from Solura — just checking in on you and {pt} this week."></textarea>
+      </div>
+      <div id="weekly-tabs" style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap"></div>
+      <div style="margin-bottom:12px">
+        <label class="ee-lbl">THIS variant's "Read this week's letter" button points at…</label>
         <select id="wk-set-linkmode" class="ee-inp">
           <option value="none">Nothing — body only (a PDF, if attached, rides as an attachment)</option>
           <option value="pdf">📄 The uploaded PDF, as a OneDrive/SharePoint tracked link</option>
@@ -1239,11 +1244,6 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <input type="url" id="wk-set-customurl" class="ee-inp" placeholder="https://www.solurahomecare.com/newsletter/…" style="display:none;margin-top:6px">
         <div id="wk-linkmode-hint" style="font-size:11px;color:var(--soft);margin-top:4px;line-height:1.5"></div>
       </div>
-      <div style="margin-bottom:12px">
-        <label class="ee-lbl">SMS template for this sequence's nurture texts ({dm}/{pt}/{rel} fill)</label>
-        <textarea id="wk-set-sms" rows="2" class="ee-inp" placeholder="Hi {dm}, Meir from Solura — just checking in on you and {pt} this week."></textarea>
-      </div>
-      <div id="weekly-tabs" style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap"></div>
       <div style="margin-bottom:12px">
         <label class="ee-lbl">Subject</label>
         <input type="text" id="weekly-subj" class="ee-inp" placeholder="{dm} works — e.g. A thought for you this week, {dm}">
@@ -1965,7 +1965,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1027-146';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1027-147';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -9593,12 +9593,6 @@ function wkStash(){
   var se=el('wk-set-engine');if(se)set.engineId=se.value||'';
   var sr=el('wk-set-refresh');if(sr)set.refreshDays=Math.max(1,parseInt(sr.value,10)||8);
   var ss=el('wk-set-sms');if(ss)set.smsText=ss.value||'';
-  var lm=el('wk-set-linkmode');
-  if(lm){
-    set.linkMode=lm.value||'none';
-    set.pdfAsLink=(set.linkMode==='pdf'); // the save-time OneDrive upload keys off this, as before
-  }
-  var cu=el('wk-set-customurl');if(cu)set.customUrl=String(cu.value||'').trim();
   if(set.engineId){var e5=(enginesDoc.engines||[]).find(function(x){return x.id===set.engineId;});set.name=e5?e5.name:set.engineId;}
   else set.name='Default (all sequences)';
   var vs=weeklyVariants();
@@ -9608,6 +9602,9 @@ function wkStash(){
   var nb=(el('weekly-body')||{}).value||'';
   if(ns!==(v.subject||'')||nb!==(v.body||'')){v.updatedAt=Date.now();}
   v.subject=ns;v.body=nb;
+  // Link choice is PER VARIANT (A/B/C can each point somewhere else)
+  var lm=el('wk-set-linkmode');if(lm)v.linkMode=lm.value||'none';
+  var cu=el('wk-set-customurl');if(cu)v.customUrl=String(cu.value||'').trim();
 }
 // The link-mode line under the selector says what each choice really does
 function wkLinkModeHint(){
@@ -9654,18 +9651,19 @@ function renderWeeklyEditor(){
   }
   var sr=el('wk-set-refresh');if(sr)sr.value=set.refreshDays||8;
   var ss=el('wk-set-sms');if(ss)ss.value=set.smsText||'';
-  var lm2=el('wk-set-linkmode');
-  if(lm2){
-    // Old sets only knew the pdfAsLink checkbox — that maps to 'pdf'
-    lm2.value=set.linkMode||(set.pdfAsLink?'pdf':'none');
-    var cu2=el('wk-set-customurl');if(cu2)cu2.value=set.customUrl||'';
-    wkLinkModeHint();
-  }
   var vs=weeklyVariants();
   if(_wkIdx>=vs.length)_wkIdx=Math.max(0,vs.length-1);
   var v=vs[_wkIdx]||{};
   el('weekly-subj').value=v.subject||'';
   el('weekly-body').value=v.body||'';
+  var lm2=el('wk-set-linkmode');
+  if(lm2){
+    // Per VARIANT, falling back to the old set-level choice (and the even
+    // older pdfAsLink checkbox) so existing drafts keep behaving.
+    lm2.value=wkVariantLinkMode(set,v);
+    var cu2=el('wk-set-customurl');if(cu2)cu2.value=(v.customUrl!=null?v.customUrl:(set.customUrl||''));
+    wkLinkModeHint();
+  }
   // tabs
   var tabs=el('weekly-tabs');
   if(tabs){
@@ -9715,7 +9713,7 @@ async function saveWeeklyDraft(){
       st6.variants=st6.variants||[];
       for(var vi=0;vi<st6.variants.length;vi++){
         var vv6=st6.variants[vi];
-        if(st6.pdfAsLink&&vv6.pdf&&vv6.pdf.b64&&!vv6.pdf.webUrl){
+        if(wkVariantLinkMode(st6,vv6)==='pdf'&&vv6.pdf&&vv6.pdf.b64&&!vv6.pdf.webUrl){
           if(spin)spin.innerHTML='<div class="mspin"></div>Uploading '+escapeHtml(vv6.pdf.name)+' to OneDrive…';
           var folderId=await emailEnsureOneDriveFolder('Weekly Newsletter '+new Date().toISOString().slice(0,10));
           var bin=atob(vv6.pdf.b64);
@@ -9768,7 +9766,7 @@ function applyWeeklyDraft(ri,opts){
   }
   // \ud83d\udd17 The set's Read-the-letter button: website edition or pasted link,
   // personal per lead where trackable. The PDF modes stay below, untouched.
-  var siteLnk='';try{siteLnk=weeklyLinkHrefFor(ri,set);}catch(_){}
+  var siteLnk='';try{siteLnk=weeklyLinkHrefFor(ri,set,w);}catch(_){}
   if(siteLnk){
     var beHost2=el('email-body');
     if(beHost2&&beHost2.innerHTML.indexOf('data-nllink')===-1){
@@ -9776,7 +9774,7 @@ function applyWeeklyDraft(ri,opts){
     }
   }
   if(w.pdf&&(w.pdf.b64||w.pdf.webUrl)){
-    if(set.pdfAsLink&&w.pdf.webUrl){
+    if(wkVariantLinkMode(set,w)==='pdf'&&w.pdf.webUrl){
       // Tracked-link delivery: a gold button in the body instead of an
       // attachment. The href is rewritten through /doc at send time, so
       // every click lands as a doc-open you can see. This is the manual
@@ -10948,7 +10946,7 @@ function nlWarmupEmailFor(ri,forced){
     try{
       if(ri>=0&&typeof weeklyLinkHrefFor==='function'){
         var setL=null;try{setL=getWeeklyDraftFor(ri);}catch(_){}
-        var lkW=weeklyLinkHrefFor(ri,setL);
+        var lkW=weeklyLinkHrefFor(ri,setL,w);
         if(lkW)html+='<p style="margin-top:16px"><a href="'+escapeHtml(lkW)+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">📰 Read this week\'s letter</a></p>';
       }
     }catch(_){}
@@ -11187,13 +11185,18 @@ function nlCustomLinkForLead(ri,url){
   }catch(_){}
   return nlPersonalLink(url,code);
 }
-function weeklyLinkHrefFor(ri,set){
-  var mode=String((set&&set.linkMode)||'');
+// Each VARIANT (A/B/C) picks its own target; the set-level choice (and the
+// even older pdfAsLink checkbox) are the fallbacks for existing drafts.
+function wkVariantLinkMode(set,v){
+  return String((v&&v.linkMode)||(set&&set.linkMode)||((set&&set.pdfAsLink)?'pdf':'none'));
+}
+function weeklyLinkHrefFor(ri,set,v){
+  var mode=wkVariantLinkMode(set,v);
   if(mode==='site'){
     var ed=(enginesDoc.config||{}).nlEdition;
     return (ed&&ed.url)?nlLinkForLead(ri):''; // no edition picked = no button, never a dead link
   }
-  if(mode==='custom')return nlCustomLinkForLead(ri,set&&set.customUrl);
+  if(mode==='custom')return nlCustomLinkForLead(ri,(v&&v.customUrl)||(set&&set.customUrl));
   return ''; // 'pdf' and 'none' are the pdf block's business
 }
 // {link} in ANY email body: this lead's personal link to the CURRENT
