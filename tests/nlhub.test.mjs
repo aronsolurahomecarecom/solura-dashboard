@@ -19,7 +19,7 @@ const src = html.slice(html.indexOf('*/', b) + 2, e);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const enginesDoc = {};
 const mk = new Function('escapeHtml', 'enginesDoc', 'crypto', 'leadKey', 'saveEnginesDoc',
-  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary,nlLinkForLead,nlTrackableUrl,nlCustomLinkForLead,wkVariantLinkMode,weeklyLinkHrefFor,nlReadButtonHtml,NL_DOCS_URL,nlFetchLatestEdition};');
+  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary,nlLinkForLead,nlTrackableUrl,nlCustomLinkForLead,wkVariantLinkMode,weeklyLinkHrefFor,nlReadButtonHtml,NL_DOCS_URL,NL_DOCS_BASE,nlMapEdition,nlFetchEditions,nlFetchLatestEdition};');
 const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => 'lead-' + ri, async () => {});
 
 // ── codes: the spec's exact contract ──
@@ -166,13 +166,23 @@ const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => '
   ok(ed.title === 'Week 44' && ed.cover_image_url === 'https://x/c.jpg', 'title and cover come along for the email');
   globalThis.fetch = async () => ({ ok: true, json: async () => [] });
   ok((await N.nlFetchLatestEdition()) === null, 'no published letters = null, not a crash');
+  // The picker fetch: more rows, same shape, bad rows dropped
+  globalThis.fetch = async (url) => { seen = String(url); return { ok: true, json: async () => [
+    { slug: 'a', title: 'A' }, { slug: 'b', title: 'B' }, { title: 'no slug' }] }; };
+  const list = await N.nlFetchEditions(30);
   globalThis.fetch = realFetch;
+  ok(/&limit=30$/.test(seen) && seen.indexOf(N.NL_DOCS_BASE) === 0, 'the picker asks the same query with a bigger limit');
+  ok(list.length === 2 && list[1].url === 'https://www.solurahomecare.com/newsletter/b', 'rows map to editions; a slugless row is dropped, not rendered broken');
 
-  ok((html.match(/data-action="nlhub-latest"/g) || []).length === 2, 'the ↻ button sits on the edition band AND the empty state');
-  ok(/case 'nlhub-latest': nlHubPullLatest\(t\); break;/.test(html), 'and is wired');
-  const pull = html.slice(html.indexOf('async function nlHubPullLatest'), html.indexOf('var _nlHubSending'));
-  ok(/cur\.slug===ed\.slug\)\{toast\('✓ Already current/.test(pull), 'pulling the same edition says so instead of pretending to change');
-  ok(/enginesDoc\.config\.nlEdition=Object\.assign\(\{\},ed,\{pickedAt:Date\.now\(\)\}\);/.test(pull) && /saveEnginesDoc/.test(pull), 'a new one becomes the current edition, saved — the editor\'s website option follows');
+  ok((html.match(/data-action="nlhub-latest"/g) || []).length === 2 && (html.match(/data-action="nlhub-pick"(?!-)/g) || []).length === 2, 'the ↻ and 📚 buttons sit on the edition band AND the empty state');
+  ok(/case 'nlhub-latest': nlHubPullLatest\(t\); break;/.test(html) && /case 'nlhub-pick': nlHubPickToggle\(t\); break;/.test(html), 'both are wired');
+  const adopt = html.slice(html.indexOf('function nlHubAdoptEdition'), html.indexOf('async function nlHubPullLatest'));
+  ok(/cur\.slug===ed\.slug\)\{toast\('✓ Already current/.test(adopt), 'adopting the same edition says so instead of pretending to change');
+  ok(/enginesDoc\.config\.nlEdition=Object\.assign\(\{\},ed,\{pickedAt:Date\.now\(\)\}\);/.test(adopt) && /saveEnginesDoc/.test(adopt), 'a new one becomes the current edition, saved — the editor\'s website option follows');
+  const pick = html.slice(html.indexOf('async function nlHubPickToggle'), html.indexOf('var _nlHubSending'));
+  ok(/if\(host\.innerHTML\)\{host\.innerHTML='';_nlPick=null;return;\}/.test(pick), 'second click closes the picker');
+  ok(/✓ current/.test(pick) && /data-action="nlhub-pick-use"/.test(pick), 'the list marks the current edition and offers Use-this-one on the rest');
+  ok(/nlHubAdoptEdition\(ed9\);/.test(html), 'picking one adopts it through the SAME path as pull-latest and the composer handoff');
 }
 
 // ── constants: the exact endpoints from the spec ──

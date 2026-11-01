@@ -1684,6 +1684,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <span style="font-size:11.5px;color:var(--soft)">Sign in once inside the frame with the website admin login — it stays in this browser.</span>
         </div>
         <div id="nlhub-edition" style="margin-bottom:10px"></div>
+        <div id="nlhub-pick"></div>
         <div id="nlhub-send-out" style="font-size:12px;color:var(--mid);white-space:pre-line;margin-bottom:10px"></div>
         <div id="nlhub-sends" style="margin-bottom:18px"></div>
         <h4 class="st-h2">Delivery (Resend)</h4>
@@ -1965,7 +1966,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1101-149';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1101-150';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -11164,18 +11165,25 @@ function nlSendsAll(){
 // the website's own /newsletter page reads — so an article pushed while
 // the dashboard wasn't listening (composer opened elsewhere, tab closed)
 // is one click away instead of stuck on last week.
-var NL_DOCS_URL='https://btmyolfxgnofrowofdnm.supabase.co/rest/v1/documents'
+var NL_DOCS_BASE='https://btmyolfxgnofrowofdnm.supabase.co/rest/v1/documents'
   +'?select=slug,title,description,published_at,cover_image_url'
-  +'&status=eq.published&kind=eq.newsletter&order=published_at.desc&limit=1';
-async function nlFetchLatestEdition(){
-  var r=await fetch(NL_DOCS_URL,{headers:{apikey:NL_STATUS_KEY}});
-  if(!r.ok)throw new Error('the website answered '+r.status);
-  var rows9=await r.json();
-  var d=rows9&&rows9[0];
+  +'&status=eq.published&kind=eq.newsletter&order=published_at.desc';
+var NL_DOCS_URL=NL_DOCS_BASE+'&limit=1';
+function nlMapEdition(d){
   if(!d||!d.slug)return null;
   return {slug:String(d.slug),url:NL_SITE_ORIGIN+'/newsletter/'+encodeURIComponent(String(d.slug)),
     title:String(d.title||''),description:String(d.description||''),
     cover_image_url:String(d.cover_image_url||''),published_at:String(d.published_at||'')};
+}
+// Newest first; limit 1 = the pull-latest button, limit 30 = the picker
+async function nlFetchEditions(n){
+  var r=await fetch(NL_DOCS_BASE+'&limit='+(parseInt(n,10)||30),{headers:{apikey:NL_STATUS_KEY}});
+  if(!r.ok)throw new Error('the website answered '+r.status);
+  var rows9=await r.json();
+  return (rows9||[]).map(nlMapEdition).filter(Boolean);
+}
+async function nlFetchLatestEdition(){
+  return (await nlFetchEditions(1))[0]||null;
 }
 // 🔗 The weekly "Read this week's letter" button, per the SET's link mode.
 // 'pdf' keeps the classic OneDrive/SharePoint path (handled by the pdf
@@ -11284,20 +11292,52 @@ function openNlCompose(){
 // The band's refresh: adopt the website's newest letter as the current
 // edition — the editor's website option then points at it, like any
 // composer handoff would have.
+// Adopting an edition (latest OR picked) is the same move as a composer
+// handoff: it becomes current, and the editor's website option follows.
+function nlHubAdoptEdition(ed){
+  var cur=(enginesDoc.config||{}).nlEdition;
+  if(cur&&cur.slug===ed.slug){toast('✓ Already current: "'+(ed.title||ed.slug)+'"');renderNlHub();return;}
+  enginesDoc.config=enginesDoc.config||{};
+  enginesDoc.config.nlEdition=Object.assign({},ed,{pickedAt:Date.now()});
+  saveEnginesDoc().catch(function(){});
+  renderNlHub();
+  toast('📰 Now current: "'+(ed.title||ed.slug)+'" — the newsletter editor\'s website option points here');
+}
 async function nlHubPullLatest(btn){
   try{
     if(btn)btn.textContent='…';
     var ed=await nlFetchLatestEdition();
     if(!ed){toast('No published letters on the website yet');return;}
-    var cur=(enginesDoc.config||{}).nlEdition;
-    if(cur&&cur.slug===ed.slug){toast('✓ Already current: "'+(ed.title||ed.slug)+'"');renderNlHub();return;}
-    enginesDoc.config=enginesDoc.config||{};
-    enginesDoc.config.nlEdition=Object.assign({},ed,{pickedAt:Date.now()});
-    saveEnginesDoc().catch(function(){});
-    renderNlHub();
-    toast('📰 Updated to "'+(ed.title||ed.slug)+'" — the newsletter editor\'s website option now points here');
+    nlHubAdoptEdition(ed);
   }catch(e){toast('⚠ Could not reach the website: '+e.message);}
   finally{if(btn)btn.textContent='↻ Latest from the website';}
+}
+// 📚 The picker: every published letter on the website, newest first —
+// click one and it becomes the current edition.
+var _nlPick=null;
+async function nlHubPickToggle(btn){
+  var host=el('nlhub-pick');if(!host)return;
+  if(host.innerHTML){host.innerHTML='';_nlPick=null;return;} // second click closes
+  try{
+    if(btn)btn.textContent='…';
+    _nlPick=await nlFetchEditions(30);
+    if(!_nlPick.length){host.innerHTML='<div style="color:var(--soft);font-size:12px;padding:8px 2px">No published letters on the website yet.</div>';return;}
+    var curSlug=(((enginesDoc.config||{}).nlEdition)||{}).slug;
+    host.innerHTML='<div style="border:1.5px solid var(--border);border-radius:12px;padding:6px 12px;margin-bottom:10px;max-height:300px;overflow-y:auto">'
+      +_nlPick.map(function(ed,i){
+        var when=ed.published_at?new Date(ed.published_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
+        return '<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:'+(i?'1px solid var(--border)':'none')+'">'
+          +(ed.cover_image_url?'<img src="'+escapeHtml(ed.cover_image_url)+'" alt="" style="width:52px;height:34px;object-fit:cover;border-radius:6px;flex:none">':'')
+          +'<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(ed.title||ed.slug)+'</div>'
+          +'<div style="font-size:11px;color:var(--soft)">'+when+'</div></div>'
+          +(ed.slug===curSlug
+            ?'<span style="font-size:11px;color:var(--grn);font-weight:700;flex:none">✓ current</span>'
+            :'<button class="ee-mini" style="flex:none" data-action="nlhub-pick-use" data-idx="'+i+'">Use this one</button>')
+          +'</div>';
+      }).join('')
+      +'</div>';
+  }catch(e){host.innerHTML='<div style="color:var(--red);font-size:12px;padding:8px 2px">✗ Could not reach the website: '+escapeHtml(e.message)+'</div>';}
+  finally{if(btn)btn.textContent='📚 Choose from the website';}
 }
 var _nlHubSending=false;
 async function nlHubSend(){
@@ -11377,7 +11417,7 @@ function renderNlHub(){
   if(!edHost||!sHost)return;
   var ed=(enginesDoc.config||{}).nlEdition;
   if(!ed||!ed.url){
-    edHost.innerHTML='<div style="color:var(--soft);font-size:12px;border:1.5px dashed var(--border);border-radius:10px;padding:12px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:200px">No edition yet. Open the composer and publish — or pull what’s already on the website.</span><button class="ee-mini" data-action="nlhub-latest">↻ Latest from the website</button></div>';
+    edHost.innerHTML='<div style="color:var(--soft);font-size:12px;border:1.5px dashed var(--border);border-radius:10px;padding:12px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:200px">No edition yet. Open the composer and publish — or pull what’s already on the website.</span><button class="ee-mini" data-action="nlhub-latest">↻ Latest from the website</button><button class="ee-mini" data-action="nlhub-pick">📚 Choose from the website</button></div>';
   }else{
     var when=ed.published_at?new Date(ed.published_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
     edHost.innerHTML='<div style="border:1.5px solid var(--gold);border-radius:12px;padding:12px 14px;background:var(--gold-pale);display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
@@ -11385,6 +11425,7 @@ function renderNlHub(){
       +'<div style="flex:1;min-width:200px"><div style="font-weight:800;font-size:13px">'+escapeHtml(ed.title||ed.slug)+'</div>'
       +'<div style="font-size:11px;color:var(--mid)">'+(when?('Published '+when+' · '):'')+'<a href="'+escapeHtml(ed.url)+'" target="_blank" rel="noopener">view on the site ↗</a></div></div>'
       +'<button class="ee-mini" data-action="nlhub-latest" title="Pull the newest published letter from the website — use this when an article was pushed without the composer open here">↻ Latest from the website</button>'
+      +'<button class="ee-mini" data-action="nlhub-pick" title="Browse every published letter on the website and pick one">📚 Choose from the website</button>'
       +'<button class="ee-mini" style="background:var(--gold-pale);border-color:var(--gold);color:#8B6500;font-weight:700" data-action="nlhub-send">📨 Send with personal links</button>'
       +'</div>';
   }
@@ -15969,6 +16010,15 @@ function onClick(ev){
     case 'inv-mode': invApplyMode(t.dataset.mode); break;
     case 'nlhub-compose': openNlCompose(); break;
     case 'nlhub-latest': nlHubPullLatest(t); break;
+    case 'nlhub-pick': nlHubPickToggle(t); break;
+    case 'nlhub-pick-use':
+      (function(){
+        var ed9=_nlPick&&_nlPick[parseInt(t.dataset.idx,10)];
+        if(!ed9)return;
+        nlHubAdoptEdition(ed9);
+        var ph=el('nlhub-pick');if(ph)ph.innerHTML='';_nlPick=null;
+      })();
+      break;
     case 'nlhub-send': nlHubSend(); break;
     case 'nlhub-poll':
       (function(){var i9=parseInt(t.dataset.idx,10)||0;t.textContent='…';
