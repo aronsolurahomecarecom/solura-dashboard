@@ -152,12 +152,12 @@ const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => '
 
 // ── ↻ pull the latest edition straight from the website ──
 {
-  ok(/kind=eq\.newsletter/.test(N.NL_DOCS_URL) && /status=eq\.published/.test(N.NL_DOCS_URL) && /order=published_at\.desc&limit=1/.test(N.NL_DOCS_URL), 'asks the SAME public table the website newsletter page reads: newest published letter, exactly one');
+  ok(/kind=in\.\(newsletter,letter,guide\)/.test(N.NL_DOCS_URL) && /status=eq\.published/.test(N.NL_DOCS_URL) && /order=published_at\.desc&limit=1/.test(N.NL_DOCS_URL), 'asks the public documents table for newsletters, letters AND guides — newest first');
   const realFetch = globalThis.fetch;
   let seen = null;
   globalThis.fetch = async (url, opts) => {
     seen = { url: String(url), apikey: opts && opts.headers && opts.headers.apikey };
-    return { ok: true, json: async () => [{ slug: 'week 44', title: 'Week 44', description: 'd', published_at: '2026-11-01T10:00:00Z', cover_image_url: 'https://x/c.jpg' }] };
+    return { ok: true, json: async () => [{ slug: 'week 44', kind: 'newsletter', title: 'Week 44', description: 'd', published_at: '2026-11-01T10:00:00Z', cover_image_url: 'https://x/c.jpg' }] };
   };
   const ed = await N.nlFetchLatestEdition();
   globalThis.fetch = realFetch;
@@ -168,11 +168,13 @@ const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => '
   ok((await N.nlFetchLatestEdition()) === null, 'no published letters = null, not a crash');
   // The picker fetch: more rows, same shape, bad rows dropped
   globalThis.fetch = async (url) => { seen = String(url); return { ok: true, json: async () => [
-    { slug: 'a', title: 'A' }, { slug: 'b', title: 'B' }, { title: 'no slug' }] }; };
+    { slug: 'a', kind: 'newsletter', title: 'A' }, { slug: 'b', kind: 'guide', title: 'B' }, { slug: 'c', kind: 'letter', title: 'C' }, { title: 'no slug' }] }; };
   const list = await N.nlFetchEditions(30);
   globalThis.fetch = realFetch;
   ok(/&limit=30$/.test(seen) && seen.indexOf(N.NL_DOCS_BASE) === 0, 'the picker asks the same query with a bigger limit');
-  ok(list.length === 2 && list[1].url === 'https://www.solurahomecare.com/newsletter/b', 'rows map to editions; a slugless row is dropped, not rendered broken');
+  ok(list.length === 3 && list[0].url === 'https://www.solurahomecare.com/newsletter/a', 'a newsletter maps to /newsletter/<slug>; a slugless row is dropped');
+  ok(list[1].url === 'https://www.solurahomecare.com/letters/b' && list[2].url === 'https://www.solurahomecare.com/letters/c', "guides and letters map to /letters/<slug> — the website's read tracker runs on BOTH paths");
+  ok(/NL_KIND_LABEL\[ed\.kind\]\|\|'Letter'/.test(html), 'the picker and the band label each item Newsletter / Letter / Guide');
 
   ok((html.match(/data-action="nlhub-latest"/g) || []).length === 2 && (html.match(/data-action="nlhub-pick"(?!-)/g) || []).length === 2, 'the ↻ and 📚 buttons sit on the edition band AND the empty state');
   ok(/case 'nlhub-latest': nlHubPullLatest\(t\); break;/.test(html) && /case 'nlhub-pick': nlHubPickToggle\(t\); break;/.test(html), 'both are wired');

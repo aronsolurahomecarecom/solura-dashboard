@@ -1966,7 +1966,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1101-150';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1101-151';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -11166,12 +11166,17 @@ function nlSendsAll(){
 // the dashboard wasn't listening (composer opened elsewhere, tab closed)
 // is one click away instead of stuck on last week.
 var NL_DOCS_BASE='https://btmyolfxgnofrowofdnm.supabase.co/rest/v1/documents'
-  +'?select=slug,title,description,published_at,cover_image_url'
-  +'&status=eq.published&kind=eq.newsletter&order=published_at.desc';
+  +'?select=slug,title,description,kind,published_at,cover_image_url'
+  +'&status=eq.published&kind=in.(newsletter,letter,guide)&order=published_at.desc';
 var NL_DOCS_URL=NL_DOCS_BASE+'&limit=1';
+var NL_KIND_LABEL={newsletter:'Newsletter',letter:'Letter',guide:'Guide'};
 function nlMapEdition(d){
   if(!d||!d.slug)return null;
-  return {slug:String(d.slug),url:NL_SITE_ORIGIN+'/newsletter/'+encodeURIComponent(String(d.slug)),
+  var kind=String(d.kind||'newsletter');
+  // Newsletters live at /newsletter/<slug>; letters and guides at
+  // /letters/<slug> — the website's read tracker runs on BOTH paths.
+  return {slug:String(d.slug),kind:kind,
+    url:NL_SITE_ORIGIN+(kind==='newsletter'?'/newsletter/':'/letters/')+encodeURIComponent(String(d.slug)),
     title:String(d.title||''),description:String(d.description||''),
     cover_image_url:String(d.cover_image_url||''),published_at:String(d.published_at||'')};
 }
@@ -11329,7 +11334,7 @@ async function nlHubPickToggle(btn){
         return '<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:'+(i?'1px solid var(--border)':'none')+'">'
           +(ed.cover_image_url?'<img src="'+escapeHtml(ed.cover_image_url)+'" alt="" style="width:52px;height:34px;object-fit:cover;border-radius:6px;flex:none">':'')
           +'<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(ed.title||ed.slug)+'</div>'
-          +'<div style="font-size:11px;color:var(--soft)">'+when+'</div></div>'
+          +'<div style="font-size:11px;color:var(--soft)"><span style="font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#8B6500">'+escapeHtml(NL_KIND_LABEL[ed.kind]||'Letter')+'</span>'+(when?(' · '+when):'')+'</div></div>'
           +(ed.slug===curSlug
             ?'<span style="font-size:11px;color:var(--grn);font-weight:700;flex:none">✓ current</span>'
             :'<button class="ee-mini" style="flex:none" data-action="nlhub-pick-use" data-idx="'+i+'">Use this one</button>')
@@ -11423,7 +11428,7 @@ function renderNlHub(){
     edHost.innerHTML='<div style="border:1.5px solid var(--gold);border-radius:12px;padding:12px 14px;background:var(--gold-pale);display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
       +(ed.cover_image_url?'<img src="'+escapeHtml(ed.cover_image_url)+'" alt="" style="width:72px;height:48px;object-fit:cover;border-radius:8px;flex:none">':'')
       +'<div style="flex:1;min-width:200px"><div style="font-weight:800;font-size:13px">'+escapeHtml(ed.title||ed.slug)+'</div>'
-      +'<div style="font-size:11px;color:var(--mid)">'+(when?('Published '+when+' · '):'')+'<a href="'+escapeHtml(ed.url)+'" target="_blank" rel="noopener">view on the site ↗</a></div></div>'
+      +'<div style="font-size:11px;color:var(--mid)">'+(ed.kind?('<span style="font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#8B6500">'+escapeHtml(NL_KIND_LABEL[ed.kind]||'Letter')+'</span> · '):'')+(when?('Published '+when+' · '):'')+'<a href="'+escapeHtml(ed.url)+'" target="_blank" rel="noopener">view on the site ↗</a></div></div>'
       +'<button class="ee-mini" data-action="nlhub-latest" title="Pull the newest published letter from the website — use this when an article was pushed without the composer open here">↻ Latest from the website</button>'
       +'<button class="ee-mini" data-action="nlhub-pick" title="Browse every published letter on the website and pick one">📚 Choose from the website</button>'
       +'<button class="ee-mini" style="background:var(--gold-pale);border-color:var(--gold);color:#8B6500;font-weight:700" data-action="nlhub-send">📨 Send with personal links</button>'
