@@ -19,7 +19,7 @@ const src = html.slice(html.indexOf('*/', b) + 2, e);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const enginesDoc = {};
 const mk = new Function('escapeHtml', 'enginesDoc', 'crypto', 'leadKey', 'saveEnginesDoc',
-  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary,nlLinkForLead,nlTrackableUrl,nlCustomLinkForLead,wkVariantLinkMode,weeklyLinkHrefFor,nlReadButtonHtml};');
+  src + '\nreturn {NL_SITE_ORIGIN,NL_STATUS_URL,NL_STATUS_KEY,NL_HUB_KEEP,nlNewCode,nlPersonalLink,nlHubEmailHtml,nlSendsAll,nlHubStatsSummary,nlLinkForLead,nlTrackableUrl,nlCustomLinkForLead,wkVariantLinkMode,weeklyLinkHrefFor,nlReadButtonHtml,NL_DOCS_URL,nlFetchLatestEdition};');
 const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => 'lead-' + ri, async () => {});
 
 // ── codes: the spec's exact contract ──
@@ -148,6 +148,31 @@ const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => '
   ok(/<a data-trkdoc="1" href="'\+escapeHtml\(w\.pdf\.webUrl\)/.test(html), 'the manual-upload SharePoint/OneDrive button works exactly as it always did');
   ok(!/nlRetireLegacyLinks/.test(html), 'the blanket legacy-link rewrite stays gone — link choice is explicit');
   ok(/wkLinkModeHint/.test(html) && /No edition picked yet/.test(html), 'the editor hint warns when site mode has no edition to point at');
+}
+
+// ── ↻ pull the latest edition straight from the website ──
+{
+  ok(/kind=eq\.newsletter/.test(N.NL_DOCS_URL) && /status=eq\.published/.test(N.NL_DOCS_URL) && /order=published_at\.desc&limit=1/.test(N.NL_DOCS_URL), 'asks the SAME public table the website newsletter page reads: newest published letter, exactly one');
+  const realFetch = globalThis.fetch;
+  let seen = null;
+  globalThis.fetch = async (url, opts) => {
+    seen = { url: String(url), apikey: opts && opts.headers && opts.headers.apikey };
+    return { ok: true, json: async () => [{ slug: 'week 44', title: 'Week 44', description: 'd', published_at: '2026-11-01T10:00:00Z', cover_image_url: 'https://x/c.jpg' }] };
+  };
+  const ed = await N.nlFetchLatestEdition();
+  globalThis.fetch = realFetch;
+  ok(seen.url === N.NL_DOCS_URL && /^sb_publishable_/.test(seen.apikey), 'the publishable key rides as the apikey header');
+  ok(ed.slug === 'week 44' && ed.url === 'https://www.solurahomecare.com/newsletter/week%2044', 'the edition url is built from the slug, encoded');
+  ok(ed.title === 'Week 44' && ed.cover_image_url === 'https://x/c.jpg', 'title and cover come along for the email');
+  globalThis.fetch = async () => ({ ok: true, json: async () => [] });
+  ok((await N.nlFetchLatestEdition()) === null, 'no published letters = null, not a crash');
+  globalThis.fetch = realFetch;
+
+  ok((html.match(/data-action="nlhub-latest"/g) || []).length === 2, 'the ↻ button sits on the edition band AND the empty state');
+  ok(/case 'nlhub-latest': nlHubPullLatest\(t\); break;/.test(html), 'and is wired');
+  const pull = html.slice(html.indexOf('async function nlHubPullLatest'), html.indexOf('var _nlHubSending'));
+  ok(/cur\.slug===ed\.slug\)\{toast\('✓ Already current/.test(pull), 'pulling the same edition says so instead of pretending to change');
+  ok(/enginesDoc\.config\.nlEdition=Object\.assign\(\{\},ed,\{pickedAt:Date\.now\(\)\}\);/.test(pull) && /saveEnginesDoc/.test(pull), 'a new one becomes the current edition, saved — the editor\'s website option follows');
 }
 
 // ── constants: the exact endpoints from the spec ──
