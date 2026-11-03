@@ -30,8 +30,12 @@ const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: 
   ok(/or a folder containing it/.test(ld) && /Share → Can edit/.test(ld) && /opened once in OneDrive/.test(ld), 'the not-found error says a shared FOLDER works too');
 
   const fis = html.slice(html.indexOf('async function findInShared'), html.indexOf('async function loadData'));
-  ok(/x\.name===name&&x\.remoteItem&&x\.remoteItem\.parentReference/.test(fis), 'directly shared files are found first');
+  ok(/sameName\(x\.name,name\)&&x\.remoteItem&&x\.remoteItem\.parentReference/.test(fis), 'directly shared files are found first, case-insensitively');
   ok(/it\.remoteItem&&it\.remoteItem\.folder/.test(fis) && /\/drives\/'\+dId\+'\/items\/'\+it\.remoteItem\.id\+"\/search\(q='/.test(fis), "shared FOLDERS get searched inside, in the owner's drive — a file in a shared folder is never invisible");
+  ok(/sharedWithMe\?allowexternal=true/.test(fis), 'items shared from outside the organization are surfaced too');
+  ok(/_swmNames=items\.map/.test(fis), 'what Shared-with-me listed is kept for the diagnostics');
+  ok(/function sameName\(a,b\)\{return String\(a\|\|''\)\.trim\(\)\.toLowerCase\(\)===String\(b\|\|''\)\.trim\(\)\.toLowerCase\(\);\}/.test(html), 'name matching ignores case and stray spaces everywhere');
+  ok((html.match(/sameName\(x\.name,FN\)/g) || []).length >= 1 && (html.match(/sameName\(x\.name,ENGINE_FILE\)/g) || []).length >= 2, 'the workbook and engines lookups all use it');
 }
 
 // ── the settings doc: findable ANYWHERE, same rules ──
@@ -42,9 +46,11 @@ const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: 
   const led = html.slice(html.indexOf('async function resolveEnginesDocLocation'), html.indexOf('/* ⚡PERF-ENGSAVE — BEGIN'));
   ok(/if\(ENG_ID\)return;/.test(led), 'the lookup runs once');
   ok(led.indexOf('findInShared(ENGINE_FILE)') < led.indexOf("search(q='\"+encodeURIComponent(ENGINE_FILE)"), 'in shared mode the OWNER\'S shared copy is looked for FIRST — a stray local file can never silently split the config');
-  ok(/return; \/\/ shared sheet \+ no shared config = the loud block below/.test(led), 'shared mode never falls back to a local search');
-  ok(/x\.name===ENGINE_FILE/.test(led) && /ENG_DRIVE=\(f\.parentReference&&f\.parentReference\.driveId\)\|\|null;/.test(led), 'own-drive search finds the doc in ANY folder and keeps its real location');
-  ok(/if\(_sharedMode&&!ENG_ID\)\{/.test(led) && /ALL settings\/engine saves are blocked/.test(led) && /or a folder containing both files/.test(led), 'shared sheet + unshared config = loud, read-only, with the folder option named');
+  ok(/return; \/\/ shared sheet \+ no reachable config = the loud block below/.test(led), 'shared mode never falls back to a local search');
+  ok(/\?\$select=parentReference/.test(led) && /\/children\?\$select=name,id,parentReference/.test(led) && /sameName\(x\.name,ENGINE_FILE\)/.test(led), "last resort: the workbook's OWN folder is checked — folder shares work even when the listing lags");
+  ok(/sameName\(x\.name,ENGINE_FILE\)/.test(led) && /ENG_DRIVE=\(f\.parentReference&&f\.parentReference\.driveId\)\|\|null;/.test(led), 'own-drive search finds the doc in ANY folder and keeps its real location');
+  ok(/if\(_sharedMode&&!ENG_ID\)\{/.test(led) && /ALL settings\/engine saves are blocked/.test(led) && /one folder containing both files/.test(led), 'shared sheet + unshared config = loud, read-only, with the folder option named');
+  ok(/Shared-with-me currently lists: '\+_swmNames/.test(led) && /Shared-with-me is EMPTY/.test(led) && /\[v'\+BUILD\+'\]/.test(led), 'the blocked message DIAGNOSES: names what the account actually sees, or says the list is empty, and stamps the build');
   ok(led.indexOf('_enginesDocLoaded=true') > led.indexOf('if(_sharedMode&&!ENG_ID){'), 'the blocked branch returns before the loaded flag — the save guard holds');
 }
 

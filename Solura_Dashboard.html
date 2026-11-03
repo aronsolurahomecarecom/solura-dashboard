@@ -1933,14 +1933,19 @@ function engUrl(op){ // op: 'content' | 'createUploadSession'
   // Never found anywhere: the classic root path — a first run CREATES it here
   return GR+'/me/drive/root:/'+ENGINE_FILE+':/'+op;
 }
-// Find a file by exact name under "Shared with me" — directly shared, OR
-// inside a shared FOLDER (the folder is listed; its files are not, so each
-// shared folder gets searched in the owner's drive).
+// Find a file by name under "Shared with me" — directly shared, OR inside
+// a shared FOLDER (the folder is listed; its files are not, so each shared
+// folder gets searched in the owner's drive). Name matching ignores case:
+// OneDrive renames and retypes happen. allowexternal=true also surfaces
+// items shared from outside the account's own organization.
+function sameName(a,b){return String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();}
+var _swmNames=null; // what Shared-with-me actually listed — for the diagnostics
 async function findInShared(name){
-  var r=await gfetch(GR+'/me/drive/sharedWithMe');
+  var r=await gfetch(GR+'/me/drive/sharedWithMe?allowexternal=true');
   var j=r.ok?await r.json():{};
   var items=j.value||[];
-  var hit=items.find(function(x){return x.name===name&&x.remoteItem&&x.remoteItem.parentReference;});
+  _swmNames=items.map(function(x){return String(x.name||'(unnamed)');});
+  var hit=items.find(function(x){return sameName(x.name,name)&&x.remoteItem&&x.remoteItem.parentReference;});
   if(hit)return {driveId:hit.remoteItem.parentReference.driveId,id:hit.remoteItem.id};
   for(var i=0;i<items.length;i++){
     var it=items[i];
@@ -1950,7 +1955,7 @@ async function findInShared(name){
       var sr=await gfetch(GR+'/drives/'+dId+'/items/'+it.remoteItem.id+"/search(q='"+encodeURIComponent(name)+"')");
       if(!sr.ok)continue;
       var sj=await sr.json();
-      var f=(sj.value||[]).find(function(x){return x.name===name;});
+      var f=(sj.value||[]).find(function(x){return sameName(x.name,name);});
       if(f)return {driveId:(f.parentReference&&f.parentReference.driveId)||dId,id:f.id};
     }catch(_){}
   }
@@ -2004,7 +2009,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1102-153';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1102-154';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -2695,13 +2700,31 @@ async function resolveEnginesDocLocation(){
   if(ENG_ID)return;
   if(_sharedMode){
     try{var s=await findInShared(ENGINE_FILE);if(s){ENG_ID=s.id;ENG_DRIVE=s.driveId;return;}}catch(_){}
-    return; // shared sheet + no shared config = the loud block below
+    // Last resort: the doc often sits NEXT TO the workbook. We can read the
+    // workbook, so try its parent folder — works whenever the share grants
+    // the folder, and quietly fails (403) when it was file-only sharing.
+    try{
+      var wm=await gfetch(GR+DRIVE_BASE+'/items/'+fid+'?$select=parentReference');
+      if(wm.ok){
+        var wj=await wm.json();
+        var pr=wj&&wj.parentReference;
+        if(pr&&pr.id){
+          var ch=await gfetch(GR+'/drives/'+(pr.driveId||DRIVE_BASE.replace('/drives/',''))+'/items/'+pr.id+'/children?$select=name,id,parentReference');
+          if(ch.ok){
+            var cj=await ch.json();
+            var cf=(cj.value||[]).find(function(x){return sameName(x.name,ENGINE_FILE);});
+            if(cf){ENG_ID=cf.id;ENG_DRIVE=(cf.parentReference&&cf.parentReference.driveId)||pr.driveId;return;}
+          }
+        }
+      }
+    }catch(_){}
+    return; // shared sheet + no reachable config = the loud block below
   }
   try{
     var r=await gfetch(GR+"/me/drive/root/search(q='"+encodeURIComponent(ENGINE_FILE)+"')");
     if(r.ok){
       var j=await r.json();
-      var f=(j.value||[]).find(function(x){return x.name===ENGINE_FILE;});
+      var f=(j.value||[]).find(function(x){return sameName(x.name,ENGINE_FILE);});
       if(f){ENG_ID=f.id;ENG_DRIVE=(f.parentReference&&f.parentReference.driveId)||null;}
     }
   }catch(_){}
@@ -2713,7 +2736,11 @@ async function loadEnginesDoc(){
       // Loud, and saves stay blocked (_enginesDocLoaded=false): a shared
       // sheet with a private config would split the two accounts' state.
       applyEnginesDoc();
-      showErr('⚠ The sheet reached this account through sharing, but '+ENGINE_FILE+' is not shared with it. Running on built-in defaults and ALL settings/engine saves are blocked. Ask the owner to share '+ENGINE_FILE+' (Can edit) with this account — or a folder containing both files — then reload.');
+      // Name what Shared-with-me ACTUALLY listed — the usual culprits are an
+      // invite sent to a different account, an unopened invite, or a rename.
+      var seen9=_swmNames&&_swmNames.length?('This account’s Shared-with-me currently lists: '+_swmNames.slice(0,12).join(', ')+(_swmNames.length>12?' …':'')+'.')
+        :'This account’s Shared-with-me is EMPTY — the share may have gone to a different email/account, or the invitation was never opened in OneDrive.';
+      showErr('⚠ [v'+BUILD+'] The sheet reached this account through sharing, but '+ENGINE_FILE+' is not reachable. Running on built-in defaults and ALL settings/engine saves are blocked. '+seen9+' Fix: the owner shares '+ENGINE_FILE+' (Can edit) with this exact account — or one folder containing both files — she opens the invite once in OneDrive, then reloads here.');
       return;
     }
     var r=await gfetch(engUrl('content'));
@@ -4732,7 +4759,7 @@ async function loadData(){
     var r=await gfetch(GR+"/me/drive/root/search(q='"+encodeURIComponent(FN)+"')");
     if(!r.ok)throw new Error('Drive search failed: '+r.status);
     var j=await r.json();
-    var f=(j.value||[]).find(function(x){return x.name===FN;});
+    var f=(j.value||[]).find(function(x){return sameName(x.name,FN);});
     if(f){
       fid=f.id;DRIVE_BASE='/me/drive';_sharedMode=false;
     }else{
