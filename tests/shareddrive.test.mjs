@@ -21,25 +21,30 @@ const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: 
   ok(!/\/me\/drive\/items\/'\+fid/.test(html) && !/\/me\/drive\/items\/"\+fid/.test(html), 'NO workbook call still hardcodes /me/drive — shared mode would silently miss it');
 }
 
-// ── the finder: own drive first, then Shared with me ──
+// ── the finder: own drive first, then Shared with me — folders included ──
 {
   const ld = html.slice(html.indexOf('async function loadData'), html.indexOf('async function loadTemplates'));
-  ok(/fid=f\.id;DRIVE_BASE='\/me\/drive';_sharedMode=false;/.test(ld), 'a sheet in the own drive behaves exactly as before');
-  ok(/gfetch\(GR\+'\/me\/drive\/sharedWithMe'\)/.test(ld), 'missing from the own drive = look under Shared with me');
-  ok(/x\.name===FN&&x\.remoteItem&&x\.remoteItem\.parentReference/.test(ld), 'the shared entry must carry the remote item (owner drive + id)');
-  ok(/fid=sf\.remoteItem\.id;/.test(ld) && /DRIVE_BASE='\/drives\/'\+sf\.remoteItem\.parentReference\.driveId;/.test(ld) && /_sharedMode=true;/.test(ld), "a shared sheet switches every call to the OWNER's drive");
-  ok(/Share → Can edit/.test(ld) && /opened once in OneDrive/.test(ld), 'the not-found error tells the owner exactly what to do');
+  ok(/fid=f\.id;DRIVE_BASE='\/me\/drive';_sharedMode=false;/.test(ld), 'a sheet in the own drive behaves exactly as before (search covers EVERY folder)');
+  ok(/var sf=await findInShared\(FN\);/.test(ld), 'missing from the own drive = findInShared');
+  ok(/fid=sf\.id;/.test(ld) && /DRIVE_BASE='\/drives\/'\+sf\.driveId;/.test(ld) && /_sharedMode=true;/.test(ld), "a shared sheet switches every call to the OWNER's drive");
+  ok(/or a folder containing it/.test(ld) && /Share → Can edit/.test(ld) && /opened once in OneDrive/.test(ld), 'the not-found error says a shared FOLDER works too');
+
+  const fis = html.slice(html.indexOf('async function findInShared'), html.indexOf('async function loadData'));
+  ok(/x\.name===name&&x\.remoteItem&&x\.remoteItem\.parentReference/.test(fis), 'directly shared files are found first');
+  ok(/it\.remoteItem&&it\.remoteItem\.folder/.test(fis) && /\/drives\/'\+dId\+'\/items\/'\+it\.remoteItem\.id\+"\/search\(q='/.test(fis), "shared FOLDERS get searched inside, in the owner's drive — a file in a shared folder is never invisible");
 }
 
-// ── the settings doc follows the same rule ──
+// ── the settings doc: findable ANYWHERE, same rules ──
 {
-  ok(/function engUrl\(op\)\{/.test(html) && /ENG_ID\?GR\+'\/drives\/'\+ENG_DRIVE\+'\/items\/'\+ENG_ID\+'\/'\+op/.test(html) && /:GR\+'\/me\/drive\/root:\/'\+ENGINE_FILE\+':\/'\+op;/.test(html), 'engUrl: owner-item address when shared, the classic own-root path otherwise');
+  ok(/if\(ENG_ID&&ENG_DRIVE\)return GR\+'\/drives\/'\+ENG_DRIVE\+'\/items\/'\+ENG_ID\+'\/'\+op;/.test(html) && /if\(ENG_ID\)return GR\+'\/me\/drive\/items\/'\+ENG_ID\+'\/'\+op;/.test(html) && /return GR\+'\/me\/drive\/root:\/'\+ENGINE_FILE\+':\/'\+op;/.test(html), 'engUrl: found item (any drive, any folder) wins; the root path remains ONLY as the first-run create spot');
   ok((html.match(/engUrl\('content'\)/g) || []).length === 2 && /engUrl\('createUploadSession'\)/.test(html), 'load, save AND the chunked upload all go through it');
   ok(!/\/me\/drive\/root:\/'\+ENGINE_FILE\+':\/content/.test(html.replace(/function engUrl[\s\S]*?\n\}/, '')), 'no engines call bypasses engUrl');
-  const led = html.slice(html.indexOf('async function resolveSharedEnginesDoc'), html.indexOf('/* ⚡PERF-ENGSAVE — BEGIN'));
-  ok(/if\(!_sharedMode\|\|ENG_ID\)return;/.test(led), 'the shared lookup only runs in shared mode, once');
-  ok(/x\.name===ENGINE_FILE&&x\.remoteItem/.test(led), 'it finds the owner\'s Solura_Engines.json under Shared with me');
-  ok(/if\(_sharedMode&&!ENG_ID\)\{/.test(led) && /ALL settings\/engine saves are blocked/.test(led), 'shared sheet + unshared config = loud, read-only — never a silently split config');
+  const led = html.slice(html.indexOf('async function resolveEnginesDocLocation'), html.indexOf('/* ⚡PERF-ENGSAVE — BEGIN'));
+  ok(/if\(ENG_ID\)return;/.test(led), 'the lookup runs once');
+  ok(led.indexOf('findInShared(ENGINE_FILE)') < led.indexOf("search(q='\"+encodeURIComponent(ENGINE_FILE)"), 'in shared mode the OWNER\'S shared copy is looked for FIRST — a stray local file can never silently split the config');
+  ok(/return; \/\/ shared sheet \+ no shared config = the loud block below/.test(led), 'shared mode never falls back to a local search');
+  ok(/x\.name===ENGINE_FILE/.test(led) && /ENG_DRIVE=\(f\.parentReference&&f\.parentReference\.driveId\)\|\|null;/.test(led), 'own-drive search finds the doc in ANY folder and keeps its real location');
+  ok(/if\(_sharedMode&&!ENG_ID\)\{/.test(led) && /ALL settings\/engine saves are blocked/.test(led) && /or a folder containing both files/.test(led), 'shared sheet + unshared config = loud, read-only, with the folder option named');
   ok(led.indexOf('_enginesDocLoaded=true') > led.indexOf('if(_sharedMode&&!ENG_ID){'), 'the blocked branch returns before the loaded flag — the save guard holds');
 }
 

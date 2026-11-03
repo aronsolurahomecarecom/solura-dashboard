@@ -1926,10 +1926,35 @@ var FN='Solura_Lead_Tracker.xlsx';
  * owner's too — shared alongside the sheet — or all saves stay blocked. */
 var DRIVE_BASE='/me/drive'; // '/drives/<ownerDriveId>' when the sheet is shared-in
 var _sharedMode=false;      // true = this account reached the sheet via sharing
-var ENG_DRIVE=null,ENG_ID=null; // the shared Solura_Engines.json, when applicable
+var ENG_DRIVE=null,ENG_ID=null; // where Solura_Engines.json was FOUND (any folder, any drive)
 function engUrl(op){ // op: 'content' | 'createUploadSession'
-  return ENG_ID?GR+'/drives/'+ENG_DRIVE+'/items/'+ENG_ID+'/'+op
-    :GR+'/me/drive/root:/'+ENGINE_FILE+':/'+op;
+  if(ENG_ID&&ENG_DRIVE)return GR+'/drives/'+ENG_DRIVE+'/items/'+ENG_ID+'/'+op;
+  if(ENG_ID)return GR+'/me/drive/items/'+ENG_ID+'/'+op;
+  // Never found anywhere: the classic root path — a first run CREATES it here
+  return GR+'/me/drive/root:/'+ENGINE_FILE+':/'+op;
+}
+// Find a file by exact name under "Shared with me" — directly shared, OR
+// inside a shared FOLDER (the folder is listed; its files are not, so each
+// shared folder gets searched in the owner's drive).
+async function findInShared(name){
+  var r=await gfetch(GR+'/me/drive/sharedWithMe');
+  var j=r.ok?await r.json():{};
+  var items=j.value||[];
+  var hit=items.find(function(x){return x.name===name&&x.remoteItem&&x.remoteItem.parentReference;});
+  if(hit)return {driveId:hit.remoteItem.parentReference.driveId,id:hit.remoteItem.id};
+  for(var i=0;i<items.length;i++){
+    var it=items[i];
+    if(!(it.remoteItem&&it.remoteItem.folder&&it.remoteItem.parentReference))continue;
+    var dId=it.remoteItem.parentReference.driveId;
+    try{
+      var sr=await gfetch(GR+'/drives/'+dId+'/items/'+it.remoteItem.id+"/search(q='"+encodeURIComponent(name)+"')");
+      if(!sr.ok)continue;
+      var sj=await sr.json();
+      var f=(sj.value||[]).find(function(x){return x.name===name;});
+      if(f)return {driveId:(f.parentReference&&f.parentReference.driveId)||dId,id:f.id};
+    }catch(_){}
+  }
+  return null;
 }
 var PHONE_DISPLAY='(216) 770-4886';
 
@@ -1979,7 +2004,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1102-152';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1102-153';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -2661,24 +2686,34 @@ async function backfillAssignments(changed){
 function engineFor(ri){return ENGINES[engineIdFor(ri)]||ENGINES[effectiveDefaultId()];}
 function seqFor(ri){return engineFor(ri).seq;}
 
-// Shared mode: the settings/engines doc must be the OWNER's file too —
-// otherwise the two accounts would silently run on different configs,
-// different sequencing state, different everything.
-async function resolveSharedEnginesDoc(){
-  if(!_sharedMode||ENG_ID)return;
-  var r=await gfetch(GR+'/me/drive/sharedWithMe');
-  var j=r.ok?await r.json():{};
-  var f=(j.value||[]).find(function(x){return x.name===ENGINE_FILE&&x.remoteItem&&x.remoteItem.parentReference;});
-  if(f){ENG_ID=f.remoteItem.id;ENG_DRIVE=f.remoteItem.parentReference.driveId;}
+// Find Solura_Engines.json WHEREVER it lives — any folder of the own
+// drive, directly shared, or inside a shared folder. In shared mode the
+// owner's shared copy is looked for FIRST, so a stray local file can never
+// silently split the two accounts' config. Found nowhere + not shared =
+// first run; engUrl falls back to the root path and the doc is created there.
+async function resolveEnginesDocLocation(){
+  if(ENG_ID)return;
+  if(_sharedMode){
+    try{var s=await findInShared(ENGINE_FILE);if(s){ENG_ID=s.id;ENG_DRIVE=s.driveId;return;}}catch(_){}
+    return; // shared sheet + no shared config = the loud block below
+  }
+  try{
+    var r=await gfetch(GR+"/me/drive/root/search(q='"+encodeURIComponent(ENGINE_FILE)+"')");
+    if(r.ok){
+      var j=await r.json();
+      var f=(j.value||[]).find(function(x){return x.name===ENGINE_FILE;});
+      if(f){ENG_ID=f.id;ENG_DRIVE=(f.parentReference&&f.parentReference.driveId)||null;}
+    }
+  }catch(_){}
 }
 async function loadEnginesDoc(){
   try{
-    try{await resolveSharedEnginesDoc();}catch(_){}
+    try{await resolveEnginesDocLocation();}catch(_){}
     if(_sharedMode&&!ENG_ID){
       // Loud, and saves stay blocked (_enginesDocLoaded=false): a shared
       // sheet with a private config would split the two accounts' state.
       applyEnginesDoc();
-      showErr('⚠ The sheet reached this account through sharing, but '+ENGINE_FILE+' is not shared with it. Running on built-in defaults and ALL settings/engine saves are blocked. Ask the owner to share '+ENGINE_FILE+' (Can edit) with this account the same way as the sheet, then reload.');
+      showErr('⚠ The sheet reached this account through sharing, but '+ENGINE_FILE+' is not shared with it. Running on built-in defaults and ALL settings/engine saves are blocked. Ask the owner to share '+ENGINE_FILE+' (Can edit) with this account — or a folder containing both files — then reload.');
       return;
     }
     var r=await gfetch(engUrl('content'));
@@ -4704,12 +4739,12 @@ async function loadData(){
       // Not in this account's own OneDrive — check "Shared with me". A
       // shared file lives in the OWNER's drive and must be addressed as
       // /drives/<ownerDrive>/items/<id>; searching /me/drive never sees it.
-      var sr=await gfetch(GR+'/me/drive/sharedWithMe');
-      var sj2=sr.ok?await sr.json():{};
-      var sf=(sj2.value||[]).find(function(x){return x.name===FN&&x.remoteItem&&x.remoteItem.parentReference;});
-      if(!sf)throw new Error(FN+' not found. It is not in this account’s own OneDrive, and nothing by that name is under Shared with me. The owner must share the FILE itself with this exact Microsoft account (Share → Can edit), and the invitation may need to be opened once in OneDrive first.');
-      fid=sf.remoteItem.id;
-      DRIVE_BASE='/drives/'+sf.remoteItem.parentReference.driveId;
+      // findInShared also looks INSIDE shared folders, so the sheet can sit
+      // in any folder the owner shared, not only be shared file-by-file.
+      var sf=await findInShared(FN);
+      if(!sf)throw new Error(FN+' not found. It is not in this account’s own OneDrive, and it is not under Shared with me (directly or inside a shared folder). The owner must share the file, or a folder containing it, with this exact Microsoft account (Share → Can edit), and the invitation may need to be opened once in OneDrive first.');
+      fid=sf.id;
+      DRIVE_BASE='/drives/'+sf.driveId;
       _sharedMode=true;
     }
     var r2=await gfetch(GR+DRIVE_BASE+'/items/'+fid+'/content');
