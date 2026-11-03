@@ -1942,6 +1942,9 @@ function sameName(a,b){return String(a||'').trim().toLowerCase()===String(b||'')
 var _swmNames=null; // what Shared-with-me actually listed — for the diagnostics
 async function findInShared(name){
   var r=await gfetch(GR+'/me/drive/sharedWithMe?allowexternal=true');
+  // 403 here is a PERMISSION gap, not an empty list: listing shared files
+  // needs Files.ReadWrite.All, which older sign-ins never granted.
+  if(r.status===403||r.status===401)throw new Error('This sign-in cannot LIST shared files yet (HTTP '+r.status+'). Sign out of the dashboard and sign back in — Microsoft will ask once for the updated permission (reading files shared with you) — then try again.');
   var j=r.ok?await r.json():{};
   var items=j.value||[];
   _swmNames=items.map(function(x){return String(x.name||'(unnamed)');});
@@ -2009,7 +2012,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1102-154';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1103-155';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -4596,7 +4599,7 @@ async function signIn(){
   sessionStorage.setItem('pkce_v',pkce.verifier);
   var url='https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/authorize?'
     +'client_id='+CLIENT_ID+'&response_type=code&redirect_uri='+encodeURIComponent(REDIRECT)
-    +'&scope='+encodeURIComponent('openid profile email Files.ReadWrite Mail.Send Mail.Send.Shared Mail.ReadWrite Calendars.ReadWrite offline_access')
+    +'&scope='+encodeURIComponent('openid profile email Files.ReadWrite.All Mail.Send Mail.Send.Shared Mail.ReadWrite Calendars.ReadWrite offline_access')
     +'&code_challenge='+pkce.challenge+'&code_challenge_method=S256&prompt=select_account';
   location.href=url;
 }
@@ -4606,7 +4609,7 @@ async function refreshToken(){
   var rt=localStorage.getItem('sr');
   if(!rt)return false;
   try{
-    var body=new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:'openid profile email Files.ReadWrite Mail.Send Mail.Send.Shared Mail.ReadWrite Calendars.ReadWrite offline_access'});
+    var body=new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:'openid profile email Files.ReadWrite.All Mail.Send Mail.Send.Shared Mail.ReadWrite Calendars.ReadWrite offline_access'});
     var r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
     var j=await r.json();
     if(j.access_token){

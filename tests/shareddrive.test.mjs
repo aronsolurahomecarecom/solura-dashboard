@@ -57,5 +57,11 @@ const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: 
 // ── sign-in copy ──
 ok(/in your OneDrive, or shared with you/.test(html), 'the sign-in screen says shared sheets work');
 
+// ── the permission that makes any of this possible ──
+{
+  ok((html.match(/email Files\.ReadWrite\.All Mail\.Send/g) || []).length === 2 && !/email Files\.ReadWrite Mail\.Send/.test(html), 'BOTH the sign-in and the token refresh request Files.ReadWrite.All — plain Files.ReadWrite cannot list shared files at all');
+  ok(/r\.status===403\|\|r\.status===401\)throw new Error\('This sign-in cannot LIST shared files yet/.test(html) && /Sign out of the dashboard and sign back in/.test(html), 'a permission gap on the shared lookup is LOUD and names the fix, never a silent empty list');
+}
+
 console.log('\nShared drive: ' + PASS + ' passed, ' + FAIL + ' failed');
 process.exit(FAIL ? 1 : 0);
