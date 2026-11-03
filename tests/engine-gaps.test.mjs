@@ -176,5 +176,33 @@ ok(html.indexOf('value="interval">⏱ Custom gaps') > -1, 'Add-phase menu has th
 ok(html.indexOf('ee-add-ientry') > -1 && html.indexOf('ee-del-ientry') > -1, 'interval entry add/delete handlers wired');
 ok((html.match(/♾ Forever \(sticky/g) || []).length >= 2, 'Forever checkbox is ♾-labelled in both weekly and interval editors');
 
+// ── ⚡WEEKDUE: a missed nurture week STAYS overdue (B-1103-158) ──
+// The old Mon-Sun anchored logic forgave a missed Thursday at the next
+// Monday — 75 overdue nurture leads "vanished" over one weekend.
+{
+  const wb = html.indexOf('/* ⚡WEEKDUE — BEGIN');
+  const we = html.indexOf('/* ⚡WEEKDUE — END */');
+  if (wb < 0 || we < 0) throw new Error('WEEKDUE markers missing');
+  const wsrc = html.slice(html.indexOf('*/', wb) + 2, we);
+  const addDays = (dd, n) => { const x = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate()); x.setDate(x.getDate() + n); return x; };
+  const daysBetween = (a, bb) => Math.round((a.getTime() - bb.getTime()) / 86400000);
+  const W = new Function('addDays', 'daysBetween', wsrc + '\nreturn {weeklyDueBucket};')(addDays, daysBetween);
+  const THU = 4, mon = d(2026, 10, 2); // Monday Nov 2, 2026 — nurture day Thursday
+
+  const missed = W.weeklyDueBucket(THU, mon, d(2026, 9, 22)); // last sent Oct 22, missed Thu Oct 29
+  ok(missed.bucket === 'overdue' && eq(missed.at, d(2026, 9, 29)), 'THE regression: missed last Thursday is STILL overdue on Monday (at the missed day)');
+  ok(W.weeklyDueBucket(THU, d(2026, 10, 16), d(2026, 9, 22)).bucket === 'overdue', 'still overdue two weeks later — a missed cycle never silently clears');
+
+  const covered = W.weeklyDueBucket(THU, mon, d(2026, 9, 29)); // sent ON the day
+  ok(covered.bucket === 'week' && eq(covered.at, d(2026, 10, 5)), 'sent on the nurture day = covered, next due this coming Thursday');
+  ok(W.weeklyDueBucket(THU, mon, d(2026, 9, 31)).bucket === 'week', 'sent late (Saturday catch-up) still covers the cycle');
+
+  ok(W.weeklyDueBucket(THU, d(2026, 10, 5), d(2026, 9, 22)).bucket === 'now', 'on the nurture day itself an uncovered lead is NOW, not overdue');
+  const fresh = W.weeklyDueBucket(THU, mon, null);
+  ok(fresh.bucket === 'week' && eq(fresh.at, d(2026, 10, 5)), 'never nurtured = the UPCOMING day, never a backdated debt');
+  ok(W.weeklyDueBucket(THU, d(2026, 10, 5), null).bucket === 'now', 'never nurtured and today is the day = now');
+  ok(/return weeklyDueBucket\(nurtureWeekday\(ri\),today,getStepDoneAt\(ri\)\);/.test(html) && (html.match(/return weeklyDueBucket\(/g) || []).length === 2, 'BOTH weekly branches (finite and sticky) ride the one pure function');
+}
+
 console.log('\nEngine gaps: ' + PASS + ' passed, ' + FAIL + ' failed');
 process.exit(FAIL ? 1 : 0);

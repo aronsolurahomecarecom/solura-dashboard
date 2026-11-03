@@ -2012,7 +2012,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1103-157';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1103-158';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -5549,33 +5549,7 @@ function whenToShowCore(ri){
 
   // Weekly cadence (finite check-ins) — on nurtureWeekday
   if(action.cadence==='weekly'&&!action.sticky){
-    var weekday=nurtureWeekday(ri);
-    var todayDay=today.getDay();
-    var doneAt=getStepDoneAt(ri);
-    var monday=addDays(today,-((todayDay+6)%7)); // Monday of this week
-    var sunday=addDays(monday,6);
-    // If this week's check-in is already done, look at next week's nurture day
-    var doneThisWeek=doneAt&&doneAt>=monday&&doneAt<=addDays(sunday,1);
-    if(doneThisWeek){
-      // Next week's nurture day
-      var nextMonday=addDays(monday,7);
-      var offset=((weekday-1)%7+7)%7; // days from Monday to weekday
-      var nextDue=addDays(nextMonday,offset);
-      var dd=daysBetween(nextDue,today);
-      if(dd<=7)return {bucket:'week',at:nextDue};
-      return {bucket:'future',at:nextDue};
-    }
-    // Not yet done this week. Where is the nurture day relative to today?
-    var thisWeekOffset=((weekday-1)%7+7)%7;
-    var thisWeekDue=addDays(monday,thisWeekOffset);
-    var diffToDue=daysBetween(thisWeekDue,today);
-    if(diffToDue<0){
-      // The day passed this week without action → overdue
-      return {bucket:'overdue',at:thisWeekDue};
-    }
-    if(diffToDue===0)return {bucket:'now',at:today};
-    // It's earlier in the week — coming up
-    return {bucket:'week',at:thisWeekDue};
+    return weeklyDueBucket(nurtureWeekday(ri),today,getStepDoneAt(ri));
   }
 
   // Sticky weekly cadence — perpetual nurture, same shape as above
@@ -5591,30 +5565,36 @@ function whenToShowCore(ri){
     return {bucket:'future',at:dueI};
   }
   if(action.cadence==='weekly'&&action.sticky){
-    var weekday5=nurtureWeekday(ri);
-    var todayDay5=today.getDay();
-    var doneAt5=getStepDoneAt(ri);
-    var monday5=addDays(today,-((todayDay5+6)%7));
-    var sunday5=addDays(monday5,6);
-    var doneThisWeek5=doneAt5&&doneAt5>=monday5&&doneAt5<=addDays(sunday5,1);
-    if(doneThisWeek5){
-      var nextMonday5=addDays(monday5,7);
-      var off5=((weekday5-1)%7+7)%7;
-      var nextDue5=addDays(nextMonday5,off5);
-      var dd5=daysBetween(nextDue5,today);
-      if(dd5<=7)return {bucket:'week',at:nextDue5};
-      return {bucket:'future',at:nextDue5};
-    }
-    var off5b=((weekday5-1)%7+7)%7;
-    var thisWeekDue5=addDays(monday5,off5b);
-    var diff5=daysBetween(thisWeekDue5,today);
-    if(diff5<0)return {bucket:'overdue',at:thisWeekDue5};
-    if(diff5===0)return {bucket:'now',at:today};
-    return {bucket:'week',at:thisWeekDue5};
+    return weeklyDueBucket(nurtureWeekday(ri),today,getStepDoneAt(ri));
   }
 
   return {bucket:'now'};
 }
+/* ⚡WEEKDUE — BEGIN (sliced by tests/engine-gaps.test.mjs) */
+/* Weekday-anchored weekly nurture, PURE. The old logic was anchored to
+ * the calendar week (Mon-Sun), so a nurture day missed on Thursday showed
+ * as overdue only until Sunday - Monday's rollover silently forgave it
+ * and 75 overdue leads "vanished" into next week (2026-11-03). Now a
+ * missed cycle STAYS overdue, however many weeks pass, until a send
+ * actually stamps step_done_at on or after the most recent nurture day. */
+function weeklyDueBucket(weekday,today,doneAt){
+  var todayDay=today.getDay();
+  // The most recent occurrence of the nurture day, today included
+  var lastOccur=addDays(today,-(((todayDay-weekday)%7+7)%7));
+  var isToday=daysBetween(lastOccur,today)===0;
+  if(doneAt&&doneAt>=lastOccur){
+    // This cycle is covered → next week's day
+    var nextDue=addDays(lastOccur,7);
+    return daysBetween(nextDue,today)<=7?{bucket:'week',at:nextDue}:{bucket:'future',at:nextDue};
+  }
+  if(isToday)return {bucket:'now',at:today};
+  if(!doneAt){
+    // Never nurtured yet: aim at the UPCOMING day, never a backdated debt
+    return {bucket:'week',at:addDays(lastOccur,7)};
+  }
+  return {bucket:'overdue',at:lastOccur};
+}
+/* ⚡WEEKDUE — END */
 
 // Human-readable column-T label for a given step index. Mirrors what the
 // engine tracks in step_idx, so the sheet stays a true reflection of state.
