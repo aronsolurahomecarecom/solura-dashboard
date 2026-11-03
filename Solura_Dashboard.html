@@ -632,7 +632,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <div class="ls-fb" style="display:none">S</div>
     </div>
     <div class="ltitle">Follow-Up Dashboard</div>
-    <div class="lsub">Sign in with Microsoft to connect live to your<br><strong>Solura_Lead_Tracker.xlsx</strong> on OneDrive.</div>
+    <div class="lsub">Sign in with Microsoft to connect live to<br><strong>Solura_Lead_Tracker.xlsx</strong> — in your OneDrive, or shared with you.</div>
     <button class="lbtn" data-action="signin">
       <svg width="16" height="16" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
       Sign in with Microsoft
@@ -1918,6 +1918,19 @@ function GHL_KEY(){
   try{return (enginesDoc&&enginesDoc.config&&enginesDoc.config.ghlApiKey)||'';}catch(_){return '';}
 }
 var FN='Solura_Lead_Tracker.xlsx';
+/* ── 👥 Shared-sheet support ──────────────────────────────────────────────
+ * An employee's account doesn't HOLD the workbook — it is SHARED with her,
+ * so it lives in the owner's drive and /me/drive never finds it. When the
+ * finder locates it under "Shared with me", every workbook call switches to
+ * the owner's drive (/drives/<id>), and the settings file must be the
+ * owner's too — shared alongside the sheet — or all saves stay blocked. */
+var DRIVE_BASE='/me/drive'; // '/drives/<ownerDriveId>' when the sheet is shared-in
+var _sharedMode=false;      // true = this account reached the sheet via sharing
+var ENG_DRIVE=null,ENG_ID=null; // the shared Solura_Engines.json, when applicable
+function engUrl(op){ // op: 'content' | 'createUploadSession'
+  return ENG_ID?GR+'/drives/'+ENG_DRIVE+'/items/'+ENG_ID+'/'+op
+    :GR+'/me/drive/root:/'+ENGINE_FILE+':/'+op;
+}
 var PHONE_DISPLAY='(216) 770-4886';
 
 // Column map. Indices are 0-based SheetJS positions = Excel column letter offset.
@@ -1966,7 +1979,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1101-151';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1102-152';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -2648,9 +2661,27 @@ async function backfillAssignments(changed){
 function engineFor(ri){return ENGINES[engineIdFor(ri)]||ENGINES[effectiveDefaultId()];}
 function seqFor(ri){return engineFor(ri).seq;}
 
+// Shared mode: the settings/engines doc must be the OWNER's file too —
+// otherwise the two accounts would silently run on different configs,
+// different sequencing state, different everything.
+async function resolveSharedEnginesDoc(){
+  if(!_sharedMode||ENG_ID)return;
+  var r=await gfetch(GR+'/me/drive/sharedWithMe');
+  var j=r.ok?await r.json():{};
+  var f=(j.value||[]).find(function(x){return x.name===ENGINE_FILE&&x.remoteItem&&x.remoteItem.parentReference;});
+  if(f){ENG_ID=f.remoteItem.id;ENG_DRIVE=f.remoteItem.parentReference.driveId;}
+}
 async function loadEnginesDoc(){
   try{
-    var r=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/content');
+    try{await resolveSharedEnginesDoc();}catch(_){}
+    if(_sharedMode&&!ENG_ID){
+      // Loud, and saves stay blocked (_enginesDocLoaded=false): a shared
+      // sheet with a private config would split the two accounts' state.
+      applyEnginesDoc();
+      showErr('⚠ The sheet reached this account through sharing, but '+ENGINE_FILE+' is not shared with it. Running on built-in defaults and ALL settings/engine saves are blocked. Ask the owner to share '+ENGINE_FILE+' (Can edit) with this account the same way as the sheet, then reload.');
+      return;
+    }
+    var r=await gfetch(engUrl('content'));
     if(r.status===404){
       // Genuinely no doc yet (first run) — safe to create one later.
       _enginesDocLoaded=true;_loadedEngineCount=0;
@@ -2705,7 +2736,7 @@ async function saveEnginesDoc(){
   // go through a chunked upload session — same 320KB-aligned mechanics the
   // email attachments use.
   if(body.length<=3.5*1024*1024){
-    var r=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/content',{
+    var r=await gfetch(engUrl('content'),{
       method:'PUT',body:body
     });
     if(!r.ok){var e=await r.json().catch(function(){return{};});
@@ -2718,7 +2749,7 @@ async function saveEnginesDoc(){
 }
 /* ⚡PERF-ENGSAVE — END */
 async function putEnginesContentChunked(body){
-  var sess=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/createUploadSession',{
+  var sess=await gfetch(engUrl('createUploadSession'),{
     method:'POST',
     body:JSON.stringify({item:{'@microsoft.graph.conflictBehavior':'replace'}})
   });
@@ -4617,7 +4648,7 @@ function ensureWorkbookSession(){
   if(!tok||!fid)return Promise.resolve(null);
   _wbSessionPromise=(async function(){
     try{
-      var r=await fetch(GR+'/me/drive/items/'+fid+'/workbook/createSession',{
+      var r=await fetch(GR+DRIVE_BASE+'/items/'+fid+'/workbook/createSession',{
         method:'POST',
         headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/json'},
         body:JSON.stringify({persistChanges:true})
@@ -4667,9 +4698,21 @@ async function loadData(){
     if(!r.ok)throw new Error('Drive search failed: '+r.status);
     var j=await r.json();
     var f=(j.value||[]).find(function(x){return x.name===FN;});
-    if(!f)throw new Error(FN+' not found in OneDrive');
-    fid=f.id;
-    var r2=await gfetch(GR+'/me/drive/items/'+fid+'/content');
+    if(f){
+      fid=f.id;DRIVE_BASE='/me/drive';_sharedMode=false;
+    }else{
+      // Not in this account's own OneDrive — check "Shared with me". A
+      // shared file lives in the OWNER's drive and must be addressed as
+      // /drives/<ownerDrive>/items/<id>; searching /me/drive never sees it.
+      var sr=await gfetch(GR+'/me/drive/sharedWithMe');
+      var sj2=sr.ok?await sr.json():{};
+      var sf=(sj2.value||[]).find(function(x){return x.name===FN&&x.remoteItem&&x.remoteItem.parentReference;});
+      if(!sf)throw new Error(FN+' not found. It is not in this account’s own OneDrive, and nothing by that name is under Shared with me. The owner must share the FILE itself with this exact Microsoft account (Share → Can edit), and the invitation may need to be opened once in OneDrive first.');
+      fid=sf.remoteItem.id;
+      DRIVE_BASE='/drives/'+sf.remoteItem.parentReference.driveId;
+      _sharedMode=true;
+    }
+    var r2=await gfetch(GR+DRIVE_BASE+'/items/'+fid+'/content');
     if(!r2.ok)throw new Error('Download failed: '+r2.status);
     var buf=await r2.arrayBuffer();
     var wb=XLSX.read(buf,{type:'array',cellDates:true});
@@ -4724,7 +4767,7 @@ function colLetter(i){
  * cell writes are idempotent, so the retry is safe.                    */
 async function writeRow(ri,updates){
   var exRow=ri+1; // SheetJS 0-based to Excel 1-based
-  var relBase='/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
+  var relBase=DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
   var cis=Object.keys(updates).map(function(k){return parseInt(k,10);})
     .sort(function(a,b){return a-b;});
   // Contiguous columns collapse into one range write
@@ -4818,7 +4861,7 @@ async function loadTemplates(){
   // The Templates tab is LEGACY: templates live on the engine steps now.
   // The tab still loads as a silent fallback (and for call scripts) but a
   // missing or empty tab is no longer an error worth nagging about.
-  var r=await gfetch(GR+"/me/drive/items/"+fid+"/workbook/worksheets/Templates/usedRange?$select=values");
+  var r=await gfetch(GR+DRIVE_BASE+"/items/"+fid+"/workbook/worksheets/Templates/usedRange?$select=values");
   if(!r.ok){
     if(r.status===404){console.warn('Templates tab absent — step templates only (this is fine)');return;}
     throw new Error('Templates load failed: '+r.status);
@@ -6804,7 +6847,7 @@ function readTraces(){try{return JSON.parse(localStorage.getItem('op_trace_v1')|
 var _anModel=null;
 async function analyticsFetchComms(){
   await ensureCommsLogSheet();
-  var url=GR+'/me/drive/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET)+"/range(address='A2:R4000')?$select=values";
+  var url=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET)+"/range(address='A2:R4000')?$select=values";
   var r=await gfetch(url);
   if(!r.ok)throw new Error('Comms read failed: '+r.status);
   var j=await r.json();
@@ -6937,7 +6980,7 @@ async function ensureCommsLogSheet(){
   // If someone else is already initializing, await that.
   if(_commsLogInFlight)return _commsLogInFlight;
   _commsLogInFlight=(async function(){
-    var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets';
+    var base=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets';
     var sheetUrl=base+'/'+encodeURIComponent(COMMS_LOG_SHEET);
     // Check if sheet exists
     var r=await gfetch(sheetUrl+'?$select=name');
@@ -7029,7 +7072,7 @@ async function logComms(entry){
       String(entry.variant||'')  // weekly A/B variant, when applicable
     ];
     var addr='A'+row+':R'+row;
-    var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
+    var base=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
     var r=await gfetch(base+"/range(address='"+addr+"')",{
       method:'PATCH',
       body:JSON.stringify({values:[values]})
@@ -10023,7 +10066,7 @@ async function stampCommsOpen(rec){
   // Write Opened At / Opens / Doc Opens onto the ORIGINAL comms row
   if(!rec||!rec.commsRow||!tok||!fid)return;
   try{
-    var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
+    var base=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
     await gfetch(base+"/range(address='O"+rec.commsRow+':Q'+rec.commsRow+"')",{
       method:'PATCH',
       body:JSON.stringify({values:[[rec.openedAt?new Date(rec.openedAt).toISOString():'',rec.opens||0,rec.docOpens||0]]})
@@ -10582,7 +10625,7 @@ async function vaCreateLead(wb){
     '','',''                                // AB · AC · AD
   ];
   var ri=firstEmptyDataRow();
-  var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
+  var base=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
   var res=await gfetch(base+"/range(address='A"+(ri+1)+":AD"+(ri+1)+"')",{
     method:'PATCH',body:JSON.stringify({values:[vals]})});
   if(!res.ok)return -1;
@@ -12350,7 +12393,7 @@ async function saveAddLead(){
   var exRow=ri+1;              // Excel 1-based row
   var spin=el('al-spin');if(spin)spin.style.display='inline-flex';
   try{
-    var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
+    var base=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
     var res=await gfetch(base+"/range(address='A"+exRow+":AI"+exRow+"')",{
       method:'PATCH',
       body:JSON.stringify({values:[vals]})
@@ -12508,7 +12551,7 @@ async function intakeCreateLead(sub,link){
   var vals=intakeLeadVals(sub,link,todayStr,new Date().toISOString());
   var ri=firstEmptyDataRow();
   var exRow=ri+1;
-  var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
+  var base=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
   var res=await gfetch(base+"/range(address='A"+exRow+":AI"+exRow+"')",{
     method:'PATCH',body:JSON.stringify({values:[vals]})});
   if(!res.ok){var e=await res.json().catch(function(){return{};});
@@ -14528,7 +14571,7 @@ async function refreshRowFromSheet(ri){
   if(!tok||!fid)return;
   try{
     var exRow=ri+1;
-    var r=await gfetch(GR+'/me/drive/items/'+fid+"/workbook/worksheets/Lead%20Tracker/range(address='A"+exRow+':AC'+exRow+"')?$select=values");
+    var r=await gfetch(GR+DRIVE_BASE+'/items/'+fid+"/workbook/worksheets/Lead%20Tracker/range(address='A"+exRow+':AC'+exRow+"')?$select=values");
     if(!r.ok)return;
     var j=await r.json();
     var vals=j&&j.values&&j.values[0];

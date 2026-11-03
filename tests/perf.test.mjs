@@ -37,9 +37,9 @@ const GR = 'https://graph.microsoft.com/v1.0';
     }
     return { ok: true, status: 200, json: async () => ({}) };
   };
-  const mk = new Function('GR', 'tok', 'fid', 'fetch', 'refreshToken',
+  const mk = new Function('GR', 'tok', 'fid', 'fetch', 'refreshToken', 'DRIVE_BASE',
     slice('GFETCH') + '\nreturn {gfetch,ensureWorkbookSession,_kill:function(){_wbSessionId=null;}};');
-  const g = mk(GR, 'tok-abc', 'file-1', fetchMock, async () => false);
+  const g = mk(GR, 'tok-abc', 'file-1', fetchMock, async () => false, '/me/drive');
 
   const wbUrl = GR + "/me/drive/items/file-1/workbook/worksheets/Lead%20Tracker/range(address='C5')";
   let r = await g.gfetch(wbUrl, { method: 'PATCH', body: '{}' });
@@ -82,9 +82,9 @@ function makeWriteRow(fetchLog, opts = {}) {
     return { ok: true, status: 200, json: async () => ({}) };
   };
   const rows = opts.rows || [];
-  const mk = new Function('GR', 'fid', 'gfetch', 'rows', 'ensureWorkbookSession',
+  const mk = new Function('GR', 'fid', 'gfetch', 'rows', 'ensureWorkbookSession', 'DRIVE_BASE',
     slice('WRITEROW') + '\nreturn {writeRow,colLetter,rows};');
-  return mk(GR, 'file-1', gfetchStub, rows, async () => opts.sid ?? 'sess-9');
+  return mk(GR, 'file-1', gfetchStub, rows, async () => opts.sid ?? 'sess-9', '/me/drive');
 }
 
 {
@@ -131,10 +131,10 @@ function makeWriteRow(fetchLog, opts = {}) {
   const puts = [];
   let applied = 0, chunked = 0;
   const gfetchStub = async (url, o) => { puts.push(url); return { ok: true, status: 200, json: async () => ({}) }; };
-  const mk = new Function('GR', 'ENGINE_FILE', 'gfetch', 'enginesDoc', 'applyEnginesDoc', 'putEnginesContentChunked',
+  const mk = new Function('GR', 'ENGINE_FILE', 'gfetch', 'enginesDoc', 'applyEnginesDoc', 'putEnginesContentChunked', 'engUrl',
     slice('ENGSAVE') + '\nreturn {saveEnginesDoc,setDoc:function(d){enginesDoc=d;},markLoaded:function(n){_enginesDocLoaded=true;_loadedEngineCount=n;}};');
   const doc = { engines: [{ id: 'e1' }], assignments: [] };
-  const s = mk(GR, 'Solura_Engines.json', gfetchStub, doc, () => { applied++; }, async () => { chunked++; });
+  const s = mk(GR, 'Solura_Engines.json', gfetchStub, doc, () => { applied++; }, async () => { chunked++; }, (op) => GR + '/me/drive/root:/Solura_Engines.json:/' + op);
 
   // 🛡 overwrite guard: an unloaded session may NEVER save
   let guarded = false;
