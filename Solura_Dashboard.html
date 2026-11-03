@@ -2012,7 +2012,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1103-156';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1103-157';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -7500,6 +7500,39 @@ async function openAnalytics(){
 function buildDiagnosticReport(){
   var L=[];
   L.push('SOLURA DIAGNOSTIC \u00b7 '+BUILD+' \u00b7 '+new Date().toISOString());
+  L.push('');
+  // \ud83d\udce5 Queue census: where every lead sits, and WHY each hidden nurture
+  // lead is hidden \u2014 the exact question "my nurture leads vanished" needs.
+  try{
+    var ws9=null;try{ws9=nlWarmupState();}catch(_){}
+    var sentN=0;try{sentN=Object.keys(nlWarmupSentMap()||{}).length;}catch(_){}
+    L.push('QUEUE CENSUS:');
+    L.push('  warm-up state: '+(ws9?('\u26a0 RUNNING \u2014 day '+((ws9.day||0)+1)+', '+sentN+' sent so far (a running warm-up HIDES nurture leads due within its week)'):'none (no warm-up holds)'));
+    var buckets={},nurtureHidden=[],nurtureTotal=0;
+    for(var qi=DATA_START;qi<rows.length;qi++){
+      var rr=rows[qi];if(!rr||!String(rr[C.NM]||rr[C.DM]||'').trim())continue;
+      var b9;try{b9=(whenToShowCore(qi)||{}).bucket||'?';}catch(e9){b9='ERR:'+String(e9.message||'').slice(0,60);}
+      buckets[b9]=(buckets[b9]||0)+1;
+      var isNur=false;try{isNur=isNurtureStep(qi);}catch(_){}
+      if(isNur)nurtureTotal++;
+      if(isNur&&b9==='hidden'){
+        var why='no current action (engine/step state)';
+        try{
+          if(isUnsubscribed(qi))why='UNSUBSCRIBED (column AD is stamped)';
+          else if(nlWarmupHolds(qi))why='WARM-UP HOLD (newsletter warm-up counts them as covered)';
+          else if(isExcludedLead(qi))why='excluded status ('+String(rr[C.ST]||'')+')';
+        }catch(_){}
+        nurtureHidden.push(String(rr[C.NM]||rr[C.DM]).trim()+' \u2192 '+why);
+      }
+    }
+    L.push('  buckets: '+JSON.stringify(buckets));
+    L.push('  nurture leads: '+nurtureTotal+' total \u00b7 '+nurtureHidden.length+' HIDDEN:');
+    nurtureHidden.slice(0,30).forEach(function(x){L.push('    \u00b7 '+x);});
+    if(nurtureHidden.length>30)L.push('    \u2026and '+(nurtureHidden.length-30)+' more, same reasons');
+    var wd9=null;try{wd9=getWeeklyDraft();}catch(_){}
+    L.push('  weekly draft: '+(wd9?'present':'\u26a0 NONE live'));
+    L.push('  engines doc: '+(_enginesDocLoaded?('loaded ('+_loadedEngineCount+' engines'+(ENG_ID?(' \u00b7 from item '+ENG_ID):' \u00b7 from the root path')+')'):'\u26a0 NOT loaded \u2014 running on built-in defaults'));
+  }catch(eQ){L.push('QUEUE CENSUS failed: '+eQ.message);}
   L.push('');
   // Shell config
   var shell=String(cfg('emailShellHtml')||'');

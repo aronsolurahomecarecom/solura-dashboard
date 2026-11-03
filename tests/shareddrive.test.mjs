@@ -57,6 +57,15 @@ const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: 
   ok(led.indexOf('_enginesDocLoaded=true') > led.indexOf('if(_sharedMode&&!ENG_ID){'), 'the blocked branch returns before the loaded flag — the save guard holds');
 }
 
+// ── the diagnostic explains a hidden queue instead of leaving it a mystery ──
+{
+  const dg = html.slice(html.indexOf('function buildDiagnosticReport'), html.indexOf('function showDiagnosticReport'));
+  ok(/QUEUE CENSUS:/.test(dg) && /whenToShowCore\(qi\)/.test(dg), 'the 🩺 report classifies EVERY lead through the real queue logic');
+  ok(/UNSUBSCRIBED \(column AD is stamped\)/.test(dg) && /WARM-UP HOLD/.test(dg) && /excluded status/.test(dg) && /no current action/.test(dg), 'each hidden nurture lead is named WITH its reason');
+  ok(/a running warm-up HIDES nurture leads/.test(dg), 'the warm-up state is called out as the known hider');
+  ok(/engines doc: /.test(dg) && /from the root path/.test(dg), 'the report says WHICH settings doc is loaded and from where');
+}
+
 // ── sign-in copy ──
 ok(/in your OneDrive, or shared with you/.test(html), 'the sign-in screen says shared sheets work');
 
