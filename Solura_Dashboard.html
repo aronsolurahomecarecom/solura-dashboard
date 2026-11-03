@@ -2012,7 +2012,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1103-155';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1103-156';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -2723,12 +2723,27 @@ async function resolveEnginesDocLocation(){
     }catch(_){}
     return; // shared sheet + no reachable config = the loud block below
   }
+  // Own drive: the ROOT copy stays AUTHORITATIVE — exactly the behavior
+  // from before sharing support. Search-anywhere only runs when the root
+  // genuinely has no doc, and duplicates are named loudly, never silently
+  // picked: a stale copy loading means wrong settings and a wrong queue.
+  try{
+    var rm=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE);
+    if(rm.ok)return; // ENG_ID stays null → engUrl keeps the classic root path
+  }catch(_){}
   try{
     var r=await gfetch(GR+"/me/drive/root/search(q='"+encodeURIComponent(ENGINE_FILE)+"')");
     if(r.ok){
       var j=await r.json();
-      var f=(j.value||[]).find(function(x){return sameName(x.name,ENGINE_FILE);});
-      if(f){ENG_ID=f.id;ENG_DRIVE=(f.parentReference&&f.parentReference.driveId)||null;}
+      var ms=(j.value||[]).filter(function(x){return sameName(x.name,ENGINE_FILE);});
+      if(ms.length){
+        ms.sort(function(a,b){return String(b.lastModifiedDateTime||'').localeCompare(String(a.lastModifiedDateTime||''));});
+        var f=ms[0];
+        ENG_ID=f.id;ENG_DRIVE=(f.parentReference&&f.parentReference.driveId)||null;
+        var where=String((f.parentReference&&f.parentReference.path)||'').replace(/^\/drive\/root:?\/?/,'')||'(top level)';
+        if(ms.length>1)showErr('⚠ '+ms.length+' files named '+ENGINE_FILE+' exist in this OneDrive — using the newest one (in "'+where+'"). Delete the stale copies: if the wrong one loads, settings and the Due-Now queue go wrong.');
+        else toast('⚙ Settings doc found in "'+where+'"');
+      }
     }
   }catch(_){}
 }

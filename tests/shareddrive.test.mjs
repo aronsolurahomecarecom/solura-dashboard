@@ -48,7 +48,10 @@ const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: 
   ok(led.indexOf('findInShared(ENGINE_FILE)') < led.indexOf("search(q='\"+encodeURIComponent(ENGINE_FILE)"), 'in shared mode the OWNER\'S shared copy is looked for FIRST — a stray local file can never silently split the config');
   ok(/return; \/\/ shared sheet \+ no reachable config = the loud block below/.test(led), 'shared mode never falls back to a local search');
   ok(/\?\$select=parentReference/.test(led) && /\/children\?\$select=name,id,parentReference/.test(led) && /sameName\(x\.name,ENGINE_FILE\)/.test(led), "last resort: the workbook's OWN folder is checked — folder shares work even when the listing lags");
+  ok(/var rm=await gfetch\(GR\+'\/me\/drive\/root:\/'\+ENGINE_FILE\);/.test(led) && /if\(rm\.ok\)return; \/\/ ENG_ID stays null/.test(led), 'the OWN-drive ROOT copy stays authoritative — the search fallback runs only when the root is empty');
   ok(/sameName\(x\.name,ENGINE_FILE\)/.test(led) && /ENG_DRIVE=\(f\.parentReference&&f\.parentReference\.driveId\)\|\|null;/.test(led), 'own-drive search finds the doc in ANY folder and keeps its real location');
+  ok(/lastModifiedDateTime/.test(led) && /files named '\+ENGINE_FILE\+' exist in this OneDrive/.test(led) && /Delete the stale copies/.test(led), 'duplicates: the NEWEST wins and the user is told loudly — a stale copy means wrong settings and a wrong queue');
+  ok(/Settings doc found in "/.test(led), 'a non-root load is announced, never silent');
   ok(/if\(_sharedMode&&!ENG_ID\)\{/.test(led) && /ALL settings\/engine saves are blocked/.test(led) && /one folder containing both files/.test(led), 'shared sheet + unshared config = loud, read-only, with the folder option named');
   ok(/Shared-with-me currently lists: '\+_swmNames/.test(led) && /Shared-with-me is EMPTY/.test(led) && /\[v'\+BUILD\+'\]/.test(led), 'the blocked message DIAGNOSES: names what the account actually sees, or says the list is empty, and stamps the build');
   ok(led.indexOf('_enginesDocLoaded=true') > led.indexOf('if(_sharedMode&&!ENG_ID){'), 'the blocked branch returns before the loaded flag — the save guard holds');
