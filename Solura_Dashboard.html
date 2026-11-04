@@ -1495,7 +1495,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <input type="number" min="0.2" step="0.1" class="ee-inp" style="max-width:140px" data-cfg="emailFallbackMinMB" data-cfgtype="float">
         </div>
         <h4 class="st-h2">👤 Who signs the wrap</h4>
-        <p class="st-p">Every send fills <code style="font-size:11px">{sendername}</code> and <code style="font-size:11px">{senderphoto}</code> in the shell with the <b>signed-in account's</b> entry below — so each employee's emails carry their own name and face. Put the tokens where they belong (for the photo: <code style="font-size:11px">&lt;img src="{senderphoto}"&gt;</code>). A shell without the tokens still works: the literal name "Meir Schwimer" swaps automatically, the photo only via the token. Entries save with the Save bar; an account with no entry uses the default.</p>
+        <p class="st-p">Every send fills <code style="font-size:11px">{sendername}</code> and <code style="font-size:11px">{senderphoto}</code> in the shell with the <b>signed-in account's</b> entry below — so each employee's emails carry their own name and face. <b>No shell edit needed:</b> the <b>Default name</b> and <b>Default photo URL</b> below are the markers — whatever matches them in the shell swaps automatically to the account's own values. So set the Default photo URL to the <i>exact</i> photo address already in your shell (copy the <code style="font-size:11px">src="…"</code> from the shell editor below). The tokens remain for shells built fresh (photo: <code style="font-size:11px">&lt;img src="{senderphoto}"&gt;</code>). Entries save with the Save bar; an account with no entry uses the default.</p>
         <div class="st-field" id="sender-profile-wrap"><div id="sender-profile-box"></div></div>
         <h4 class="st-h2">Email design shell</h4>
         <p class="st-p">Paste your branded HTML wrapper here. <code style="font-size:11px">{content}</code> (or <code style="font-size:11px">{{body}}</code>) marks where the message goes — everything you type, Claude drafts, and the weekly nurture email all flow into it automatically at send. <code style="font-size:11px">{dm}</code>, <code style="font-size:11px">{pt}</code> and <code style="font-size:11px">{link}</code> (the lead's personal link to the current newsletter edition) also fill per lead. Leave empty for plain emails.</p>
@@ -2086,7 +2086,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1104-161';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1104-162';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -9680,7 +9680,7 @@ function applyEmailShell(bodyHtml,ri){
   var shell=String(cfg('emailShellHtml')||'').trim();
   if(!shell)return bodyHtml;
   // Sender identity fills the SHELL only — the message text is untouched
-  try{shell=fillSenderTokens(shell,senderProfile());}catch(_){}
+  try{shell=fillSenderTokens(shell,senderProfile(),(enginesDoc.config||{}).senderDefault||{});}catch(_){}
   var content=extractInnerHtml(bodyHtml);
   var slot=findShellSlot(shell);
   var out;
@@ -9733,15 +9733,27 @@ var _claudeHtmlDraft=false; // composer body holds a Claude draft → always wra
 // Pure: {sendername}/{senderphoto} (and {{sender_name}}-style dialects) fill
 // with the signed-in account's profile. Shells from before the tokens get
 // the literal signature name swapped, so employees work without a shell edit.
-function fillSenderTokens(s,p){
-  s=String(s||'');p=p||{};
+function fillSenderTokens(s,p,d){
+  s=String(s||'');p=p||{};d=d||{};
   var nm=String(p.name||'').trim(),ph=String(p.photo||'').trim();
+  var dn=String(d.name||'').trim()||'Meir Schwimer';
+  var dp=String(d.photo||'').trim();
   s=s.replace(/\{\{\s*sender_?name\s*\}\}/gi,'{sendername}').replace(/\{\s*sender_?name\s*\}/gi,'{sendername}')
     .replace(/\{\{\s*sender_?photo\s*\}\}/gi,'{senderphoto}').replace(/\{\s*sender_?photo\s*\}/gi,'{senderphoto}');
   var hadNameTok=s.indexOf('{sendername}')>-1;
+  var hadPhotoTok=s.indexOf('{senderphoto}')>-1;
   s=s.split('{sendername}').join(escapeHtml(nm));
   s=s.split('{senderphoto}').join(escapeHtml(ph));
-  if(!hadNameTok&&nm&&nm!=='Meir Schwimer')s=s.split('Meir Schwimer').join(escapeHtml(nm));
+  // Shells without tokens: the DEFAULT name and the DEFAULT photo URL are
+  // the markers. Whatever matches them in the shell swaps to the account's
+  // own values — so a photo changes per employee without a shell edit,
+  // as long as the Default photo URL is the exact address baked in.
+  if(!hadNameTok&&nm&&nm!==dn)s=s.split(dn).join(escapeHtml(nm));
+  if(!hadPhotoTok&&ph&&dp&&ph!==dp){
+    s=s.split(dp).join(escapeHtml(ph));
+    var dpEsc=escapeHtml(dp); // URLs with & live as &amp; inside HTML
+    if(dpEsc!==dp)s=s.split(dpEsc).join(escapeHtml(ph));
+  }
   return s;
 }
 function declawDesignHtml(html){

@@ -151,7 +151,18 @@ const W = mk(extractInnerHtml, s => String(s).replace(/[&<>"]/g, c => ({ '&': '&
   ok(tokenled.indexOf('by Meir Schwimer') > -1, 'when tokens ARE used, literal names elsewhere are left alone (no surprise swaps)');
   ok(W.fillSenderTokens('<b>{sendername}</b>', { name: '<i>x</i>' }).indexOf('<i>x</i>') === -1, 'profile values are HTML-escaped');
 
-  ok(/try\{shell=fillSenderTokens\(shell,senderProfile\(\)\);\}catch\(_\)\{\}/.test(html), 'the fill runs on the SHELL only, before the message is spliced in');
+  ok(/try\{shell=fillSenderTokens\(shell,senderProfile\(\),\(enginesDoc\.config\|\|\{\}\)\.senderDefault\|\|\{\}\);\}catch\(_\)\{\}/.test(html), 'the fill runs on the SHELL only, with the defaults as the swap markers');
+
+  // Photo auto-swap: the Default photo URL is the marker (B-1104-162)
+  const legacyShell = '<img src="https://x/meir.jpg?v=2&s=1" width="60"><p>Warmly, Meir Schwimer</p>';
+  const swapped = W.fillSenderTokens(legacyShell.replace('&', '&amp;'), { name: 'Chany Schwimer', photo: 'https://x/chany.jpg' }, { name: 'Meir Schwimer', photo: 'https://x/meir.jpg?v=2&s=1' });
+  ok(swapped.indexOf('https://x/chany.jpg') > -1 && swapped.indexOf('meir.jpg') === -1, 'a tokenless shell swaps the photo wherever the DEFAULT photo URL appears — even entity-escaped (&amp;)');
+  ok(swapped.indexOf('Chany Schwimer') > -1, 'and the name swaps against the default name');
+  const meirSame = W.fillSenderTokens(legacyShell, { name: 'Meir Schwimer', photo: 'https://x/meir.jpg?v=2&s=1' }, { name: 'Meir Schwimer', photo: 'https://x/meir.jpg?v=2&s=1' });
+  ok(meirSame === legacyShell, 'the default sender\'s own sends stay byte-identical');
+  const tokShell = W.fillSenderTokens('<img src="{senderphoto}"> and https://x/meir.jpg', { photo: 'https://x/chany.jpg' }, { photo: 'https://x/meir.jpg' });
+  ok(tokShell.indexOf('src="https://x/chany.jpg"') > -1 && tokShell.indexOf('and https://x/meir.jpg') > -1, 'when the token IS used, other URLs are left alone (no surprise swaps)');
+  ok(W.fillSenderTokens('<img src="https://x/meir.jpg">', { photo: 'https://x/chany.jpg' }, { photo: '' }).indexOf('meir.jpg') > -1, 'no default photo URL set = no guessing, nothing swaps');
   ok(/async function loadWhoAmI/.test(html) && /\/me\?\$select=mail,userPrincipalName,displayName/.test(html) && /loadWhoAmI\(\);\}catch\(_\)\{\} \/\/ 👤/.test(html), 'the signed-in account is learned from Graph at load');
   ok(/enginesDoc\.config\.senderProfiles/.test(html) && /senderDefault/.test(html), 'profiles live in the SHARED config — every browser sees the same roster');
   ok(/id="snd-my-name"/.test(html) && /id="snd-def-photo"/.test(html) && /renderSenderProfile\(\);\}catch\(_\)\{\} \/\/ 👤/.test(html), 'Settings shows default + this-account fields');
