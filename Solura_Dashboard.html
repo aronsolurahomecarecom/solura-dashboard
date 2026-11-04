@@ -1942,9 +1942,21 @@ function engUrl(op){ // op: 'content' | 'createUploadSession'
 // OneDrive renames and retypes happen. allowexternal=true also surfaces
 // items shared from outside the account's own organization.
 function sameName(a,b){return String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();}
-var _swmNames=null; // what Shared-with-me actually listed — for the diagnostics
+var _swmNames=null,_swmStatus=0; // what Shared-with-me actually answered — for the diagnostics
+// The scopes Microsoft ACTUALLY granted this sign-in (from the token
+// response). The one hard fact that separates "not shared" from "this
+// token cannot see shares": without Files.ReadWrite.All the listing
+// comes back 200-and-empty, not 403.
+function grantedScopes(){try{return localStorage.getItem('granted_scopes')||'';}catch(_){return '';}}
+function scopeVerdict(){
+  var s=grantedScopes();
+  if(!s)return 'granted permissions unknown (older sign-in) — sign out and back in';
+  return /Files\.ReadWrite\.All/i.test(s)?'shared-files permission GRANTED'
+    :'⚠ this sign-in LACKS the shared-files permission (Files.ReadWrite.All) — sign out, sign back in, and accept the Microsoft prompt; if it says Need admin approval, the owner approves it';
+}
 async function findInShared(name){
   var r=await gfetch(GR+'/me/drive/sharedWithMe?allowexternal=true');
+  _swmStatus=r.status;
   // 403 here is a PERMISSION gap, not an empty list: listing shared files
   // needs Files.ReadWrite.All, which older sign-ins never granted.
   if(r.status===403||r.status===401)throw new Error('This sign-in cannot LIST shared files yet (HTTP '+r.status+'). Sign out of the dashboard and sign back in — Microsoft will ask once for the updated permission (reading files shared with you) — then try again.');
@@ -2015,7 +2027,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1104-159';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1104-160';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -4634,6 +4646,7 @@ async function refreshToken(){
       tok=j.access_token;
       sessionStorage.setItem('st',tok);
       if(j.refresh_token)localStorage.setItem('sr',j.refresh_token);
+      try{if(j.scope)localStorage.setItem('granted_scopes',j.scope);}catch(_){}
       return true;
     }
   }catch(e){}
@@ -4705,6 +4718,7 @@ async function handleAuthCallback(){
       tok=j.access_token;
       sessionStorage.setItem('st',tok);
       if(j.refresh_token)localStorage.setItem('sr',j.refresh_token);
+      try{if(j.scope)localStorage.setItem('granted_scopes',j.scope);}catch(_){}
       onSignedIn();
     }else{
       showErr('Token error: '+(j.error_description||j.error||'unknown'));
@@ -4791,7 +4805,12 @@ async function loadData(){
       // findInShared also looks INSIDE shared folders, so the sheet can sit
       // in any folder the owner shared, not only be shared file-by-file.
       var sf=await findInShared(FN);
-      if(!sf)throw new Error(FN+' not found. It is not in this account’s own OneDrive, and it is not under Shared with me (directly or inside a shared folder). The owner must share the file, or a folder containing it, with this exact Microsoft account (Share → Can edit), and the invitation may need to be opened once in OneDrive first.');
+      if(!sf){
+        var ev='[v'+BUILD+'] Shared-with-me answered HTTP '+_swmStatus+' with '
+          +((_swmNames&&_swmNames.length)?(_swmNames.length+' item'+(_swmNames.length!==1?'s':'')+': '+_swmNames.slice(0,8).join(', ')):'ZERO items')
+          +'. '+scopeVerdict()+'.';
+        throw new Error(FN+' not found. It is not in this account’s own OneDrive, and it is not under Shared with me (directly or inside a shared folder). '+ev+' If the permission is granted and the list is still empty, the share went to a DIFFERENT email than this sign-in, or the invitation was never opened in OneDrive.');
+      }
       fid=sf.id;
       DRIVE_BASE='/drives/'+sf.driveId;
       _sharedMode=true;
@@ -7516,6 +7535,7 @@ function buildDiagnosticReport(){
     var wd9=null;try{wd9=getWeeklyDraft();}catch(_){}
     L.push('  weekly draft: '+(wd9?'present':'\u26a0 NONE live'));
     L.push('  engines doc: '+(_enginesDocLoaded?('loaded ('+_loadedEngineCount+' engines'+(ENG_ID?(' \u00b7 from item '+ENG_ID):' \u00b7 from the root path')+')'):'\u26a0 NOT loaded \u2014 running on built-in defaults'));
+    L.push('  sign-in: '+(ME.email||'(identity not loaded)')+' \u00b7 '+scopeVerdict());
   }catch(eQ){L.push('QUEUE CENSUS failed: '+eQ.message);}
   L.push('');
   // Shell config

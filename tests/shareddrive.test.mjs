@@ -27,7 +27,7 @@ const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: 
   ok(/fid=f\.id;DRIVE_BASE='\/me\/drive';_sharedMode=false;/.test(ld), 'a sheet in the own drive behaves exactly as before (search covers EVERY folder)');
   ok(/var sf=await findInShared\(FN\);/.test(ld), 'missing from the own drive = findInShared');
   ok(/fid=sf\.id;/.test(ld) && /DRIVE_BASE='\/drives\/'\+sf\.driveId;/.test(ld) && /_sharedMode=true;/.test(ld), "a shared sheet switches every call to the OWNER's drive");
-  ok(/or a folder containing it/.test(ld) && /Share → Can edit/.test(ld) && /opened once in OneDrive/.test(ld), 'the not-found error says a shared FOLDER works too');
+  ok(/inside a shared folder/.test(ld) && /never opened in OneDrive/.test(ld), 'the not-found error covers shared folders and the unopened-invite case');
 
   const fis = html.slice(html.indexOf('async function findInShared'), html.indexOf('async function loadData'));
   ok(/sameName\(x\.name,name\)&&x\.remoteItem&&x\.remoteItem\.parentReference/.test(fis), 'directly shared files are found first, case-insensitively');
@@ -68,6 +68,17 @@ const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: 
 
 // ── sign-in copy ──
 ok(/in your OneDrive, or shared with you/.test(html), 'the sign-in screen says shared sheets work');
+
+// ── the not-found error carries EVIDENCE, not just advice ──
+{
+  const ld2 = html.slice(html.indexOf('async function loadData'), html.indexOf('async function loadTemplates'));
+  ok(/\[v'\+BUILD\+'\] Shared-with-me answered HTTP '\+_swmStatus/.test(ld2) && /ZERO items/.test(ld2), 'the workbook error states the HTTP status and exactly what was listed');
+  ok(/scopeVerdict\(\)/.test(ld2) && /share went to a DIFFERENT email/.test(ld2), 'and the scope verdict plus the different-email possibility');
+  ok(/function grantedScopes\(\)/.test(html) && (html.match(/localStorage\.setItem\('granted_scopes',j\.scope\)/g) || []).length === 2, 'the granted scopes are captured from BOTH token grants (sign-in and refresh)');
+  ok(/200-and-empty, not 403/.test(html), 'the code documents the trap: a lacking scope lists empty, it does not refuse');
+  ok(/LACKS the shared-files permission \(Files\.ReadWrite\.All\)/.test(html) && /Need admin approval/.test(html), 'the verdict names the permission and the admin-approval path');
+  ok(/sign-in: '\+\(ME\.email\|\|'\(identity not loaded\)'\)/.test(html) && /\+scopeVerdict\(\)\);/.test(html), 'the 🩺 diagnostic shows who is signed in and what was granted');
+}
 
 // ── the permission that makes any of this possible ──
 {
