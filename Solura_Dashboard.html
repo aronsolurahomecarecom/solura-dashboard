@@ -1954,6 +1954,65 @@ function scopeVerdict(){
   return /Files\.ReadWrite\.All/i.test(s)?'shared-files permission GRANTED'
     :'⚠ this sign-in LACKS the shared-files permission (Files.ReadWrite.All) — sign out, sign back in, and accept the Microsoft prompt; if it says Need admin approval, the owner approves it';
 }
+/* 🔗 Share-link rescue: Microsoft's shared-with-me LISTING sometimes omits
+ * OneDrive-to-OneDrive shares that the OneDrive website happily shows
+ * (seen 2026-11-04: her listing returned the one SharePoint item and
+ * NEITHER personal-drive file). The /shares resolver ignores listings
+ * entirely: paste the share link once, the file resolves to its drive and
+ * id, and this browser remembers the connection. */
+function shareIdFromUrl(u){
+  u=String(u||'').trim();
+  if(!/^https?:\/\//i.test(u))return '';
+  return 'u!'+btoa(u).replace(/=+$/,'').replace(/\//g,'_').replace(/\+/g,'-');
+}
+async function resolveShareLink(u){
+  var sid=shareIdFromUrl(u);
+  if(!sid)throw new Error('that does not look like a web link');
+  var r=await gfetch(GR+'/shares/'+sid+'/driveItem?$select=id,name,parentReference');
+  if(!r.ok)throw new Error('Microsoft would not open that link for this account (HTTP '+r.status+')');
+  var j=await r.json();
+  if(!(j&&j.id&&j.parentReference&&j.parentReference.driveId))throw new Error('the link resolved but gave no file location');
+  return {id:j.id,driveId:j.parentReference.driveId,name:String(j.name||'')};
+}
+function linkedItems(){try{return JSON.parse(localStorage.getItem('linked_items_v1')||'{}');}catch(_){return {};}}
+function saveLinkedItems(o){try{localStorage.setItem('linked_items_v1',JSON.stringify(o||{}));}catch(_){}}
+function renderShareRescue(){
+  var host=el('share-rescue');
+  if(!host){
+    var e9=el('err');if(!e9||!e9.parentNode)return;
+    host=document.createElement('div');host.id='share-rescue';
+    e9.parentNode.insertBefore(host,e9.nextSibling);
+  }
+  host.innerHTML='<div style="max-width:560px;margin:10px auto;border:1.5px solid var(--border);border-radius:12px;padding:14px 16px;background:#fff;text-align:left">'
+    +'<div style="font-weight:800;font-size:13px;margin-bottom:6px">🔗 Connect by link instead</div>'
+    +'<div style="font-size:12px;color:var(--mid);line-height:1.6;margin-bottom:10px">Microsoft’s shared-files listing can lag behind what the OneDrive website shows. Paste the share links for the two files (in OneDrive → Shared, right-click each → Copy link) — this browser then connects directly and remembers.</div>'
+    +'<label class="ee-lbl">Link to '+FN+'</label><input class="ee-inp" id="rescue-wb" placeholder="https://…" style="margin-bottom:8px">'
+    +'<label class="ee-lbl">Link to '+ENGINE_FILE+'</label><input class="ee-inp" id="rescue-eng" placeholder="https://…" style="margin-bottom:10px">'
+    +'<button class="st-btn-gold" data-action="share-rescue" style="padding:8px 18px">Connect</button>'
+    +'<span id="rescue-out" style="font-size:12px;margin-left:10px"></span>'
+    +'</div>';
+}
+async function shareRescueConnect(){
+  var out=el('rescue-out');
+  function say(t2){if(out)out.textContent=t2;}
+  try{
+    say('Connecting…');
+    var wbU=String((el('rescue-wb')||{}).value||'').trim();
+    var enU=String((el('rescue-eng')||{}).value||'').trim();
+    if(!wbU){say('✗ Paste at least the sheet link');return;}
+    var wb=await resolveShareLink(wbU);
+    if(!sameName(wb.name,FN)){say('✗ That link opens "'+wb.name+'", not '+FN);return;}
+    var store={wb:{id:wb.id,driveId:wb.driveId}};
+    if(enU){
+      var en=await resolveShareLink(enU);
+      if(!sameName(en.name,ENGINE_FILE)){say('✗ The second link opens "'+en.name+'", not '+ENGINE_FILE);return;}
+      store.eng={id:en.id,driveId:en.driveId};
+    }
+    saveLinkedItems(store);
+    say('✓ Connected — reloading');
+    location.reload();
+  }catch(e){say('✗ '+e.message);}
+}
 async function findInShared(name){
   var r=await gfetch(GR+'/me/drive/sharedWithMe?allowexternal=true');
   _swmStatus=r.status;
@@ -2027,7 +2086,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1104-160';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1104-161';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -2735,6 +2794,11 @@ async function resolveEnginesDocLocation(){
           }
         }
       }
+    }catch(_){}
+    // A remembered share link for the settings doc works too
+    try{
+      var li9=linkedItems();
+      if(li9.eng&&li9.eng.id){ENG_ID=li9.eng.id;ENG_DRIVE=li9.eng.driveId;return;}
     }catch(_){}
     return; // shared sheet + no reachable config = the loud block below
   }
@@ -4804,16 +4868,28 @@ async function loadData(){
       // /drives/<ownerDrive>/items/<id>; searching /me/drive never sees it.
       // findInShared also looks INSIDE shared folders, so the sheet can sit
       // in any folder the owner shared, not only be shared file-by-file.
-      var sf=await findInShared(FN);
-      if(!sf){
-        var ev='[v'+BUILD+'] Shared-with-me answered HTTP '+_swmStatus+' with '
-          +((_swmNames&&_swmNames.length)?(_swmNames.length+' item'+(_swmNames.length!==1?'s':'')+': '+_swmNames.slice(0,8).join(', ')):'ZERO items')
-          +'. '+scopeVerdict()+'.';
-        throw new Error(FN+' not found. It is not in this account’s own OneDrive, and it is not under Shared with me (directly or inside a shared folder). '+ev+' If the permission is granted and the list is still empty, the share went to a DIFFERENT email than this sign-in, or the invitation was never opened in OneDrive.');
+      // A remembered share link wins — listings can lie, links don't
+      var li=linkedItems(),okLinked=false;
+      if(li.wb&&li.wb.id){
+        try{
+          var chk=await gfetch(GR+'/drives/'+encodeURIComponent(li.wb.driveId)+'/items/'+encodeURIComponent(li.wb.id)+'?$select=id');
+          if(chk.ok){fid=li.wb.id;DRIVE_BASE='/drives/'+li.wb.driveId;_sharedMode=true;okLinked=true;}
+          else saveLinkedItems({}); // stale link → fall back to the listing
+        }catch(_){}
       }
-      fid=sf.id;
-      DRIVE_BASE='/drives/'+sf.driveId;
-      _sharedMode=true;
+      if(!okLinked){
+        var sf=await findInShared(FN);
+        if(!sf){
+          var ev='[v'+BUILD+'] Shared-with-me answered HTTP '+_swmStatus+' with '
+            +((_swmNames&&_swmNames.length)?(_swmNames.length+' item'+(_swmNames.length!==1?'s':'')+': '+_swmNames.slice(0,8).join(', ')):'ZERO items')
+            +'. '+scopeVerdict()+'.';
+          try{renderShareRescue();}catch(_){} // the paste-the-link way out rides the error
+          throw new Error(FN+' not found. It is not in this account’s own OneDrive, and it is not under Shared with me (directly or inside a shared folder). '+ev+' If the permission is granted and the list is still empty, the share went to a DIFFERENT email than this sign-in, or the invitation was never opened in OneDrive. OR: use Connect by link below.');
+        }
+        fid=sf.id;
+        DRIVE_BASE='/drives/'+sf.driveId;
+        _sharedMode=true;
+      }
     }
     var r2=await gfetch(GR+DRIVE_BASE+'/items/'+fid+'/content');
     if(!r2.ok)throw new Error('Download failed: '+r2.status);
@@ -16257,6 +16333,7 @@ function onClick(ev){
     case 'formdrop-refresh': loadFormDrop(); break;
     case 'inv-mode': invApplyMode(t.dataset.mode); break;
     case 'nlhub-compose': openNlCompose(); break;
+    case 'share-rescue': shareRescueConnect(); break;
     case 'nlhub-latest': nlHubPullLatest(t); break;
     case 'nlhub-pick': nlHubPickToggle(t); break;
     case 'nlhub-pick-use':

@@ -80,6 +80,27 @@ ok(/in your OneDrive, or shared with you/.test(html), 'the sign-in screen says s
   ok(/sign-in: '\+\(ME\.email\|\|'\(identity not loaded\)'\)/.test(html) && /\+scopeVerdict\(\)\);/.test(html), 'the 🩺 diagnostic shows who is signed in and what was granted');
 }
 
+// ── 🔗 share-link rescue: links beat listings ──
+{
+  // The encoder, run for real (Graph's base64url share-id format)
+  const fb = html.indexOf('function shareIdFromUrl');
+  const fe = html.indexOf('async function resolveShareLink');
+  const enc = new Function('btoa', html.slice(fb, fe) + '\nreturn shareIdFromUrl;')((s) => Buffer.from(s, 'binary').toString('base64'));
+  const sid = enc('https://solura-my.sharepoint.com/:x:/g/personal/meir/EeAbc?e=4%2Fab');
+  ok(/^u!/.test(sid) && sid.indexOf('=') === -1 && sid.indexOf('/') === -1 && sid.indexOf('+') === -1, "share ids are u! + base64url: no '=', '/' or '+' survive");
+  ok(enc('not a link') === '', 'non-links refuse to encode');
+
+  ok(/\/shares\/'\+sid\+'\/driveItem\?\$select=id,name,parentReference/.test(html), 'the resolver asks Graph to open the LINK itself — no listing involved');
+  const ld3 = html.slice(html.indexOf('async function loadData'), html.indexOf('async function loadTemplates'));
+  ok(/var li=linkedItems\(\),okLinked=false;/.test(ld3) && ld3.indexOf('linkedItems()') < ld3.indexOf('findInShared(FN)'), 'a remembered link is tried BEFORE the flaky listing');
+  ok(/else saveLinkedItems\(\{\}\); \/\/ stale link/.test(ld3), 'a dead remembered link clears itself and the listing takes over');
+  ok(/renderShareRescue\(\);\}catch\(_\)\{\} \/\/ the paste-the-link way out rides the error/.test(ld3), 'the not-found error always comes WITH the rescue form');
+  const rc = html.slice(html.indexOf('async function shareRescueConnect'), html.indexOf('async function findInShared'));
+  ok(/sameName\(wb\.name,FN\)/.test(rc) && /sameName\(en\.name,ENGINE_FILE\)/.test(rc), 'a pasted link is verified to open the RIGHT file before being remembered');
+  ok(/if\(li9\.eng&&li9\.eng\.id\)\{ENG_ID=li9\.eng\.id;ENG_DRIVE=li9\.eng\.driveId;return;\}/.test(html), 'the settings doc rides its remembered link too');
+  ok(/case 'share-rescue': shareRescueConnect\(\); break;/.test(html) && /id="rescue-wb"/.test(html) && /id="rescue-eng"/.test(html), 'the Connect-by-link form is wired');
+}
+
 // ── the permission that makes any of this possible ──
 {
   ok((html.match(/email Files\.ReadWrite\.All Mail\.Send/g) || []).length === 2 && !/email Files\.ReadWrite Mail\.Send/.test(html), 'BOTH the sign-in and the token refresh request Files.ReadWrite.All — plain Files.ReadWrite cannot list shared files at all');
