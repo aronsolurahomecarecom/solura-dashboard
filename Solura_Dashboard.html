@@ -1494,6 +1494,9 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <label class="ee-lbl">Route attachments through OneDrive share links when larger than (MB)</label>
           <input type="number" min="0.2" step="0.1" class="ee-inp" style="max-width:140px" data-cfg="emailFallbackMinMB" data-cfgtype="float">
         </div>
+        <h4 class="st-h2">👤 Who signs the wrap</h4>
+        <p class="st-p">Every send fills <code style="font-size:11px">{sendername}</code> and <code style="font-size:11px">{senderphoto}</code> in the shell with the <b>signed-in account's</b> entry below — so each employee's emails carry their own name and face. Put the tokens where they belong (for the photo: <code style="font-size:11px">&lt;img src="{senderphoto}"&gt;</code>). A shell without the tokens still works: the literal name "Meir Schwimer" swaps automatically, the photo only via the token. Entries save with the Save bar; an account with no entry uses the default.</p>
+        <div class="st-field" id="sender-profile-wrap"><div id="sender-profile-box"></div></div>
         <h4 class="st-h2">Email design shell</h4>
         <p class="st-p">Paste your branded HTML wrapper here. <code style="font-size:11px">{content}</code> (or <code style="font-size:11px">{{body}}</code>) marks where the message goes — everything you type, Claude drafts, and the weekly nurture email all flow into it automatically at send. <code style="font-size:11px">{dm}</code>, <code style="font-size:11px">{pt}</code> and <code style="font-size:11px">{link}</code> (the lead's personal link to the current newsletter edition) also fill per lead. Leave empty for plain emails.</p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
@@ -2012,7 +2015,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1103-158';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1104-159';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -4773,6 +4776,7 @@ async function gfetch(url,opts){
 
 async function loadData(){
   clearErr();
+  try{loadWhoAmI();}catch(_){} // 👤 fire-and-forget; cached for the wrap
   try{
     var r=await gfetch(GR+"/me/drive/root/search(q='"+encodeURIComponent(FN)+"')");
     if(!r.ok)throw new Error('Drive search failed: '+r.status);
@@ -7749,6 +7753,7 @@ function renderConfigInputs(){
   try{renderEmailPresetSettings();}catch(_){}
   try{renderIntakeLinks();}catch(_){}
   try{renderNlHub();}catch(_){} // 📰 composer edition + send history
+  try{renderSenderProfile();}catch(_){} // 👤 per-account wrap identity
   try{loadFormDrop();}catch(_){} // 📉 the funnel loads itself with Settings
   try{renderSchedMail();}catch(_){}
   try{renderSchedSms();}catch(_){}
@@ -8443,6 +8448,20 @@ document.addEventListener('input',function(ev){
     try{enginesDoc.config=enginesDoc.config||{};enginesDoc.config.ghlApiKey=t.value.trim();stMarkDirty();}catch(_){}
   }
   if(t&&t.id==='wk-set-linkmode'){try{wkLinkModeHint();}catch(_){}}
+  // 👤 sender-profile edits stage into the shared config (Save bar commits)
+  if(t&&/^snd-(def|my)-(name|photo)$/.test(t.id||'')){
+    enginesDoc.config=enginesDoc.config||{};
+    if(t.id.indexOf('snd-def')===0){
+      var d0=enginesDoc.config.senderDefault=enginesDoc.config.senderDefault||{};
+      if(t.id==='snd-def-name')d0.name=t.value.trim();else d0.photo=t.value.trim();
+    }else if(ME.email){
+      var P0=senderProfiles();
+      var m0=P0[ME.email]=P0[ME.email]||{};
+      if(t.id==='snd-my-name')m0.name=t.value.trim();else m0.photo=t.value.trim();
+      if(!m0.name&&!m0.photo)delete P0[ME.email]; // empty entry = back to the default
+    }
+    stMarkDirty();
+  }
   // Settings config fields → staged into enginesDoc.config, saved via Save bar
   if(t&&t.dataset&&t.dataset.cfg){
     var ty=t.dataset.cfgtype;
@@ -9509,9 +9528,63 @@ function findShellSlot(shell){
   m=shell.match(/&#123;&#123;\s*(?:content|body|message)\s*&#125;&#125;/i);
   return m?m[0]:null;
 }
+/* ── 👤 Who signs the wrap ────────────────────────────────────────────────
+ * The shell used to be one person's: Meir's name and photo baked into the
+ * saved HTML. With employees signing in, the wrap fills {sendername} and
+ * {senderphoto} per SIGNED-IN ACCOUNT from profiles in the shared config;
+ * a shell without the tokens still works — the literal "Meir Schwimer"
+ * swaps to the account's name automatically. */
+var ME={email:'',name:''};
+try{ME.email=localStorage.getItem('me_email')||'';ME.name=localStorage.getItem('me_name')||'';}catch(_){}
+async function loadWhoAmI(){
+  try{
+    var r=await gfetch(GR+'/me?$select=mail,userPrincipalName,displayName');
+    if(!r.ok)return;
+    var j=await r.json();
+    ME.email=normEmail(j.mail||j.userPrincipalName||'');
+    ME.name=String(j.displayName||'').trim();
+    try{localStorage.setItem('me_email',ME.email);localStorage.setItem('me_name',ME.name);}catch(_){}
+    try{renderSenderProfile();}catch(_){}
+  }catch(_){}
+}
+function senderProfiles(){
+  enginesDoc.config=enginesDoc.config||{};
+  var m=enginesDoc.config.senderProfiles;
+  if(!m)m=enginesDoc.config.senderProfiles={};
+  return m;
+}
+// The signed-in account's entry wins field by field; the default fills gaps.
+function senderProfile(){
+  enginesDoc.config=enginesDoc.config||{};
+  var d=enginesDoc.config.senderDefault||{};
+  var p=(ME.email&&senderProfiles()[ME.email])||{};
+  return {name:String(p.name||d.name||'Meir Schwimer').trim(),
+    photo:String(p.photo||d.photo||'').trim()};
+}
+function renderSenderProfile(){
+  var host=el('sender-profile-box');if(!host)return;
+  enginesDoc.config=enginesDoc.config||{};
+  var d=enginesDoc.config.senderDefault||{};
+  var P=senderProfiles();
+  var mine=ME.email?(P[ME.email]||{}):{};
+  host.innerHTML=
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">'
+    +'<div><label class="ee-lbl">Default name</label><input class="ee-inp" id="snd-def-name" value="'+escapeHtml(d.name||'Meir Schwimer')+'"></div>'
+    +'<div><label class="ee-lbl">Default photo URL</label><input class="ee-inp" id="snd-def-photo" value="'+escapeHtml(d.photo||'')+'" placeholder="https://…"></div>'
+    +'</div>'
+    +(ME.email
+      ?('<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+        +'<div><label class="ee-lbl">This account ('+escapeHtml(ME.email)+') — name</label><input class="ee-inp" id="snd-my-name" value="'+escapeHtml(mine.name||'')+'" placeholder="empty = the default"></div>'
+        +'<div><label class="ee-lbl">This account — photo URL</label><input class="ee-inp" id="snd-my-photo" value="'+escapeHtml(mine.photo||'')+'" placeholder="empty = the default"></div>'
+        +'</div>')
+      :'<div style="font-size:11.5px;color:var(--soft)">Sign-in identity not loaded yet — reload the page to edit this account’s own entry.</div>')
+    +(Object.keys(P).length?('<div style="font-size:11px;color:var(--soft);margin-top:8px">Accounts with their own entry: '+Object.keys(P).map(escapeHtml).join(', ')+'</div>'):'');
+}
 function applyEmailShell(bodyHtml,ri){
   var shell=String(cfg('emailShellHtml')||'').trim();
   if(!shell)return bodyHtml;
+  // Sender identity fills the SHELL only — the message text is untouched
+  try{shell=fillSenderTokens(shell,senderProfile());}catch(_){}
   var content=extractInnerHtml(bodyHtml);
   var slot=findShellSlot(shell);
   var out;
@@ -9561,6 +9634,20 @@ function applyEmailShell(bodyHtml,ri){
  * it sits cleanly in the shell's content slot. The raw-HTML PASTE mode
  * keeps its shell-skip gate: that path is for complete hand-built designs. */
 var _claudeHtmlDraft=false; // composer body holds a Claude draft → always wrap
+// Pure: {sendername}/{senderphoto} (and {{sender_name}}-style dialects) fill
+// with the signed-in account's profile. Shells from before the tokens get
+// the literal signature name swapped, so employees work without a shell edit.
+function fillSenderTokens(s,p){
+  s=String(s||'');p=p||{};
+  var nm=String(p.name||'').trim(),ph=String(p.photo||'').trim();
+  s=s.replace(/\{\{\s*sender_?name\s*\}\}/gi,'{sendername}').replace(/\{\s*sender_?name\s*\}/gi,'{sendername}')
+    .replace(/\{\{\s*sender_?photo\s*\}\}/gi,'{senderphoto}').replace(/\{\s*sender_?photo\s*\}/gi,'{senderphoto}');
+  var hadNameTok=s.indexOf('{sendername}')>-1;
+  s=s.split('{sendername}').join(escapeHtml(nm));
+  s=s.split('{senderphoto}').join(escapeHtml(ph));
+  if(!hadNameTok&&nm&&nm!=='Meir Schwimer')s=s.split('Meir Schwimer').join(escapeHtml(nm));
+  return s;
+}
 function declawDesignHtml(html){
   var v=extractInnerHtml(String(html||''));
   // Hidden preheader blocks fight the shell's own inbox preview line

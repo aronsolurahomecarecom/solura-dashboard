@@ -23,8 +23,8 @@ const extractInnerHtml = (v) => {
   if (m) return m[1];
   return v.replace(/<\/?html[^>]*>/gi, '').replace(/<head[\s\S]*?<\/head>/gi, '');
 };
-const mk = new Function('extractInnerHtml', src + '\nreturn {declawDesignHtml,_claudeHtmlDraft,shellWillApply,_shellOverride};');
-const W = mk(extractInnerHtml);
+const mk = new Function('extractInnerHtml', 'escapeHtml', src + '\nreturn {declawDesignHtml,_claudeHtmlDraft,shellWillApply,_shellOverride,fillSenderTokens};');
+const W = mk(extractInnerHtml, s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
 
 // ── declawDesignHtml ──
 {
@@ -135,6 +135,28 @@ const W = mk(extractInnerHtml);
   ok(/Write the reason first/.test(cc), 'an empty save is nudged, not silently dropped');
   ok(/loss-custom-btn'\)\.click\(\)/.test(html), 'Enter submits the typed reason');
   ok(/var lc9=el\('loss-custom'\);if\(lc9\)lc9\.value='';/.test(html), 'the input clears on every open — no stale reason carries over');
+}
+
+// ── 👤 per-account wrap identity (B-1104-159) ──
+{
+  const shell = '<div><img src="{senderphoto}" alt=""><b>{sendername}</b> · {{ sender_name }} · {{BODY}}</div>';
+  const out = W.fillSenderTokens(shell, { name: 'Chany Schwimer', photo: 'https://x/chany.jpg' });
+  ok(out.indexOf('<b>Chany Schwimer</b>') > -1 && out.indexOf('· Chany Schwimer ·') > -1, '{sendername} and the {{ sender_name }} dialect both fill');
+  ok(out.indexOf('src="https://x/chany.jpg"') > -1, '{senderphoto} lands in the img src');
+  ok(out.indexOf('{{BODY}}') > -1, 'the body slot is untouched — it belongs to the shell filler');
+  const legacy = W.fillSenderTokens('<p>Warmly,<br>Meir Schwimer</p>', { name: 'Chany Schwimer', photo: '' });
+  ok(legacy.indexOf('Meir Schwimer') === -1 && legacy.indexOf('Chany Schwimer') > -1, "a shell WITHOUT tokens still works: the literal signature name swaps to the account's");
+  ok(W.fillSenderTokens('<p>Meir Schwimer</p>', { name: 'Meir Schwimer' }).indexOf('Meir Schwimer') > -1, "Meir's own sends are byte-identical to before");
+  const tokenled = W.fillSenderTokens('<b>{sendername}</b> by Meir Schwimer', { name: 'Chany Schwimer' });
+  ok(tokenled.indexOf('by Meir Schwimer') > -1, 'when tokens ARE used, literal names elsewhere are left alone (no surprise swaps)');
+  ok(W.fillSenderTokens('<b>{sendername}</b>', { name: '<i>x</i>' }).indexOf('<i>x</i>') === -1, 'profile values are HTML-escaped');
+
+  ok(/try\{shell=fillSenderTokens\(shell,senderProfile\(\)\);\}catch\(_\)\{\}/.test(html), 'the fill runs on the SHELL only, before the message is spliced in');
+  ok(/async function loadWhoAmI/.test(html) && /\/me\?\$select=mail,userPrincipalName,displayName/.test(html) && /loadWhoAmI\(\);\}catch\(_\)\{\} \/\/ 👤/.test(html), 'the signed-in account is learned from Graph at load');
+  ok(/enginesDoc\.config\.senderProfiles/.test(html) && /senderDefault/.test(html), 'profiles live in the SHARED config — every browser sees the same roster');
+  ok(/id="snd-my-name"/.test(html) && /id="snd-def-photo"/.test(html) && /renderSenderProfile\(\);\}catch\(_\)\{\} \/\/ 👤/.test(html), 'Settings shows default + this-account fields');
+  ok(/if\(!m0\.name&&!m0\.photo\)delete P0\[ME\.email\];/.test(html), 'clearing both fields returns an account to the default');
+  ok(/Who signs the wrap/.test(html) && /&lt;img src="\{senderphoto\}"&gt;/.test(html), 'the settings copy shows exactly where the tokens go');
 }
 
 console.log('\nClaude wrap: ' + PASS + ' passed, ' + FAIL + ' failed');
