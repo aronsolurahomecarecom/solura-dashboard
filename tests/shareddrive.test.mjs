@@ -66,6 +66,16 @@ const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: 
   ok(/engines doc: /.test(dg) && /from the root path/.test(dg), 'the report says WHICH settings doc is loaded and from where');
 }
 
+// ── 🔑 keys follow the shared settings — no retyping per employee ──
+{
+  const ks = html.slice(html.indexOf('function syncLocalKeysToConfig'), html.indexOf('async function loadEnginesDoc'));
+  ok(/if\(!_enginesDocLoaded\)return;/.test(ks), 'the heal never runs on an unloaded doc — the wipe guard stays intact');
+  ok(/\['claudeApiKey','ghlApiKey'\]/.test(ks) && /loc&&!String\(enginesDoc\.config\[k\]\|\|''\)\.trim\(\)/.test(ks), 'a LOCAL key fills the shared copy only where the shared copy is EMPTY — never overwrites');
+  ok(/syncLocalKeysToConfig\(\);\}catch\(_\)\{\} \/\/ 🔑/.test(html), 'the heal runs right after the engines doc loads');
+  ok((html.match(/localStorage\.getItem\('claudeApiKey'\)\|\|''/g) || []).length >= 3 && /enginesDoc\.config&&enginesDoc\.config\.claudeApiKey/.test(html), 'every Claude call site reads localStorage first, shared config second');
+  ok(/localStorage\.setItem\('claudeApiKey',t\.value\.trim\(\)\)/.test(html) && /enginesDoc\.config\.claudeApiKey=t\.value\.trim\(\);stMarkDirty\(\)/.test(html), 'typing the key in Settings writes BOTH stores going forward');
+}
+
 // ── sign-in copy ──
 ok(/in your OneDrive, or shared with you/.test(html), 'the sign-in screen says shared sheets work');
 

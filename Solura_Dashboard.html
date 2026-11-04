@@ -2086,7 +2086,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1104-163';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1104-164';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -2825,6 +2825,28 @@ async function resolveEnginesDocLocation(){
       }
     }
   }catch(_){}
+}
+/* 🔑 One-way heal: API keys typed into THIS browser before the shared-
+ * config era publish themselves into the shared Solura_Engines.json once
+ * (only where the shared copy is EMPTY — a key already there is never
+ * overwritten). Every teammate on the same settings file then gets Claude
+ * and HomeCareGrow without retyping keys; each call site already reads
+ * localStorage first, shared config second. */
+function syncLocalKeysToConfig(){
+  if(!_enginesDocLoaded)return; // the overwrite guard would refuse the save anyway
+  var changed=[];
+  try{
+    enginesDoc.config=enginesDoc.config||{};
+    ['claudeApiKey','ghlApiKey'].forEach(function(k){
+      var loc='';try{loc=String(localStorage.getItem(k)||'').trim();}catch(_){}
+      if(loc&&!String(enginesDoc.config[k]||'').trim()){enginesDoc.config[k]=loc;changed.push(k);}
+    });
+  }catch(_){}
+  if(changed.length){
+    saveEnginesDoc().then(function(){
+      toast('🔑 '+changed.join(' + ')+' synced to the shared settings — teammates now get '+(changed.length>1?'them':'it')+' automatically');
+    }).catch(function(){});
+  }
 }
 async function loadEnginesDoc(){
   try{
@@ -4918,6 +4940,7 @@ async function loadData(){
     try{await loadTemplates();}catch(e){showErr('Templates load failed: '+e.message);}
     // Load custom sequence engines (falls back to embedded default on any failure)
     try{await loadEnginesDoc();}catch(e){console.warn('Engines doc:',e.message);}
+    try{syncLocalKeysToConfig();}catch(_){} // 🔑 keys typed pre-sharing publish themselves once
 
     // Run migration if needed before rendering
     await maybeRunMigration();
