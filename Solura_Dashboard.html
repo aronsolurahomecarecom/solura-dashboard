@@ -2086,7 +2086,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1104-162';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1104-163';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -9675,7 +9675,30 @@ function renderSenderProfile(){
         +'</div>')
       :'<div style="font-size:11.5px;color:var(--soft)">Sign-in identity not loaded yet — reload the page to edit this account’s own entry.</div>')
     +(Object.keys(P).length?('<div style="font-size:11px;color:var(--soft);margin-top:8px">Accounts with their own entry: '+Object.keys(P).map(escapeHtml).join(', ')+'</div>'):'');
+  // 📸 The marker must match the shell BYTE FOR BYTE — so show every image
+  // the shell holds, let the right one be PICKED, and verify the match live.
+  try{
+    var srcs=shellImgSrcs();
+    _shellImgList=srcs;
+    var dp9=String(d.photo||'').trim();
+    var shell9=String(cfg('emailShellHtml')||'');
+    var matches=!!dp9&&(shell9.indexOf(dp9)>-1||shell9.indexOf(escapeHtml(dp9))>-1||shell9.indexOf(dp9.replace(/&amp;/g,'&'))>-1);
+    var verdict=!dp9?'⚠ No default photo marker set — the photo cannot swap until one is picked below.'
+      :matches?'✓ The default photo marker matches the shell — employee photos will swap.'
+      :'⚠ The default photo marker does NOT appear in the shell — nothing will swap. Pick the real one below.';
+    host.innerHTML+='<div style="font-size:11.5px;margin-top:10px;font-weight:600;color:'+(matches?'var(--grn)':'var(--red)')+'">'+verdict+'</div>'
+      +(srcs.length
+        ?('<div style="font-size:11px;color:var(--soft);margin:6px 0 4px">Images in the shell — click the HEADSHOT to make it the marker:</div>'
+          +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
+          +srcs.map(function(u,i){
+            return '<div style="text-align:center"><img src="'+escapeHtml(u)+'" style="height:44px;max-width:90px;object-fit:contain;display:block;border:2px solid '+(u===dp9?'var(--grn)':'var(--border)')+';border-radius:8px;background:#fff;margin:0 auto 4px">'
+              +'<button class="ee-mini" style="font-size:10.5px;padding:3px 8px" data-action="snd-pick-photo" data-i="'+i+'">'+(u===dp9?'✓ marker':'Use as marker')+'</button></div>';
+          }).join('')
+          +'</div>')
+        :'<div style="font-size:11px;color:var(--soft);margin-top:6px">The shell contains no images at all — the photo lives somewhere else (a template or a pasted design), not in the wrap.</div>');
+  }catch(_){}
 }
+var _shellImgList=[];
 function applyEmailShell(bodyHtml,ri){
   var shell=String(cfg('emailShellHtml')||'').trim();
   if(!shell)return bodyHtml;
@@ -9751,10 +9774,22 @@ function fillSenderTokens(s,p,d){
   if(!hadNameTok&&nm&&nm!==dn)s=s.split(dn).join(escapeHtml(nm));
   if(!hadPhotoTok&&ph&&dp&&ph!==dp){
     s=s.split(dp).join(escapeHtml(ph));
-    var dpEsc=escapeHtml(dp); // URLs with & live as &amp; inside HTML
+    var dpEsc=escapeHtml(dp); // URLs with & live as &amp; inside HTML…
     if(dpEsc!==dp)s=s.split(dpEsc).join(escapeHtml(ph));
+    var dpUn=dp.replace(/&amp;/g,'&'); // …and a pasted &amp; may mean a plain &
+    if(dpUn!==dp)s=s.split(dpUn).join(escapeHtml(ph));
   }
   return s;
+}
+// Every image the shell carries — so the marker is PICKED, never retyped
+function shellImgSrcs(){
+  var shell=String(cfg('emailShellHtml')||'');
+  var out=[],seen={},m,RX=/<img[^>]*src=["']([^"']+)["']/gi;
+  while((m=RX.exec(shell))){
+    var u=m[1];
+    if(!seen[u]){seen[u]=1;out.push(u);}
+  }
+  return out;
 }
 function declawDesignHtml(html){
   var v=extractInnerHtml(String(html||''));
@@ -16346,6 +16381,18 @@ function onClick(ev){
     case 'inv-mode': invApplyMode(t.dataset.mode); break;
     case 'nlhub-compose': openNlCompose(); break;
     case 'share-rescue': shareRescueConnect(); break;
+    case 'snd-pick-photo':
+      (function(){
+        var u=_shellImgList[parseInt(t.dataset.i,10)];
+        if(!u)return;
+        enginesDoc.config=enginesDoc.config||{};
+        var dPk=enginesDoc.config.senderDefault=enginesDoc.config.senderDefault||{};
+        dPk.photo=u;
+        stMarkDirty();
+        renderSenderProfile();
+        toast('📸 Marker set — employee photos now swap against this image. Hit Save.');
+      })();
+      break;
     case 'nlhub-latest': nlHubPullLatest(t); break;
     case 'nlhub-pick': nlHubPickToggle(t); break;
     case 'nlhub-pick-use':

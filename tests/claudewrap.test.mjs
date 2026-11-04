@@ -163,6 +163,13 @@ const W = mk(extractInnerHtml, s => String(s).replace(/[&<>"]/g, c => ({ '&': '&
   const tokShell = W.fillSenderTokens('<img src="{senderphoto}"> and https://x/meir.jpg', { photo: 'https://x/chany.jpg' }, { photo: 'https://x/meir.jpg' });
   ok(tokShell.indexOf('src="https://x/chany.jpg"') > -1 && tokShell.indexOf('and https://x/meir.jpg') > -1, 'when the token IS used, other URLs are left alone (no surprise swaps)');
   ok(W.fillSenderTokens('<img src="https://x/meir.jpg">', { photo: 'https://x/chany.jpg' }, { photo: '' }).indexOf('meir.jpg') > -1, 'no default photo URL set = no guessing, nothing swaps');
+  ok(W.fillSenderTokens('<img src="https://x/m.jpg?a=1&b=2">', { photo: 'https://x/c.jpg' }, { photo: 'https://x/m.jpg?a=1&amp;b=2' }).indexOf('https://x/c.jpg') > -1, 'a marker pasted in its &amp;-escaped form still matches the plain shell URL');
+
+  // 📸 the picker: images are PICKED from the shell, never retyped
+  ok(/function shellImgSrcs\(\)/.test(html) && /<img\[\^>\]\*src=\["'\]/.test(html), 'the shell is scanned for every image it carries');
+  ok(/data-action="snd-pick-photo"/.test(html) && /case 'snd-pick-photo':/.test(html) && /dPk\.photo=u;/.test(html), 'clicking an image makes it the marker, staged for Save');
+  ok(/The default photo marker does NOT appear in the shell/.test(html) && /matches the shell — employee photos will swap/.test(html) && /No default photo marker set/.test(html), 'a LIVE verdict says whether the marker actually matches, in all three states');
+  ok(/shell contains no images at all/.test(html), 'and says so when the photo lives outside the wrap entirely');
   ok(/async function loadWhoAmI/.test(html) && /\/me\?\$select=mail,userPrincipalName,displayName/.test(html) && /loadWhoAmI\(\);\}catch\(_\)\{\} \/\/ 👤/.test(html), 'the signed-in account is learned from Graph at load');
   ok(/enginesDoc\.config\.senderProfiles/.test(html) && /senderDefault/.test(html), 'profiles live in the SHARED config — every browser sees the same roster');
   ok(/id="snd-my-name"/.test(html) && /id="snd-def-photo"/.test(html) && /renderSenderProfile\(\);\}catch\(_\)\{\} \/\/ 👤/.test(html), 'Settings shows default + this-account fields');
