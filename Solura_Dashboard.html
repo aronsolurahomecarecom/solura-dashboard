@@ -632,7 +632,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
       <div class="ls-fb" style="display:none">S</div>
     </div>
     <div class="ltitle">Follow-Up Dashboard</div>
-    <div class="lsub">Sign in with Microsoft to connect live to your<br><strong>Solura_Lead_Tracker.xlsx</strong> on OneDrive.</div>
+    <div class="lsub">Sign in with Microsoft to connect live to<br><strong>Solura_Lead_Tracker.xlsx</strong> — in your OneDrive, or shared with you.</div>
     <button class="lbtn" data-action="signin">
       <svg width="16" height="16" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
       Sign in with Microsoft
@@ -1228,14 +1228,22 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
         <div><label class="ee-lbl">Refresh every (days)</label>
           <input type="number" id="wk-set-refresh" min="1" max="90" class="ee-inp"></div>
       </div>
-      <div style="margin-bottom:10px">
-        <label class="st-check" style="font-size:12px"><input type="checkbox" id="wk-set-pdflink"> Deliver the PDF as a <strong>tracked link</strong> instead of an attachment — you'll see who opens it (attached PDFs can't be tracked)</label>
-      </div>
       <div style="margin-bottom:12px">
         <label class="ee-lbl">SMS template for this sequence's nurture texts ({dm}/{pt}/{rel} fill)</label>
         <textarea id="wk-set-sms" rows="2" class="ee-inp" placeholder="Hi {dm}, Meir from Solura — just checking in on you and {pt} this week."></textarea>
       </div>
       <div id="weekly-tabs" style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap"></div>
+      <div style="margin-bottom:12px">
+        <label class="ee-lbl">THIS variant's "Read this week's letter" button points at…</label>
+        <select id="wk-set-linkmode" class="ee-inp">
+          <option value="none">Nothing — body only (a PDF, if attached, rides as an attachment)</option>
+          <option value="pdf">📄 The uploaded PDF, as a OneDrive/SharePoint tracked link</option>
+          <option value="site">🌐 This week's WEBSITE edition — a personal tracked link per lead</option>
+          <option value="custom">🔗 A link I paste below</option>
+        </select>
+        <input type="url" id="wk-set-customurl" class="ee-inp" placeholder="https://www.solurahomecare.com/newsletter/…" style="display:none;margin-top:6px">
+        <div id="wk-linkmode-hint" style="font-size:11px;color:var(--soft);margin-top:4px;line-height:1.5"></div>
+      </div>
       <div style="margin-bottom:12px">
         <label class="ee-lbl">Subject</label>
         <input type="text" id="weekly-subj" class="ee-inp" placeholder="{dm} works — e.g. A thought for you this week, {dm}">
@@ -1486,8 +1494,11 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <label class="ee-lbl">Route attachments through OneDrive share links when larger than (MB)</label>
           <input type="number" min="0.2" step="0.1" class="ee-inp" style="max-width:140px" data-cfg="emailFallbackMinMB" data-cfgtype="float">
         </div>
+        <h4 class="st-h2">👤 Who signs the wrap</h4>
+        <p class="st-p">Every send fills <code style="font-size:11px">{sendername}</code> and <code style="font-size:11px">{senderphoto}</code> in the shell with the <b>signed-in account's</b> entry below — so each employee's emails carry their own name and face. <b>No shell edit needed:</b> the <b>Default name</b> and <b>Default photo URL</b> below are the markers — whatever matches them in the shell swaps automatically to the account's own values. So set the Default photo URL to the <i>exact</i> photo address already in your shell (copy the <code style="font-size:11px">src="…"</code> from the shell editor below). The tokens remain for shells built fresh (photo: <code style="font-size:11px">&lt;img src="{senderphoto}"&gt;</code>). Entries save with the Save bar; an account with no entry uses the default.</p>
+        <div class="st-field" id="sender-profile-wrap"><div id="sender-profile-box"></div></div>
         <h4 class="st-h2">Email design shell</h4>
-        <p class="st-p">Paste your branded HTML wrapper here. <code style="font-size:11px">{content}</code> (or <code style="font-size:11px">{{body}}</code>) marks where the message goes — everything you type, Claude drafts, and the weekly nurture email all flow into it automatically at send. <code style="font-size:11px">{dm}</code> and <code style="font-size:11px">{pt}</code> also fill per lead. Leave empty for plain emails.</p>
+        <p class="st-p">Paste your branded HTML wrapper here. <code style="font-size:11px">{content}</code> (or <code style="font-size:11px">{{body}}</code>) marks where the message goes — everything you type, Claude drafts, and the weekly nurture email all flow into it automatically at send. <code style="font-size:11px">{dm}</code>, <code style="font-size:11px">{pt}</code> and <code style="font-size:11px">{link}</code> (the lead's personal link to the current newsletter edition) also fill per lead. Leave empty for plain emails.</p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
           <div>
             <textarea class="ee-inp" rows="16" style="font-family:'SF Mono',Monaco,monospace;font-size:11px;line-height:1.45" data-cfg="emailShellHtml" data-cfgtype="str" placeholder='<div style="background:#F5F1E8;padding:30px">&#10;  <div style="max-width:600px;margin:0 auto;background:#fff;padding:30px;border-radius:8px">&#10;    {content}&#10;    <hr>&#10;    <p style="color:#8B6500">Solura Home Care · (216) 770-4886</p>&#10;  </div>&#10;</div>'></textarea>
@@ -1676,6 +1687,7 @@ html:has(.fsov.open),html:has(.modal.open){overflow:hidden;}
           <span style="font-size:11.5px;color:var(--soft)">Sign in once inside the frame with the website admin login — it stays in this browser.</span>
         </div>
         <div id="nlhub-edition" style="margin-bottom:10px"></div>
+        <div id="nlhub-pick"></div>
         <div id="nlhub-send-out" style="font-size:12px;color:var(--mid);white-space:pre-line;margin-bottom:10px"></div>
         <div id="nlhub-sends" style="margin-bottom:18px"></div>
         <h4 class="st-h2">Delivery (Resend)</h4>
@@ -1909,6 +1921,123 @@ function GHL_KEY(){
   try{return (enginesDoc&&enginesDoc.config&&enginesDoc.config.ghlApiKey)||'';}catch(_){return '';}
 }
 var FN='Solura_Lead_Tracker.xlsx';
+/* ── 👥 Shared-sheet support ──────────────────────────────────────────────
+ * An employee's account doesn't HOLD the workbook — it is SHARED with her,
+ * so it lives in the owner's drive and /me/drive never finds it. When the
+ * finder locates it under "Shared with me", every workbook call switches to
+ * the owner's drive (/drives/<id>), and the settings file must be the
+ * owner's too — shared alongside the sheet — or all saves stay blocked. */
+var DRIVE_BASE='/me/drive'; // '/drives/<ownerDriveId>' when the sheet is shared-in
+var _sharedMode=false;      // true = this account reached the sheet via sharing
+var ENG_DRIVE=null,ENG_ID=null; // where Solura_Engines.json was FOUND (any folder, any drive)
+function engUrl(op){ // op: 'content' | 'createUploadSession'
+  if(ENG_ID&&ENG_DRIVE)return GR+'/drives/'+ENG_DRIVE+'/items/'+ENG_ID+'/'+op;
+  if(ENG_ID)return GR+'/me/drive/items/'+ENG_ID+'/'+op;
+  // Never found anywhere: the classic root path — a first run CREATES it here
+  return GR+'/me/drive/root:/'+ENGINE_FILE+':/'+op;
+}
+// Find a file by name under "Shared with me" — directly shared, OR inside
+// a shared FOLDER (the folder is listed; its files are not, so each shared
+// folder gets searched in the owner's drive). Name matching ignores case:
+// OneDrive renames and retypes happen. allowexternal=true also surfaces
+// items shared from outside the account's own organization.
+function sameName(a,b){return String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();}
+var _swmNames=null,_swmStatus=0; // what Shared-with-me actually answered — for the diagnostics
+// The scopes Microsoft ACTUALLY granted this sign-in (from the token
+// response). The one hard fact that separates "not shared" from "this
+// token cannot see shares": without Files.ReadWrite.All the listing
+// comes back 200-and-empty, not 403.
+function grantedScopes(){try{return localStorage.getItem('granted_scopes')||'';}catch(_){return '';}}
+function scopeVerdict(){
+  var s=grantedScopes();
+  if(!s)return 'granted permissions unknown (older sign-in) — sign out and back in';
+  return /Files\.ReadWrite\.All/i.test(s)?'shared-files permission GRANTED'
+    :'⚠ this sign-in LACKS the shared-files permission (Files.ReadWrite.All) — sign out, sign back in, and accept the Microsoft prompt; if it says Need admin approval, the owner approves it';
+}
+/* 🔗 Share-link rescue: Microsoft's shared-with-me LISTING sometimes omits
+ * OneDrive-to-OneDrive shares that the OneDrive website happily shows
+ * (seen 2026-11-04: her listing returned the one SharePoint item and
+ * NEITHER personal-drive file). The /shares resolver ignores listings
+ * entirely: paste the share link once, the file resolves to its drive and
+ * id, and this browser remembers the connection. */
+function shareIdFromUrl(u){
+  u=String(u||'').trim();
+  if(!/^https?:\/\//i.test(u))return '';
+  return 'u!'+btoa(u).replace(/=+$/,'').replace(/\//g,'_').replace(/\+/g,'-');
+}
+async function resolveShareLink(u){
+  var sid=shareIdFromUrl(u);
+  if(!sid)throw new Error('that does not look like a web link');
+  var r=await gfetch(GR+'/shares/'+sid+'/driveItem?$select=id,name,parentReference');
+  if(!r.ok)throw new Error('Microsoft would not open that link for this account (HTTP '+r.status+')');
+  var j=await r.json();
+  if(!(j&&j.id&&j.parentReference&&j.parentReference.driveId))throw new Error('the link resolved but gave no file location');
+  return {id:j.id,driveId:j.parentReference.driveId,name:String(j.name||'')};
+}
+function linkedItems(){try{return JSON.parse(localStorage.getItem('linked_items_v1')||'{}');}catch(_){return {};}}
+function saveLinkedItems(o){try{localStorage.setItem('linked_items_v1',JSON.stringify(o||{}));}catch(_){}}
+function renderShareRescue(){
+  var host=el('share-rescue');
+  if(!host){
+    var e9=el('err');if(!e9||!e9.parentNode)return;
+    host=document.createElement('div');host.id='share-rescue';
+    e9.parentNode.insertBefore(host,e9.nextSibling);
+  }
+  host.innerHTML='<div style="max-width:560px;margin:10px auto;border:1.5px solid var(--border);border-radius:12px;padding:14px 16px;background:#fff;text-align:left">'
+    +'<div style="font-weight:800;font-size:13px;margin-bottom:6px">🔗 Connect by link instead</div>'
+    +'<div style="font-size:12px;color:var(--mid);line-height:1.6;margin-bottom:10px">Microsoft’s shared-files listing can lag behind what the OneDrive website shows. Paste the share links for the two files (in OneDrive → Shared, right-click each → Copy link) — this browser then connects directly and remembers.</div>'
+    +'<label class="ee-lbl">Link to '+FN+'</label><input class="ee-inp" id="rescue-wb" placeholder="https://…" style="margin-bottom:8px">'
+    +'<label class="ee-lbl">Link to '+ENGINE_FILE+'</label><input class="ee-inp" id="rescue-eng" placeholder="https://…" style="margin-bottom:10px">'
+    +'<button class="st-btn-gold" data-action="share-rescue" style="padding:8px 18px">Connect</button>'
+    +'<span id="rescue-out" style="font-size:12px;margin-left:10px"></span>'
+    +'</div>';
+}
+async function shareRescueConnect(){
+  var out=el('rescue-out');
+  function say(t2){if(out)out.textContent=t2;}
+  try{
+    say('Connecting…');
+    var wbU=String((el('rescue-wb')||{}).value||'').trim();
+    var enU=String((el('rescue-eng')||{}).value||'').trim();
+    if(!wbU){say('✗ Paste at least the sheet link');return;}
+    var wb=await resolveShareLink(wbU);
+    if(!sameName(wb.name,FN)){say('✗ That link opens "'+wb.name+'", not '+FN);return;}
+    var store={wb:{id:wb.id,driveId:wb.driveId}};
+    if(enU){
+      var en=await resolveShareLink(enU);
+      if(!sameName(en.name,ENGINE_FILE)){say('✗ The second link opens "'+en.name+'", not '+ENGINE_FILE);return;}
+      store.eng={id:en.id,driveId:en.driveId};
+    }
+    saveLinkedItems(store);
+    say('✓ Connected — reloading');
+    location.reload();
+  }catch(e){say('✗ '+e.message);}
+}
+async function findInShared(name){
+  var r=await gfetch(GR+'/me/drive/sharedWithMe?allowexternal=true');
+  _swmStatus=r.status;
+  // 403 here is a PERMISSION gap, not an empty list: listing shared files
+  // needs Files.ReadWrite.All, which older sign-ins never granted.
+  if(r.status===403||r.status===401)throw new Error('This sign-in cannot LIST shared files yet (HTTP '+r.status+'). Sign out of the dashboard and sign back in — Microsoft will ask once for the updated permission (reading files shared with you) — then try again.');
+  var j=r.ok?await r.json():{};
+  var items=j.value||[];
+  _swmNames=items.map(function(x){return String(x.name||'(unnamed)');});
+  var hit=items.find(function(x){return sameName(x.name,name)&&x.remoteItem&&x.remoteItem.parentReference;});
+  if(hit)return {driveId:hit.remoteItem.parentReference.driveId,id:hit.remoteItem.id};
+  for(var i=0;i<items.length;i++){
+    var it=items[i];
+    if(!(it.remoteItem&&it.remoteItem.folder&&it.remoteItem.parentReference))continue;
+    var dId=it.remoteItem.parentReference.driveId;
+    try{
+      var sr=await gfetch(GR+'/drives/'+dId+'/items/'+it.remoteItem.id+"/search(q='"+encodeURIComponent(name)+"')");
+      if(!sr.ok)continue;
+      var sj=await sr.json();
+      var f=(sj.value||[]).find(function(x){return sameName(x.name,name);});
+      if(f)return {driveId:(f.parentReference&&f.parentReference.driveId)||dId,id:f.id};
+    }catch(_){}
+  }
+  return null;
+}
 var PHONE_DISPLAY='(216) 770-4886';
 
 // Column map. Indices are 0-based SheetJS positions = Excel column letter offset.
@@ -1957,7 +2086,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1025-143';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1104-164';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -2639,9 +2768,101 @@ async function backfillAssignments(changed){
 function engineFor(ri){return ENGINES[engineIdFor(ri)]||ENGINES[effectiveDefaultId()];}
 function seqFor(ri){return engineFor(ri).seq;}
 
+// Find Solura_Engines.json WHEREVER it lives — any folder of the own
+// drive, directly shared, or inside a shared folder. In shared mode the
+// owner's shared copy is looked for FIRST, so a stray local file can never
+// silently split the two accounts' config. Found nowhere + not shared =
+// first run; engUrl falls back to the root path and the doc is created there.
+async function resolveEnginesDocLocation(){
+  if(ENG_ID)return;
+  if(_sharedMode){
+    try{var s=await findInShared(ENGINE_FILE);if(s){ENG_ID=s.id;ENG_DRIVE=s.driveId;return;}}catch(_){}
+    // Last resort: the doc often sits NEXT TO the workbook. We can read the
+    // workbook, so try its parent folder — works whenever the share grants
+    // the folder, and quietly fails (403) when it was file-only sharing.
+    try{
+      var wm=await gfetch(GR+DRIVE_BASE+'/items/'+fid+'?$select=parentReference');
+      if(wm.ok){
+        var wj=await wm.json();
+        var pr=wj&&wj.parentReference;
+        if(pr&&pr.id){
+          var ch=await gfetch(GR+'/drives/'+(pr.driveId||DRIVE_BASE.replace('/drives/',''))+'/items/'+pr.id+'/children?$select=name,id,parentReference');
+          if(ch.ok){
+            var cj=await ch.json();
+            var cf=(cj.value||[]).find(function(x){return sameName(x.name,ENGINE_FILE);});
+            if(cf){ENG_ID=cf.id;ENG_DRIVE=(cf.parentReference&&cf.parentReference.driveId)||pr.driveId;return;}
+          }
+        }
+      }
+    }catch(_){}
+    // A remembered share link for the settings doc works too
+    try{
+      var li9=linkedItems();
+      if(li9.eng&&li9.eng.id){ENG_ID=li9.eng.id;ENG_DRIVE=li9.eng.driveId;return;}
+    }catch(_){}
+    return; // shared sheet + no reachable config = the loud block below
+  }
+  // Own drive: the ROOT copy stays AUTHORITATIVE — exactly the behavior
+  // from before sharing support. Search-anywhere only runs when the root
+  // genuinely has no doc, and duplicates are named loudly, never silently
+  // picked: a stale copy loading means wrong settings and a wrong queue.
+  try{
+    var rm=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE);
+    if(rm.ok)return; // ENG_ID stays null → engUrl keeps the classic root path
+  }catch(_){}
+  try{
+    var r=await gfetch(GR+"/me/drive/root/search(q='"+encodeURIComponent(ENGINE_FILE)+"')");
+    if(r.ok){
+      var j=await r.json();
+      var ms=(j.value||[]).filter(function(x){return sameName(x.name,ENGINE_FILE);});
+      if(ms.length){
+        ms.sort(function(a,b){return String(b.lastModifiedDateTime||'').localeCompare(String(a.lastModifiedDateTime||''));});
+        var f=ms[0];
+        ENG_ID=f.id;ENG_DRIVE=(f.parentReference&&f.parentReference.driveId)||null;
+        var where=String((f.parentReference&&f.parentReference.path)||'').replace(/^\/drive\/root:?\/?/,'')||'(top level)';
+        if(ms.length>1)showErr('⚠ '+ms.length+' files named '+ENGINE_FILE+' exist in this OneDrive — using the newest one (in "'+where+'"). Delete the stale copies: if the wrong one loads, settings and the Due-Now queue go wrong.');
+        else toast('⚙ Settings doc found in "'+where+'"');
+      }
+    }
+  }catch(_){}
+}
+/* 🔑 One-way heal: API keys typed into THIS browser before the shared-
+ * config era publish themselves into the shared Solura_Engines.json once
+ * (only where the shared copy is EMPTY — a key already there is never
+ * overwritten). Every teammate on the same settings file then gets Claude
+ * and HomeCareGrow without retyping keys; each call site already reads
+ * localStorage first, shared config second. */
+function syncLocalKeysToConfig(){
+  if(!_enginesDocLoaded)return; // the overwrite guard would refuse the save anyway
+  var changed=[];
+  try{
+    enginesDoc.config=enginesDoc.config||{};
+    ['claudeApiKey','ghlApiKey'].forEach(function(k){
+      var loc='';try{loc=String(localStorage.getItem(k)||'').trim();}catch(_){}
+      if(loc&&!String(enginesDoc.config[k]||'').trim()){enginesDoc.config[k]=loc;changed.push(k);}
+    });
+  }catch(_){}
+  if(changed.length){
+    saveEnginesDoc().then(function(){
+      toast('🔑 '+changed.join(' + ')+' synced to the shared settings — teammates now get '+(changed.length>1?'them':'it')+' automatically');
+    }).catch(function(){});
+  }
+}
 async function loadEnginesDoc(){
   try{
-    var r=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/content');
+    try{await resolveEnginesDocLocation();}catch(_){}
+    if(_sharedMode&&!ENG_ID){
+      // Loud, and saves stay blocked (_enginesDocLoaded=false): a shared
+      // sheet with a private config would split the two accounts' state.
+      applyEnginesDoc();
+      // Name what Shared-with-me ACTUALLY listed — the usual culprits are an
+      // invite sent to a different account, an unopened invite, or a rename.
+      var seen9=_swmNames&&_swmNames.length?('This account’s Shared-with-me currently lists: '+_swmNames.slice(0,12).join(', ')+(_swmNames.length>12?' …':'')+'.')
+        :'This account’s Shared-with-me is EMPTY — the share may have gone to a different email/account, or the invitation was never opened in OneDrive.';
+      showErr('⚠ [v'+BUILD+'] The sheet reached this account through sharing, but '+ENGINE_FILE+' is not reachable. Running on built-in defaults and ALL settings/engine saves are blocked. '+seen9+' Fix: the owner shares '+ENGINE_FILE+' (Can edit) with this exact account — or one folder containing both files — she opens the invite once in OneDrive, then reloads here.');
+      return;
+    }
+    var r=await gfetch(engUrl('content'));
     if(r.status===404){
       // Genuinely no doc yet (first run) — safe to create one later.
       _enginesDocLoaded=true;_loadedEngineCount=0;
@@ -2696,7 +2917,7 @@ async function saveEnginesDoc(){
   // go through a chunked upload session — same 320KB-aligned mechanics the
   // email attachments use.
   if(body.length<=3.5*1024*1024){
-    var r=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/content',{
+    var r=await gfetch(engUrl('content'),{
       method:'PUT',body:body
     });
     if(!r.ok){var e=await r.json().catch(function(){return{};});
@@ -2709,7 +2930,7 @@ async function saveEnginesDoc(){
 }
 /* ⚡PERF-ENGSAVE — END */
 async function putEnginesContentChunked(body){
-  var sess=await gfetch(GR+'/me/drive/root:/'+ENGINE_FILE+':/createUploadSession',{
+  var sess=await gfetch(engUrl('createUploadSession'),{
     method:'POST',
     body:JSON.stringify({item:{'@microsoft.graph.conflictBehavior':'replace'}})
   });
@@ -2944,68 +3165,6 @@ function getNames(ri){
   return {dm:dmFirst,pt:ptFirst,hasDM:!!dmFirst,apfm:isAPFM(ri),
     rel:String(r[C.REL]||'').trim().toLowerCase(),ri:ri};
 }
-/* ⚡NLLINK — BEGIN
- * Every link to a guide or newsletter on solurahomecare.com (/letters/<slug>, /newsletter/<slug>) becomes
- * THIS lead's personal link (?r=<code>) whenever a message is filled for a lead, in any composer, template
- * or sequence. {letter_link} (or {letter_link:spot}) fills with the edition picked in the Newsletter hub.
- * The code is stable per lead + guide, so a preview and the real send carry the same link. When the
- * message actually goes out (Outlook or Resend), the lead is added to that guide's send in the Newsletter
- * hub, and the website reports back opened / read per code, as for hub sends. The website never learns names. */
-var NL_SITE_RE=/https?:\/\/(?:www\.)?solurahomecare\.com\/(letters|newsletter)\/([a-z0-9][a-z0-9-]{0,118})((?:\?|&amp;|&)[^"'\s<>)]*)?/gi;
-var _nlPending={};
-function nlLinkSalt(){
-  enginesDoc.config=enginesDoc.config||{};
-  if(!enginesDoc.config.nlLinkSalt){enginesDoc.config.nlLinkSalt=nlNewCode();try{saveEnginesDoc().catch(function(){});}catch(_){}}
-  return enginesDoc.config.nlLinkSalt;
-}
-function nlFnv(str,seed){var h=seed>>>0;for(var i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)>>>0;}return h>>>0;}
-function nlLeadCode(ri,slug){
-  var k=nlLinkSalt()+'|'+leadKey(ri)+'|'+slug;
-  var a=nlFnv(k,2166136261).toString(36),b=nlFnv(k,374761393).toString(36);
-  return ('0000000'+a).slice(-7)+('0000000'+b).slice(-7);
-}
-function nlPersonalizeLinks(s,names){
-  s=String(s||'');
-  var ri=names&&typeof names.ri==='number'?names.ri:null;
-  var ed=((enginesDoc||{}).config||{}).nlEdition;
-  s=s.replace(/\{\{?\s*letter_link(?::([a-z0-9_-]{1,24}))?\s*\}\}?/gi,function(m,spot){
-    var u=(ed&&ed.url)?String(ed.url):'https://www.solurahomecare.com/letters';
-    return spot?(u+(u.indexOf('?')>-1?'&':'?')+'s='+spot.toLowerCase()):u;
-  });
-  if(ri===null||!rows[ri])return s;
-  return s.replace(NL_SITE_RE,function(m,kind,slug,q){
-    q=q||'';
-    if(/(?:\?|&amp;|&)r=/.test(q))return m;          // already personal (Newsletter hub sends)
-    var code=nlLeadCode(ri,slug);
-    _nlPending[code]={ri:ri,slug:slug,url:'https://www.solurahomecare.com/'+kind+'/'+slug};
-    var amp=q.indexOf('&amp;')>-1?'&amp;':'&';
-    return 'https://www.solurahomecare.com/'+kind+'/'+slug+(q?(q+amp):'?')+'r='+code;
-  });
-}
-// Called with the outgoing payload of every real send: registers the personal links it carries.
-function nlNoteSent(payload){
-  try{
-    var str=typeof payload==='string'?payload:JSON.stringify(payload||'');
-    var re=/(?:\?|&amp;|&|\\u0026)r=([a-z0-9]{10,24})/g,m,hit=false;
-    while((m=re.exec(str))){
-      var p=_nlPending[m[1]];if(!p)continue;
-      var L=nlSendsAll(),send=null;
-      for(var i=0;i<L.length;i++){if(L[i].adhoc&&L[i].slug===p.slug){send=L[i];break;}}
-      if(!send){
-        var ed=((enginesDoc||{}).config||{}).nlEdition||{};
-        send={slug:p.slug,title:(ed.slug===p.slug&&ed.title)?ed.title:p.slug,url:p.url,sentAt:Date.now(),recipients:[],stats:{},lastPoll:0,adhoc:true};
-        L.unshift(send);if(L.length>NL_HUB_KEEP)L.length=NL_HUB_KEEP;
-      }
-      if(!send.recipients.some(function(x){return x.code===m[1];})){
-        var r0=rows[p.ri]||[];
-        send.recipients.push({k:leadKey(p.ri),name:String(r0[C.NM]||r0[C.DM]||'').trim(),email:'',code:m[1]});
-        hit=true;
-      }
-    }
-    if(hit){saveEnginesDoc().catch(function(){});try{renderNlHub();}catch(_){}}
-  }catch(_){}
-}
-/* ⚡NLLINK — END */
 /* ⚡FILLNAMES — BEGIN (sliced by tests/engine-gaps.test.mjs) */
 // The flip of {rel}: what the PATIENT is to the lead. The sheet doesn't
 // record the patient's gender, so only relationships with a determined
@@ -3041,7 +3200,15 @@ function fillNames(s,names){
     .replace(/\{\s*(?:patient|client)\s*\}/gi,'{pt}')
     .replace(/\{\{\s*(?:rel|relationship)\s*\}\}/gi,'{rel}')
     .replace(/\{\s*relationship\s*\}/gi,'{rel}');
-  if(typeof nlPersonalizeLinks==='function')s=nlPersonalizeLinks(s,names);
+  // {link} → this lead's PERSONAL link to the current newsletter edition,
+  // same family as {dm}/{pt}. The typeof guard keeps this slice-safe: in
+  // test slices (or with no edition picked) it falls back to the public
+  // letters page, so a broken link never ships.
+  if(/\{\{?\s*link\s*\}\}?/i.test(s)){
+    var lk='https://www.solurahomecare.com/newsletter';
+    try{if(typeof nlLinkForLead==='function')lk=nlLinkForLead(names.ri)||lk;}catch(_){}
+    s=s.replace(/\{\{\s*link\s*\}\}/gi,lk).replace(/\{\s*link\s*\}/gi,lk);
+  }
   s=s.replace(/\{dm\}/g,dm);
   // {ptrel} → the flip: what the patient is to the lead ("your parent",
   // "your spouse"). Ambiguous inverses fall back to "loved one".
@@ -4548,7 +4715,7 @@ async function signIn(){
   sessionStorage.setItem('pkce_v',pkce.verifier);
   var url='https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/authorize?'
     +'client_id='+CLIENT_ID+'&response_type=code&redirect_uri='+encodeURIComponent(REDIRECT)
-    +'&scope='+encodeURIComponent('openid profile email Files.ReadWrite Mail.Send Mail.Send.Shared Mail.ReadWrite Calendars.ReadWrite offline_access')
+    +'&scope='+encodeURIComponent('openid profile email Files.ReadWrite.All Mail.Send Mail.Send.Shared Mail.ReadWrite Calendars.ReadWrite offline_access')
     +'&code_challenge='+pkce.challenge+'&code_challenge_method=S256&prompt=select_account';
   location.href=url;
 }
@@ -4558,13 +4725,14 @@ async function refreshToken(){
   var rt=localStorage.getItem('sr');
   if(!rt)return false;
   try{
-    var body=new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:'openid profile email Files.ReadWrite Mail.Send Mail.Send.Shared Mail.ReadWrite Calendars.ReadWrite offline_access'});
+    var body=new URLSearchParams({client_id:CLIENT_ID,refresh_token:rt,grant_type:'refresh_token',scope:'openid profile email Files.ReadWrite.All Mail.Send Mail.Send.Shared Mail.ReadWrite Calendars.ReadWrite offline_access'});
     var r=await fetch('https://login.microsoftonline.com/'+TENANT+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
     var j=await r.json();
     if(j.access_token){
       tok=j.access_token;
       sessionStorage.setItem('st',tok);
       if(j.refresh_token)localStorage.setItem('sr',j.refresh_token);
+      try{if(j.scope)localStorage.setItem('granted_scopes',j.scope);}catch(_){}
       return true;
     }
   }catch(e){}
@@ -4636,6 +4804,7 @@ async function handleAuthCallback(){
       tok=j.access_token;
       sessionStorage.setItem('st',tok);
       if(j.refresh_token)localStorage.setItem('sr',j.refresh_token);
+      try{if(j.scope)localStorage.setItem('granted_scopes',j.scope);}catch(_){}
       onSignedIn();
     }else{
       showErr('Token error: '+(j.error_description||j.error||'unknown'));
@@ -4662,7 +4831,7 @@ function ensureWorkbookSession(){
   if(!tok||!fid)return Promise.resolve(null);
   _wbSessionPromise=(async function(){
     try{
-      var r=await fetch(GR+'/me/drive/items/'+fid+'/workbook/createSession',{
+      var r=await fetch(GR+DRIVE_BASE+'/items/'+fid+'/workbook/createSession',{
         method:'POST',
         headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/json'},
         body:JSON.stringify({persistChanges:true})
@@ -4678,7 +4847,6 @@ function ensureWorkbookSession(){
 // workbook calls ride the persisted session and retry sessionless if it died.
 async function gfetch(url,opts){
   opts=opts||{};
-  if(/\/sendMail$|\/me\/messages$/.test(url)&&opts.body&&typeof nlNoteSent==='function')nlNoteSent(opts.body);
   opts.headers=opts.headers||{};
   opts.headers['Authorization']='Bearer '+tok;
   if(opts.body&&!opts.headers['Content-Type'])opts.headers['Content-Type']='application/json';
@@ -4708,14 +4876,44 @@ async function gfetch(url,opts){
 
 async function loadData(){
   clearErr();
+  try{loadWhoAmI();}catch(_){} // 👤 fire-and-forget; cached for the wrap
   try{
     var r=await gfetch(GR+"/me/drive/root/search(q='"+encodeURIComponent(FN)+"')");
     if(!r.ok)throw new Error('Drive search failed: '+r.status);
     var j=await r.json();
-    var f=(j.value||[]).find(function(x){return x.name===FN;});
-    if(!f)throw new Error(FN+' not found in OneDrive');
-    fid=f.id;
-    var r2=await gfetch(GR+'/me/drive/items/'+fid+'/content');
+    var f=(j.value||[]).find(function(x){return sameName(x.name,FN);});
+    if(f){
+      fid=f.id;DRIVE_BASE='/me/drive';_sharedMode=false;
+    }else{
+      // Not in this account's own OneDrive — check "Shared with me". A
+      // shared file lives in the OWNER's drive and must be addressed as
+      // /drives/<ownerDrive>/items/<id>; searching /me/drive never sees it.
+      // findInShared also looks INSIDE shared folders, so the sheet can sit
+      // in any folder the owner shared, not only be shared file-by-file.
+      // A remembered share link wins — listings can lie, links don't
+      var li=linkedItems(),okLinked=false;
+      if(li.wb&&li.wb.id){
+        try{
+          var chk=await gfetch(GR+'/drives/'+encodeURIComponent(li.wb.driveId)+'/items/'+encodeURIComponent(li.wb.id)+'?$select=id');
+          if(chk.ok){fid=li.wb.id;DRIVE_BASE='/drives/'+li.wb.driveId;_sharedMode=true;okLinked=true;}
+          else saveLinkedItems({}); // stale link → fall back to the listing
+        }catch(_){}
+      }
+      if(!okLinked){
+        var sf=await findInShared(FN);
+        if(!sf){
+          var ev='[v'+BUILD+'] Shared-with-me answered HTTP '+_swmStatus+' with '
+            +((_swmNames&&_swmNames.length)?(_swmNames.length+' item'+(_swmNames.length!==1?'s':'')+': '+_swmNames.slice(0,8).join(', ')):'ZERO items')
+            +'. '+scopeVerdict()+'.';
+          try{renderShareRescue();}catch(_){} // the paste-the-link way out rides the error
+          throw new Error(FN+' not found. It is not in this account’s own OneDrive, and it is not under Shared with me (directly or inside a shared folder). '+ev+' If the permission is granted and the list is still empty, the share went to a DIFFERENT email than this sign-in, or the invitation was never opened in OneDrive. OR: use Connect by link below.');
+        }
+        fid=sf.id;
+        DRIVE_BASE='/drives/'+sf.driveId;
+        _sharedMode=true;
+      }
+    }
+    var r2=await gfetch(GR+DRIVE_BASE+'/items/'+fid+'/content');
     if(!r2.ok)throw new Error('Download failed: '+r2.status);
     var buf=await r2.arrayBuffer();
     var wb=XLSX.read(buf,{type:'array',cellDates:true});
@@ -4742,6 +4940,7 @@ async function loadData(){
     try{await loadTemplates();}catch(e){showErr('Templates load failed: '+e.message);}
     // Load custom sequence engines (falls back to embedded default on any failure)
     try{await loadEnginesDoc();}catch(e){console.warn('Engines doc:',e.message);}
+    try{syncLocalKeysToConfig();}catch(_){} // 🔑 keys typed pre-sharing publish themselves once
 
     // Run migration if needed before rendering
     await maybeRunMigration();
@@ -4770,7 +4969,7 @@ function colLetter(i){
  * cell writes are idempotent, so the retry is safe.                    */
 async function writeRow(ri,updates){
   var exRow=ri+1; // SheetJS 0-based to Excel 1-based
-  var relBase='/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
+  var relBase=DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
   var cis=Object.keys(updates).map(function(k){return parseInt(k,10);})
     .sort(function(a,b){return a-b;});
   // Contiguous columns collapse into one range write
@@ -4864,7 +5063,7 @@ async function loadTemplates(){
   // The Templates tab is LEGACY: templates live on the engine steps now.
   // The tab still loads as a silent fallback (and for call scripts) but a
   // missing or empty tab is no longer an error worth nagging about.
-  var r=await gfetch(GR+"/me/drive/items/"+fid+"/workbook/worksheets/Templates/usedRange?$select=values");
+  var r=await gfetch(GR+DRIVE_BASE+"/items/"+fid+"/workbook/worksheets/Templates/usedRange?$select=values");
   if(!r.ok){
     if(r.status===404){console.warn('Templates tab absent — step templates only (this is fine)');return;}
     throw new Error('Templates load failed: '+r.status);
@@ -5472,33 +5671,7 @@ function whenToShowCore(ri){
 
   // Weekly cadence (finite check-ins) — on nurtureWeekday
   if(action.cadence==='weekly'&&!action.sticky){
-    var weekday=nurtureWeekday(ri);
-    var todayDay=today.getDay();
-    var doneAt=getStepDoneAt(ri);
-    var monday=addDays(today,-((todayDay+6)%7)); // Monday of this week
-    var sunday=addDays(monday,6);
-    // If this week's check-in is already done, look at next week's nurture day
-    var doneThisWeek=doneAt&&doneAt>=monday&&doneAt<=addDays(sunday,1);
-    if(doneThisWeek){
-      // Next week's nurture day
-      var nextMonday=addDays(monday,7);
-      var offset=((weekday-1)%7+7)%7; // days from Monday to weekday
-      var nextDue=addDays(nextMonday,offset);
-      var dd=daysBetween(nextDue,today);
-      if(dd<=7)return {bucket:'week',at:nextDue};
-      return {bucket:'future',at:nextDue};
-    }
-    // Not yet done this week. Where is the nurture day relative to today?
-    var thisWeekOffset=((weekday-1)%7+7)%7;
-    var thisWeekDue=addDays(monday,thisWeekOffset);
-    var diffToDue=daysBetween(thisWeekDue,today);
-    if(diffToDue<0){
-      // The day passed this week without action → overdue
-      return {bucket:'overdue',at:thisWeekDue};
-    }
-    if(diffToDue===0)return {bucket:'now',at:today};
-    // It's earlier in the week — coming up
-    return {bucket:'week',at:thisWeekDue};
+    return weeklyDueBucket(nurtureWeekday(ri),today,getStepDoneAt(ri));
   }
 
   // Sticky weekly cadence — perpetual nurture, same shape as above
@@ -5514,30 +5687,36 @@ function whenToShowCore(ri){
     return {bucket:'future',at:dueI};
   }
   if(action.cadence==='weekly'&&action.sticky){
-    var weekday5=nurtureWeekday(ri);
-    var todayDay5=today.getDay();
-    var doneAt5=getStepDoneAt(ri);
-    var monday5=addDays(today,-((todayDay5+6)%7));
-    var sunday5=addDays(monday5,6);
-    var doneThisWeek5=doneAt5&&doneAt5>=monday5&&doneAt5<=addDays(sunday5,1);
-    if(doneThisWeek5){
-      var nextMonday5=addDays(monday5,7);
-      var off5=((weekday5-1)%7+7)%7;
-      var nextDue5=addDays(nextMonday5,off5);
-      var dd5=daysBetween(nextDue5,today);
-      if(dd5<=7)return {bucket:'week',at:nextDue5};
-      return {bucket:'future',at:nextDue5};
-    }
-    var off5b=((weekday5-1)%7+7)%7;
-    var thisWeekDue5=addDays(monday5,off5b);
-    var diff5=daysBetween(thisWeekDue5,today);
-    if(diff5<0)return {bucket:'overdue',at:thisWeekDue5};
-    if(diff5===0)return {bucket:'now',at:today};
-    return {bucket:'week',at:thisWeekDue5};
+    return weeklyDueBucket(nurtureWeekday(ri),today,getStepDoneAt(ri));
   }
 
   return {bucket:'now'};
 }
+/* ⚡WEEKDUE — BEGIN (sliced by tests/engine-gaps.test.mjs) */
+/* Weekday-anchored weekly nurture, PURE. The old logic was anchored to
+ * the calendar week (Mon-Sun), so a nurture day missed on Thursday showed
+ * as overdue only until Sunday - Monday's rollover silently forgave it
+ * and 75 overdue leads "vanished" into next week (2026-11-03). Now a
+ * missed cycle STAYS overdue, however many weeks pass, until a send
+ * actually stamps step_done_at on or after the most recent nurture day. */
+function weeklyDueBucket(weekday,today,doneAt){
+  var todayDay=today.getDay();
+  // The most recent occurrence of the nurture day, today included
+  var lastOccur=addDays(today,-(((todayDay-weekday)%7+7)%7));
+  var isToday=daysBetween(lastOccur,today)===0;
+  if(doneAt&&doneAt>=lastOccur){
+    // This cycle is covered → next week's day
+    var nextDue=addDays(lastOccur,7);
+    return daysBetween(nextDue,today)<=7?{bucket:'week',at:nextDue}:{bucket:'future',at:nextDue};
+  }
+  if(isToday)return {bucket:'now',at:today};
+  if(!doneAt){
+    // Never nurtured yet: aim at the UPCOMING day, never a backdated debt
+    return {bucket:'week',at:addDays(lastOccur,7)};
+  }
+  return {bucket:'overdue',at:lastOccur};
+}
+/* ⚡WEEKDUE — END */
 
 // Human-readable column-T label for a given step index. Mirrors what the
 // engine tracks in step_idx, so the sheet stays a true reflection of state.
@@ -6850,7 +7029,7 @@ function readTraces(){try{return JSON.parse(localStorage.getItem('op_trace_v1')|
 var _anModel=null;
 async function analyticsFetchComms(){
   await ensureCommsLogSheet();
-  var url=GR+'/me/drive/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET)+"/range(address='A2:R4000')?$select=values";
+  var url=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET)+"/range(address='A2:R4000')?$select=values";
   var r=await gfetch(url);
   if(!r.ok)throw new Error('Comms read failed: '+r.status);
   var j=await r.json();
@@ -6983,7 +7162,7 @@ async function ensureCommsLogSheet(){
   // If someone else is already initializing, await that.
   if(_commsLogInFlight)return _commsLogInFlight;
   _commsLogInFlight=(async function(){
-    var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets';
+    var base=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets';
     var sheetUrl=base+'/'+encodeURIComponent(COMMS_LOG_SHEET);
     // Check if sheet exists
     var r=await gfetch(sheetUrl+'?$select=name');
@@ -7075,7 +7254,7 @@ async function logComms(entry){
       String(entry.variant||'')  // weekly A/B variant, when applicable
     ];
     var addr='A'+row+':R'+row;
-    var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
+    var base=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
     var r=await gfetch(base+"/range(address='"+addr+"')",{
       method:'PATCH',
       body:JSON.stringify({values:[values]})
@@ -7424,6 +7603,40 @@ function buildDiagnosticReport(){
   var L=[];
   L.push('SOLURA DIAGNOSTIC \u00b7 '+BUILD+' \u00b7 '+new Date().toISOString());
   L.push('');
+  // \ud83d\udce5 Queue census: where every lead sits, and WHY each hidden nurture
+  // lead is hidden \u2014 the exact question "my nurture leads vanished" needs.
+  try{
+    var ws9=null;try{ws9=nlWarmupState();}catch(_){}
+    var sentN=0;try{sentN=Object.keys(nlWarmupSentMap()||{}).length;}catch(_){}
+    L.push('QUEUE CENSUS:');
+    L.push('  warm-up state: '+(ws9?('\u26a0 RUNNING \u2014 day '+((ws9.day||0)+1)+', '+sentN+' sent so far (a running warm-up HIDES nurture leads due within its week)'):'none (no warm-up holds)'));
+    var buckets={},nurtureHidden=[],nurtureTotal=0;
+    for(var qi=DATA_START;qi<rows.length;qi++){
+      var rr=rows[qi];if(!rr||!String(rr[C.NM]||rr[C.DM]||'').trim())continue;
+      var b9;try{b9=(whenToShowCore(qi)||{}).bucket||'?';}catch(e9){b9='ERR:'+String(e9.message||'').slice(0,60);}
+      buckets[b9]=(buckets[b9]||0)+1;
+      var isNur=false;try{isNur=isNurtureStep(qi);}catch(_){}
+      if(isNur)nurtureTotal++;
+      if(isNur&&b9==='hidden'){
+        var why='no current action (engine/step state)';
+        try{
+          if(isUnsubscribed(qi))why='UNSUBSCRIBED (column AD is stamped)';
+          else if(nlWarmupHolds(qi))why='WARM-UP HOLD (newsletter warm-up counts them as covered)';
+          else if(isExcludedLead(qi))why='excluded status ('+String(rr[C.ST]||'')+')';
+        }catch(_){}
+        nurtureHidden.push(String(rr[C.NM]||rr[C.DM]).trim()+' \u2192 '+why);
+      }
+    }
+    L.push('  buckets: '+JSON.stringify(buckets));
+    L.push('  nurture leads: '+nurtureTotal+' total \u00b7 '+nurtureHidden.length+' HIDDEN:');
+    nurtureHidden.slice(0,30).forEach(function(x){L.push('    \u00b7 '+x);});
+    if(nurtureHidden.length>30)L.push('    \u2026and '+(nurtureHidden.length-30)+' more, same reasons');
+    var wd9=null;try{wd9=getWeeklyDraft();}catch(_){}
+    L.push('  weekly draft: '+(wd9?'present':'\u26a0 NONE live'));
+    L.push('  engines doc: '+(_enginesDocLoaded?('loaded ('+_loadedEngineCount+' engines'+(ENG_ID?(' \u00b7 from item '+ENG_ID):' \u00b7 from the root path')+')'):'\u26a0 NOT loaded \u2014 running on built-in defaults'));
+    L.push('  sign-in: '+(ME.email||'(identity not loaded)')+' \u00b7 '+scopeVerdict());
+  }catch(eQ){L.push('QUEUE CENSUS failed: '+eQ.message);}
+  L.push('');
   // Shell config
   var shell=String(cfg('emailShellHtml')||'');
   var shellSlot=shell?findShellSlot(shell):null;
@@ -7659,6 +7872,7 @@ function renderConfigInputs(){
   try{renderEmailPresetSettings();}catch(_){}
   try{renderIntakeLinks();}catch(_){}
   try{renderNlHub();}catch(_){} // 📰 composer edition + send history
+  try{renderSenderProfile();}catch(_){} // 👤 per-account wrap identity
   try{loadFormDrop();}catch(_){} // 📉 the funnel loads itself with Settings
   try{renderSchedMail();}catch(_){}
   try{renderSchedSms();}catch(_){}
@@ -8351,6 +8565,21 @@ document.addEventListener('input',function(ev){
     // storage eviction, and follows you across devices (private OneDrive
     // file — never the public page source).
     try{enginesDoc.config=enginesDoc.config||{};enginesDoc.config.ghlApiKey=t.value.trim();stMarkDirty();}catch(_){}
+  }
+  if(t&&t.id==='wk-set-linkmode'){try{wkLinkModeHint();}catch(_){}}
+  // 👤 sender-profile edits stage into the shared config (Save bar commits)
+  if(t&&/^snd-(def|my)-(name|photo)$/.test(t.id||'')){
+    enginesDoc.config=enginesDoc.config||{};
+    if(t.id.indexOf('snd-def')===0){
+      var d0=enginesDoc.config.senderDefault=enginesDoc.config.senderDefault||{};
+      if(t.id==='snd-def-name')d0.name=t.value.trim();else d0.photo=t.value.trim();
+    }else if(ME.email){
+      var P0=senderProfiles();
+      var m0=P0[ME.email]=P0[ME.email]||{};
+      if(t.id==='snd-my-name')m0.name=t.value.trim();else m0.photo=t.value.trim();
+      if(!m0.name&&!m0.photo)delete P0[ME.email]; // empty entry = back to the default
+    }
+    stMarkDirty();
   }
   // Settings config fields → staged into enginesDoc.config, saved via Save bar
   if(t&&t.dataset&&t.dataset.cfg){
@@ -9418,9 +9647,86 @@ function findShellSlot(shell){
   m=shell.match(/&#123;&#123;\s*(?:content|body|message)\s*&#125;&#125;/i);
   return m?m[0]:null;
 }
+/* ── 👤 Who signs the wrap ────────────────────────────────────────────────
+ * The shell used to be one person's: Meir's name and photo baked into the
+ * saved HTML. With employees signing in, the wrap fills {sendername} and
+ * {senderphoto} per SIGNED-IN ACCOUNT from profiles in the shared config;
+ * a shell without the tokens still works — the literal "Meir Schwimer"
+ * swaps to the account's name automatically. */
+var ME={email:'',name:''};
+try{ME.email=localStorage.getItem('me_email')||'';ME.name=localStorage.getItem('me_name')||'';}catch(_){}
+async function loadWhoAmI(){
+  try{
+    var r=await gfetch(GR+'/me?$select=mail,userPrincipalName,displayName');
+    if(!r.ok)return;
+    var j=await r.json();
+    ME.email=normEmail(j.mail||j.userPrincipalName||'');
+    ME.name=String(j.displayName||'').trim();
+    try{localStorage.setItem('me_email',ME.email);localStorage.setItem('me_name',ME.name);}catch(_){}
+    try{renderSenderProfile();}catch(_){}
+  }catch(_){}
+}
+function senderProfiles(){
+  enginesDoc.config=enginesDoc.config||{};
+  var m=enginesDoc.config.senderProfiles;
+  if(!m)m=enginesDoc.config.senderProfiles={};
+  return m;
+}
+// The signed-in account's entry wins field by field; the default fills gaps.
+function senderProfile(){
+  enginesDoc.config=enginesDoc.config||{};
+  var d=enginesDoc.config.senderDefault||{};
+  var p=(ME.email&&senderProfiles()[ME.email])||{};
+  return {name:String(p.name||d.name||'Meir Schwimer').trim(),
+    photo:String(p.photo||d.photo||'').trim()};
+}
+function renderSenderProfile(){
+  var host=el('sender-profile-box');if(!host)return;
+  enginesDoc.config=enginesDoc.config||{};
+  var d=enginesDoc.config.senderDefault||{};
+  var P=senderProfiles();
+  var mine=ME.email?(P[ME.email]||{}):{};
+  host.innerHTML=
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">'
+    +'<div><label class="ee-lbl">Default name</label><input class="ee-inp" id="snd-def-name" value="'+escapeHtml(d.name||'Meir Schwimer')+'"></div>'
+    +'<div><label class="ee-lbl">Default photo URL</label><input class="ee-inp" id="snd-def-photo" value="'+escapeHtml(d.photo||'')+'" placeholder="https://…"></div>'
+    +'</div>'
+    +(ME.email
+      ?('<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+        +'<div><label class="ee-lbl">This account ('+escapeHtml(ME.email)+') — name</label><input class="ee-inp" id="snd-my-name" value="'+escapeHtml(mine.name||'')+'" placeholder="empty = the default"></div>'
+        +'<div><label class="ee-lbl">This account — photo URL</label><input class="ee-inp" id="snd-my-photo" value="'+escapeHtml(mine.photo||'')+'" placeholder="empty = the default"></div>'
+        +'</div>')
+      :'<div style="font-size:11.5px;color:var(--soft)">Sign-in identity not loaded yet — reload the page to edit this account’s own entry.</div>')
+    +(Object.keys(P).length?('<div style="font-size:11px;color:var(--soft);margin-top:8px">Accounts with their own entry: '+Object.keys(P).map(escapeHtml).join(', ')+'</div>'):'');
+  // 📸 The marker must match the shell BYTE FOR BYTE — so show every image
+  // the shell holds, let the right one be PICKED, and verify the match live.
+  try{
+    var srcs=shellImgSrcs();
+    _shellImgList=srcs;
+    var dp9=String(d.photo||'').trim();
+    var shell9=String(cfg('emailShellHtml')||'');
+    var matches=!!dp9&&(shell9.indexOf(dp9)>-1||shell9.indexOf(escapeHtml(dp9))>-1||shell9.indexOf(dp9.replace(/&amp;/g,'&'))>-1);
+    var verdict=!dp9?'⚠ No default photo marker set — the photo cannot swap until one is picked below.'
+      :matches?'✓ The default photo marker matches the shell — employee photos will swap.'
+      :'⚠ The default photo marker does NOT appear in the shell — nothing will swap. Pick the real one below.';
+    host.innerHTML+='<div style="font-size:11.5px;margin-top:10px;font-weight:600;color:'+(matches?'var(--grn)':'var(--red)')+'">'+verdict+'</div>'
+      +(srcs.length
+        ?('<div style="font-size:11px;color:var(--soft);margin:6px 0 4px">Images in the shell — click the HEADSHOT to make it the marker:</div>'
+          +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
+          +srcs.map(function(u,i){
+            return '<div style="text-align:center"><img src="'+escapeHtml(u)+'" style="height:44px;max-width:90px;object-fit:contain;display:block;border:2px solid '+(u===dp9?'var(--grn)':'var(--border)')+';border-radius:8px;background:#fff;margin:0 auto 4px">'
+              +'<button class="ee-mini" style="font-size:10.5px;padding:3px 8px" data-action="snd-pick-photo" data-i="'+i+'">'+(u===dp9?'✓ marker':'Use as marker')+'</button></div>';
+          }).join('')
+          +'</div>')
+        :'<div style="font-size:11px;color:var(--soft);margin-top:6px">The shell contains no images at all — the photo lives somewhere else (a template or a pasted design), not in the wrap.</div>');
+  }catch(_){}
+}
+var _shellImgList=[];
 function applyEmailShell(bodyHtml,ri){
   var shell=String(cfg('emailShellHtml')||'').trim();
   if(!shell)return bodyHtml;
+  // Sender identity fills the SHELL only — the message text is untouched
+  try{shell=fillSenderTokens(shell,senderProfile(),(enginesDoc.config||{}).senderDefault||{});}catch(_){}
   var content=extractInnerHtml(bodyHtml);
   var slot=findShellSlot(shell);
   var out;
@@ -9470,6 +9776,44 @@ function applyEmailShell(bodyHtml,ri){
  * it sits cleanly in the shell's content slot. The raw-HTML PASTE mode
  * keeps its shell-skip gate: that path is for complete hand-built designs. */
 var _claudeHtmlDraft=false; // composer body holds a Claude draft → always wrap
+// Pure: {sendername}/{senderphoto} (and {{sender_name}}-style dialects) fill
+// with the signed-in account's profile. Shells from before the tokens get
+// the literal signature name swapped, so employees work without a shell edit.
+function fillSenderTokens(s,p,d){
+  s=String(s||'');p=p||{};d=d||{};
+  var nm=String(p.name||'').trim(),ph=String(p.photo||'').trim();
+  var dn=String(d.name||'').trim()||'Meir Schwimer';
+  var dp=String(d.photo||'').trim();
+  s=s.replace(/\{\{\s*sender_?name\s*\}\}/gi,'{sendername}').replace(/\{\s*sender_?name\s*\}/gi,'{sendername}')
+    .replace(/\{\{\s*sender_?photo\s*\}\}/gi,'{senderphoto}').replace(/\{\s*sender_?photo\s*\}/gi,'{senderphoto}');
+  var hadNameTok=s.indexOf('{sendername}')>-1;
+  var hadPhotoTok=s.indexOf('{senderphoto}')>-1;
+  s=s.split('{sendername}').join(escapeHtml(nm));
+  s=s.split('{senderphoto}').join(escapeHtml(ph));
+  // Shells without tokens: the DEFAULT name and the DEFAULT photo URL are
+  // the markers. Whatever matches them in the shell swaps to the account's
+  // own values — so a photo changes per employee without a shell edit,
+  // as long as the Default photo URL is the exact address baked in.
+  if(!hadNameTok&&nm&&nm!==dn)s=s.split(dn).join(escapeHtml(nm));
+  if(!hadPhotoTok&&ph&&dp&&ph!==dp){
+    s=s.split(dp).join(escapeHtml(ph));
+    var dpEsc=escapeHtml(dp); // URLs with & live as &amp; inside HTML…
+    if(dpEsc!==dp)s=s.split(dpEsc).join(escapeHtml(ph));
+    var dpUn=dp.replace(/&amp;/g,'&'); // …and a pasted &amp; may mean a plain &
+    if(dpUn!==dp)s=s.split(dpUn).join(escapeHtml(ph));
+  }
+  return s;
+}
+// Every image the shell carries — so the marker is PICKED, never retyped
+function shellImgSrcs(){
+  var shell=String(cfg('emailShellHtml')||'');
+  var out=[],seen={},m,RX=/<img[^>]*src=["']([^"']+)["']/gi;
+  while((m=RX.exec(shell))){
+    var u=m[1];
+    if(!seen[u]){seen[u]=1;out.push(u);}
+  }
+  return out;
+}
 function declawDesignHtml(html){
   var v=extractInnerHtml(String(html||''));
   // Hidden preheader blocks fight the shell's own inbox preview line
@@ -9639,7 +9983,6 @@ function wkStash(){
   var se=el('wk-set-engine');if(se)set.engineId=se.value||'';
   var sr=el('wk-set-refresh');if(sr)set.refreshDays=Math.max(1,parseInt(sr.value,10)||8);
   var ss=el('wk-set-sms');if(ss)set.smsText=ss.value||'';
-  var pl=el('wk-set-pdflink');if(pl)set.pdfAsLink=!!pl.checked;
   if(set.engineId){var e5=(enginesDoc.engines||[]).find(function(x){return x.id===set.engineId;});set.name=e5?e5.name:set.engineId;}
   else set.name='Default (all sequences)';
   var vs=weeklyVariants();
@@ -9649,6 +9992,24 @@ function wkStash(){
   var nb=(el('weekly-body')||{}).value||'';
   if(ns!==(v.subject||'')||nb!==(v.body||'')){v.updatedAt=Date.now();}
   v.subject=ns;v.body=nb;
+  // Link choice is PER VARIANT (A/B/C can each point somewhere else)
+  var lm=el('wk-set-linkmode');if(lm)v.linkMode=lm.value||'none';
+  var cu=el('wk-set-customurl');if(cu)v.customUrl=String(cu.value||'').trim();
+}
+// The link-mode line under the selector says what each choice really does
+function wkLinkModeHint(){
+  var lm=el('wk-set-linkmode'),hint=el('wk-linkmode-hint'),cu=el('wk-set-customurl');
+  if(!lm||!hint)return;
+  var m=lm.value;
+  if(cu)cu.style.display=(m==='custom')?'':'none';
+  if(m==='pdf')hint.textContent='The uploaded PDF goes out as a OneDrive/SharePoint link, click-tracked through the worker — the classic manual-upload path.';
+  else if(m==='site'){
+    var ed=null;try{ed=(enginesDoc.config||{}).nlEdition;}catch(_){}
+    hint.textContent=ed&&ed.url?('Current edition: "'+(ed.title||ed.slug)+'" — every lead gets their own tracked link to it (opens + real reads).')
+      :'⚠ No edition picked yet — publish in the composer (Settings → Newsletter) first, or the button is left out.';
+  }
+  else if(m==='custom')hint.textContent='On solurahomecare.com: every lead gets their own tracked link (opens + real reads). Anywhere else: the link is used exactly as pasted — no read data exists there.';
+  else hint.textContent='';
 }
 function openWeekly(){
   draftSets(); // ensure migrated
@@ -9680,12 +10041,19 @@ function renderWeeklyEditor(){
   }
   var sr=el('wk-set-refresh');if(sr)sr.value=set.refreshDays||8;
   var ss=el('wk-set-sms');if(ss)ss.value=set.smsText||'';
-  var pl2=el('wk-set-pdflink');if(pl2)pl2.checked=!!set.pdfAsLink;
   var vs=weeklyVariants();
   if(_wkIdx>=vs.length)_wkIdx=Math.max(0,vs.length-1);
   var v=vs[_wkIdx]||{};
   el('weekly-subj').value=v.subject||'';
   el('weekly-body').value=v.body||'';
+  var lm2=el('wk-set-linkmode');
+  if(lm2){
+    // Per VARIANT, falling back to the old set-level choice (and the even
+    // older pdfAsLink checkbox) so existing drafts keep behaving.
+    lm2.value=wkVariantLinkMode(set,v);
+    var cu2=el('wk-set-customurl');if(cu2)cu2.value=(v.customUrl!=null?v.customUrl:(set.customUrl||''));
+    wkLinkModeHint();
+  }
   // tabs
   var tabs=el('weekly-tabs');
   if(tabs){
@@ -9735,7 +10103,7 @@ async function saveWeeklyDraft(){
       st6.variants=st6.variants||[];
       for(var vi=0;vi<st6.variants.length;vi++){
         var vv6=st6.variants[vi];
-        if(st6.pdfAsLink&&vv6.pdf&&vv6.pdf.b64&&!vv6.pdf.webUrl){
+        if(wkVariantLinkMode(st6,vv6)==='pdf'&&vv6.pdf&&vv6.pdf.b64&&!vv6.pdf.webUrl){
           if(spin)spin.innerHTML='<div class="mspin"></div>Uploading '+escapeHtml(vv6.pdf.name)+' to OneDrive…';
           var folderId=await emailEnsureOneDriveFolder('Weekly Newsletter '+new Date().toISOString().slice(0,10));
           var bin=atob(vv6.pdf.b64);
@@ -9786,11 +10154,21 @@ function applyWeeklyDraft(ri,opts){
       bodyEl.innerHTML=emailPlainToHtml(filled);
     }
   }
+  // \ud83d\udd17 The set's Read-the-letter button: website edition or pasted link,
+  // personal per lead where trackable. The PDF modes stay below, untouched.
+  var siteLnk='';try{siteLnk=weeklyLinkHrefFor(ri,set,w);}catch(_){}
+  if(siteLnk){
+    var beHost2=el('email-body');
+    if(beHost2&&beHost2.innerHTML.indexOf('data-nllink')===-1){
+      beHost2.innerHTML+=nlReadButtonHtml(siteLnk,true);
+    }
+  }
   if(w.pdf&&(w.pdf.b64||w.pdf.webUrl)){
-    if(set.pdfAsLink&&w.pdf.webUrl){
+    if(wkVariantLinkMode(set,w)==='pdf'&&w.pdf.webUrl){
       // Tracked-link delivery: a gold button in the body instead of an
       // attachment. The href is rewritten through /doc at send time, so
-      // every click lands as a doc-open you can see.
+      // every click lands as a doc-open you can see. This is the manual
+      // SharePoint/OneDrive path \u2014 kept exactly as it always was.
       var beHost=el('email-body');
       if(beHost&&beHost.innerHTML.indexOf('data-trkdoc')===-1){
         beHost.innerHTML+='<p style="margin-top:16px"><a data-trkdoc="1" href="'+escapeHtml(w.pdf.webUrl)+'" style="display:inline-block;padding:11px 20px;background:#C8870A;color:#ffffff;border-radius:8px;text-decoration:none;font-weight:bold;font-family:Georgia,serif">\ud83d\udcc4 '+escapeHtml(w.pdf.name.replace(/\.pdf$/i,''))+'</a></p>';
@@ -10034,7 +10412,7 @@ async function stampCommsOpen(rec){
   // Write Opened At / Opens / Doc Opens onto the ORIGINAL comms row
   if(!rec||!rec.commsRow||!tok||!fid)return;
   try{
-    var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
+    var base=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/'+encodeURIComponent(COMMS_LOG_SHEET);
     await gfetch(base+"/range(address='O"+rec.commsRow+':Q'+rec.commsRow+"')",{
       method:'PATCH',
       body:JSON.stringify({values:[[rec.openedAt?new Date(rec.openedAt).toISOString():'',rec.opens||0,rec.docOpens||0]]})
@@ -10593,7 +10971,7 @@ async function vaCreateLead(wb){
     '','',''                                // AB · AC · AD
   ];
   var ri=firstEmptyDataRow();
-  var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
+  var base=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
   var res=await gfetch(base+"/range(address='A"+(ri+1)+":AD"+(ri+1)+"')",{
     method:'PATCH',body:JSON.stringify({values:[vals]})});
   if(!res.ok)return -1;
@@ -10718,7 +11096,6 @@ async function resendFetch(op,params){
   var rc=resendCfg();
   if(!rc)throw new Error('Tracking worker URL/token missing (Settings → Data) — the Resend relay rides it');
   var body=Object.assign({token:rc.token,op:op},params||{});
-  if(/send/i.test(String(op))&&typeof nlNoteSent==='function')nlNoteSent(params);
   var r=await fetch(rc.url+'/resend?token='+encodeURIComponent(rc.token),{
     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   var j=await r.json().catch(function(){return {};});
@@ -10952,7 +11329,19 @@ function nlWarmupEmailFor(ri,forced){
     var sig=String(cfg('emailSignature')||'').trim();
     html=emailPlainToHtml(body+(sig?('\n\n'+sig):''));
   }
-  if(!isFullDesignHtml(html))html=buildNewsletterHtml(html,{noUnsub:true});
+  // 🔗 The set's Read-the-letter button (website edition / pasted link),
+  // personal per lead — same as the composer apply. typeof keeps the test
+  // slice safe; full-design HTML carries its own links, so it's left alone.
+  if(!isFullDesignHtml(html)){
+    try{
+      if(ri>=0&&typeof weeklyLinkHrefFor==='function'){
+        var setL=null;try{setL=getWeeklyDraftFor(ri);}catch(_){}
+        var lkW=weeklyLinkHrefFor(ri,setL,w);
+        if(lkW&&typeof nlReadButtonHtml==='function')html+=nlReadButtonHtml(lkW);
+      }
+    }catch(_){}
+    html=buildNewsletterHtml(html,{noUnsub:true});
+  }
   return {subj:subj,html:html,label:String(w.label||'A')};
 }
 async function nlWarmupSendBatch(progress){
@@ -11161,6 +11550,103 @@ function nlSendsAll(){
   enginesDoc.nlSends=enginesDoc.nlSends||[];
   return enginesDoc.nlSends;
 }
+// ↻ Pull the newest published letter straight from the SAME public source
+// the website's own /newsletter page reads — so an article pushed while
+// the dashboard wasn't listening (composer opened elsewhere, tab closed)
+// is one click away instead of stuck on last week.
+var NL_DOCS_BASE='https://btmyolfxgnofrowofdnm.supabase.co/rest/v1/documents'
+  +'?select=slug,title,description,kind,published_at,cover_image_url'
+  +'&status=eq.published&kind=in.(newsletter,letter,guide)&order=published_at.desc';
+var NL_DOCS_URL=NL_DOCS_BASE+'&limit=1';
+var NL_KIND_LABEL={newsletter:'Newsletter',letter:'Letter',guide:'Guide'};
+function nlMapEdition(d){
+  if(!d||!d.slug)return null;
+  var kind=String(d.kind||'newsletter');
+  // Newsletters live at /newsletter/<slug>; letters and guides at
+  // /letters/<slug> — the website's read tracker runs on BOTH paths.
+  return {slug:String(d.slug),kind:kind,
+    url:NL_SITE_ORIGIN+(kind==='newsletter'?'/newsletter/':'/letters/')+encodeURIComponent(String(d.slug)),
+    title:String(d.title||''),description:String(d.description||''),
+    cover_image_url:String(d.cover_image_url||''),published_at:String(d.published_at||'')};
+}
+// Newest first; limit 1 = the pull-latest button, limit 30 = the picker
+async function nlFetchEditions(n){
+  var r=await fetch(NL_DOCS_BASE+'&limit='+(parseInt(n,10)||30),{headers:{apikey:NL_STATUS_KEY}});
+  if(!r.ok)throw new Error('the website answered '+r.status);
+  var rows9=await r.json();
+  return (rows9||[]).map(nlMapEdition).filter(Boolean);
+}
+async function nlFetchLatestEdition(){
+  return (await nlFetchEditions(1))[0]||null;
+}
+// 🔗 The weekly "Read this week's letter" button, per the SET's link mode.
+// 'pdf' keeps the classic OneDrive/SharePoint path (handled by the pdf
+// block, untouched); 'site' is this week's website edition with a personal
+// tracked link per lead; 'custom' is any pasted url — personal + tracked
+// when it lives on our website (that's where the read data exists), used
+// exactly as pasted anywhere else.
+function nlTrackableUrl(u){
+  return /^https:\/\/(www\.)?solurahomecare\.com\//i.test(String(u||'').trim());
+}
+function nlCustomLinkForLead(ri,url){
+  url=String(url||'').trim();
+  if(!url)return '';
+  if(!nlTrackableUrl(url))return url; // elsewhere: as pasted — no read data there
+  if(ri==null||ri<0)return url;
+  var code=nlNewCode();
+  try{
+    enginesDoc.nlAdhoc=enginesDoc.nlAdhoc||{};
+    var k=leadKey(ri);
+    var L=enginesDoc.nlAdhoc[k]=enginesDoc.nlAdhoc[k]||[];
+    L.unshift({code:code,slug:url.split('?')[0].split('/').filter(Boolean).pop()||'',at:Date.now()});
+    if(L.length>5)L.length=5;
+    saveEnginesDoc().catch(function(){});
+  }catch(_){}
+  return nlPersonalLink(url,code);
+}
+// Each VARIANT (A/B/C) picks its own target; the set-level choice (and the
+// even older pdfAsLink checkbox) are the fallbacks for existing drafts.
+function wkVariantLinkMode(set,v){
+  return String((v&&v.linkMode)||(set&&set.linkMode)||((set&&set.pdfAsLink)?'pdf':'none'));
+}
+// The Read-the-letter block: a quiet, letter-like card in the brand's
+// linen-and-gold, not a bare button bolted to the bottom. Outbound copy,
+// so warm and unhurried, and no em dashes.
+function nlReadButtonHtml(href,marked){
+  return '<div'+(marked?' data-nllink="1"':'')+' style="margin-top:26px;padding:20px 22px;background:#f7f3ea;border:1px solid #e4ddcf;border-radius:12px;text-align:center;font-family:Georgia,\'Times New Roman\',serif">'
+    +'<div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#8B6500;font-weight:bold;margin-bottom:6px">This week\'s letter</div>'
+    +'<div style="font-size:14.5px;line-height:1.6;color:#3d4348;margin-bottom:14px">A few quiet minutes of reading, written for families like yours.</div>'
+    +'<a href="'+escapeHtml(String(href||''))+'" style="display:inline-block;background:#1f3d57;color:#faf8f4;text-decoration:none;font-size:16px;font-weight:bold;padding:12px 28px;border-radius:10px;border-bottom:3px solid #C59B4E">Read this week\'s letter</a>'
+    +'</div>';
+}
+function weeklyLinkHrefFor(ri,set,v){
+  var mode=wkVariantLinkMode(set,v);
+  if(mode==='site'){
+    var ed=(enginesDoc.config||{}).nlEdition;
+    return (ed&&ed.url)?nlLinkForLead(ri):''; // no edition picked = no button, never a dead link
+  }
+  if(mode==='custom')return nlCustomLinkForLead(ri,(v&&v.customUrl)||(set&&set.customUrl));
+  return ''; // 'pdf' and 'none' are the pdf block's business
+}
+// {link} in ANY email body: this lead's personal link to the CURRENT
+// edition. A fresh code per fill, recorded against the lead (last 5 per
+// lead) so reads can be matched later. No edition picked yet, or no lead
+// in context → the public letters page, never a broken token.
+function nlLinkForLead(ri){
+  var ed=(enginesDoc.config||{}).nlEdition;
+  if(!ed||!ed.url)return 'https://www.solurahomecare.com/newsletter';
+  if(ri==null||ri<0)return ed.url; // no lead context: the edition, uncoded
+  var code=nlNewCode();
+  try{
+    enginesDoc.nlAdhoc=enginesDoc.nlAdhoc||{};
+    var k=leadKey(ri);
+    var L=enginesDoc.nlAdhoc[k]=enginesDoc.nlAdhoc[k]||[];
+    L.unshift({code:code,slug:ed.slug,at:Date.now()});
+    if(L.length>5)L.length=5;
+    saveEnginesDoc().catch(function(){});
+  }catch(_){}
+  return nlPersonalLink(ed.url,code);
+}
 // Pure: one send's funnel. "Read" is the real signal; scanners that
 // prefetch links show as opens but never stay long enough to read.
 function nlHubStatsSummary(send){
@@ -11196,6 +11682,56 @@ function openNlCompose(){
   var fr=el('nlcompose-frame');
   if(fr&&!fr.src)fr.src=NL_SITE_ORIGIN+'/compose'; // loads only on first open
   el('modal-nlcompose').classList.add('open');
+}
+// The band's refresh: adopt the website's newest letter as the current
+// edition — the editor's website option then points at it, like any
+// composer handoff would have.
+// Adopting an edition (latest OR picked) is the same move as a composer
+// handoff: it becomes current, and the editor's website option follows.
+function nlHubAdoptEdition(ed){
+  var cur=(enginesDoc.config||{}).nlEdition;
+  if(cur&&cur.slug===ed.slug){toast('✓ Already current: "'+(ed.title||ed.slug)+'"');renderNlHub();return;}
+  enginesDoc.config=enginesDoc.config||{};
+  enginesDoc.config.nlEdition=Object.assign({},ed,{pickedAt:Date.now()});
+  saveEnginesDoc().catch(function(){});
+  renderNlHub();
+  toast('📰 Now current: "'+(ed.title||ed.slug)+'" — the newsletter editor\'s website option points here');
+}
+async function nlHubPullLatest(btn){
+  try{
+    if(btn)btn.textContent='…';
+    var ed=await nlFetchLatestEdition();
+    if(!ed){toast('No published letters on the website yet');return;}
+    nlHubAdoptEdition(ed);
+  }catch(e){toast('⚠ Could not reach the website: '+e.message);}
+  finally{if(btn)btn.textContent='↻ Latest from the website';}
+}
+// 📚 The picker: every published letter on the website, newest first —
+// click one and it becomes the current edition.
+var _nlPick=null;
+async function nlHubPickToggle(btn){
+  var host=el('nlhub-pick');if(!host)return;
+  if(host.innerHTML){host.innerHTML='';_nlPick=null;return;} // second click closes
+  try{
+    if(btn)btn.textContent='…';
+    _nlPick=await nlFetchEditions(30);
+    if(!_nlPick.length){host.innerHTML='<div style="color:var(--soft);font-size:12px;padding:8px 2px">No published letters on the website yet.</div>';return;}
+    var curSlug=(((enginesDoc.config||{}).nlEdition)||{}).slug;
+    host.innerHTML='<div style="border:1.5px solid var(--border);border-radius:12px;padding:6px 12px;margin-bottom:10px;max-height:300px;overflow-y:auto">'
+      +_nlPick.map(function(ed,i){
+        var when=ed.published_at?new Date(ed.published_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
+        return '<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:'+(i?'1px solid var(--border)':'none')+'">'
+          +(ed.cover_image_url?'<img src="'+escapeHtml(ed.cover_image_url)+'" alt="" style="width:52px;height:34px;object-fit:cover;border-radius:6px;flex:none">':'')
+          +'<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(ed.title||ed.slug)+'</div>'
+          +'<div style="font-size:11px;color:var(--soft)"><span style="font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#8B6500">'+escapeHtml(NL_KIND_LABEL[ed.kind]||'Letter')+'</span>'+(when?(' · '+when):'')+'</div></div>'
+          +(ed.slug===curSlug
+            ?'<span style="font-size:11px;color:var(--grn);font-weight:700;flex:none">✓ current</span>'
+            :'<button class="ee-mini" style="flex:none" data-action="nlhub-pick-use" data-idx="'+i+'">Use this one</button>')
+          +'</div>';
+      }).join('')
+      +'</div>';
+  }catch(e){host.innerHTML='<div style="color:var(--red);font-size:12px;padding:8px 2px">✗ Could not reach the website: '+escapeHtml(e.message)+'</div>';}
+  finally{if(btn)btn.textContent='📚 Choose from the website';}
 }
 var _nlHubSending=false;
 async function nlHubSend(){
@@ -11275,13 +11811,15 @@ function renderNlHub(){
   if(!edHost||!sHost)return;
   var ed=(enginesDoc.config||{}).nlEdition;
   if(!ed||!ed.url){
-    edHost.innerHTML='<div style="color:var(--soft);font-size:12px;border:1.5px dashed var(--border);border-radius:10px;padding:12px 14px">No edition yet. Open the composer, write the letter, press Publish — it lands here by itself.</div>';
+    edHost.innerHTML='<div style="color:var(--soft);font-size:12px;border:1.5px dashed var(--border);border-radius:10px;padding:12px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:200px">No edition yet. Open the composer and publish — or pull what’s already on the website.</span><button class="ee-mini" data-action="nlhub-latest">↻ Latest from the website</button><button class="ee-mini" data-action="nlhub-pick">📚 Choose from the website</button></div>';
   }else{
     var when=ed.published_at?new Date(ed.published_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
     edHost.innerHTML='<div style="border:1.5px solid var(--gold);border-radius:12px;padding:12px 14px;background:var(--gold-pale);display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
       +(ed.cover_image_url?'<img src="'+escapeHtml(ed.cover_image_url)+'" alt="" style="width:72px;height:48px;object-fit:cover;border-radius:8px;flex:none">':'')
       +'<div style="flex:1;min-width:200px"><div style="font-weight:800;font-size:13px">'+escapeHtml(ed.title||ed.slug)+'</div>'
-      +'<div style="font-size:11px;color:var(--mid)">'+(when?('Published '+when+' · '):'')+'<a href="'+escapeHtml(ed.url)+'" target="_blank" rel="noopener">view on the site ↗</a></div></div>'
+      +'<div style="font-size:11px;color:var(--mid)">'+(ed.kind?('<span style="font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#8B6500">'+escapeHtml(NL_KIND_LABEL[ed.kind]||'Letter')+'</span> · '):'')+(when?('Published '+when+' · '):'')+'<a href="'+escapeHtml(ed.url)+'" target="_blank" rel="noopener">view on the site ↗</a></div></div>'
+      +'<button class="ee-mini" data-action="nlhub-latest" title="Pull the newest published letter from the website — use this when an article was pushed without the composer open here">↻ Latest from the website</button>'
+      +'<button class="ee-mini" data-action="nlhub-pick" title="Browse every published letter on the website and pick one">📚 Choose from the website</button>'
       +'<button class="ee-mini" style="background:var(--gold-pale);border-color:var(--gold);color:#8B6500;font-weight:700" data-action="nlhub-send">📨 Send with personal links</button>'
       +'</div>';
   }
@@ -12201,7 +12739,7 @@ async function saveAddLead(){
   var exRow=ri+1;              // Excel 1-based row
   var spin=el('al-spin');if(spin)spin.style.display='inline-flex';
   try{
-    var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
+    var base=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
     var res=await gfetch(base+"/range(address='A"+exRow+":AI"+exRow+"')",{
       method:'PATCH',
       body:JSON.stringify({values:[vals]})
@@ -12359,7 +12897,7 @@ async function intakeCreateLead(sub,link){
   var vals=intakeLeadVals(sub,link,todayStr,new Date().toISOString());
   var ri=firstEmptyDataRow();
   var exRow=ri+1;
-  var base=GR+'/me/drive/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
+  var base=GR+DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
   var res=await gfetch(base+"/range(address='A"+exRow+":AI"+exRow+"')",{
     method:'PATCH',body:JSON.stringify({values:[vals]})});
   if(!res.ok){var e=await res.json().catch(function(){return{};});
@@ -14379,7 +14917,7 @@ async function refreshRowFromSheet(ri){
   if(!tok||!fid)return;
   try{
     var exRow=ri+1;
-    var r=await gfetch(GR+'/me/drive/items/'+fid+"/workbook/worksheets/Lead%20Tracker/range(address='A"+exRow+':AC'+exRow+"')?$select=values");
+    var r=await gfetch(GR+DRIVE_BASE+'/items/'+fid+"/workbook/worksheets/Lead%20Tracker/range(address='A"+exRow+':AC'+exRow+"')?$select=values");
     if(!r.ok)return;
     var j=await r.json();
     var vals=j&&j.values&&j.values[0];
@@ -15865,6 +16403,29 @@ function onClick(ev){
     case 'formdrop-refresh': loadFormDrop(); break;
     case 'inv-mode': invApplyMode(t.dataset.mode); break;
     case 'nlhub-compose': openNlCompose(); break;
+    case 'share-rescue': shareRescueConnect(); break;
+    case 'snd-pick-photo':
+      (function(){
+        var u=_shellImgList[parseInt(t.dataset.i,10)];
+        if(!u)return;
+        enginesDoc.config=enginesDoc.config||{};
+        var dPk=enginesDoc.config.senderDefault=enginesDoc.config.senderDefault||{};
+        dPk.photo=u;
+        stMarkDirty();
+        renderSenderProfile();
+        toast('📸 Marker set — employee photos now swap against this image. Hit Save.');
+      })();
+      break;
+    case 'nlhub-latest': nlHubPullLatest(t); break;
+    case 'nlhub-pick': nlHubPickToggle(t); break;
+    case 'nlhub-pick-use':
+      (function(){
+        var ed9=_nlPick&&_nlPick[parseInt(t.dataset.idx,10)];
+        if(!ed9)return;
+        nlHubAdoptEdition(ed9);
+        var ph=el('nlhub-pick');if(ph)ph.innerHTML='';_nlPick=null;
+      })();
+      break;
     case 'nlhub-send': nlHubSend(); break;
     case 'nlhub-poll':
       (function(){var i9=parseInt(t.dataset.idx,10)||0;t.textContent='…';
