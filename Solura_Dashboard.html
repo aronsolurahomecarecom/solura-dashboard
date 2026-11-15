@@ -3209,6 +3209,25 @@ function fillNames(s,names){
     try{if(typeof nlLinkForLead==='function')lk=nlLinkForLead(names.ri)||lk;}catch(_){}
     s=s.replace(/\{\{\s*link\s*\}\}/gi,lk).replace(/\{\s*link\s*\}/gi,lk);
   }
+  // Newsletter-agent emails carry {letter_link} (same personal link as {link})
+  // and {cover_image_url} (the picked edition's cover). With no cover known,
+  // the picture is dropped rather than shipped as a broken image.
+  if(/\{\{?\s*letter_link\s*\}\}?/i.test(s)){
+    var lk2='https://www.solurahomecare.com/letters';
+    try{if(typeof nlLinkForLead==='function')lk2=nlLinkForLead(names.ri)||lk2;}catch(_){}
+    s=s.replace(/\{\{\s*letter_link\s*\}\}/gi,lk2).replace(/\{\s*letter_link\s*\}/gi,lk2);
+  }
+  if(/\{\{?\s*cover_image_url\s*\}\}?/i.test(s)){
+    var cv='';
+    try{var edc=((typeof enginesDoc!=='undefined'&&enginesDoc&&enginesDoc.config)||{}).nlEdition;cv=String((edc&&edc.cover_image_url)||'').trim();}catch(_){}
+    if(cv&&/^https:\/\//i.test(cv)){
+      var cvq=cv.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+      s=s.replace(/\{\{\s*cover_image_url\s*\}\}/gi,cvq).replace(/\{\s*cover_image_url\s*\}/gi,cvq);
+    }else{
+      s=s.replace(/<a\b[^>]*>\s*<img\b[^>]*\{\{?\s*cover_image_url\s*\}\}?[^>]*>\s*<\/a>/gi,'')
+         .replace(/<img\b[^>]*\{\{?\s*cover_image_url\s*\}\}?[^>]*>/gi,'');
+    }
+  }
   s=s.replace(/\{dm\}/g,dm);
   // {ptrel} → the flip: what the patient is to the lead ("your parent",
   // "your spouse"). Ambiguous inverses fall back to "loved one".
@@ -3591,7 +3610,7 @@ var DEFAULT_ASMTSCHED_TEMPLATE=[
 '  <tr><td style="background-color:#1f3d57;padding:22px 40px;border-radius:0 0 16px 16px"><p style="margin:0;font-family:Arial,sans-serif;font-size:12px;line-height:1.9;color:#c2cfdb;text-align:center">',
 '    <span style="color:#C59B4E;font-weight:bold;letter-spacing:0.08em">SOLURA HOME CARE</span><br>',
 '    Licensed Ohio Home Care Agency, License 4574HHN<br>',
-'    815 Superior Ave E Ste 1618, Cleveland OH 44114<br>',
+'    815 Superior Ave E, Cleveland OH 44114<br>',
 '    <a href="https://www.solurahomecare.com" style="color:#64A3D1;text-decoration:none">www.solurahomecare.com</a>',
 '  </p></td></tr>',
 '</table>',
@@ -3670,7 +3689,7 @@ function buildCancelEmailHtml(prevWhen,isVirtual){
     +'<p style="margin:0 0 20px;font-family:Georgia,\'Times New Roman\',serif;font-size:17px;line-height:2;color:#3d4348">The '+(isVirtual?'video visit':'home visit')+' we had planned for <b>'+escapeHtml(prevWhen)+'</b> has been cancelled, and it is off your calendar. Nothing is needed from you.</p>'
     +'<p style="margin:0 0 26px;font-family:Georgia,\'Times New Roman\',serif;font-size:17px;line-height:2;color:#3d4348">Whenever a better time comes into view for you and {pt}, just reply to this email or call (216) 770-4886. We would be glad to set a new one.</p>'
     +'<p style="margin:0 0 30px;font-family:Georgia,\'Times New Roman\',serif;font-size:17px;color:#3d4348;font-style:italic">Warmly,<br><b style="font-style:normal;color:#1f3d57">Meir Schwimer</b><br><span style="font-family:Arial,sans-serif;font-size:12px;color:#C59B4E;font-weight:bold">Solura Home Care</span></p></td></tr>'
-    +'<tr><td style="background-color:#1f3d57;padding:18px 40px;text-align:center;font-family:Arial,sans-serif;font-size:12px;line-height:1.9;color:#c2cfdb"><span style="color:#C59B4E;font-weight:bold;letter-spacing:0.08em">SOLURA HOME CARE</span><br>815 Superior Ave E Ste 1618, Cleveland OH 44114</td></tr>'
+    +'<tr><td style="background-color:#1f3d57;padding:18px 40px;text-align:center;font-family:Arial,sans-serif;font-size:12px;line-height:1.9;color:#c2cfdb"><span style="color:#C59B4E;font-weight:bold;letter-spacing:0.08em">SOLURA HOME CARE</span><br>815 Superior Ave E, Cleveland OH 44114</td></tr>'
     +'</table></td></tr></table>';
 }
 function asmtSchedCfg(){
@@ -3975,7 +3994,7 @@ function intEmailHtml(f,isVirtual){
     +'<p style="margin:0 0 16px;font-size:15px;line-height:1.7">If the time stops working, reply here or call and we\'ll find another. Nothing is set in stone.</p>'
     +'<p style="margin:0;font-size:15px;line-height:1.7">Warmly,<br>Meir Schwimer</p>'
     +'<hr style="border:none;border-top:1px solid #C59B4E;margin:18px 0 12px">'
-    +'<p style="margin:0;font-size:12px;line-height:1.8;color:#8a8f94">Solura Home Care · (216) 770-4886 · meir@solurahomecare.com<br>License 4574HHN · 815 Superior Ave E Ste 1618, Cleveland OH 44114</p>'
+    +'<p style="margin:0;font-size:12px;line-height:1.8;color:#8a8f94">Solura Home Care · (216) 770-4886 · meir@solurahomecare.com<br>License 4574HHN · 815 Superior Ave E, Cleveland OH 44114</p>'
     +'</div></div>';
   return {subject:'Your '+(isVirtual?'video ':'')+'interview with Solura Home Care, '+invPrettyDate(f.date),html:html};
 }
@@ -9994,7 +10013,7 @@ function wkStash(){
   v.subject=ns;v.body=nb;
   // Link choice is PER VARIANT (A/B/C can each point somewhere else)
   var lm=el('wk-set-linkmode');if(lm)v.linkMode=lm.value||'none';
-  var cu=el('wk-set-customurl');if(cu)v.customUrl=String(cu.value||'').trim();
+  var cu=el('wk-set-customurl');if(cu){v.customUrl=String(cu.value||'').trim();try{var sl0=nlUrlSlug(v.customUrl);if(sl0)nlEnsureMeta(sl0).catch(function(){});}catch(_){}}
 }
 // The link-mode line under the selector says what each choice really does
 function wkLinkModeHint(){
@@ -10160,7 +10179,8 @@ function applyWeeklyDraft(ri,opts){
   if(siteLnk){
     var beHost2=el('email-body');
     if(beHost2&&beHost2.innerHTML.indexOf('data-nllink')===-1){
-      beHost2.innerHTML+=nlReadButtonHtml(siteLnk,true);
+      var meta2=null;try{meta2=weeklyLinkMetaFor(set,w);}catch(_){}
+      beHost2.innerHTML+=nlReadButtonHtml(siteLnk,true,meta2);
     }
   }
   if(w.pdf&&(w.pdf.b64||w.pdf.webUrl)){
@@ -11337,7 +11357,7 @@ function nlWarmupEmailFor(ri,forced){
       if(ri>=0&&typeof weeklyLinkHrefFor==='function'){
         var setL=null;try{setL=getWeeklyDraftFor(ri);}catch(_){}
         var lkW=weeklyLinkHrefFor(ri,setL,w);
-        if(lkW&&typeof nlReadButtonHtml==='function')html+=nlReadButtonHtml(lkW);
+        if(lkW&&typeof nlReadButtonHtml==='function'){var mtW=null;try{mtW=weeklyLinkMetaFor(setL,w);}catch(_){}html+=nlReadButtonHtml(lkW,false,mtW);}
       }
     }catch(_){}
     html=buildNewsletterHtml(html,{noUnsub:true});
@@ -11543,7 +11563,7 @@ function nlHubEmailHtml(ed,first,link){
     +'<a href="'+escapeHtml(link)+'" style="display:inline-block;background:#1f3d57;color:#faf8f4;text-decoration:none;font-size:16px;font-weight:bold;padding:13px 26px;border-radius:10px;border-bottom:3px solid #C59B4E">Read this week\'s letter</a>'
     +'<p style="font-size:12.5px;line-height:1.6;color:#8a8f94;margin:22px 0 0">This link is personal to you. Please don\'t forward it.</p>'
     +'<p style="font-size:12.5px;line-height:1.6;color:#8a8f94;margin:8px 0 0">Would you rather not get these letters? Just reply with the word stop and we will take care of it right away.</p>'
-    +'<p style="font-size:12px;line-height:1.6;color:#8a8f94;margin:14px 0 0">Solura Home Care · (216) 770-4886 · License 4574HHN<br>815 Superior Ave E Ste 1618, Cleveland OH 44114</p>'
+    +'<p style="font-size:12px;line-height:1.6;color:#8a8f94;margin:14px 0 0">Solura Home Care · (216) 770-4886 · License 4574HHN<br>815 Superior Ave E, Cleveland OH 44114</p>'
     +'</div></div>';
 }
 function nlSendsAll(){
@@ -11612,12 +11632,79 @@ function wkVariantLinkMode(set,v){
 // The Read-the-letter block: a quiet, letter-like card in the brand's
 // linen-and-gold, not a bare button bolted to the bottom. Outbound copy,
 // so warm and unhurried, and no em dashes.
-function nlReadButtonHtml(href,marked){
-  return '<div'+(marked?' data-nllink="1"':'')+' style="margin-top:26px;padding:20px 22px;background:#f7f3ea;border:1px solid #e4ddcf;border-radius:12px;text-align:center;font-family:Georgia,\'Times New Roman\',serif">'
-    +'<div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#8B6500;font-weight:bold;margin-bottom:6px">This week\'s letter</div>'
-    +'<div style="font-size:14.5px;line-height:1.6;color:#3d4348;margin-bottom:14px">A few quiet minutes of reading, written for families like yours.</div>'
-    +'<a href="'+escapeHtml(String(href||''))+'" style="display:inline-block;background:#1f3d57;color:#faf8f4;text-decoration:none;font-size:16px;font-weight:bold;padding:12px 28px;border-radius:10px;border-bottom:3px solid #C59B4E">Read this week\'s letter</a>'
+// With the piece's details (title, summary, cover picture) the card shows a
+// real preview of what they will read; without them it stays the quiet
+// text card. Labels follow the kind, so a guide is never called a letter.
+var NL_CARD_LABEL={newsletter:["This week's letter","Read this week's letter"],
+  guide:['A guide for families','Read the guide'],letter:['A letter for families','Read the letter']};
+function nlCardKind(meta,href){
+  var k=String((meta&&meta.kind)||'');
+  if(NL_CARD_LABEL[k])return k;
+  if(/\/newsletter\//i.test(String(href||'')))return 'newsletter';
+  return /\/letters\//i.test(String(href||''))?'guide':'newsletter';
+}
+function nlCardSummary(t){
+  t=String(t||'').replace(/\s+/g,' ').trim();
+  if(t.length<=220)return t;
+  var c=t.slice(0,220),sp=c.lastIndexOf(' ');
+  return (sp>140?c.slice(0,sp):c).replace(/[\s,.;:]+$/,'')+'…';
+}
+function nlReadButtonHtml(href,marked,meta){
+  meta=meta||{};
+  var h=escapeHtml(String(href||''));
+  var title=String(meta.title||'').trim(),img=String(meta.cover_image_url||'').trim();
+  var btn='display:inline-block;background:#1f3d57;color:#faf8f4;text-decoration:none;font-size:16px;font-weight:bold;padding:12px 28px;border-radius:10px;border-bottom:3px solid #C59B4E';
+  var box='margin-top:26px;padding:20px 22px;background:#f7f3ea;border:1px solid #e4ddcf;border-radius:12px;font-family:Georgia,\'Times New Roman\',serif';
+  if(!title&&!img){
+    return '<div'+(marked?' data-nllink="1"':'')+' style="'+box+';text-align:center">'
+      +'<div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#8B6500;font-weight:bold;margin-bottom:6px">This week\'s letter</div>'
+      +'<div style="font-size:14.5px;line-height:1.6;color:#3d4348;margin-bottom:14px">A few quiet minutes of reading, written for families like yours.</div>'
+      +'<a href="'+h+'" style="'+btn+'">Read this week\'s letter</a>'
+      +'</div>';
+  }
+  var L=NL_CARD_LABEL[nlCardKind(meta,href)],sum=nlCardSummary(meta.description);
+  return '<div'+(marked?' data-nllink="1"':'')+' style="'+box+';text-align:left">'
+    +(img?'<a href="'+h+'" style="text-decoration:none;border:0"><img src="'+escapeHtml(img)+'" alt="'+escapeHtml(title)+'" width="520" style="width:100%;max-width:100%;height:auto;border:0;border-radius:8px;display:block;margin:0 0 16px"></a>':'')
+    +'<div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#8B6500;font-weight:bold;margin-bottom:6px">'+escapeHtml(L[0])+'</div>'
+    +(title?'<div style="font-size:20px;line-height:1.3;color:#1f3d57;margin:0 0 8px"><a href="'+h+'" style="color:#1f3d57;text-decoration:none">'+escapeHtml(title)+'</a></div>':'')
+    +(sum?'<div style="font-size:14.5px;line-height:1.6;color:#3d4348;margin:0 0 16px">'+escapeHtml(sum)+'</div>':'<div style="height:6px"></div>')
+    +'<a href="'+h+'" style="'+btn+'">'+escapeHtml(L[1])+'</a>'
     +'</div>';
+}
+// The card's details for a set: the picked website edition, or the pasted
+// guide's details (looked up once from the website and kept in settings).
+function nlUrlSlug(u){
+  var m=String(u||'').match(/^https:\/\/(?:www\.)?solurahomecare\.com\/(?:letters|newsletter)\/([a-z0-9][a-z0-9-]{0,118})/i);
+  return m?m[1].toLowerCase():'';
+}
+function weeklyLinkMetaFor(set,v){
+  var mode=wkVariantLinkMode(set,v);
+  if(mode==='site')return (enginesDoc.config||{}).nlEdition||null;
+  if(mode==='custom'){
+    var slug=nlUrlSlug((v&&v.customUrl)||(set&&set.customUrl));
+    if(!slug)return null;
+    var c=((enginesDoc.config||{}).nlMeta||{})[slug];
+    if(!c){try{nlEnsureMeta(slug);}catch(_){}}
+    return c||null;
+  }
+  return null;
+}
+async function nlEnsureMeta(slug){
+  slug=String(slug||'').toLowerCase();
+  if(!/^[a-z0-9][a-z0-9-]{0,118}$/.test(slug))return null;
+  enginesDoc.config=enginesDoc.config||{};
+  var M=enginesDoc.config.nlMeta=enginesDoc.config.nlMeta||{};
+  if(M[slug])return M[slug];
+  var base=NL_DOCS_BASE.replace('&order=published_at.desc','');
+  var r=await fetch(base+'&slug=eq.'+encodeURIComponent(slug)+'&limit=1',{headers:{apikey:NL_STATUS_KEY}});
+  if(!r.ok)return null;
+  var d=((await r.json())||[])[0];
+  var ed=nlMapEdition(d);
+  if(!ed)return null;
+  M[slug]={title:ed.title,description:ed.description,cover_image_url:ed.cover_image_url,kind:ed.kind};
+  var ks=Object.keys(M);if(ks.length>60)delete M[ks[0]];
+  saveEnginesDoc().catch(function(){});
+  return M[slug];
 }
 function weeklyLinkHrefFor(ri,set,v){
   var mode=wkVariantLinkMode(set,v);
