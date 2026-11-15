@@ -9293,6 +9293,7 @@ function startInboundPolling(){
     schedCheckPastDue().catch(function(){}); // ⏰ confirm Exchange sent what was due
     schedSmsCheckPastDue().catch(function(){}); // 📱 confirm GHL sent what was due
     try{nlHubAutoPoll();}catch(_){} // 📰 newsletter read-status, at most every 20 min
+    try{if(typeof nlReadsPoll==='function')nlReadsPoll(false).catch(function(){});}catch(_){} // 📖 lead-email reads, at most every 20 min
   },INBOUND_POLL_MS);
 }
 function stopInboundPolling(){
@@ -11889,6 +11890,111 @@ function nlHubAutoPoll(){
   if(Date.now()-(L[0].lastPoll||0)<20*60*1000)return;
   nlHubPoll(0).catch(function(){});
 }
+/* ⚡NLREADS — BEGIN
+ * 📖 Lead reads. Every personal link a lead got from a lead email ({link},
+ * {letter_link}, the weekly A/B/C card) is saved per lead in nlAdhoc. This
+ * asks the website about those codes on the standing poll (every 20 min at
+ * most, codes up to 60 days old), keeps older Newsletter hub sends fresh
+ * (every 6 hours for 30 days), and shows each lead's opens and reads in the
+ * lead drawer. "Read" is the real signal; an open alone may be a scanner. */
+var NL_READS_POLL_MS=20*60*1000,NL_READS_MAX_AGE=60*24*3600*1000;
+var _nlReadsBusy=false;
+function nlLeadCodes(){
+  var out=[],seen={},A=(enginesDoc&&enginesDoc.nlAdhoc)||{};
+  Object.keys(A).forEach(function(k){
+    (A[k]||[]).forEach(function(x){
+      if(x&&x.code&&!seen[x.code]){seen[x.code]=1;out.push({code:x.code,slug:x.slug||'',at:x.at||0,k:k});}
+    });
+  });
+  return out;
+}
+async function nlReadsPoll(force){
+  if(_nlReadsBusy)return;
+  enginesDoc.nlReads=enginesDoc.nlReads||{};
+  var now=Date.now();
+  if(!force&&now-(enginesDoc.nlReadsPolledAt||0)<NL_READS_POLL_MS)return;
+  _nlReadsBusy=true;
+  try{
+    enginesDoc.nlReadsPolledAt=now;
+    var changed=false;
+    var codes=nlLeadCodes().filter(function(x){return now-x.at<NL_READS_MAX_AGE;}).map(function(x){return x.code;});
+    for(var i=0;i<codes.length;i+=2000){
+      var r=await fetch(NL_STATUS_URL,{method:'POST',
+        headers:{apikey:NL_STATUS_KEY,'Content-Type':'application/json'},
+        body:JSON.stringify({p_codes:codes.slice(i,i+2000)})});
+      if(!r.ok)throw new Error('status endpoint answered '+r.status);
+      ((await r.json())||[]).forEach(function(row){
+        if(!row||!row.code)return;
+        var old=enginesDoc.nlReads[row.code];
+        if(!old||old.last_open_at!==row.last_open_at||old.read_at!==row.read_at||old.seconds!==row.seconds)changed=true;
+        enginesDoc.nlReads[row.code]=row;
+      });
+    }
+    // Older hub sends (not just the newest) keep getting fresh read numbers
+    var L=nlSendsAll();
+    for(var j=1;j<L.length;j++){
+      var s=L[j];
+      if(s&&now-(s.sentAt||0)<30*864e5&&now-(s.lastPoll||0)>6*3600e3){try{await nlHubPoll(j);}catch(_){}}
+    }
+    if(changed){
+      saveEnginesDoc().catch(function(){});
+      try{nlReadsRefreshDrawer();}catch(_){}
+    }
+  }finally{_nlReadsBusy=false;}
+}
+// Everything this lead opened or read: lead-email links and hub sends, newest first
+function nlLeadReads(ri){
+  var k=leadKey(ri),out=[],seen={},R=(enginesDoc&&enginesDoc.nlReads)||{};
+  ((enginesDoc.nlAdhoc||{})[k]||[]).forEach(function(x){
+    var st=R[x.code];
+    if(st&&!seen[x.code]){seen[x.code]=1;out.push({code:x.code,slug:st.slug||x.slug,st:st});}
+  });
+  nlSendsAll().forEach(function(s){
+    (s.recipients||[]).forEach(function(rp){
+      var st=(s.stats||{})[rp.code];
+      if(rp.k===k&&st&&!seen[rp.code]){seen[rp.code]=1;out.push({code:rp.code,slug:st.slug||s.slug,title:s.title,st:st});}
+    });
+  });
+  return out.sort(function(a,b){
+    return Date.parse(b.st.last_open_at||b.st.first_open_at||0)-Date.parse(a.st.last_open_at||a.st.first_open_at||0);
+  });
+}
+function nlTitleForSlug(slug,fallback){
+  if(fallback)return fallback;
+  var cfg=(enginesDoc&&enginesDoc.config)||{},M=cfg.nlMeta||{},ed=cfg.nlEdition||{};
+  if(M[slug]&&M[slug].title)return M[slug].title;
+  if(ed.slug===slug&&ed.title)return ed.title;
+  var L=nlSendsAll();for(var i=0;i<L.length;i++){if(L[i].slug===slug&&L[i].title)return L[i].title;}
+  var t=String(slug||'').replace(/-\d{8}$/,'').replace(/-/g,' ');
+  return t.charAt(0).toUpperCase()+t.slice(1);
+}
+function renderLeadReadsFor(ri){
+  var L=nlLeadReads(ri);
+  var hasLinks=((enginesDoc.nlAdhoc||{})[leadKey(ri)]||[]).length>0;
+  if(!L.length&&!hasLinks)return '<div id="nl-reads-'+ri+'"></div>';
+  var reads=L.filter(function(x){return x.st.read_at;}).length;
+  var items=L.slice(0,6).map(function(x){
+    var st=x.st,isRead=!!st.read_at;
+    var when=new Date(st.read_at||st.last_open_at||st.first_open_at);
+    var whenStr=isNaN(when)?'':when.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+when.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    var badge=isRead
+      ?'<span style="color:var(--grn);font-weight:700;font-size:10.5px">✓ Read</span> <span style="color:var(--soft);font-size:10.5px">'+nlHubFmtSecs(st.seconds)+' · '+Math.round(st.max_scroll||0)+'% of the page'+(st.opens>1?' · opened ×'+st.opens:'')+'</span>'
+      :'<span style="color:var(--soft);font-size:10.5px">opened, not read yet (could be a link scanner)</span>';
+    return '<div class="activity-item" style="border-left-color:'+(isRead?'var(--grn)':'var(--border)')+'">'
+      +'<div class="subj">'+escapeHtml(nlTitleForSlug(x.slug,x.title))+'</div>'
+      +'<div class="meta">'+escapeHtml(whenStr)+' · '+badge+'</div></div>';
+  }).join('');
+  return '<div id="nl-reads-'+ri+'" class="activity-section" style="background:#FBF8F1;border-color:#EADFC8">'
+    +'<div class="activity-hdr" style="color:#8B6500">📖 Guides they read'+(reads?' <span class="count" style="background:#C59B4E">'+reads+'</span>':'')+'</div>'
+    +(items||'<div class="activity-empty">No opens yet on the guide links sent to them.</div>')
+    +'</div>';
+}
+function nlReadsRefreshDrawer(){
+  if(typeof drawerRi!=='number'||drawerRi<0)return;
+  var host=document.getElementById('nl-reads-'+drawerRi);
+  if(host)host.outerHTML=renderLeadReadsFor(drawerRi);
+}
+/* ⚡NLREADS — END */
 function nlHubFmtSecs(s){
   s=Math.round(parseFloat(s)||0);
   return s<60?(s+'s'):(Math.floor(s/60)+'m '+(s%60)+'s');
@@ -14955,7 +15061,9 @@ function openDrawer(ri){
     +'<button class="ee-mini" data-action="open-intake" data-ri="'+ri+'">📋 Intake Q&amp;A</button>'
     +'<button class="ee-mini" data-action="open-restart" data-ri="'+ri+'">⟳ Restart sequence</button>'
     +'</div>';
-  el('d-body').innerHTML=actionsRow+inboundHtml+sentHtml+activityHtml+fieldsHtml;
+  var readsHtml='';try{if(typeof renderLeadReadsFor==='function')readsHtml=renderLeadReadsFor(ri);}catch(_){}
+  el('d-body').innerHTML=actionsRow+inboundHtml+sentHtml+readsHtml+activityHtml+fieldsHtml;
+  try{if(typeof nlReadsPoll==='function')nlReadsPoll(false).catch(function(){});}catch(_){}
   el('drawer').classList.add('open');
   el('doverlay').classList.add('open');
   // Restore the email fold if it was open before this re-render (cached, instant)
