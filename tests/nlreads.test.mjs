@@ -55,7 +55,7 @@ ok(h.includes('>1</span>'), 'count shows reads, not opens');
 ok(N.renderLeadReadsFor(9) === '<div id="nl-reads-9"></div>', 'no links sent: empty placeholder only');
 ok(N.renderLeadReadsFor(8).includes('No opens yet'), 'links sent but none opened: quiet note');
 ok(N.nlTitleForSlug('care-at-home-20261112') === 'Care at home', 'date suffix trimmed from slug titles');
-ok(html.includes("readsHtml=renderLeadReadsFor(ri)") && html.includes("sentHtml+readsHtml+activityHtml"), 'drawer includes the section');
+ok(html.includes("sentHtml+activityHtml") && !html.includes('readsHtml'), 'no separate guides section: doc counts live on each email line');
 ok(html.includes("nlReadsPoll(false).catch(function(){});}catch(_){} // 📖"), 'standing poll checks reads');
 ok(html.includes("nlReadsPollLead(ri).catch(function(){})"), 'opening a lead checks that lead right away');
 ok(!html.includes('nlReadsPolledAt'), 'throttle is per browser tab, not shared through settings');
@@ -66,5 +66,28 @@ await N.nlReadsPollLead(7);
 ok(sentBodies.length === before + 1, 'lead check waits 30 seconds before asking again');
 await N.nlReadsPollLead(9);
 ok(sentBodies.length === before + 1, 'lead with no links: no request');
+// ── 📄 doc counts on each email line ──
+{
+  const b = html.indexOf('// 📄 Personal guide links'), e = html.indexOf('var _trkSelfInfo=');
+  const rsrc = html.slice(b, e);
+  const R = new Function('escapeHtml', 'trackDocUrl', rsrc + '\nreturn {rewriteTrackedDocAnchors};')(esc, (u, m) => 'https://trk.example/doc?u=' + encodeURIComponent(u) + '&i=' + m.i);
+  const card = '<a href="https://www.solurahomecare.com/letters/home-safety?r=abcdefghij12" style="x">Read</a> <a href="https://cal.com/x">Book</a> <a data-trkdoc="1" href="https://onedrive/x.pdf">PDF</a>';
+  const out = R.rewriteTrackedDocAnchors(card, { i: 'm1' });
+  ok(out.includes('trk.example/doc?u=' + encodeURIComponent('https://www.solurahomecare.com/letters/home-safety?r=abcdefghij12')), 'guide link goes through the doc tracker');
+  ok(out.includes('href="https://cal.com/x"'), 'other links untouched');
+  ok(out.includes(encodeURIComponent('https://onedrive/x.pdf')), 'PDF doc links still tracked');
+  ok(R.rewriteTrackedDocAnchors('<a href="https://www.solurahomecare.com/letters/home-safety">x</a>', { i: 'm1' }).includes('href="https://www.solurahomecare.com/letters/home-safety"'), 'public link without a personal code stays as is');
+}
+{
+  enginesDoc.nlAdhoc.L1[0].sid = undefined;
+  const T = new Function('enginesDoc', 'leadKey', 'saveEnginesDoc', html.slice(html.indexOf('function nlTagCodesWithSend('), html.indexOf('/* ⚡NLREADS — END */')) + '\nreturn {nlTagCodesWithSend,nlDocForSend};')(enginesDoc, ri => (ri === 7 ? 'L1' : 'L3'), () => Promise.resolve());
+  const n = T.nlTagCodesWithSend('<a href="https://www.solurahomecare.com/letters/home-safety?s=card&amp;r=aaaaaaaaaaa1">x</a>', 'mSEND', 7);
+  ok(n === 1 && enginesDoc.nlAdhoc.L1[0].sid === 'mSEND', 'the code in the email is stamped with that email');
+  const d = T.nlDocForSend(7, { id: 'mSEND', ts: now }, []);
+  ok(d && d.opens === 2 && d.read && d.scroll === 82, 'stamped email shows doc opens and the read');
+  const later = T.nlDocForSend(7, { id: 'mOTHER', ts: now - 2 * 864e5 + 60000 }, [{ ts: now - 3 * 864e5 }]);
+  ok(later && later.opens === 1 && !later.read, 'older email without a stamp matches the code made just before it');
+  ok(T.nlDocForSend(7, { id: 'mX', ts: now - 20 * 864e5 }, []) === null, 'no guide in that email: no doc badge');
+}
 console.log('\nLead reads: ' + PASS + ' passed, ' + FAIL + ' failed');
 if (FAIL) process.exit(1);
