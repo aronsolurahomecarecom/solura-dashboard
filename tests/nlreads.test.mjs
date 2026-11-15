@@ -31,7 +31,7 @@ const fetchStub = async (url, opt) => {
   ] };
 };
 const N = new Function('enginesDoc', 'escapeHtml', 'leadKey', 'nlSendsAll', 'nlHubPoll', 'nlHubFmtSecs', 'saveEnginesDoc', 'fetch', 'NL_STATUS_URL', 'NL_STATUS_KEY', 'document', 'drawerRi',
-  src + '\nreturn {nlLeadCodes,nlReadsPoll,nlLeadReads,renderLeadReadsFor,nlTitleForSlug};')(
+  src + '\nreturn {nlLeadCodes,nlReadsPoll,nlReadsPollLead,nlLeadReads,renderLeadReadsFor,nlTitleForSlug};')(
   enginesDoc, esc, ri => (ri === 7 ? 'L1' : ri === 8 ? 'L2' : 'L3'), () => sends, async () => {}, s => Math.round(s) + 's',
   () => { saved++; return Promise.resolve(); }, fetchStub, 'U', 'K', { getElementById: () => null }, drawerRi);
 
@@ -57,5 +57,14 @@ ok(N.renderLeadReadsFor(8).includes('No opens yet'), 'links sent but none opened
 ok(N.nlTitleForSlug('care-at-home-20261112') === 'Care at home', 'date suffix trimmed from slug titles');
 ok(html.includes("readsHtml=renderLeadReadsFor(ri)") && html.includes("sentHtml+readsHtml+activityHtml"), 'drawer includes the section');
 ok(html.includes("nlReadsPoll(false).catch(function(){});}catch(_){} // 📖"), 'standing poll checks reads');
+ok(html.includes("nlReadsPollLead(ri).catch(function(){})"), 'opening a lead checks that lead right away');
+ok(!html.includes('nlReadsPolledAt'), 'throttle is per browser tab, not shared through settings');
+const before = sentBodies.length;
+await N.nlReadsPollLead(7);
+ok(sentBodies.length === before + 1 && sentBodies[sentBodies.length - 1].p_codes.length === 3, 'lead check asks only about that lead\'s codes');
+await N.nlReadsPollLead(7);
+ok(sentBodies.length === before + 1, 'lead check waits 30 seconds before asking again');
+await N.nlReadsPollLead(9);
+ok(sentBodies.length === before + 1, 'lead with no links: no request');
 console.log('\nLead reads: ' + PASS + ' passed, ' + FAIL + ' failed');
 if (FAIL) process.exit(1);
