@@ -9293,7 +9293,7 @@ function startInboundPolling(){
     schedCheckPastDue().catch(function(){}); // ⏰ confirm Exchange sent what was due
     schedSmsCheckPastDue().catch(function(){}); // 📱 confirm GHL sent what was due
     try{nlHubAutoPoll();}catch(_){} // 📰 newsletter read-status, at most every 20 min
-    try{if(typeof nlReadsPoll==='function')nlReadsPoll(false).catch(function(){});}catch(_){} // 📖 lead-email reads, at most every 20 min
+    try{if(typeof nlReadsPoll==='function')nlReadsPoll(false).catch(function(){});}catch(_){} // 📖 lead-email reads, at most every 5 min
   },INBOUND_POLL_MS);
 }
 function stopInboundPolling(){
@@ -11897,8 +11897,44 @@ function nlHubAutoPoll(){
  * most, codes up to 60 days old), keeps older Newsletter hub sends fresh
  * (every 6 hours for 30 days), and shows each lead's opens and reads in the
  * lead drawer. "Read" is the real signal; an open alone may be a scanner. */
-var NL_READS_POLL_MS=20*60*1000,NL_READS_MAX_AGE=60*24*3600*1000;
-var _nlReadsBusy=false;
+var NL_READS_POLL_MS=5*60*1000,NL_READS_MAX_AGE=60*24*3600*1000,NL_READS_LEAD_MS=30*1000;
+// Throttles live in memory, per browser tab: another tab's poll never makes this one wait.
+var _nlReadsBusy=false,_nlReadsLastAt=0,_nlReadsLeadAt={};
+// Store rows from the website; true when anything a person would see changed
+function nlReadsStore(list){
+  enginesDoc.nlReads=enginesDoc.nlReads||{};
+  var changed=false;
+  (list||[]).forEach(function(row){
+    if(!row||!row.code)return;
+    var old=enginesDoc.nlReads[row.code];
+    if(!old||old.last_open_at!==row.last_open_at||old.read_at!==row.read_at||old.seconds!==row.seconds||old.max_scroll!==row.max_scroll||old.opens!==row.opens)changed=true;
+    enginesDoc.nlReads[row.code]=row;
+  });
+  return changed;
+}
+async function nlReadsFetch(codes){
+  var out=[];
+  for(var i=0;i<codes.length;i+=2000){
+    var r=await fetch(NL_STATUS_URL,{method:'POST',
+      headers:{apikey:NL_STATUS_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({p_codes:codes.slice(i,i+2000)})});
+    if(!r.ok)throw new Error('status endpoint answered '+r.status);
+    out=out.concat((await r.json())||[]);
+  }
+  return out;
+}
+// Opening a lead checks that lead's links right away (at most every 30 seconds)
+async function nlReadsPollLead(ri){
+  var k=leadKey(ri),now=Date.now();
+  if(now-(_nlReadsLeadAt[k]||0)<NL_READS_LEAD_MS)return;
+  _nlReadsLeadAt[k]=now;
+  var codes=((enginesDoc.nlAdhoc||{})[k]||[]).filter(function(x){return x&&x.code&&now-(x.at||0)<NL_READS_MAX_AGE;}).map(function(x){return x.code;});
+  if(!codes.length)return;
+  if(nlReadsStore(await nlReadsFetch(codes))){
+    saveEnginesDoc().catch(function(){});
+    try{nlReadsRefreshDrawer();}catch(_){}
+  }
+}
 function nlLeadCodes(){
   var out=[],seen={},A=(enginesDoc&&enginesDoc.nlAdhoc)||{};
   Object.keys(A).forEach(function(k){
@@ -11912,24 +11948,12 @@ async function nlReadsPoll(force){
   if(_nlReadsBusy)return;
   enginesDoc.nlReads=enginesDoc.nlReads||{};
   var now=Date.now();
-  if(!force&&now-(enginesDoc.nlReadsPolledAt||0)<NL_READS_POLL_MS)return;
+  if(!force&&now-_nlReadsLastAt<NL_READS_POLL_MS)return;
   _nlReadsBusy=true;
   try{
-    enginesDoc.nlReadsPolledAt=now;
-    var changed=false;
+    _nlReadsLastAt=now;
     var codes=nlLeadCodes().filter(function(x){return now-x.at<NL_READS_MAX_AGE;}).map(function(x){return x.code;});
-    for(var i=0;i<codes.length;i+=2000){
-      var r=await fetch(NL_STATUS_URL,{method:'POST',
-        headers:{apikey:NL_STATUS_KEY,'Content-Type':'application/json'},
-        body:JSON.stringify({p_codes:codes.slice(i,i+2000)})});
-      if(!r.ok)throw new Error('status endpoint answered '+r.status);
-      ((await r.json())||[]).forEach(function(row){
-        if(!row||!row.code)return;
-        var old=enginesDoc.nlReads[row.code];
-        if(!old||old.last_open_at!==row.last_open_at||old.read_at!==row.read_at||old.seconds!==row.seconds)changed=true;
-        enginesDoc.nlReads[row.code]=row;
-      });
-    }
+    var changed=codes.length?nlReadsStore(await nlReadsFetch(codes)):false;
     // Older hub sends (not just the newest) keep getting fresh read numbers
     var L=nlSendsAll();
     for(var j=1;j<L.length;j++){
@@ -15063,7 +15087,7 @@ function openDrawer(ri){
     +'</div>';
   var readsHtml='';try{if(typeof renderLeadReadsFor==='function')readsHtml=renderLeadReadsFor(ri);}catch(_){}
   el('d-body').innerHTML=actionsRow+inboundHtml+sentHtml+readsHtml+activityHtml+fieldsHtml;
-  try{if(typeof nlReadsPoll==='function')nlReadsPoll(false).catch(function(){});}catch(_){}
+  try{if(typeof nlReadsPollLead==='function')nlReadsPollLead(ri).catch(function(){});}catch(_){}
   el('drawer').classList.add('open');
   el('doverlay').classList.add('open');
   // Restore the email fold if it was open before this re-render (cached, instant)
