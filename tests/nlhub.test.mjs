@@ -52,7 +52,7 @@ const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => '
   ok(em.indexOf("Read this week's letter") > -1, 'the one button says what the spec says');
   ok(em.indexOf("This link is personal to you. Please don't forward it.") > -1, 'the personal-link footer line');
   ok(/reply with the word stop/.test(em), 'the way out is one reply (the dashboard already flags opt-out language)');
-  ok(em.indexOf('815 Superior Ave E Ste 1618') > -1 && em.indexOf('License 4574HHN') > -1, 'the brand contact block closes it');
+  ok(em.indexOf('815 Superior Ave E, Cleveland') > -1 && em.indexOf('License 4574HHN') > -1, 'the brand contact block closes it');
   ok(em.indexOf('—') === -1, 'no em dashes anywhere in outbound copy (brand rule)');
   const hostile = N.nlHubEmailHtml({ title: '<script>x</script>', description: '<b>y</b>' }, '<i>z</i>', link);
   ok(hostile.indexOf('<script>x</script>') === -1 && hostile.indexOf('<b>y</b>') === -1 && hostile.indexOf('<i>z</i>') === -1, 'edition fields and names are escaped');
@@ -130,12 +130,12 @@ const N = mk(esc, enginesDoc, (await import('node:crypto')).webcrypto, (ri) => '
   // Wiring: editor control, both send paths, and the untouched pdf branch
   ok(/id="wk-set-linkmode"/.test(html) && /id="wk-set-customurl"/.test(html), 'the editor has the link-mode selector + the paste-a-link field');
   ok(/THIS variant's "Read this week's letter" button/.test(html), 'the control sits with the A/B/C variant, not the set');
-  ok(/if\(lm\)v\.linkMode=lm\.value\|\|'none';/.test(html) && /if\(cu\)v\.customUrl=String\(cu\.value\|\|''\)\.trim\(\);/.test(html), 'the choice saves onto the VARIANT');
+  ok(/if\(lm\)v\.linkMode=lm\.value\|\|'none';/.test(html) && /if\(cu\)\{v\.customUrl=String\(cu\.value\|\|''\)\.trim\(\);/.test(html), 'the choice saves onto the VARIANT');
   ok(/lm2\.value=wkVariantLinkMode\(set,v\);/.test(html), 'switching A/B/C tabs shows that variant\'s own choice');
   ok(/wkVariantLinkMode\(st6,vv6\)==='pdf'&&vv6\.pdf/.test(html), 'the save-time OneDrive upload keys off the per-variant mode');
   ok(/wkVariantLinkMode\(set,w\)==='pdf'&&w\.pdf\.webUrl/.test(html), 'so does the SharePoint button branch');
-  ok(/siteLnk=weeklyLinkHrefFor\(ri,set,w\);/.test(html) && /nlReadButtonHtml\(siteLnk,true\)/.test(html), 'the composer apply adds the per-lead card for site/custom variants');
-  ok(/typeof weeklyLinkHrefFor==='function'/.test(html) && /lkW=weeklyLinkHrefFor\(ri,setL,w\);/.test(html) && /nlReadButtonHtml\(lkW\)/.test(html), 'the automated warm-up / A-B sends pass the VARIANT and use the same card (slice-safe)');
+  ok(/siteLnk=weeklyLinkHrefFor\(ri,set,w\);/.test(html) && /nlReadButtonHtml\(siteLnk,true,meta2\)/.test(html), 'the composer apply adds the per-lead card for site/custom variants');
+  ok(/typeof weeklyLinkHrefFor==='function'/.test(html) && /lkW=weeklyLinkHrefFor\(ri,setL,w\);/.test(html) && /nlReadButtonHtml\(lkW,false,mtW\)/.test(html), 'the automated warm-up / A-B sends pass the VARIANT and use the same card (slice-safe)');
 
   // The card itself: letter-like, branded, escaped, no em dashes
   const card = N.nlReadButtonHtml('https://www.solurahomecare.com/newsletter/week-42?r=abc123def456', true);

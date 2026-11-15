@@ -37,7 +37,7 @@ ok(I.interviews() === enginesDoc.interviews && typeof I.interviews() === 'object
   ok(/Friday, October 17 at 2:00 PM/.test(em.html) && /Rose&#39;s home on Lee Rd|Rose's home on Lee Rd/.test(em.html.replace(/&#?\w+;/g, "'")), 'when + where ride the card');
   ok(/Ask us anything about overnight care/.test(em.html), 'notes ride the card');
   ok(/No forms and no commitments/.test(em.html), 'no-pressure promise, per the brand');
-  ok(/Warmly,<br>Meir Schwimer/.test(em.html) && /License 4574HHN/.test(em.html) && /815 Superior Ave E Ste 1618/.test(em.html) && /\(216\) 770-4886/.test(em.html), 'signature + contact block correct');
+  ok(/Warmly,<br>Meir Schwimer/.test(em.html) && /License 4574HHN/.test(em.html) && /815 Superior Ave E, Cleveland/.test(em.html) && /\(216\) 770-4886/.test(em.html), 'signature + contact block correct');
   ok(/#f5f0e8/.test(em.html) && /#faf8f4/.test(em.html) && /#C59B4E/.test(em.html) && /Georgia/.test(em.html), 'linen/cream/gold Georgia brand shell');
   ok(em.html.indexOf('—') === -1 && em.subject.indexOf('—') === -1, 'no em dashes in outbound copy');
   const noNotes = I.intEmailHtml({ date: '2026-10-17', time: '14:00', location: 'x', notes: '' }, false);

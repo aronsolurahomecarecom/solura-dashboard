@@ -58,7 +58,7 @@ ok(dflt.indexOf('{dm}') > -1 && dflt.indexOf('{pt}') > -1, 'name tokens survive 
   ok(T.indexOf('solurahomecare.com/wp-content/uploads/2026/01/Solura.png') > -1, 'current logo URL (not the old GitHub one)');
   ok(T.indexOf('meir.jpg') > -1 && T.indexOf('&bull; &bull; &bull;') > -1, 'signature photo + gold dot divider');
   ok(T.indexOf('line-height:2') > -1 && T.indexOf('Georgia') > -1, 'Georgia at double line-height, reads like a letter');
-  ok(T.indexOf('License 4574HHN') > -1 && T.indexOf('815 Superior Ave E Ste 1618') > -1 && T.indexOf('www.solurahomecare.com') > -1, 'navy footer: license, address (never service areas), website');
+  ok(T.indexOf('License 4574HHN') > -1 && T.indexOf('815 Superior Ave E, Cleveland') > -1 && T.indexOf('www.solurahomecare.com') > -1, 'navy footer: license, address (never service areas), website');
   ok(T.indexOf('—') === -1 && T.indexOf('—') === -1, 'NO em dashes anywhere in the copy (hard brand rule)');
   ok(!/limited|act now|hurry|spots/i.test(T), 'no urgency or scarcity language');
   ok(T.indexOf('reply to this email or call (216) 770-4886') > -1, 'soft reply-or-call close, no sales CTA');
@@ -250,7 +250,7 @@ ok(/data-action="open-asmt-sched" data-ri="'\+ri\+'" title="Reschedule the asses
   ok(canc.ics.indexOf('VALARM') === -1, 'no reminder alarm on a cancellation');
   const note = A.buildCancelEmailHtml('Oct 8, 2026 at 11:00 AM', true);
   ok(note.indexOf('video visit') > -1 && note.indexOf('Oct 8, 2026 at 11:00 AM') > -1, 'cancellation note names the visit type and the old time');
-  ok(note.indexOf('Meir Schwimer') > -1 && note.indexOf('815 Superior Ave E Ste 1618') > -1, 'signed Meir Schwimer, footer carries the address');
+  ok(note.indexOf('Meir Schwimer') > -1 && note.indexOf('815 Superior Ave E, Cleveland') > -1, 'signed Meir Schwimer, footer carries the address');
   ok(note.indexOf('—') === -1 && !/hurry|urgent|last chance/i.test(note), 'no em dashes, no pressure — door left open warmly');
   ok(A.buildCancelEmailHtml('X', false).indexOf('home visit') > -1, 'in-person cancellations say home visit');
   const cv = html.slice(html.indexOf('async function asCancel'), html.indexOf('async function asSave'));

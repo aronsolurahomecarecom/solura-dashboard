@@ -119,7 +119,7 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 â€
   ok(/expandWorker\(qs\.get\('w'\)\)\|\|WORKER_DEFAULT/.test(form), 'URL w wins, baked default is the fallback');
   ok(/if\(!phone&&!email\)return;/.test(form) && /if\(!name\)return;/.test(form), 'client-side gate backstops the worker gate');
   ok(/if\(!first\)/.test(form) && /if\(!n\)\{setErr\('e-phone',MISSING_PHONE\)/.test(form) && /n<10/.test(form), 'design validation: first name + 10-digit phone, errors clear on typing');
-  ok(/\(216\) 770-4886/.test(form) && /License 4574HHN/.test(form) && /815 Superior Ave E Ste 1618/.test(form), 'brand contact block present');
+  ok(/\(216\) 770-4886/.test(form) && /License 4574HHN/.test(form) && /815 Superior Ave E, Cleveland/.test(form), 'brand contact block present');
   ok(form.indexOf('â€”') === -1, 'no em dashes anywhere in the outbound-facing form');
   ok(/name="robots" content="noindex"/.test(form), 'form stays out of search engines');
   // The board design's substance

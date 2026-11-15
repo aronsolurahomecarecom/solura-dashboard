@@ -1,0 +1,30 @@
+// 🖼 Newsletter-agent emails: {letter_link} becomes the lead's personal link and {cover_image_url} the edition's cover;
+// with no cover known the picture is removed instead of shipping a broken image.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+const here = dirname(fileURLToPath(import.meta.url));
+const html = readFileSync(join(here, '..', 'Solura_Dashboard.html'), 'utf8');
+let PASS = 0, FAIL = 0;
+const ok = (c, n) => { if (c) PASS++; else { FAIL++; console.error('  ✗ FAIL: ' + n); } };
+const a = html.indexOf('function fillNames(s,names){');
+let depth = 0, i = html.indexOf('{', a), z = i;
+for (; z < html.length; z++) { if (html[z] === '{') depth++; else if (html[z] === '}') { depth--; if (!depth) break; } }
+const src = html.slice(a, z + 1);
+const enginesDoc = { config: {} };
+const mk = () => new Function('enginesDoc', 'nlLinkForLead', 'inverseRel', src + '\nreturn fillNames;')(enginesDoc, ri => 'https://www.solurahomecare.com/letters/g?r=code' + ri, () => 'parent');
+const fill = mk();
+const tpl = '<p>Hi {dm},</p><a href="{letter_link}" style="x"><img src="{cover_image_url}" width="474" alt="A"></a><a href="{letter_link}">Open the guide</a>';
+enginesDoc.config.nlEdition = { cover_image_url: 'https://btmyolfxgnofrowofdnm.supabase.co/storage/v1/object/public/images/covers/c.jpg', url: 'u' };
+const out = fill(tpl, { dm: 'Ann', ri: 3 });
+ok(out.includes('Hi Ann,'), 'name filled');
+ok((out.match(/href="https:\/\/www\.solurahomecare\.com\/letters\/g\?r=code3"/g) || []).length === 2, 'both {letter_link} become the personal link');
+ok(out.includes('src="https://btmyolfxgnofrowofdnm.supabase.co/storage/v1/object/public/images/covers/c.jpg"'), 'cover filled');
+ok(!/\{(letter_link|cover_image_url)\}/.test(out), 'no tokens left');
+enginesDoc.config.nlEdition = { url: 'u' };
+const out2 = fill(tpl, { dm: 'Ann', ri: 3 });
+ok(!out2.includes('<img') && !out2.includes('{cover_image_url}') && out2.includes('Open the guide'), 'no cover known: picture removed, rest kept');
+enginesDoc.config.nlEdition = { cover_image_url: 'javascript:alert(1)' };
+ok(!fill(tpl, { dm: 'A', ri: 1 }).includes('javascript:'), 'only https covers are used');
+console.log('\nNewsletter cover and link tokens: ' + PASS + ' passed, ' + FAIL + ' failed');
+process.exit(FAIL ? 1 : 0);
