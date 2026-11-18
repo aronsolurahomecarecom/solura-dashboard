@@ -220,6 +220,8 @@
       <fieldset>
         <legend style="font-size:18px">Any health conditions we should know about?<span class="opt">optional</span><span class="opt2">Choose any that apply, or skip this and tell us on the phone.</span></legend>
         <div class="chips" id="g-cond"></div>
+        <div class="chips" id="g-cond-more" hidden style="margin-top:12px"></div>
+        <button type="button" class="backbtn" id="btn-condmore" aria-expanded="false" style="margin-top:10px">More conditions</button>
       </fieldset>
       <fieldset>
         <legend style="font-size:18px">Best time to reach you<span class="opt">optional</span></legend>
@@ -405,7 +407,13 @@
   // Values are the PORTAL's condition keys: they land in the same
   // mentioned_conditions column the dashboard's picker writes, feed the
   // conditions engine, and later drive the assessment questions.
-  var CONDS=[['dementia',"Dementia or Alzheimer's"],['parkinsons',"Parkinson's disease"],['stroke','Stroke recovery'],['chf','A heart condition'],['copd','COPD or breathing issues'],['diabetes','Diabetes'],['arthritis','Arthritis or joint pain'],['postsurg','Recovering from surgery'],['fall','Falls or fall risk'],['cancer','Cancer care']];
+  // Same keys and lists as the dashboard's condition picker (ASMT_COMMON_CONDITIONS
+  // first, ASMT_OTHER_CONDITIONS behind "More conditions"). 'fall' is not a
+  // condition in the dashboard (falls are an assessment concern), so it rides
+  // in the readable labels only, never in the keys column.
+  var CONDS=[['dementia',"Dementia or Alzheimer's"],['parkinsons',"Parkinson's disease"],['stroke','Stroke or stroke recovery'],['chf','Heart disease or heart failure'],['copd','COPD or breathing problems'],['diabetes','Diabetes'],['arthritis','Arthritis or joint pain'],['hypertension','High blood pressure'],['cancer','Cancer, current or in remission'],['kidney','Kidney disease'],['postsurg','Recovering from surgery'],['fall','Falls or fall risk'],['vision','Vision loss'],['hearing','Hearing loss'],['depression','Depression or anxiety']];
+  var CONDS_MORE=[['ms','Multiple sclerosis (MS)'],['als','ALS'],['huntington',"Huntington's disease"],['lupus','Lupus'],['crohns',"Crohn's or IBD"],['epilepsy','Epilepsy or seizures'],['tbi','Brain injury'],['chronic_pain','Chronic pain'],['liver','Liver disease'],['thyroid','Thyroid condition'],['osteoporosis','Osteoporosis'],['gerd','Acid reflux or stomach problems'],['anemia','Anemia or a blood disorder'],['wound','A wound or pressure sore that is slow to heal'],['amputation','Amputation'],['tracheostomy','Tracheostomy or ventilator'],['feeding_tube','Feeding tube'],['catheter','Catheter'],['sub_use','Substance use']];
+  var COND_LABEL_ONLY={fall:1};
   var MISSING_PHONE='Please add a phone number so we can reach you.';
   var SHORT_PHONE='That number looks a little short. Please check that it has all 10 digits.';
 
@@ -458,6 +466,15 @@
       host.appendChild(b);
     });
   }
+  // the less common conditions stay folded away unless opened or one of them is picked
+  var condMoreOpen=false;
+  function condMoreSync(){
+    var host=el('g-cond-more'),btn=el('btn-condmore');if(!host||!btn)return;
+    var picked=CONDS_MORE.some(function(c){return st.conds.indexOf(c[0])>-1;});
+    host.hidden=!(condMoreOpen||picked);
+    btn.textContent=condMoreOpen?'Show fewer':'More conditions';
+    btn.setAttribute('aria-expanded',condMoreOpen?'true':'false');
+  }
   function renderAll(){
     renderGroup('g-recipient',RECIP,'recipient',false,false,{errId:'e-recipient',onPick:function(v){
       if(v==='Client/Patient'){st.cameFrom=cur;show('referral');}
@@ -470,6 +487,8 @@
     renderGroup('g-payment',PAY,'payment',false,false,{});
     renderGroup('g-best',TIMES,'best',false,true,{});
     renderGroup('g-cond',CONDS,'conds',true,true,{});
+    renderGroup('g-cond-more',CONDS_MORE,'conds',true,true,{onPick:condMoreSync});
+    condMoreSync();
     renderGroup('g-refneeds',NEEDS,'refNeeds',true,true,{});
   }
 
@@ -498,6 +517,7 @@
   }
 
   el('btn-back').addEventListener('click',function(){show(cur==='step3'?'step2':'step1');});
+  el('btn-condmore').addEventListener('click',function(){condMoreOpen=!condMoreOpen;condMoreSync();});
   el('btn-refback').addEventListener('click',function(){
     if(st.recipient==='Client/Patient')st.recipient=null;
     renderAll();
@@ -570,7 +590,8 @@
     if(!name)return; // belt and suspenders; the gate above already caught it
     if(!phone&&!email)return;
     var ptName=st.recipient==='Self'?'':(el('i-ptfirst').value.trim()+' '+el('i-ptlast').value.trim()).trim();
-    var condLabels=CONDS.filter(function(c){return st.conds.indexOf(c[0])>-1;}).map(function(c){return c[1];});
+    var condLabels=CONDS.concat(CONDS_MORE).filter(function(c){return st.conds.indexOf(c[0])>-1;}).map(function(c){return c[1];});
+    var condKeys=st.conds.filter(function(k){return !COND_LABEL_ONLY[k];});
     postIntake({
       code:CODE,name:name,phone:phone,email:email,
       pt:ptName,
@@ -578,7 +599,7 @@
       notes:el('i-notes').value.trim(),
       needs:st.needs.join(', '),timeline:st.timeline||'',hours:st.hours||'',
       pay:st.payment||'',best:st.best||'',
-      cond:st.conds.join(', '),condLabel:condLabels.join(', '),
+      cond:condKeys.join(', '),condLabel:condLabels.join(', '),
       sms:'yes ('+SMS_CONSENT_VERSION+')',
       variant:'full',org:'',page:String(location.href).slice(0,300),
       hp:el('i-website').value
