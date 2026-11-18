@@ -2086,7 +2086,7 @@ var C={
   ARR:34     // AI arrived_at — full ISO arrival timestamp (dashboard-added
              //    leads); enables time-to-first-dial in seconds + the C SLA
 };
-var BUILD='B-1104-164';  // bump every ship — verify in ⚙ Settings → About after deploy
+var BUILD='B-1118-165';  // bump every ship — verify in ⚙ Settings → About after deploy
 var DATA_START=4; // headers in row 4 (Excel 1-based), data from row 5; SheetJS row 4 = Excel row 5
 
 /* ─── 🔄 New-version watcher ────────────────────────────────────────────
@@ -2913,6 +2913,7 @@ async function saveEnginesDoc(){
   // successful save — settings toggles that resave identical config used
   // to re-upload the whole doc (potentially MBs with an embedded PDF).
   if(body===_lastEnginesBody){applyEnginesDoc();return;}
+  _lastSelfWriteAt=Date.now(); // engines-doc saves bump the sync stamp too
   // Simple PUT is only reliable to ~4MB. Large configs (big training PDFs)
   // go through a chunked upload session — same 320KB-aligned mechanics the
   // email attachments use.
@@ -4987,6 +4988,7 @@ function colLetter(i){
  * now costs 1. Any batch hiccup falls back to the old sequential loop —
  * cell writes are idempotent, so the retry is safe.                    */
 async function writeRow(ri,updates){
+  _lastSelfWriteAt=Date.now(); // our own writes bump the sync stamp too
   var exRow=ri+1; // SheetJS 0-based to Excel 1-based
   var relBase=DRIVE_BASE+'/items/'+fid+'/workbook/worksheets/Lead%20Tracker';
   var cis=Object.keys(updates).map(function(k){return parseInt(k,10);})
@@ -9287,6 +9289,7 @@ function startInboundPolling(){
   pollNdrMail().catch(function(){});
   schedCheckPastDue().catch(function(){});
   schedSmsCheckPastDue().catch(function(){});
+  sheetSyncCheck().catch(function(){}); // 🔄 sets the baseline stamps right away
   inboundEmailPollTimer=setInterval(function(){
     pollInboundMail();
     pollNdrMail().catch(function(){});
@@ -9294,6 +9297,7 @@ function startInboundPolling(){
     schedSmsCheckPastDue().catch(function(){}); // 📱 confirm GHL sent what was due
     try{nlHubAutoPoll();}catch(_){} // 📰 newsletter read-status, at most every 20 min
     try{if(typeof nlReadsPoll==='function')nlReadsPoll(false).catch(function(){});}catch(_){} // 📖 lead-email reads, at most every 5 min
+    sheetSyncCheck().catch(function(){}); // 🔄 cross-portal sync rides the same poll
   },INBOUND_POLL_MS);
 }
 function stopInboundPolling(){
@@ -17720,12 +17724,56 @@ function isModalOpen(){
 }
 
 async function autoRefresh(reason){
-  if(!tok)return;
+  if(!tok)return false;
   if(isModalOpen()){
     // Try again later; don't interrupt the user
-    return;
+    return false;
   }
-  try{await loadData();}catch(e){console.warn('Auto-refresh ('+reason+') failed:',e.message);}
+  try{await loadData();return true;}catch(e){console.warn('Auto-refresh ('+reason+') failed:',e.message);return false;}
+}
+
+/* ⚡LIVESYNC — BEGIN (sliced by tests/livesync.test.mjs) */
+/* 🔄 Cross-portal sync. Two people run this dashboard against the SAME
+ * sheet now — but each browser trusted only its own writes, so an action
+ * Meir completed stayed on the employee's plate until the blind 15-minute
+ * refresh. Now every 60s poll asks OneDrive for the workbook's and the
+ * settings doc's stamps (one tiny metadata call each); a changed stamp
+ * means someone ELSE wrote, and the proven full reload pulls it in. */
+var SYNC_SELF_COOLDOWN_MS=90*1000; // own writes also bump the stamp — stay quiet that long
+var _lastSelfWriteAt=0;
+function syncShouldDefer(o){
+  o=o||{};
+  return !!(o.modalOpen||o.stDirty||((o.now||0)-(o.lastSelfWriteAt||0))<(o.cooldownMs||SYNC_SELF_COOLDOWN_MS));
+}
+function syncStampOf(j){return String(((j&&j.eTag)||'')+'|'+((j&&j.lastModifiedDateTime)||''));}
+/* ⚡LIVESYNC — END */
+var _wbStamp='',_engStamp='',_syncChecking=false;
+async function sheetSyncCheck(){
+  if(_syncChecking||!tok||!fid)return;
+  _syncChecking=true;
+  try{
+    var wbR=await gfetch(GR+DRIVE_BASE+'/items/'+fid+'?$select=eTag,lastModifiedDateTime');
+    if(!wbR.ok)return;
+    var wbS=syncStampOf(await wbR.json());
+    var engS=_engStamp;
+    try{
+      var engMeta=(ENG_ID?(ENG_DRIVE?GR+'/drives/'+ENG_DRIVE+'/items/'+ENG_ID:GR+'/me/drive/items/'+ENG_ID):GR+'/me/drive/root:/'+ENGINE_FILE)+'?$select=eTag,lastModifiedDateTime';
+      var egR=await gfetch(engMeta);
+      if(egR.ok)engS=syncStampOf(await egR.json());
+    }catch(_){}
+    if(!_wbStamp){_wbStamp=wbS;_engStamp=engS;return;} // first look = the baseline
+    if(wbS===_wbStamp&&engS===_engStamp)return;
+    // Something changed on OneDrive. Mid-work (a modal open, staged
+    // settings, or our own write seconds ago) the reload HOLDS — the stale
+    // stamp keeps the change pending, so the first quiet poll pulls it in.
+    if(syncShouldDefer({modalOpen:isModalOpen(),stDirty:(typeof stDirty!=='undefined'&&stDirty),now:Date.now(),lastSelfWriteAt:_lastSelfWriteAt}))return;
+    var ok9=await autoRefresh('remote-change');
+    if(ok9){
+      _wbStamp=wbS;_engStamp=engS;
+      toast('🔄 Changes from another device pulled in — the queue is current');
+    }
+  }catch(_){}
+  finally{_syncChecking=false;}
 }
 
 function startAutoRefresh(){
