@@ -134,7 +134,17 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 â€
   ok(/needs:st\.needs\.join\(', '\)/.test(form) && /timeline:st\.timeline/.test(form) && /hours:st\.hours/.test(form) && /pay:st\.payment/.test(form), 'tap-card answers ride the payload as readable labels');
   ok(/\['dementia',"Dementia or Alzheimer's"\]/.test(form) && /\['parkinsons'/.test(form) && /\['chf'/.test(form) && /\['postsurg'/.test(form), "condition chips carry the PORTAL's condition keys");
   ok(/renderGroup\('g-cond',CONDS,'conds',true,true/.test(form), 'conditions are MULTI-select chips â€” more than one can apply');
-  ok(/cond:st\.conds\.join\(', '\)/.test(form) && /condLabel:condLabels\.join\(', '\)/.test(form), 'payload carries keys for the engine + labels for humans');
+  ok(/cond:condKeys\.join\(', '\)/.test(form) && /condLabel:condLabels\.join\(', '\)/.test(form), 'payload carries keys for the engine + labels for humans');
+  ok(/var COND_LABEL_ONLY=\{fall:1\}/.test(form) && /st\.conds\.filter\(function\(k\)\{return !COND_LABEL_ONLY\[k\];\}\)/.test(form), "falls ride in the readable labels only, never as a condition key (the dashboard treats falls as an assessment concern)");
+  {
+    const keysOf = (src, name) => { const m = src.match(new RegExp('var ' + name + '=(\\[\\[[\\s\\S]*?\\]\\]);')); return m ? (m[1].match(/\[(?:'|")([a-z_]+)(?:'|"),/g) || []).map(s => s.replace(/^\[['"]|['"],$/g, '')) : []; };
+    const dash = readFileSync(join(here, '..', 'Solura_Dashboard.html'), 'utf8');
+    const dk = s => { const m = dash.match(new RegExp('var ' + s + '=\\[([\\s\\S]*?)\\n\\];')); return m ? (m[1].match(/\{k:'([a-z_]+)'/g) || []).map(x => x.slice(4, -1)) : []; };
+    const common = dk('ASMT_COMMON_CONDITIONS'), other = dk('ASMT_OTHER_CONDITIONS');
+    const fc = keysOf(form, 'CONDS').filter(k => k !== 'fall'), fm = keysOf(form, 'CONDS_MORE');
+    ok(common.length > 10 && JSON.stringify(fc) === JSON.stringify(common), 'the form shows every common condition from the dashboard picker, same keys, same order');
+    ok(other.length > 10 && JSON.stringify(fm) === JSON.stringify(other), 'More conditions holds every other condition from the dashboard picker, same keys, same order');
+  }
   ok(/id="pt-wrap"/.test(form) && /id="i-ptfirst"/.test(form) && /id="i-ptlast"/.test(form) && /pw\.hidden=\(v==='Self'\)/.test(form), 'their first + last name live on page 3, hidden for self-inquiries');
   ok(form.indexOf('id="step3"') < form.indexOf('id="pt-wrap"') && form.indexOf('id="pt-wrap"') < form.indexOf('id="referral"'), 'the loved-one block sits INSIDE step 3');
   ok(/el\('i-ptfirst'\)\.value\.trim\(\)\+' '\+el\('i-ptlast'\)\.value\.trim\(\)/.test(form), 'first + last combine into the client name');
