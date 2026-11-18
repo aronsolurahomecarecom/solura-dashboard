@@ -131,10 +131,12 @@ const I = mk(enginesDoc, () => ({ track: 'C', conf: 'high' }), () => 'Phase 1 â€
   ok(/font-size: 13px/.test(form.slice(form.indexOf('.consentline'), form.indexOf('.consentline') + 160)), 'the consent line is visibly small');
   ok(/sms:'yes \('\+SMS_CONSENT_VERSION\+'\)'/.test(form) && /sms-v2-submit-2026-10/.test(form), 'every full-flow submission records consent with the v2 (submit-based) version');
   ok(/Solura_Application_Form\.html\?src=GNG6XK/.test(form) && /Looking for a caregiver job\?/.test(form), 'job seekers get the Apply here link with the GNG6XK source code');
-  ok(/needs:st\.needs\.join\(', '\)/.test(form) && /timeline:st\.timeline/.test(form) && /hours:st\.hours/.test(form) && /pay:st\.payment/.test(form), 'tap-card answers ride the payload as readable labels');
+  ok(/needs:st\.needs\.join\(', '\)/.test(form) && /timeline:\(?st\.timeline/.test(form) && /hours:st\.hours/.test(form) && /pay:st\.payment/.test(form), 'tap-card answers ride the payload as readable labels');
   ok(/\['dementia',"Dementia or Alzheimer's"\]/.test(form) && /\['parkinsons'/.test(form) && /\['chf'/.test(form) && /\['postsurg'/.test(form), "condition chips carry the PORTAL's condition keys");
   ok(/renderGroup\('g-cond',CONDS,'conds',true,true/.test(form), 'conditions are MULTI-select chips â€” more than one can apply');
   ok(/cond:condKeys\.join\(', '\)/.test(form) && /condLabel:condLabels\.join\(', '\)/.test(form), 'payload carries keys for the engine + labels for humans');
+  ok(/\['After hospital','After a hospital stay'\]/.test(form) && /timeline:\(st\.timeline==='After hospital'\?'ASAP':st\.timeline\)/.test(form) && /Timing: after a hospital stay\. /.test(form), 'after a hospital stay: sent as ASAP plus a note, same as the website');
+  ok(/id="i-reffirst"/.test(form) && /id="i-reflast"/.test(form) && /id="i-refrole"/.test(form) && /'Role: '\+rr/.test(form), 'referral: first + last name and an optional role, same fields as the website');
   ok(/var COND_LABEL_ONLY=\{fall:1\}/.test(form) && /st\.conds\.filter\(function\(k\)\{return !COND_LABEL_ONLY\[k\];\}\)/.test(form), "falls ride in the readable labels only, never as a condition key (the dashboard treats falls as an assessment concern)");
   {
     const keysOf = (src, name) => { const m = src.match(new RegExp('var ' + name + '=(\\[\\[[\\s\\S]*?\\]\\]);')); return m ? (m[1].match(/\[(?:'|")([a-z_]+)(?:'|"),/g) || []).map(s => s.replace(/^\[['"]|['"],$/g, '')) : []; };
