@@ -325,6 +325,19 @@ Each of these exists only because the data store was two files on OneDrive reach
 
 ---
 
+## 5b. Decisions — approved by Meir, 2026-11-18
+
+1. **Email**: Graph for 1:1 and billing, Resend for broadcast — approved, with amendments: Microsoft is a CONNECTOR (auth token managed in Settings), not the only sign-in; Google connectable too; sign-in itself is provider-agnostic (Supabase Auth: Microsoft, Google, magic link). Shared mailboxes: an individual user may send from a shared mailbox they have access to, IF the admin has allowed that specific mailbox (admin-managed allowlist in Settings).
+2. **Calling**: bridge-to-cell first, softphone later — approved; Twilio work starts immediately (A2P registration is the long pole, kick it off in Sprint 0).
+3. **Number**: NOT hardcoded — Settings gets a full UI for searching/choosing/buying numbers and a guided porting flow.
+4. **Payments**: Stripe payment links — approved, deferred to a later phase.
+5. **Voice agent**: shelved until the Twilio foundation is live — approved.
+6. **Retention**: keep everything forever, INCLUDING call recordings (until further notice).
+7. **Employee access**: full access — approved, plus build real admin controls (roles/permissions UI) to regulate things.
+8. **Supabase**: merge projects — approved, with the explicit trajectory that the dashboard progressively becomes the ADMIN CENTER for the website (editions, documents, read data, eventually site content management live in one place).
+
+---
+
 ## 6. Design-brief raw material
 
 **The users.** Two non-technical operators at a small licensed home care agency in Cleveland: Meir (owner-rep, lives in this tool all day) and one employee. They are fast on the phone and warm on email; they are not fast in software. Every screen must answer a question they already have, never ask them to configure something first.
