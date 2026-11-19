@@ -18,6 +18,11 @@
   .hdr p { margin: 0; font-size: 18px; line-height: 1.4; text-align: right; }
   .hdr a { font-weight: bold; text-decoration: underline; text-underline-offset: 3px; }
   .goldline { height: 1px; background: #C59B4E; }
+  /* small logo: top of the side panel on wide screens, top of the form card on phones (the header bar was removed) */
+  .brandmark { display: block; line-height: 0; width: max-content; }
+  .brandmark img { width: 56px; height: 56px; display: block; border-radius: 50%; }
+  .brandmark--card { display: none; }
+  @media (max-width: 979px) { aside .brandmark { display: none; } .brandmark--card { display: block; margin-bottom: -10px; } .brandmark--card img { width: 44px; height: 44px; } }
 
   main { max-width: 1232px; margin: 0 auto; padding: clamp(16px, 3.5vw, 48px) clamp(16px, 4vw, 56px) 28px; display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
   .card { flex: 999 1 560px; min-width: 0; background: #faf8f4; border-radius: 18px; padding: clamp(22px, 4vw, 52px); box-shadow: 0 1px 2px rgba(31,61,87,.05), 0 14px 36px rgba(31,61,87,.07); display: flex; flex-direction: column; gap: 28px; }
@@ -94,8 +99,9 @@
   .donephoto img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
   aside { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: clamp(4px, 1vw, 14px) 4px; }
-  /* side panel stays put beside the form while it scrolls (only when it sits beside the card and fits the screen) */
-  @media (min-width: 980px) and (min-height: 580px) { aside { position: sticky; top: 24px; } }
+  /* side panel stays beside the form while the page scrolls; when it is taller than the window, a script lets it
+     scroll just far enough to show its bottom (scrolling down) or its top (scrolling up), then hold */
+  @media (min-width: 980px) { aside { position: sticky; top: 24px; } }
   .trustphoto { width: 100%; aspect-ratio: 4 / 3; border-radius: 14px; overflow: hidden; }
   .trustphoto img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .trust { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 18px 20px; }
@@ -116,14 +122,10 @@
 </style>
 </head>
 <body>
-<header class="hdr">
-  <a href="https://solurahomecare.com" aria-label="Solura Home Care home" style="line-height:0"><img src="https://solurahomecare.com/wp-content/uploads/2026/01/Solura.png" alt="Solura Home Care" onerror="this.onerror=null;this.src='/logo.png';this.style.width='64px'"></a>
-  <p><span style="display:block">Prefer to talk?</span><a href="tel:+12167704886">Call (216) 770-4886</a></p>
-</header>
-<div class="goldline"></div>
 
 <main>
   <section class="card" aria-label="Care inquiry form">
+    <a class="brandmark brandmark--card" href="https://solurahomecare.com" aria-label="Solura Home Care home"><img src="https://solurahomecare.com/wp-content/uploads/2026/01/Solura.png" alt="Solura Home Care" width="56" height="56" onerror="this.onerror=null;this.src='/logo.png'"></a>
 
     <div id="backrow" class="steprow" hidden>
       <button type="button" class="backbtn" id="btn-back"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5" fill="none" stroke="#1f3d57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>Back</button>
@@ -310,6 +312,7 @@
   </section>
 
   <aside aria-label="About Solura Home Care" id="aside">
+    <a class="brandmark" href="https://solurahomecare.com" aria-label="Solura Home Care home"><img src="https://solurahomecare.com/wp-content/uploads/2026/01/Solura.png" alt="Solura Home Care" width="56" height="56" onerror="this.onerror=null;this.src='/logo.png'"></a>
     <div class="trustphoto"><img src="/images/trust-photo.jpg" alt="A caregiver and an older woman share tea and look through a photo album at a kitchen table" loading="lazy"></div>
     <ul class="trust">
       <li><span class="dot" style="background:#70A54D"></span><span><b>Ohio licensed</b><small>HHA Non-Medical License 4574HHN</small></span></li>
@@ -640,6 +643,23 @@
     });
   });
 
+  // side panel: holds in place; if taller than the window it moves only until its bottom (going down) or top (going up) shows
+  (function(){
+    var a=el('aside');if(!a||!window.matchMedia)return;
+    var mq=window.matchMedia('(min-width: 980px)'),GAP=24,top=GAP,lastY=window.scrollY,busy=false;
+    function update(){
+      busy=false;
+      var y=window.scrollY,d=y-lastY;lastY=y;
+      if(!mq.matches){a.style.top='';return;}
+      var vh=window.innerHeight,h=a.offsetHeight,min=Math.min(GAP,vh-h-GAP);
+      top=Math.max(min,Math.min(GAP,top-d));
+      a.style.top=Math.round(top)+'px';
+    }
+    function ask(){if(!busy){busy=true;requestAnimationFrame(update);}}
+    window.addEventListener('scroll',ask,{passive:true});
+    window.addEventListener('resize',function(){top=Math.min(top,GAP);ask();});
+    update();
+  })();
   renderAll();
   show('step1');
 })();
